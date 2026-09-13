@@ -1359,8 +1359,9 @@ func _focus_scale_row(bodies: int) -> Dictionary:
 	# family: at a thousand bodies a side it is eighty million soldier-visits a pass, and
 	# measuring it would take longer than measuring everything else put together. It is
 	# measured where it is affordable and reported as not measured where it is not - the
-	# layer's own figures carry on.
-	var measure_reference := bodies <= 100
+	# layer's own figures carry on. Two hundred a side is the last size worth paying for
+	# (about 1.1 seconds a pass), and it is the row that says what "not affordable" means.
+	var measure_reference := bodies <= 200
 	var passes := SCALE_TICKS if bodies <= 200 else 4
 	var summary_ms := 0.0
 	var select_ms := 0.0

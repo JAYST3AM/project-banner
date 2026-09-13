@@ -1208,19 +1208,22 @@ same state so the two are compared like for like:
 
 | bodies/side | soldiers | summaries | selection | layer total | reference | speedup | boxes/sel | soldiers/sel | agree |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 20 | 400 | 0.389 ms | 0.468 ms | **0.857 ms** | 2.620 ms | 3.1x | 19.0 | 20.0 | yes |
-| 50 | 1,000 | 0.975 ms | 2.116 ms | **3.091 ms** | 16.425 ms | 5.3x | 49.0 | 20.0 | yes |
-| 100 | 2,000 | 1.958 ms | 11.205 ms | **13.163 ms** | 66.229 ms | 5.0x | 146.0 | 39.6 | yes |
-| 200 | 4,000 | 3.953 ms | 54.381 ms | **58.334 ms** | 268.304 ms | 4.6x | 391.1 | 59.4 | yes |
-| 400 | 8,000 | 8.454 ms | 232.547 ms | **241.001 ms** | not measured | - | 885.6 | 69.5 | not measured |
-| 1,000 | 20,000 | 21.066 ms | 2,334.553 ms | **2,355.619 ms** | not measured | - | 3,678.1 | 128.7 | not measured |
-| 2,000 | 40,000 | 42.292 ms | 39,032.041 ms | **39,074.333 ms** | not measured | - | 31,104.4 | 612.3 | not measured |
+| 20 | 400 | 0.389 ms | 0.472 ms | **0.861 ms** | 2.646 ms | 3.1x | 19.0 | 20.0 | yes |
+| 50 | 1,000 | 0.992 ms | 2.102 ms | **3.095 ms** | 16.496 ms | 5.3x | 49.0 | 20.0 | yes |
+| 100 | 2,000 | 1.974 ms | 11.201 ms | **13.176 ms** | 66.693 ms | 5.1x | 146.0 | 39.6 | yes |
+| 200 | 4,000 | 3.978 ms | 54.786 ms | **58.764 ms** | 269.019 ms | 4.6x | 391.1 | 59.4 | yes |
+| 400 | 8,000 | 8.045 ms | 234.130 ms | **242.175 ms** | **1,113.566 ms** | **4.6x** | 885.6 | 69.5 | yes |
+| 1,000 | 20,000 | 21.126 ms | 2,347.970 ms | **2,369.095 ms** | not measured | - | 3,678.1 | 128.7 | not measured |
+| 2,000 | 40,000 | 42.556 ms | 39,485.791 ms | **39,528.347 ms** | not measured | - | 31,104.4 | 612.3 | not measured |
 
 **Where comparing bodies against bodies stops being acceptable: somewhere past two hundred
 bodies a side.** The selection is quadratic in bodies - each body compares itself against the
-others - so 400 bodies a side costs 233 ms and 1,000 costs 2.3 seconds. A real battle fields
-**fifty a side**. The reference column is deliberately not measured above 200: at 1,000 bodies
-a side it is eighty million soldier-visits a pass, which is exactly why it was replaced.
+others - so 400 bodies a side costs 234 ms and 1,000 costs 2.3 seconds. A real battle fields
+**fifty a side**. The 400-body row is the last one the harness pays for the reference
+implementation on, and it is the row that gives "not affordable" a number: **one pass over the
+army per body costs 1.11 seconds a tick at 400 bodies a side**, against 242 ms for the whole
+layer. Above that it is reported as not measured rather than estimated: at 1,000 bodies a side
+it is eighty million soldier-visits a pass, which is exactly why it was replaced.
 
 This is the honest answer to "should there be a formation-level spatial index": not yet, and
 the curve says when. If a future milestone fields five hundred bodies a side, the index becomes

@@ -1922,8 +1922,14 @@ realistic benchmark, comparing bodies against bodies is a few thousand cheap com
 tick - a small fraction of the pass it replaced - and the measured cost is dominated by the
 summary pass rather than by the comparisons. A grid would add a structure, an invariant and a
 tuning constant to make something cheaper that is already a per-cent-level share of the tick.
-Family C measures where that stops being true: the layer is still small at a thousand bodies a
-side, and the game fields a hundred.
+Family C measures where that stops being true, and the figure is not the one this paragraph
+originally guessed: the layer is **13.2 ms at a hundred bodies a side** (a real battle's count),
+**58.8 ms at two hundred**, **242 ms at four hundred** and **2.37 seconds at a thousand** - the
+selection is quadratic in bodies, and at 400 a side the reference implementation it replaced
+costs **1.11 seconds on its own**. So the grid is not justified today and the curve says what
+would justify it: a future milestone fielding several hundred bodies a side. A structure, an
+invariant and a tuning constant are not worth building against a share of the tick that is
+below one per cent at the count the game actually uses.
 
 **Why there is no retention rule.** The brief allows one and the measurement declines it. A
 body's answer changes 38 times a tick across a hundred bodies, which is the answer changing
