@@ -1,0 +1,32 @@
+# Godot 4+ ------------------------------------------------------------------
+# Godot's imported/cache data is generated locally and must never be committed.
+.godot/
+.import/
+export.cfg
+export_presets.cfg
+
+# Godot's exported builds / temp export dirs
+build/
+exports/
+
+# Imported translations
+*.translation
+
+# Mono / .NET (unused for Project Banner, kept for future-proofing)
+.mono/
+data_*/
+mono_crash.*.json
+
+# OS / editor noise ---------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
+.vscode/
+.idea/
+
+# Local scratch / logs ------------------------------------------------------
+*.log
+/tmp/
+/tools/local/
