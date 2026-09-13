@@ -200,7 +200,9 @@ Three gaps, each one a case of the game knowing something and not writing it dow
 saved, reloaded and fought again without resetting; the real menu opens a legacy save
 and Continue migrates it; CI is green on the pushed commit. **1708 assertions, 0
 failures, 13 of 13 suites** headless, **95 checks, 0 failures** across the restart,
-windowed flow clean. See D-041 and D-042.
+windowed flow clean. CI green on the first run —
+[run 34741699176](https://github.com/JAYST3AM/project-banner/actions/runs/34741699176).
+See D-041 and D-042.
 
 ---
 

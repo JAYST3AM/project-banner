@@ -7,7 +7,9 @@ What is actually playable and verified **right now**.
 **Test status:** `1708 assertions, 0 failures, 13 of 13 suites` headless, plus
 `95 checks, 0 failures` in a genuine two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
-every pull request against it, pinned to Godot 4.7.2-stable.
+every pull request against it, pinned to Godot 4.7.2-stable. Green on the foundation
+lock commit —
+[run 34741699176](https://github.com/JAYST3AM/project-banner/actions/runs/34741699176).
 
 **Note:** Steps 6.5 and 6.6 were hardening passes over Steps 0-6, not new gameplay.
 See [Step 6.6 - final foundation lock](#step-66---final-foundation-lock) below.

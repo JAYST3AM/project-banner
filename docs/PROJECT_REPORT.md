@@ -111,7 +111,7 @@ runner's `SUITES` list, since several are meant to fail.
 | `2b987d9` | milestone-06: validate persistent campaign save and load |
 | `a0bf817`, `cf9c69a` | the full project report, and a README for a public reader |
 | `24ae05d`, `484b4a8` | milestone-06.5: harden vertical slice after external audit |
-| `TBD` | milestone-06.6: lock the Steps 0-6 foundation |
+| `128d07e` | milestone-06.6: lock the Steps 0-6 foundation |
 
 ---
 
@@ -502,6 +502,23 @@ written so the engine's exit status survives the log capture: `set -o pipefail` 
 the `tee`, plus an explicit grep for the runner's own `PASS` line, so a run that
 somehow exited 0 without reporting success is still red. Logs upload as an artifact on
 failure.
+
+**Observed result** on the first run, on a clean Ubuntu runner
+([run 34741699176](https://github.com/JAYST3AM/project-banner/actions/runs/34741699176)):
+
+```
+engine: 4.7.2.stable.official.ed1daf0bf
+  suites: 13 of 13 reported   assertions: 1708   failures: 0
+  RESULT: PASS
+    wounded s_0008: 28 -> 11 hp, must survive the restart
+--------- persistence write: PASS (6 checks, 0 failures) ---------
+    26 soldiers restored, 9 of them dead
+--------- persistence verify: PASS (95 checks, 0 failures) ---------
+```
+
+Every required step ran; the only skipped step was the failure-artifact upload, which
+is correct on a passing run. The engine the runner used is the pinned one, not whatever
+`latest` resolved to on the day.
 
 **CI does not fail on the runner self-test's deliberate runtime error.** That fixture
 provokes a real engine error on purpose (see §9.3) and the engine still exits 0 because
