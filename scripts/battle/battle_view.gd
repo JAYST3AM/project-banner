@@ -25,11 +25,48 @@ var selected_ids: Array[int] = []
 var box_select_active: bool = false
 var box_select_rect: Rect2 = Rect2()
 
+## Transient floating text (damage numbers, deaths), aged by _process.
+var _popups: Array[Dictionary] = []
+const POPUP_LIFETIME := 1.1
+const POPUP_RISE := 2.6
+
 var _font: Font = null
 
 
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
+
+
+func _process(delta: float) -> void:
+	if _popups.is_empty():
+		return
+	var kept: Array[Dictionary] = []
+	for popup in _popups:
+		popup["age"] = float(popup.get("age", 0.0)) + delta
+		if float(popup["age"]) < POPUP_LIFETIME:
+			kept.append(popup)
+	_popups = kept
+	queue_redraw()
+
+
+## Consume a frame of simulator events and turn them into visual feedback.
+func add_events(events: Array[Dictionary]) -> void:
+	for event in events:
+		match str(event.get("type", "")):
+			"hit":
+				_popups.append({
+					"text": "-%d" % int(event.get("damage", 0)),
+					"position": event.get("position", Vector2.ZERO),
+					"age": 0.0,
+					"color": COLOR_GOLD if bool(event.get("ranged", false)) else Color("ffd9d0"),
+				})
+			"death":
+				_popups.append({
+					"text": "%s down" % str(event.get("unit_name", "")),
+					"position": event.get("position", Vector2.ZERO),
+					"age": 0.0,
+					"color": COLOR_ENEMY.lightened(0.25),
+				})
 
 
 func bind(p_simulator: BattleSimulator, p_context: BattleContext) -> void:
@@ -66,6 +103,24 @@ func _draw() -> void:
 		draw_rect(box_select_rect, COLOR_GOLD.darkened(0.2), false, 0.18)
 		draw_rect(box_select_rect, Color(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b, 0.12))
 
+	_draw_popups()
+
+
+func _draw_popups() -> void:
+	if _font == null:
+		return
+	for popup in _popups:
+		var life := float(popup.get("age", 0.0)) / POPUP_LIFETIME
+		var colour: Color = popup.get("color", COLOR_TEXT)
+		colour.a = clampf(1.0 - life, 0.0, 1.0)
+		var size := 26
+		var text := str(popup.get("text", ""))
+		var position: Vector2 = popup.get("position", Vector2.ZERO)
+		position.y -= life * POPUP_RISE
+		var measured := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size)
+		draw_string(_font, position - Vector2(measured.x * 0.5, 0.0), text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, size, colour)
+
 
 func _draw_unit(unit: BattleUnit) -> void:
 	var color := unit_color(unit)
@@ -94,8 +149,19 @@ func _draw_unit(unit: BattleUnit) -> void:
 	if selected_ids.has(unit.id):
 		draw_arc(position, UNIT_RADIUS + 1.9, 0.0, TAU, 28, COLOR_GOLD, 0.34)
 
-	if unit.has_move_order:
-		draw_dashed_line(position, unit.move_order, COLOR_GOLD.darkened(0.25), 0.16, 1.2)
+	if unit.has_orders():
+		draw_dashed_line(position, _order_target(unit), COLOR_GOLD.darkened(0.25), 0.16, 1.2)
+
+
+## Where a unit's order line should point: an attack target if it has one,
+## otherwise its move waypoint. Only meaningful when [method BattleUnit.has_orders]
+## is true.
+func _order_target(unit: BattleUnit) -> Vector2:
+	if unit.attack_order_target_id >= 0 and simulator != null:
+		var hunted := simulator.find_unit(unit.attack_order_target_id)
+		if hunted != null and hunted.is_alive():
+			return hunted.position
+	return unit.move_order
 
 
 func _draw_fallen(unit: BattleUnit) -> void:

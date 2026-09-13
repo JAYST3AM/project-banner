@@ -329,3 +329,95 @@ without touching the campaign.
 player party every time. Keeping them as two paths means the consequence-bearing
 one stays honest - it is the path a player takes - while the inspection path stays
 free of side effects.
+
+---
+
+## D-024: A battle is described before it is applied
+
+**Decision.** `BattleResolver.build_result()` computes the entire outcome without
+mutating anything; `apply()` is a separate call and the only place a battle writes
+to the campaign.
+
+**Why.** A fight can be abandoned in several ways - retreat, debug exit, quitting
+to the menu, or the process dying. If damage and death were written to soldiers as
+they happened, every one of those paths would leave a save file full of
+half-resolved state: soldiers at zero hit points but still listed as active,
+battles that never concluded. Splitting description from application makes the
+failure mode "the battle did not happen" instead of "the battle half-happened".
+
+**Consequence worth knowing.** Because `apply()` reads `BattleResult` alone, a
+battle could be applied *later* (after a reload, say) or *not at all*, without
+changing any of the code involved.
+
+---
+
+## D-025: Melee reach must exceed the distance the separation pass enforces
+
+**Decision.** Melee `attack_range` values (1.8-2.4) are deliberately larger than
+the minimum gap the overlap resolver maintains (1.35), and a test asserts it.
+
+**Why.** This was a real, silent, catastrophic bug. `_resolve_overlaps()` pushed
+units apart to 1.35 every step; melee range was 1.0-1.6; so melee units closed,
+were pushed back, and *never satisfied the in-range condition*. Melee combat was
+completely inert. It was not obvious, because bandit archers (range 9.0) kept
+shooting the player's party to death - fights looked like they were working, and
+simply ended in a massacre with zero enemy casualties. Twenty-four simulated
+openings produced 24 losses and 0 enemy dead, which is what exposed it.
+
+The guard is two assertions: every non-ranged archetype's range must exceed
+`separation_radius * SEPARATION_FACTOR`, and a melee-only fight must produce
+damage. Either one alone would have caught it.
+
+---
+
+## D-026: Loot is sold immediately, because there is no inventory
+
+**Decision.** Items rolled from `data/items/items.json` are converted to gold the
+moment a battle is won, and named on the results screen.
+
+**Why.** The brief asks only for a "loot placeholder", but a placeholder that
+accumulates in a dictionary nobody reads is dead data that looks like a feature.
+Selling loot for coin is a complete, honest loop today, and when an inventory
+arrives the change is "put the item in the bag instead of adding its value".
+
+---
+
+## D-027: Balance is asserted as a range, and reported at both ends
+
+**Decision.** `tests/test_combat.gd` simulates the opening fight across 24
+campaign seeds against the weakest bandit band *and* the strongest, prints both
+results, and asserts a range rather than a single expected outcome.
+
+**Why.** A vertical slice where the opening fight is always lost hides broken
+combat maths (which is exactly how D-025 survived several milestones), and one
+where it is always won hides it just as well. Asserting "winnable" and "losable"
+makes the test tell you *what the game currently feels like*, not just whether the
+code runs. The printed figures - currently 20/24 and 3/24 - are the fastest way to
+notice that a data edit has moved the game somewhere unintended.
+
+---
+
+## D-028: The campaign keeps a chronicle of its battles
+
+**Decision.** `apply()` appends a small JSON-safe summary of every battle to
+`CampaignState.flags["battle_log"]`, capped at the most recent 40.
+
+**Why.** Two reasons. First, it is the seed of the "the world remembers" feeling
+the design principle asks for - the campaign now has a history independent of any
+individual soldier. Second, it makes an outcome verifiable after the fact, without
+holding on to a live `BattleResult` or peeking at a scene payload, which is what
+the end-to-end test asserts against. The cap keeps a long campaign's save bounded.
+
+---
+
+## D-029: Fallen soldiers keep the kills they earned
+
+**Decision.** `apply()` adds a dead soldier's kills to their record before marking
+them dead.
+
+**Why.** It is easy to write the survivor path and forget the casualty path - and
+this was a real bug found by an end-to-end assertion that the party's total kills
+must equal the enemies put down (5 dead enemies, 4 recorded kills). A soldier who
+killed someone before they fell did so; losing that quietly rewrites the record of
+a fight that actually happened, which is precisely the kind of detail the design
+principle says should make the player care.

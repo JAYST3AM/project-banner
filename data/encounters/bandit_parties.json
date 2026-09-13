@@ -1,6 +1,5 @@
 {
   "_comment": "Overworld hostile parties. Spawn points are explicit and deterministic so a given campaign seed always produces the same world. 'composition' entries are weighted: a higher weight means more likely to be picked for each slot.",
-
   "templates": [
     {
       "id": "road_bandits",
@@ -12,9 +11,18 @@
       "behaviour": "wander",
       "wander_radius": 120.0,
       "composition": [
-        { "unit_type_id": "bandit_ruffian", "weight": 6 },
-        { "unit_type_id": "bandit_brigand", "weight": 2 },
-        { "unit_type_id": "bandit_archer", "weight": 2 }
+        {
+          "unit_type_id": "bandit_ruffian",
+          "weight": 6
+        },
+        {
+          "unit_type_id": "bandit_brigand",
+          "weight": 1
+        },
+        {
+          "unit_type_id": "bandit_archer",
+          "weight": 1
+        }
       ]
     },
     {
@@ -27,33 +35,50 @@
       "behaviour": "wander",
       "wander_radius": 90.0,
       "composition": [
-        { "unit_type_id": "bandit_brigand", "weight": 4 },
-        { "unit_type_id": "bandit_ruffian", "weight": 4 },
-        { "unit_type_id": "bandit_archer", "weight": 2 }
+        {
+          "unit_type_id": "bandit_brigand",
+          "weight": 4
+        },
+        {
+          "unit_type_id": "bandit_ruffian",
+          "weight": 4
+        },
+        {
+          "unit_type_id": "bandit_archer",
+          "weight": 2
+        }
       ]
     }
   ],
-
   "spawns": [
     {
       "id": "bandits_north_road",
       "template_id": "road_bandits",
       "settlement_id": "thornwood_hollow",
-      "offset": [10.0, -150.0],
+      "offset": [
+        10.0,
+        -150.0
+      ],
       "seed_index": 1
     },
     {
       "id": "bandits_west_fen",
       "template_id": "road_bandits",
       "settlement_id": "greywatch",
-      "offset": [240.0, -190.0],
+      "offset": [
+        240.0,
+        -190.0
+      ],
       "seed_index": 2
     },
     {
       "id": "bandits_high_moor",
       "template_id": "thornwood_broken_men",
       "settlement_id": "redmoor",
-      "offset": [190.0, 250.0],
+      "offset": [
+        190.0,
+        250.0
+      ],
       "seed_index": 3
     }
   ]

@@ -44,7 +44,9 @@ func max_party_size() -> int:
 
 
 func party_capacity_remaining() -> int:
-	return maxi(0, max_party_size() - state.player_party.size())
+	# Only the living count against the cap: a party of corpses should never
+	# block recruiting.
+	return maxi(0, max_party_size() - state.active_members(state.player_party).size())
 
 
 func available_at(settlement: Settlement, unit_type_id: String) -> int:

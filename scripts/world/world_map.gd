@@ -77,8 +77,9 @@ func _ready() -> void:
 	_apply_dev_autotravel()
 
 
-## Dev-only: drop the player next to the nearest hostile party so the encounter
-## path runs without waiting for one to wander into them.
+## Dev-only: drop the player next to a hostile party so the encounter path runs
+## without waiting for one to wander into them. Chooses the smallest band by
+## default - the fight a careful player would pick.
 func _apply_dev_autoengage() -> void:
 	if not DevFlags.autoengage() or _overworld == null:
 		return
@@ -87,8 +88,14 @@ func _apply_dev_autoengage() -> void:
 		DebugLogger.warn("dev flag: no hostile parties to engage", "WorldMap")
 		return
 	var target := parties[0]
+	for candidate in parties:
+		var size := _state.active_members(_state.party_of(candidate)).size()
+		if size < _state.active_members(_state.party_of(target)).size():
+			target = candidate
 	_state.world_position = target.position
-	DebugLogger.info("dev flag: moved the party onto %s" % target.display_name, "WorldMap")
+	DebugLogger.info("dev flag: moved the party onto %s (%d soldiers)" % [
+		target.display_name, _state.active_members(_state.party_of(target)).size(),
+	], "WorldMap")
 
 
 ## Dev-only: begin travelling immediately (see DevFlags). Used by automated runs

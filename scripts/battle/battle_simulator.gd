@@ -29,6 +29,9 @@ var events: Array[Dictionary] = []
 
 var field_size: Vector2 = Vector2(100.0, 60.0)
 var separation_radius: float = 1.5
+var base_hit_chance: float = 0.75
+var defence_mitigation: float = 0.05
+var max_duration: float = 600.0
 
 
 func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
@@ -38,6 +41,9 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 	if config != null:
 		field_size = BattleSetup.field_size(config)
 		separation_radius = config.get_float("battle.separation_radius", 1.5)
+		base_hit_chance = config.get_float("battle.base_hit_chance", 0.75)
+		defence_mitigation = config.get_float("battle.defence_mitigation", 0.05)
+		max_duration = config.get_float("battle.max_duration_seconds", 600.0)
 
 
 func add_units(p_units: Array[BattleUnit]) -> void:
@@ -90,10 +96,8 @@ func step(delta: float) -> Array[Dictionary]:
 	if state != State.RUNNING:
 		return events
 	elapsed += delta
-	if config != null:
-		var limit := config.get_float("battle.max_duration_seconds", 600.0)
-		if elapsed >= limit:
-			_finish("")
+	if config != null and elapsed >= max_duration:
+		_finish("")
 
 	for unit in units:
 		if unit.is_alive():
@@ -106,10 +110,27 @@ func step(delta: float) -> Array[Dictionary]:
 
 
 func _update_unit(unit: BattleUnit, delta: float) -> void:
+	unit.cooldown_left = maxf(0.0, unit.cooldown_left - delta)
+
 	var target := _choose_target(unit)
 	if target == null:
 		return
+	# An explicit attack order wins over automatic target selection, but only
+	# while the ordered target is still standing.
+	if unit.attack_order_target_id >= 0:
+		var ordered := find_unit(unit.attack_order_target_id)
+		if ordered != null and ordered.is_alive() and ordered.side != unit.side:
+			target = ordered
+		else:
+			unit.attack_order_target_id = -1
+
 	unit.facing = (target.position - unit.position).normalized()
+
+	if unit.position.distance_to(target.position) <= unit.attack_range:
+		# In reach: stand and strike rather than walk into the enemy.
+		if unit.cooldown_left <= 0.0:
+			_attack(unit, target)
+		return
 
 	if unit.has_move_order:
 		_move_toward(unit, unit.move_order, delta)
@@ -118,6 +139,58 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 		return
 
 	_move_toward(unit, target.position, delta)
+
+
+func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
+	# A target chosen this step can already have been struck down by someone else
+	# earlier in the same step. Hitting a corpse would credit a kill twice.
+	if not target.is_alive():
+		return
+	attacker.cooldown_left = attacker.attack_cooldown
+
+	if rng.randf() > base_hit_chance:
+		events.append({
+			"type": "miss",
+			"attacker": attacker.id,
+			"target": target.id,
+			"position": target.position,
+		})
+		return
+
+	var raw := float(attacker.attack) * rng.randf_range(0.85, 1.15)
+	var reduction := minf(0.7, float(target.defence) * defence_mitigation)
+	var damage := maxi(1, int(round(raw * (1.0 - reduction))))
+
+	var killed := target.take_damage(damage, attacker.id)
+	attacker.damage_dealt += damage
+
+	events.append({
+		"type": "hit",
+		"attacker": attacker.id,
+		"target": target.id,
+		"damage": damage,
+		"position": target.position,
+		"ranged": attacker.ranged,
+		"killed": killed,
+	})
+
+	if killed:
+		attacker.kills += 1
+		events.append({
+			"type": "death",
+			"unit": target.id,
+			"unit_name": target.display_name,
+			"side": target.side,
+			"soldier_id": target.soldier_id,
+			"killer": attacker.id,
+			"killer_name": attacker.display_name,
+			"killer_side": attacker.side,
+			"position": target.position,
+		})
+		# Anyone hunting this unit must pick a new quarry.
+		for unit in units:
+			if unit.attack_order_target_id == target.id:
+				unit.attack_order_target_id = -1
 
 
 func _choose_target(unit: BattleUnit) -> BattleUnit:

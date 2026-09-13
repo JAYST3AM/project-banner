@@ -178,6 +178,25 @@ one owner.
 | `BattleView` | `scripts/battle/battle_view.gd` | draws the field, units, health bars and the selection box |
 | `EncounterDialog` | `scripts/ui/encounter_dialog.gd` | the pause-and-decide prompt |
 
+### Combat outcome (Step 5)
+
+| Class | File | Notes |
+| --- | --- | --- |
+| `BattleResult` | `scripts/battle/battle_result.gd` | a full description of what a battle produced |
+| `BattleResolver` | `scripts/battle/battle_resolver.gd` | builds the result (mutates nothing), then applies it |
+| `BattleResultsScreen` | `scripts/ui/battle_results_screen.gd` | the after-action report |
+
+**Resolution is two-phase, and that is the point.** `build_result()` reads the
+battle and the campaign and returns a `BattleResult` without changing anything;
+`apply()` is the only function in the project that lets a battle alter the
+campaign. A quit, a crash or a debug exit mid-fight therefore cannot leave a
+soldier half-dead in a save file, because nothing has been written yet.
+
+`BattleResolver.apply()` is where a battle becomes consequences: kills and battles
+fought, XP and level-ups, hit points, survival counts, a history entry per person,
+the gold, and whether the beaten party still exists on the map. A small JSON-safe
+chronicle of the last 40 battles is kept in `CampaignState.flags["battle_log"]`.
+
 **The battle scene never looks anything up.** It receives a `BattleContext` through
 the scene payload, and that context already contains both rosters as snapshots with
 resolved stats. Adding ambushes, sieges or scripted battles later means building a

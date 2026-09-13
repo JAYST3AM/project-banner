@@ -36,9 +36,16 @@ var kills: int = 0
 var damage_dealt: int = 0
 var damage_taken: int = 0
 
+## Seconds until this unit may strike again.
+var cooldown_left: float = 0.0
+## Set when this unit is killed, so the result can name the killer.
+var killed_by_id: int = -1
+
 ## Player-issued move order, if any. Cleared when the unit reaches it.
 var move_order: Vector2 = Vector2.ZERO
 var has_move_order: bool = false
+## Player-issued attack order: a unit id to hunt, or -1. Cleared when it dies.
+var attack_order_target_id: int = -1
 
 
 static func from_snapshot(snapshot: Dictionary, side: String, id: int) -> BattleUnit:
@@ -79,12 +86,26 @@ func is_enemy_of(other: BattleUnit) -> bool:
 
 ## Player-issued orders are drawn differently in the view, so this is worth naming.
 func has_orders() -> bool:
-	return has_move_order
+	return has_move_order or attack_order_target_id >= 0
 
 
 func clear_orders() -> void:
 	has_move_order = false
 	move_order = Vector2.ZERO
+	attack_order_target_id = -1
+
+
+## Applies damage. Returns true when this blow was the killing one.
+func take_damage(amount: int, attacker_id: int) -> bool:
+	var applied := maxi(1, amount)
+	hp -= applied
+	damage_taken += applied
+	if hp <= 0:
+		hp = 0
+		alive = false
+		killed_by_id = attacker_id
+		return true
+	return false
 
 
 func describe() -> String:

@@ -26,6 +26,9 @@ var _box_selecting := false
 var _box_start_world := Vector2.ZERO
 var _box_current_world := Vector2.ZERO
 var _drag_threshold_px := 6.0
+var _resolved := false
+## Battle-time multiplier used by automated runs (DevFlags.battle_speed()).
+var _battle_speed := 1.0
 
 
 func _ready() -> void:
@@ -59,6 +62,11 @@ func _ready() -> void:
 	_build_hud()
 	_refresh()
 	set_process(true)
+
+	_battle_speed = DevFlags.battle_speed()
+	if DevFlags.autostart_battle():
+		DebugLogger.info("dev flag: starting the battle automatically", "Battle")
+		call_deferred("_on_start_battle")
 
 
 func _focus_camera() -> void:
@@ -135,10 +143,17 @@ func _refresh() -> void:
 			_simulator.side_count(BattleContext.SIDE_ENEMY), _context.strength_of(BattleContext.SIDE_ENEMY),
 		],
 		"Ground:       %s, seed %d" % [_context.weather, _context.terrain_seed],
-		"Time:         Day %d %s" % [_context.campaign_day, CampaignClock.time_string_from_hour(_context.campaign_hour)],
+		"Time:         Day %d %s   (elapsed %d:%02d)" % [
+			_context.campaign_day,
+			CampaignClock.time_string_from_hour(_context.campaign_hour),
+			int(_simulator.elapsed) / 60,
+			int(_simulator.elapsed) % 60,
+		],
 		"Battle state: %s" % _state_name(),
 	])
 	_start_button.disabled = _simulator.is_running()
+	var selected := _view.selected_ids.size()
+	_retreat_button.text = "Retreat" if selected == 0 else "Retreat (%d selected)" % selected
 
 
 func _state_name() -> String:
@@ -158,12 +173,15 @@ func _process(delta: float) -> void:
 		return
 	_update_camera_pan(delta)
 	if _simulator.is_running():
-		_simulator.step(delta)
+		var events := _simulator.step(delta * _battle_speed)
+		_view.add_events(events)
 		_view.queue_redraw()
 		_info_timer += delta
 		if _info_timer >= 0.25:
 			_info_timer = 0.0
 			_refresh()
+		if _simulator.is_finished():
+			_resolve_and_show(false)
 
 
 ## ---------- camera and input --------------------------------------------
@@ -294,22 +312,37 @@ func _clear_selection() -> void:
 	_view.queue_redraw()
 
 
-## Right-click sends every selected unit to a point. Orders issued before the
-## battle starts are held until it does, so a plan can be set up first.
+## Right-click on an enemy orders an attack; right-click on open ground orders a
+## move. Orders issued before the battle starts are held until it does, so a plan
+## can be set up first.
 func _issue_move_order(world_point: Vector2) -> void:
 	if _view.selected_ids.is_empty():
 		_hint.text = "Select a unit first (click it, shift-click to add, or drag a box)."
 		return
+	var target_id := _view.unit_at(world_point)
+	var target_unit := _simulator.find_unit(target_id) if target_id >= 0 else null
+	var is_enemy := target_unit != null and target_unit.side != BattleContext.SIDE_PLAYER
+
 	var issued := 0
 	for unit_id in _view.selected_ids:
 		var unit := _simulator.find_unit(unit_id)
 		if unit == null or not unit.is_alive():
 			continue
-		unit.move_order = world_point
-		unit.has_move_order = true
+		if is_enemy:
+			unit.attack_order_target_id = target_id
+			unit.has_move_order = false
+		else:
+			unit.attack_order_target_id = -1
+			unit.move_order = world_point
+			unit.has_move_order = true
 		issued += 1
-	if issued > 0:
-		_hint.text = "%d unit(s) ordered to %.0f, %.0f. Right-click again to re-issue; left-click empty ground to clear the selection." % [
+
+	if issued <= 0:
+		return
+	if is_enemy:
+		_hint.text = "%d unit(s) ordered to attack %s." % [issued, target_unit.display_name]
+	else:
+		_hint.text = "%d unit(s) ordered to %.0f, %.0f. Right-click an enemy to attack it instead." % [
 			issued, world_point.x, world_point.y,
 		]
 	_view.queue_redraw()
@@ -327,23 +360,40 @@ func _on_start_battle() -> void:
 		return
 	_simulator.start()
 	DebugLogger.info("battle started", "Battle")
-	_hint.text = "The lines have engaged. Combat resolution arrives with the next milestone - for now the armies close and hold."
+	_hint.text = "The lines have engaged. Left-click to select, right-click an enemy to attack it, right-click ground to move. Space starts, R retreats."
 	_refresh()
 
 
 func _on_retreat() -> void:
-	_return_to_campaign(true)
+	_resolve_and_show(true)
 
 
 func _on_debug_exit() -> void:
-	_return_to_campaign(false)
-
-
-func _return_to_campaign(apply_retreat: bool) -> void:
-	if apply_retreat and GameManager.is_campaign_active():
-		var state := GameManager.campaign
-		var world_party := state.world_party(_context.world_party_id)
-		var encounters := EncounterService.build(state, _config)
-		if encounters != null and world_party != null:
-			encounters.apply_retreat(world_party)
+	# Deliberately does NOT resolve: this path exists so a developer can leave an
+	# inspection run without moving the campaign on.
+	DebugLogger.info("debug exit from the battlefield - no consequences applied", "Battle")
 	SceneManager.change_scene("world_map", {"select_settlement_id": ""})
+
+
+## Decide the outcome, write it back to the campaign, and show the results.
+## Guarded so a battle can only be resolved once, however it ended.
+func _resolve_and_show(retreated: bool) -> void:
+	if _resolved:
+		return
+	_resolved = true
+	if _simulator.is_running() and not retreated:
+		_simulator.state = BattleSimulator.State.FINISHED
+
+	var state := GameManager.campaign
+	var resolver := BattleResolver.build(state, _config)
+	var result: BattleResult = null
+	if resolver != null:
+		result = resolver.build_result(_context, _simulator, _simulator.winner, _simulator.elapsed, retreated)
+		resolver.apply(result, _context)
+	else:
+		result = BattleResult.new()
+		result.battle_id = _context.battle_id
+		result.enemy_display_name = _context.enemy_display_name
+
+	DebugLogger.info("battle resolved: %s (%s)" % [result.title(), result.battle_id], "Battle")
+	SceneManager.change_scene("battle_results", {"result": result, "context": _context})

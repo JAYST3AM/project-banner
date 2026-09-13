@@ -11,7 +11,7 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | 2 | Playable world map and settlement travel | **DONE** |
 | 3 | Persistent soldiers, recruitment, party roster | **DONE** |
 | 4 | World encounters and tactical battle transition | **DONE** |
-| 5 | First functional tactical combat | TODO |
+| 5 | First functional tactical combat | **DONE** |
 | 6 | Persistent campaign save/load validation | TODO |
 | — | **First major checkpoint: the full vertical slice** | TODO |
 | 7+ | Post-checkpoint systems (see below) | TODO |
@@ -111,7 +111,9 @@ logs all twelve of them by name on the field.
 - Configurable XP for participation, kills, survival and victory
 
 **Definition of done:** the Step 5 end-to-end path, driven headlessly in
-`tests/test_e2e_loop.gd` and played by hand.
+`tests/test_e2e_loop.gd` (127 assertions, through the real scenes) and played by
+hand in windowed runs. Balance measured across 24 seeds: 20/24 wins against the
+weakest bandit band, 3/24 against the strongest.
 
 ## Step 6 - Save/load validation (`milestone-06`)
 

@@ -1,0 +1,16 @@
+{
+  "_comment": "Loot that can drop from a won battle. There is no inventory system yet, so loot is sold for coin the moment the battle ends and the item names are listed on the results screen. That keeps the data meaningful now instead of sitting unused until an inventory exists. 'value' is gold.",
+
+  "items": [
+    { "id": "chipped_spear",    "name": "a chipped spear",        "kind": "weapon", "value": 12 },
+    { "id": "notched_axe",      "name": "a notched axe",          "kind": "weapon", "value": 15 },
+    { "id": "hunting_bow",      "name": "a hunting bow",          "kind": "weapon", "value": 18 },
+    { "id": "leather_cap",      "name": "a leather cap",          "kind": "armour", "value": 8 },
+    { "id": "patched_mail",     "name": "a patched mail shirt",   "kind": "armour", "value": 34 },
+    { "id": "cracked_shield",   "name": "a cracked shield",       "kind": "armour", "value": 10 },
+    { "id": "coin_purse",       "name": "a cut coin purse",       "kind": "coin",   "value": 25 },
+    { "id": "brass_ring",       "name": "a brass ring",           "kind": "trinket","value": 6 },
+    { "id": "whetstone",        "name": "a good whetstone",       "kind": "trinket","value": 4 },
+    { "id": "stolen_silk",      "name": "a roll of stolen silk",  "kind": "trade",  "value": 40 }
+  ]
+}

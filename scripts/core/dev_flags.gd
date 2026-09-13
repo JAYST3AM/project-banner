@@ -20,6 +20,8 @@ const AUTORECRUIT_PREFIX := "--autorecruit="
 const AUTOENGAGE_FLAG := "--autoengage"
 const AUTOATTACK_FLAG := "--autoattack"
 const AUTOLEAVE_FLAG := "--autoleave"
+const AUTOSTART_BATTLE_FLAG := "--autostart-battle"
+const BATTLESPEED_PREFIX := "--battlespeed="
 
 
 static func _user_args() -> PackedStringArray:
@@ -98,6 +100,22 @@ static func autoattack() -> bool:
 ## automated run can chain town -> world map -> encounter -> battle.
 static func autoleave_town() -> bool:
 	return _has_flag(AUTOLEAVE_FLAG)
+
+
+## Begin the battle the moment the battlefield loads.
+static func autostart_battle() -> bool:
+	return _has_flag(AUTOSTART_BATTLE_FLAG)
+
+
+## Multiplier applied to battle time, so an automated run does not have to sit
+## through a real-time fight. 1.0 = normal.
+static func battle_speed() -> float:
+	for arg in _user_args():
+		if arg.begins_with(BATTLESPEED_PREFIX):
+			var raw := arg.trim_prefix(BATTLESPEED_PREFIX)
+			var value := float(raw) if raw.is_valid_float() else 1.0
+			return clampf(value, 0.1, 200.0)
+	return 1.0
 
 
 static func _has_flag(flag: String) -> bool:
