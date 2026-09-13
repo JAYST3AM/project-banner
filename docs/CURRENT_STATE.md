@@ -775,7 +775,7 @@ soldier searches for a target every tick. That is what Step 7.4 should attack.
 | New suite | `test_overlap` - a pair separates, distant soldiers do not move, coincident soldiers resolve deterministically, cell boundaries including corners and exact edges, no pair resolved twice, order independence, repeatability, **no allocation after configure**, settled-formation skipping for line/column/loose, compression, two bodies crossing, enemy contact, flank contact, dense piles, no launches, convergence, brute-force agreement on sparse *and* dense deployments, and a cell-size sweep |
 | Two-process restart | **95 checks, 0 failures** - unchanged; no save-format change |
 | Windowed smoke | campaign -> settlement -> recruit -> battle -> **formation drill** -> results, zero script errors |
-| CI | **green** on `e32bfbc` — [run 34754179794](https://github.com/JAYST3AM/project-banner/actions/runs/34754179794), read from the raw job log: 18 of 18 suites, 2490 assertions, both persistence phases |
+| CI | **green** on `e32bfbc` — [run 34754179794](https://github.com/JAYST3AM/project-banner/actions/runs/34754179794), and on every commit since — read from the raw job logs: 18 of 18 suites, 2490 assertions, both persistence phases |
 
 ## Known limitations
 
