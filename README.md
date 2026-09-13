@@ -26,6 +26,7 @@ and how it is verified, and [`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes 
 
 | File | Purpose |
 | --- | --- |
+| [`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md) | One-document overview: status, architecture, data, verification, gaps |
 | [`docs/DEVELOPMENT_ENVIRONMENT.md`](docs/DEVELOPMENT_ENVIRONMENT.md) | Toolchain, executable paths, run/test commands |
 | [`docs/GAME_ARCHITECTURE.md`](docs/GAME_ARCHITECTURE.md) | Core systems, state ownership, scene hierarchy |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestone plan and progress |
