@@ -22,6 +22,39 @@ and reopening the game.
 See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for exactly what is playable
 and how it is verified, and [`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next.
 
+## Reviewing this codebase?
+
+Start with [`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md) — it is written as a
+self-contained orientation and covers the architecture, the content data, the combat
+maths, the verification strategy and an honest list of gaps.
+
+The five invariants that hold the design together, and that a review should check
+against:
+
+1. A soldier's identity lives in `CampaignState.soldiers` and nowhere else.
+   `Party` stores **ids**, not objects; battle units hold a `soldier_id`.
+2. `BattleContext` is the only channel between campaign and battle — the battle
+   scene never reads global state or a catalog.
+3. A battle is described (`BattleResolver.build_result`) before it is applied
+   (`apply`). `apply()` is the only place a battle changes the campaign.
+4. Time conversion exists only in `CampaignClock`.
+5. All balance numbers live in `data/*.json`, never inline in code.
+
+Where the risk actually lives, and where the interesting reading is:
+
+| File | Why |
+| --- | --- |
+| `scripts/battle/battle_simulator.gd` | the whole fight, as pure data — combat maths, targeting, death |
+| `scripts/battle/battle_resolver.gd` | the only function that lets a battle change the campaign |
+| `scripts/core/campaign_state.gd` | the persistence root; ownership rules live here |
+| `scripts/units/recruitment_service.gd` | the one transaction that adds a soldier to the party |
+| `tests/test_combat.gd` | includes the balance assertion that caught a silently broken melee system |
+
+Verification is the point of this repository. If you change something, the claim to
+check is not "it compiles" but that
+`tests/` still reports `1207 assertions, 0 failures, 8 of 8 suites` and that the
+two-process restart check still passes.
+
 ## Documentation
 
 | File | Purpose |
@@ -36,9 +69,11 @@ and how it is verified, and [`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes 
 ## Quick start
 
 ```bash
-PROJ="F:/VSC Projects/Project Banner"
+git clone https://github.com/JAYST3AM/project-banner.git
+cd project-banner
+PROJ="$(pwd)"
 
-# Play the game
+# Play the game (Godot 4.7.2-stable; `godotc` is the console build)
 godot --path "$PROJ"
 
 # Headless validation: run every test suite
@@ -48,6 +83,9 @@ godotc --headless --path "$PROJ" res://scenes/dev/tests.tscn
 godotc --headless --path "$PROJ" res://scenes/dev/persistence_check.tscn -- --phase=write
 godotc --headless --path "$PROJ" res://scenes/dev/persistence_check.tscn -- --phase=verify
 ```
+
+On Windows the plain `godot` executable detaches from the console and prints nothing;
+use `godotc` whenever you want to read output.
 
 See `docs/DEVELOPMENT_ENVIRONMENT.md` for the full command reference, including the
 development switches that let the real game be driven without a mouse.
@@ -59,6 +97,6 @@ assets/     audio, fonts, sprites, placeholders
 data/       data-driven definitions (units, items, settlements, encounters, config)
 scenes/     core, world, settlements, battle, ui, dev
 scripts/    core, world, battle, units, ui
-docs/       architecture, roadmap, current state, decisions, environment
-tests/      headless test suites
+docs/       report, architecture, roadmap, current state, decisions, environment
+tests/      headless test suites, plus the two-process restart check
 ```
