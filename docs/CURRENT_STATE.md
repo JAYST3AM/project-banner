@@ -1134,17 +1134,30 @@ Unchanged from Step 7: same seed (70707), dimensions, layouts, rules and budget,
 comparison holds across four milestones.
 
 The Step 7.4 column is a **probe build**: the tip of Step 7.4 with the Step 7.5 counters added
-and nothing else changed, run on this machine with this harness, one run at a time.
+and nothing else changed, run on this machine with this harness, one run at a time. Both
+columns below are saved runs, taken back to back. They were re-taken because an earlier
+rehearsal of this table was measured into a temporary file that the machine cleaned up, and a
+number that cannot be re-read is not evidence.
 
 | Soldiers | Step 7.4 ms/tick | **Step 7.5 ms/tick** | change | 7.5 ticks/sec | contact |
 | ---: | ---: | ---: | ---: | ---: | --- |
-| 100 | 2.014 | **2.025** | 0.99x | 494 | yes |
-| 500 | 12.900 | **12.808** | 1.01x | 78 | yes |
-| 1,000 | 30.136 | **29.659** | 1.02x | 34 | yes |
-| 2,500 | 89.261 | **89.383** | 1.00x | 11 | yes |
-| 5,000 | 233.479 | **231.812** | 1.01x | 4 | yes |
-| 10,000 | 618.000 | **518.008** | **1.19x** | 2 | yes |
-| 20,000 | 1,099.764 | **1,092.018** | 1.01x | 1 | no |
+| 100 | 1.972 | **2.025** | 0.97x | 494 | yes |
+| 500 | 12.527 | **12.808** | 0.98x | 78 | yes |
+| 1,000 | 28.832 | **29.659** | 0.97x | 34 | yes |
+| 2,500 | 87.389 | **89.383** | 0.98x | 11 | yes |
+| 5,000 | 228.245 | **231.812** | 0.98x | 4 | yes |
+| 10,000 | 515.099 | **518.008** | 0.99x | 2 | yes |
+| 20,000 | 1,073.773 | **1,092.018** | 0.98x | 1 | no |
+
+**Read that change column as "within a few per cent", not as a result in either direction.**
+These are wall-clock-budgeted runs: a faster build fits more ticks into the same sixty seconds
+and ends its window further into the fight, so the window is different in every row. Three
+measurements of the *same* Step 7.4 build on this machine gave 515.1, 541.7 (the figure recorded
+when Step 7.4 shipped) and 618.0 ms a tick at ten thousand soldiers - a 20% spread on one row,
+which is larger than any change the table is being asked to show. The matched-window table
+below is the comparison of record: same tick count, both builds, no budget that can shorten a
+slower run's window. The earlier rehearsal of this table reported 1.19x at ten thousand, which
+was the fast side of that spread rather than an improvement.
 
 Matched-window runs, twenty ticks each, both builds, so no wall-clock budget can shorten a
 slower run's window:

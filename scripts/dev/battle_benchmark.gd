@@ -51,6 +51,17 @@ extends Node
 ## --focus-scale=1    where the formation layer stops being free, by body count
 ## --scaled-table=0   family B without the clock, off when only the profile is wanted
 ## [/codeblock]
+##
+## And two that predate all of the above and are easy to miss, both used by the methodology
+## rather than by a milestone's own tables:
+## [codeblock]
+## --reliable=0       family A alone: no family B table, no repeatability pass
+## --ticks=20         matched windows, for a before/after comparison across two builds
+## [/codeblock]
+## A before/after comparison must not be made across `--budget` runs. The budget decides how
+## long a run lasts by how fast the build is, so a cheaper build measures a later, heavier
+## window of the same battle and can appear not to have improved. `--ticks=` is the fix: same
+## tick count for both builds, no budget that can shorten the slower one.
 
 const DEFAULT_UNITS := [100, 500, 1000, 2500, 5000]
 const DEFAULT_TICKS := 600
