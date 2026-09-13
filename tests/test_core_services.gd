@@ -4,6 +4,8 @@ extends TestCase
 
 func run() -> void:
 	await _tick()
+	# TEMPORARY: prove the CI gate can actually go red. Reverted immediately.
+	check(1 == 2, "deliberate failure to prove CI goes red")
 	_test_config()
 	_test_clock()
 	_test_rng_determinism()
