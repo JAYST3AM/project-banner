@@ -24,6 +24,10 @@ var rng: RandomNumberGenerator = null
 var units: Array[BattleUnit] = []
 var state: State = State.DEPLOYING
 var elapsed: float = 0.0
+## Simulation ticks completed. The only clock target scheduling is allowed to read: an
+## integer tick counter that a re-run reproduces exactly, never a wall-clock reading and
+## never a rendered frame. See D-080.
+var tick_index: int = 0
 var winner: String = ""
 
 ## Events produced by the most recent [method step] call. The view consumes them;
@@ -60,6 +64,62 @@ var target_search_radius: float = 8.0
 var target_search_escalation: float = 4.0
 var target_search_max_radius: float = 60.0
 
+## ---------- target persistence and reacquisition cadence (Step 7.4) --------
+##
+## [b]The rule.[/b] Once a soldier has acquired an automatic opponent, that opponent
+## stays the answer while it is alive, hostile and still nearby. The soldier looks for a
+## new one when the current one stops qualifying, or when its own awareness tick comes
+## round - and never merely to discover that the same enemy is still standing in front of
+## it. See D-080.
+##
+## [b]Why a cadence rather than merely "on invalidation".[/b] Waiting for an invalidation
+## alone would leave a soldier holding an opponent it cannot touch while a fresh one
+## walks into its face: an army that has marched past its own targeting. The cadence is
+## what lets a soldier notice that the situation has changed, and it is staggered so that
+## the noticing is spread across ticks rather than massed on one.
+
+## How many simulation ticks may pass between a soldier's own awareness searches.
+##
+## One means "search every tick", which is the behaviour this milestone replaced. Four is
+## the shipped value, chosen by sweeping 1, 2, 3, 4, 6 and 8 on both benchmark families:
+## see D-081 for the figures and for what the behaviour costs at each.
+var target_reacquisition_ticks: int = 4
+
+## How far a retained opponent may be before it stops being worth continuing with, in
+## world units.
+##
+## Shipped equal to [member target_search_max_radius], and equal to it on purpose: a
+## soldier should not release an opponent it was only just able to find because that
+## opponent is now a unit further away. Swept at 8, 16, 24 and 32 (D-082); the values
+## below the search ceiling make a soldier acquire an enemy at long range and let it go on
+## the very next tick, which is thrash dressed up as a rule. What the bound is for is the
+## opponent that genuinely leaves - the one that would otherwise be run after across the
+## battlefield - and for that it only has to be finite and bounded by what a search could
+## have found in the first place.
+var target_retention_radius: float = 32.0
+
+## How much closer a new candidate has to be before a soldier abandons the opponent it
+## already has. 1.0 would switch on any difference at all; 1.25 means an enemy has to be
+## a quarter closer to take over, which is the hysteresis that stops two similar enemies
+## swapping the answer every tick. See D-081.
+var target_switch_advantage: float = 1.25
+
+## Whether losing an opponent that was within reach is allowed to bring the next search
+## forward, instead of waiting for the soldier's own slot.
+##
+## This is the only path that can search off the cadence, and it is deliberately narrow:
+## it fires when a soldier's sword was in something when that something was taken away,
+## which is a fight continuing and not a schedule arriving. It is bounded by the size of
+## the contact line rather than by the size of the army, and the death-storm test measures
+## the worst tick it can produce. See D-083.
+var target_immediate_on_contact_loss: bool = true
+
+## How far from a lost opponent a soldier has to have been for its loss to count as being
+## taken away mid-fight, as a multiple of the soldier's own reach. One means "it was
+## within reach"; the knife-edge case is a soldier whose opponent died to somebody else's
+## blow at the moment it was about to swing.
+var target_contact_loss_factor: float = 1.0
+
 ## Who a soldier faces when nobody is near it, refreshed once per tick.
 ##
 ## A local search answers "who is nearest to me" for a soldier standing in the fighting,
@@ -75,6 +135,12 @@ var target_search_max_radius: float = 60.0
 ## per tick. See D-067.
 var _focus_by_formation: Dictionary = {}
 var _focus_by_side: Dictionary = {}
+
+## How far each body's focus enemy is from that body's anchor, in world units, INF when
+## there is nobody to be pointed at. Kept alongside [member _focus_by_formation] rather
+## than looked up on demand, and it is what lets a soldier prove that a look would find
+## nobody before paying for it. See [method _focus_look_finds_nobody].
+var _focus_distance_by_formation: Dictionary = {}
 
 ## The separation pass's own index. A second grid rather than the targeting one because
 ## the two ask different-sized questions: a target search reaches 8 units and a separation
@@ -114,6 +180,100 @@ var overlap_stats: Dictionary = {}
 var profile_enabled: bool = false
 var profile: Dictionary = {}
 
+## ---------- development-only target counters (Step 7.4) --------------------
+##
+## [b]Measurement before change.[/b] The phase clock could say that target selection cost
+## 248 ms a tick at five thousand soldiers. It could not say *why*, and "the search is
+## expensive" and "the search happens far too often" call for opposite fixes. So target
+## handling was given counters first, and the counters chose the milestone.
+##
+## They count what the code did, not what it was asked to do: searches actually run,
+## where the answer came from, why a remembered opponent was dropped, and how many
+## candidates a search had to look at. Every one of them is incremented behind
+## [member profile_enabled], so a real battle pays nothing for being explained. See D-079.
+##
+## The same counters are what turns the before/after comparison into a fact rather than a
+## claim: the run that produced the "before" column differs from the run that produced
+## the "after" column in behaviour and in nothing else.
+var tgt_searches: int = 0
+## Searches that found somebody, and searches that found nobody locally.
+var tgt_successful_searches: int = 0
+var tgt_empty_searches: int = 0
+## How many searches were answered by each rung of the escalation ladder. Rung one is
+## the starting radius; a rung count above one means the soldier had to widen its search,
+## which is the pre-contact case rather than the fighting one.
+var tgt_rung_hits: PackedInt32Array = PackedInt32Array()
+## Soldiers pointed at the fighting because they had nobody of their own, without looking.
+## The cheap fallback, counted so that "how often is it actually used" is a number. A tick
+## where a search ran and found nobody is counted as a search instead, not as both: these
+## counters partition soldier-ticks, and a set of counters that overlaps cannot be added up.
+var tgt_focus_fallbacks: int = 0
+## Of those, the ones where the look was skipped on a proof that it would have found nobody
+## rather than merely not being due. A sub-count of [member tgt_focus_fallbacks], not a
+## sixth category: it says how much of the cheap path was reached by arithmetic rather than
+## by arriving at the soldier's turn.
+var tgt_focus_proven: int = 0
+## Explicit player orders honoured, and orders cleared because their quarry died.
+var tgt_explicit_order_uses: int = 0
+var tgt_order_clears: int = 0
+## Ticks spent dealing with a remembered opponent rather than looking for one - the whole
+## point of the milestone, split into the two cases that matter. [b]In reach[/b] is the
+## fastest path through target handling: the enemy is close enough to be struck, so
+## nothing at all is asked of the battlefield. [b]Not in reach[/b] is an opponent being
+## walked towards or held at formation range.
+var tgt_retained_in_reach: int = 0
+var tgt_retained_held: int = 0
+## Why a remembered opponent stopped being the answer. Dead is the common case in a
+## fight; too far is a soldier that has stopped chasing; gone means the unit was not in
+## the index at all; side would be a bug if it ever happened.
+var tgt_invalid_dead: int = 0
+var tgt_invalid_far: int = 0
+var tgt_invalid_gone: int = 0
+var tgt_invalid_side: int = 0
+## Reacquisitions that were brought forward because the soldier's opponent was taken away
+## from it mid-swing, and reacquisitions that simply ran on the soldier's own cadence.
+var tgt_immediate_reacquires: int = 0
+var tgt_scheduled_reacquires: int = 0
+## Candidates handed over by the broadphase and actually measured, summed and at worst.
+var tgt_candidates: int = 0
+var tgt_candidates_max: int = 0
+## Automatic opponent changes: how often a soldier dealing with one living enemy switched
+## to a different living one. This is the churn figure, and the number hysteresis is
+## meant to hold down. Acquisitions from nothing are counted separately so that a battle
+## starting up does not look like churn.
+var tgt_switches: int = 0
+var tgt_acquisitions: int = 0
+## Acquisition latency: how many ticks passed between a soldier losing an opponent and
+## having another one, summed, worst, and over how many samples.
+##
+## This is the figure the cadence is judged by rather than the search count. A cadence
+## makes looking cheaper; it must not make a soldier slow, and "slow" is measurable: the
+## loss is stamped on the soldier, the replacement is stamped on the same soldier, and the
+## difference is the answer in simulation ticks.
+var tgt_latency_ticks: int = 0
+var tgt_latency_worst: int = 0
+var tgt_latency_samples: int = 0
+## How many of those waits were longer than one cadence. A long wait is not the schedule
+## arriving late - the schedule is bounded by the interval - it is a soldier with nobody
+## left to find, standing at the edge of the fighting or on a wing that has not met
+## anybody yet. The two are worth telling apart rather than averaging together.
+var tgt_latency_over_cadence: int = 0
+## Soldier-ticks: living soldiers multiplied by ticks stepped. The denominator for
+## "searches per soldier per second", and the figure the old behaviour would have matched
+## one search to, one for one.
+var tgt_soldier_ticks: int = 0
+
+## Set for the duration of one soldier's target resolution when the invalidation that
+## made the search necessary was an urgent one. Consumed by the search that follows it in
+## the same call, and cleared before every resolution, so it never leaks between soldiers.
+var _search_is_immediate: bool = false
+
+## Per-tick phase samples for the spike analysis, collected only when
+## [member sample_phases] is on. Average cost hides the thing this milestone is most
+## likely to break: a system that averages well and spikes every sixth tick. See D-084.
+var sample_phases: bool = false
+var samples: Dictionary = {}
+
 var field_size: Vector2 = Vector2(100.0, 60.0)
 var separation_radius: float = 1.5
 ## The grid's cell size, in world units. Read from config so it is one number in one
@@ -145,11 +305,19 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		target_search_radius = maxf(0.5, config.get_float("battle.target_search_radius", 8.0))
 		target_search_escalation = maxf(1.05, config.get_float("battle.target_search_escalation", 4.0))
 		target_search_max_radius = config.get_float("battle.target_search_max_radius", 32.0)
-	# The bound is what keeps a target search local. A ceiling of zero - or anything
-	# below the starting radius - would mean a per-soldier search of the whole
-	# battlefield, which is precisely the cost this milestone exists to remove, so it is
-	# repaired to the starting radius rather than honoured. See D-067.
-	target_search_max_radius = maxf(target_search_radius, target_search_max_radius)
+		# The bound is what keeps a target search local. A ceiling of zero - or anything
+		# below the starting radius - would mean a per-soldier search of the whole
+		# battlefield, which is precisely the cost this milestone exists to remove, so it is
+		# repaired to the starting radius rather than honoured. See D-067.
+		target_search_max_radius = maxf(target_search_radius, target_search_max_radius)
+		# Step 7.4. A cadence of zero or less would mean "never look again", which is not a
+		# cadence and would strand every soldier on the first enemy it ever met, so it is
+		# repaired to one tick - the every-tick behaviour - rather than honoured.
+		target_reacquisition_ticks = maxi(1, int(config.get_int("battle.target_reacquisition_ticks", 4)))
+		target_retention_radius = maxf(0.0, config.get_float("battle.target_retention_radius", 32.0))
+		target_switch_advantage = maxf(1.0, config.get_float("battle.target_switch_advantage", 1.25))
+		target_immediate_on_contact_loss = config.get_bool("battle.target_immediate_on_contact_loss", true)
+		target_contact_loss_factor = maxf(0.0, config.get_float("battle.target_contact_loss_factor", 1.0))
 	grid = BattleSpatialGrid.new()
 	grid.configure(field_size, cell_size)
 	overlap_grid = BattleOverlapGrid.new()
@@ -161,8 +329,15 @@ func add_units(p_units: Array[BattleUnit]) -> void:
 	units = p_units
 	_unit_by_id.clear()
 	_fastest_speed = 0.0
+	# A soldier's awareness slot is derived from its own id and nothing else, which is
+	# what makes the schedule deterministic: the same roster in the same order gives the
+	# same phases, and re-ordering the roster changes the order soldiers are updated in
+	# but not when any one of them looks around. See D-080.
+	var interval := maxi(1, target_reacquisition_ticks)
 	for unit in units:
 		_unit_by_id[unit.id] = unit
+		unit.auto_target_id = -1
+		unit.next_search_tick = posmod(unit.id, interval)
 		if unit.is_alive():
 			_fastest_speed = maxf(_fastest_speed, unit.move_speed)
 
@@ -418,6 +593,11 @@ func step(delta: float) -> Array[Dictionary]:
 		_finish("")
 		return events
 
+	# The tick's starting point, for the spike analysis: the phase clocks are cumulative,
+	# so a tick's own cost is the difference. Taken before anything runs and read back at
+	# the end, because an average cost hides exactly the thing that matters here.
+	var sample_mark: Dictionary = _sample_mark() if (profile_enabled and sample_phases) else {}
+
 	# The bodies move first, then the soldiers dress to them. Doing it in this order
 	# means a soldier reads one settled slot position per step rather than chasing a
 	# place that is still being computed.
@@ -469,6 +649,12 @@ func step(delta: float) -> Array[Dictionary]:
 	_profile_stop("total", tick_start)
 	if profile_enabled:
 		profile["ticks"] = int(profile.get("ticks", 0)) + 1
+	if sample_phases and not sample_mark.is_empty():
+		_sample_tick(sample_mark)
+	# The tick counter moves last, so every decision taken during this tick saw the same
+	# tick number. This is the only clock the target schedule reads, and it counts
+	# simulation ticks rather than anything measured off a wall.
+	tick_index += 1
 
 	if not is_finished():
 		_check_victory()
@@ -509,6 +695,166 @@ func profile_ms(key: String) -> float:
 
 func reset_profile() -> void:
 	profile = {}
+	samples = {}
+	tgt_searches = 0
+	tgt_successful_searches = 0
+	tgt_empty_searches = 0
+	tgt_rung_hits = PackedInt32Array()
+	tgt_focus_fallbacks = 0
+	tgt_focus_proven = 0
+	tgt_explicit_order_uses = 0
+	tgt_order_clears = 0
+	tgt_retained_in_reach = 0
+	tgt_retained_held = 0
+	tgt_invalid_dead = 0
+	tgt_invalid_far = 0
+	tgt_invalid_gone = 0
+	tgt_invalid_side = 0
+	tgt_immediate_reacquires = 0
+	tgt_scheduled_reacquires = 0
+	tgt_candidates = 0
+	tgt_candidates_max = 0
+	tgt_switches = 0
+	tgt_acquisitions = 0
+	tgt_latency_ticks = 0
+	tgt_latency_worst = 0
+	tgt_latency_samples = 0
+	tgt_latency_over_cadence = 0
+	tgt_soldier_ticks = 0
+
+
+## ---------- development-only spike analysis --------------------------------
+
+## The phase clocks as they stand, for the tick that is about to run to subtract from.
+func _sample_mark() -> Dictionary:
+	return {
+		"total": float(profile.get("total", 0.0)),
+		"grid": float(profile.get("grid", 0.0)),
+		"focus": float(profile.get("focus", 0.0)),
+		"formation": float(profile.get("formation", 0.0)),
+		"soldiers": float(profile.get("soldiers", 0.0)),
+		"target": float(profile.get("target", 0.0)),
+		"overlap": float(profile.get("overlap", 0.0)),
+	}
+
+
+## Record one tick's own cost for each phase. The distributions this builds are what
+## catch a system that averages well and spikes - which a staggered cadence is exactly
+## the sort of change that can cause. See D-084.
+##
+## Plain arrays rather than packed ones because a packed array in this engine is copied
+## when it is read back out of a dictionary, which would turn a run of samples into a
+## quadratic one for no benefit. The samples are a few thousand floats and they are read
+## once, at the end, by a report.
+func _sample_tick(mark: Dictionary) -> void:
+	for key in mark.keys():
+		var series: Array = samples.get(key, [])
+		series.append(float(profile.get(key, 0.0)) - float(mark[key]))
+		samples[key] = series
+
+
+## Average and tail of one sampled phase, in milliseconds per tick. p50/p95/p99 are
+## nearest-rank on the sorted samples, which is honest for the sizes measured here and
+## says so rather than pretending to interpolate.
+func phase_stats(key: String) -> Dictionary:
+	var series: Array = samples.get(key, [])
+	if series.is_empty():
+		return {}
+	var sorted := series.duplicate()
+	sorted.sort()
+	var total := 0.0
+	for value in series:
+		total += value
+	return {
+		"count": sorted.size(),
+		"avg": total / float(sorted.size()),
+		"p50": _percentile(sorted, 0.50),
+		"p95": _percentile(sorted, 0.95),
+		"p99": _percentile(sorted, 0.99),
+		"max": sorted[sorted.size() - 1],
+	}
+
+
+## Nearest-rank percentile of an already sorted array, clamped into range.
+func _percentile(sorted: Array, fraction: float) -> float:
+	var position := clampi(int(ceil(fraction * float(sorted.size()))) - 1, 0, sorted.size() - 1)
+	return float(sorted[position])
+
+
+## ---------- development-only target report --------------------------------
+
+## Everything target handling counted since the last reset, with the derived figures the
+## milestone is judged on. Development-only data; nothing in the game reads it.
+##
+## The derived numbers are the point of the report rather than the raw counters: searches
+## per soldier per simulated second says whether the cadence is doing what it claims,
+## "searches avoided" says how much of the old every-tick behaviour is gone, and the
+## switch count per thousand soldiers per second is the churn figure that has to stay
+## small for the persistence rule to be a good one rather than merely a cheap one.
+func target_report() -> Dictionary:
+	var ticks := maxi(1, int(profile.get("ticks", 0)))
+	var soldier_ticks := maxi(1, tgt_soldier_ticks)
+	var simulated_seconds := float(ticks) * _tick_seconds()
+	var report := {
+		"ticks": ticks,
+		"soldier_ticks": tgt_soldier_ticks,
+		"searches": tgt_searches,
+		"searches_per_tick": float(tgt_searches) / float(ticks),
+		"successful_searches": tgt_successful_searches,
+		"empty_searches": tgt_empty_searches,
+		"retained_in_reach": tgt_retained_in_reach,
+		"retained_held": tgt_retained_held,
+		"retained_uses": tgt_retained_in_reach + tgt_retained_held,
+		"searches_avoided": maxi(0, tgt_soldier_ticks - tgt_searches),
+		"searches_avoided_pct": 100.0 * float(maxi(0, tgt_soldier_ticks - tgt_searches)) / float(soldier_ticks),
+		"searches_per_soldier_second": float(tgt_searches) / maxf(0.0001, float(tgt_soldier_ticks) * _tick_seconds()),
+		"focus_fallbacks": tgt_focus_fallbacks,
+		"focus_per_tick": float(tgt_focus_fallbacks) / float(ticks),
+		"focus_proven": tgt_focus_proven,
+		"focus_proven_pct": 100.0 * float(tgt_focus_proven) / maxf(1.0, float(tgt_focus_fallbacks)),
+		"explicit_order_uses": tgt_explicit_order_uses,
+		"order_clears": tgt_order_clears,
+		"invalid_dead": tgt_invalid_dead,
+		"invalid_far": tgt_invalid_far,
+		"invalid_gone": tgt_invalid_gone,
+		"invalid_side": tgt_invalid_side,
+		"invalidations": tgt_invalid_dead + tgt_invalid_far + tgt_invalid_gone + tgt_invalid_side,
+		"invalidations_per_tick": float(tgt_invalid_dead + tgt_invalid_far + tgt_invalid_gone + tgt_invalid_side) / float(ticks),
+		"immediate_reacquires": tgt_immediate_reacquires,
+		"scheduled_reacquires": tgt_scheduled_reacquires,
+		"candidates": tgt_candidates,
+		"candidates_per_search": float(tgt_candidates) / maxf(1.0, float(tgt_searches)),
+		"candidates_max": tgt_candidates_max,
+		"acquisitions": tgt_acquisitions,
+		"switches": tgt_switches,
+		"latency_samples": tgt_latency_samples,
+		"latency_avg_ticks": float(tgt_latency_ticks) / maxf(1.0, float(tgt_latency_samples)),
+		"latency_worst_ticks": tgt_latency_worst,
+		"latency_over_cadence": tgt_latency_over_cadence,
+		"switches_per_1000_soldiers_second": 1000.0 * float(tgt_switches) / maxf(0.0001, float(soldier_ticks) * _tick_seconds()),
+		"cadence_ticks": target_reacquisition_ticks,
+		"retention_radius": target_retention_radius,
+		"switch_advantage": target_switch_advantage,
+		"immediate_on_contact_loss": target_immediate_on_contact_loss,
+		"simulated_seconds": simulated_seconds,
+	}
+	var rungs: Array[int] = []
+	for count in tgt_rung_hits:
+		rungs.append(count)
+	report["rung_hits"] = rungs
+	return report
+
+
+## One simulation tick in seconds, as the battle itself is being stepped with. The
+## schedule counts ticks rather than seconds, so the only place seconds appear at all is
+## this report, where a reader wants them.
+func _tick_seconds() -> float:
+	if config == null:
+		return 0.05
+	var rate := config.get_float("battle.tick_rate", 0.0)
+	if rate <= 0.0:
+		return 0.05
+	return 1.0 / rate
 
 
 ## ---------- overlap instrumentation helpers --------------------------------
@@ -521,6 +867,8 @@ func overlap_report() -> Dictionary:
 
 func _update_unit(unit: BattleUnit, delta: float) -> void:
 	unit.cooldown_left = maxf(0.0, unit.cooldown_left - delta)
+	if profile_enabled:
+		tgt_soldier_ticks += 1
 
 	# An explicit attack order is a player instruction, so it is resolved [i]before[/i]
 	# the automatic search rather than after it. The order is authoritative whenever it
@@ -529,19 +877,27 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 	# away - and on a five-thousand-soldier field that work is not free. The semantics
 	# are identical either way: the order is honoured while its target is a living enemy
 	# and lapses the moment it is not.
+	#
+	# Step 7.4 keeps this exactly where it was and in front of everything else: no
+	# cadence, no retention and no measurement of who is nearest is allowed to introduce
+	# a tick of latency into an order the player just gave. See D-085.
 	var target: BattleUnit = null
 	if unit.attack_order_target_id >= 0:
 		var ordered := find_unit(unit.attack_order_target_id)
 		if ordered != null and ordered.is_alive() and ordered.side != unit.side:
 			target = ordered
+			if profile_enabled:
+				tgt_explicit_order_uses += 1
 		else:
 			unit.attack_order_target_id = -1
+			if profile_enabled:
+				tgt_order_clears += 1
 
 	if target == null:
 		var target_probe := 0
 		if profile_enabled:
 			target_probe = Time.get_ticks_usec()
-		target = _choose_target(unit)
+		target = _resolve_target(unit)
 		if target_probe > 0:
 			_profile_accumulate("target", target_probe)
 	if target == null:
@@ -643,7 +999,247 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 				unit.attack_order_target_id = -1
 
 
-## The nearest living enemy to this soldier.
+## ---------- target acquisition (Step 7.4) ---------------------------------
+
+## Who this soldier is dealing with this tick.
+##
+## [b]The order of the questions is the design.[/b] Everything cheap is asked before
+## anything expensive, and the expensive question - a spatial search - is only reached
+## when the cheaper ones have said it is worth asking:
+##
+## [codeblock]
+## explicit order?          use it                       (player instruction, no search)
+## remembered opponent?
+##     in reach?            use it                       (no search: the fastest path)
+##     not this soldier's turn yet?
+##                          use it                       (no search: still relevant)
+## turned to look?
+##     search: nearest local enemy, or the formation's focus
+## [/codeblock]
+##
+## A soldier that is out of reach and not due to look falls to the formation's or its
+## side's focus, which is the answer the bodies have already worked out for themselves
+## once this tick - the architecture that exists precisely so a soldier far from the
+## fighting does not have to ask the battlefield a question every tick. See D-080, D-085.
+func _resolve_target(unit: BattleUnit) -> BattleUnit:
+	_search_is_immediate = false
+	var retained := _retained_target(unit)
+	if retained != null:
+		var reach := unit.attack_range
+		if unit.position.distance_squared_to(retained.position) <= reach * reach:
+			if profile_enabled:
+				tgt_retained_in_reach += 1
+			return retained
+		if tick_index < unit.next_search_tick:
+			if profile_enabled:
+				tgt_retained_held += 1
+			return retained
+	elif tick_index < unit.next_search_tick:
+		# Nothing remembered, and it is not this soldier's turn to look. The cheap
+		# answer is the one its body already has.
+		if profile_enabled:
+			tgt_focus_fallbacks += 1
+		return _focus_target(unit)
+	return _search_for_target(unit, retained)
+
+
+## The enemy this soldier was already dealing with, if it is still worth dealing with.
+##
+## Cheap by construction: one index probe and a handful of comparisons, with no spatial
+## query anywhere in it. That is what makes retaining an opponent cheaper than finding
+## one, by orders of magnitude, and it is the whole reason the milestone works.
+##
+## [b]It is also where a loss is noticed[/b], and it is the only place in the milestone
+## that can bring a search forward off the cadence. An opponent that died while the
+## soldier could have struck it is a fight in progress, and making that soldier wait for
+## its slot would leave it standing over a corpse. An opponent that simply got too far
+## away, or that was never in reach to begin with, waits for its slot like everything
+## else: nothing was taken away from that soldier mid-swing. See D-083.
+func _retained_target(unit: BattleUnit) -> BattleUnit:
+	if unit.auto_target_id < 0:
+		return null
+	var cached: BattleUnit = _unit_by_id.get(unit.auto_target_id)
+	if cached == null:
+		unit.auto_target_id = -1
+		if profile_enabled:
+			tgt_invalid_gone += 1
+		return null
+	if cached.side == unit.side:
+		# Not reachable today - the search only ever returns enemies - but a remembered
+		# answer that has become an ally is exactly the sort of thing an optimisation
+		# should refuse rather than attack.
+		unit.auto_target_id = -1
+		if profile_enabled:
+			tgt_invalid_side += 1
+		return null
+	if not cached.is_alive():
+		var lost_reach := unit.attack_range * target_contact_loss_factor
+		var fought_it := unit.position.distance_squared_to(cached.position) <= lost_reach * lost_reach
+		unit.auto_target_id = -1
+		if profile_enabled:
+			tgt_invalid_dead += 1
+			unit.target_lost_tick = tick_index
+		if fought_it and target_immediate_on_contact_loss:
+			unit.next_search_tick = tick_index
+			_search_is_immediate = true
+		return null
+	var retention := _retention_radius_of(unit)
+	if unit.position.distance_squared_to(cached.position) > retention * retention:
+		unit.auto_target_id = -1
+		if profile_enabled:
+			tgt_invalid_far += 1
+			unit.target_lost_tick = tick_index
+		return null
+	return cached
+
+
+## Look around, and take the answer. Called only when a soldier has nobody worth
+## continuing with, or when its own awareness tick has come round.
+##
+## The remembered opponent is not discarded merely because a search happened. It is
+## discarded when a better answer exists, and "better" has to be better by
+## [member target_switch_advantage] rather than by a hair, which is the hysteresis that
+## stops two similar enemies exchanging the answer on alternate ticks and walking a
+## soldier in circles. See D-081.
+func _search_for_target(unit: BattleUnit, retained: BattleUnit) -> BattleUnit:
+	# The cheapest look of all is the one that is not worth making. A soldier whose body's
+	# nearest enemy is further away than this soldier could see cannot find anybody by
+	# looking, so it is pointed at the fighting instead and the battlefield is not asked.
+	if _focus_look_finds_nobody(unit):
+		if profile_enabled:
+			tgt_focus_fallbacks += 1
+			tgt_focus_proven += 1
+		unit.next_search_tick = tick_index + target_reacquisition_ticks
+		if retained != null:
+			return retained
+		unit.auto_target_id = -1
+		return _focus_target(unit)
+
+	if profile_enabled:
+		tgt_searches += 1
+		if _search_is_immediate:
+			tgt_immediate_reacquires += 1
+		else:
+			tgt_scheduled_reacquires += 1
+
+	var local := _nearest_local_enemy(unit)
+	if local != null:
+		if retained != null and not _clear_improvement(unit, retained, local):
+			local = retained
+		_store_target(unit, local)
+		if profile_enabled:
+			tgt_successful_searches += 1
+		return local
+
+	if profile_enabled:
+		tgt_empty_searches += 1
+	unit.next_search_tick = tick_index + target_reacquisition_ticks
+	if retained != null:
+		# Nobody local, but the opponent this soldier already had is still valid: it is
+		# simply standing further off than the search reaches. Keeping it is the point of
+		# a retention radius wider than the search radius.
+		return retained
+	# Nobody found and nobody remembered: this soldier is pointed at the fighting. It is
+	# counted as a search rather than as a focus fallback, because this tick did pay for
+	# a search - the two counters partition soldier-ticks between them, and a tick that
+	# looked is a tick that looked, whatever it found.
+	unit.auto_target_id = -1
+	return _focus_target(unit)
+
+
+## Whether a freshly found enemy is enough of an improvement to be worth abandoning the
+## opponent this soldier is already dealing with.
+##
+## Deliberately generous to the incumbent. A soldier holding an opponent it can reach
+## should not swap to one that is a hundredth of a unit closer, because that is not a
+## better fight - it is the same fight with extra turning.
+func _clear_improvement(unit: BattleUnit, retained: BattleUnit, candidate: BattleUnit) -> bool:
+	if retained == candidate:
+		return true
+	# Compared squared, so the advantage is squared with it rather than rooted out per
+	# candidate. Same answer, one fewer square root in a hot loop.
+	var advantage := target_switch_advantage * target_switch_advantage
+	var held := unit.position.distance_squared_to(retained.position)
+	var fresh := unit.position.distance_squared_to(candidate.position)
+	return fresh * advantage < held
+
+
+## Remember an opponent and put this soldier's next look a cadence away.
+func _store_target(unit: BattleUnit, chosen: BattleUnit) -> void:
+	if profile_enabled:
+		var previous := unit.auto_target_id
+		if previous >= 0 and chosen != null and chosen.id != previous:
+			tgt_switches += 1
+		elif previous < 0 and chosen != null:
+			tgt_acquisitions += 1
+			if unit.target_lost_tick >= 0:
+				var waited := tick_index - unit.target_lost_tick
+				tgt_latency_ticks += waited
+				tgt_latency_worst = maxi(tgt_latency_worst, waited)
+				tgt_latency_samples += 1
+				if waited > target_reacquisition_ticks:
+					tgt_latency_over_cadence += 1
+				unit.target_lost_tick = -1
+	unit.auto_target_id = chosen.id if chosen != null else -1
+	unit.next_search_tick = tick_index + target_reacquisition_ticks
+
+
+## How far this soldier looks when it searches. Config for every unit that does not say
+## otherwise; a unit that carries its own awareness radius uses that.
+##
+## The point of the override is that nothing here assumes a one-point-eight-unit reach.
+## A soldier that one day carries a bow needs a wider look, and it says so on itself
+## rather than the query being rewritten around a weapon name. There are no archers in
+## this milestone and this changes no behaviour on its own. See D-086.
+func _search_radius_of(unit: BattleUnit) -> float:
+	return unit.awareness_radius if unit.awareness_radius > 0.0 else target_search_radius
+
+
+## The widest rung of this soldier's ladder. Never below its own starting radius, so a
+## ladder always has at least one rung and always terminates.
+func _search_ceiling_of(unit: BattleUnit) -> float:
+	return maxf(_search_radius_of(unit), target_search_max_radius)
+
+
+## How far a remembered opponent may be before continuing with it stops being reasonable.
+## Never tighter than the radius the soldier searches at, or a soldier would drop the
+## enemy it holds only to find it again on the next look.
+func _retention_radius_of(unit: BattleUnit) -> float:
+	return maxf(_search_radius_of(unit), target_retention_radius)
+
+
+## Whether a look by this soldier would provably find nobody, in which case the battlefield
+## is not asked at all.
+##
+## [b]The proof.[/b] A body's focus is the enemy nearest to that body's anchor, at a known
+## distance. This soldier stands a known distance from the same anchor. For any enemy E,
+## [code]d(soldier, E) >= d(anchor, E) - d(soldier, anchor) >= focus_distance - offset[/code],
+## so when that bound is already beyond the widest rung of this soldier's ladder there is no
+## enemy the ladder could have returned: every candidate it would have measured is further
+## away than it may look. The grid's own query margin is subtracted because both the focus
+## and the soldier may have moved since the focus was computed, by at most the distance the
+## fastest soldier can walk in one tick.
+##
+## It is a proof rather than a heuristic, in the same spirit as the separation pass skipping
+## the settled interior of a body (D-076). When the bound does not hold, the search runs
+## exactly as it always did, so the answer is the same either way - what changes is whether
+## a question with a known answer was worth asking. A test drives a live battle and asserts
+## that every skipped look would indeed have found nobody. See D-087.
+func _focus_look_finds_nobody(unit: BattleUnit) -> bool:
+	if unit.formation_ref == null:
+		return false
+	var body := unit.formation_ref
+	var reachable: float = float(_focus_distance_by_formation.get(body.id, INF))
+	if reachable == INF:
+		# Nobody on the other side at all: nothing to find and nothing to be pointed at.
+		return true
+	var margin := grid.query_margin if grid != null else 0.0
+	var bound := reachable - unit.position.distance_to(body.anchor) - margin
+	return bound > _search_ceiling_of(unit)
+
+
+## The nearest living enemy inside this soldier's own awareness bound, or null when there
+## is nobody local.
 ##
 ## Searched outward from the soldier rather than across the battlefield: a radius that
 ## comfortably exceeds anything anyone can currently reach, widening geometrically, and
@@ -658,16 +1254,38 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 ## escalation ladder is what will let archers, long spears and cavalry threat detection
 ## search further without this method being rewritten - and widening a ladder is a
 ## config change, not a code change. Step 7.2 adds no such system.
-func _choose_target(unit: BattleUnit) -> BattleUnit:
+func _nearest_local_enemy(unit: BattleUnit) -> BattleUnit:
 	var enemy_side := enemy_side_of(unit.side)
-	var radius := target_search_radius
+	var ceiling := _search_ceiling_of(unit)
+	var radius := _search_radius_of(unit)
+	var rung := 0
 	while true:
+		rung += 1
 		var best := _nearest_enemy_within(unit, enemy_side, radius)
+		if profile_enabled:
+			if tgt_rung_hits.size() < rung:
+				tgt_rung_hits.resize(rung)
+			tgt_rung_hits[rung - 1] += 1
 		if best != null:
 			return best
-		if radius >= target_search_max_radius:
+		var widened := minf(ceiling, radius * target_search_escalation)
+		# Two ways out, and both are needed: the ladder is done when it has reached its
+		# ceiling, and it is stuck when widening cannot widen any further. A ladder that
+		# cannot terminate is a per-soldier scan of the whole battlefield by another name.
+		if radius >= ceiling or widened <= radius:
 			break
-		radius = minf(target_search_max_radius, radius * target_search_escalation)
+		radius = widened
+	return null
+
+
+## The nearest living enemy to this soldier, or the enemy its body is pointed at when
+## there is nobody within its own bound. This is the whole of the local search, and it is
+## unchanged by Step 7.4: the milestone changed how often it is asked, never what it
+## answers.
+func _choose_target(unit: BattleUnit) -> BattleUnit:
+	var best := _nearest_local_enemy(unit)
+	if best != null:
+		return best
 	return _focus_target(unit)
 
 
@@ -677,8 +1295,12 @@ func _choose_target(unit: BattleUnit) -> BattleUnit:
 func _refresh_focus() -> void:
 	_focus_by_formation.clear()
 	_focus_by_side.clear()
+	_focus_distance_by_formation.clear()
 	for formation in formations:
-		_focus_by_formation[formation.id] = _nearest_enemy_to_point(formation.side, formation.anchor)
+		var directed := _nearest_enemy_to_point(formation.side, formation.anchor)
+		_focus_by_formation[formation.id] = directed
+		_focus_distance_by_formation[formation.id] = (
+			INF if directed == null else formation.anchor.distance_to(directed.position))
 
 
 ## Who this soldier faces when there is nobody inside its own search bound.
@@ -695,6 +1317,8 @@ func _focus_target(unit: BattleUnit) -> BattleUnit:
 			# over the army - once for the body, not once for every soldier in it.
 			directed = _nearest_enemy_to_point(unit.side, body.anchor)
 			_focus_by_formation[body.id] = directed
+			_focus_distance_by_formation[body.id] = (
+				INF if directed == null else body.anchor.distance_to(directed.position))
 		if directed != null:
 			return directed
 	var by_side: BattleUnit = _focus_by_side.get(unit.side)
@@ -746,6 +1370,12 @@ func _nearest_enemy_within(unit: BattleUnit, enemy_side: String, radius: float) 
 	if grid == null:
 		return null
 	grid.collect_within(unit.position, radius, enemy_side, _query_scratch)
+	if profile_enabled:
+		# What the broadphase handed over, before the exact test below throws most of it
+		# away. This is the figure that says whether a search is cheap because there is
+		# nobody about or expensive because there is.
+		tgt_candidates += _query_scratch.size()
+		tgt_candidates_max = maxi(tgt_candidates_max, _query_scratch.size())
 	var best: BattleUnit = null
 	var best_distance := INF
 	var limit := radius * radius

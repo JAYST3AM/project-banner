@@ -47,6 +47,42 @@ var has_move_order: bool = false
 ## Player-issued attack order: a unit id to hunt, or -1. Cleared when it dies.
 var attack_order_target_id: int = -1
 
+## ---------- battle-transient target state (Step 7.4) ------------------------
+##
+## [b]None of this is saved, and none of it belongs to a soldier.[/b] A [BattleUnit]
+## exists for the duration of one battle and is rebuilt from the campaign every time, so
+## these fields are scratch space for the fight in progress rather than anything
+## persistent. A campaign save never sees them, and a battle that is re-run from the same
+## seed rebuilds them identically.
+##
+## They are held as plain ids and counters rather than as node references, timers,
+## dictionaries or signals, because a battle of twenty thousand soldiers pays for every
+## one of them twenty thousand times: an integer compare is what a target check can
+## afford to be, and anything with an allocation behind it is not.
+
+## The enemy this soldier last chose for itself, or -1. An explicit order is not written
+## here - orders are the player's and live in [member attack_order_target_id].
+var auto_target_id: int = -1
+
+## The simulation tick at which this soldier's next scheduled awareness search is due.
+##
+## An integer simulation tick rather than a clock of any kind: the schedule has to be
+## reproducible from the battle seed, the roster and the orders, and no wall-clock
+## reading can promise that. See D-080.
+var next_search_tick: int = 0
+
+## How far this soldier looks for its own enemies, in world units, or zero to use
+## whatever the battle is configured with. A capability rather than a weapon: it exists so
+## that a unit which one day sees further can say so, instead of the search being
+## rewritten around what it is carrying.
+var awareness_radius: float = 0.0
+
+## The tick at which this soldier last lost an opponent, so that acquisition latency can be
+## measured: stamped when a memory is invalidated, read when the next one is stored, and
+## the difference in ticks is the answer. Development-only - written and read behind the
+## simulator's profiling switch - and battle-transient like everything else here.
+var target_lost_tick: int = -1
+
 ## The formation this soldier belongs to, if any, and the place in it the soldier
 ## stands.
 ##

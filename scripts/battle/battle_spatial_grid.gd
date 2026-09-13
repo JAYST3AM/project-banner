@@ -74,6 +74,17 @@ var _occupied: PackedInt32Array = PackedInt32Array()
 var _cell_mask: PackedByteArray = PackedByteArray()
 
 
+## [b]What Step 7.4 did not add.[/b] The brief anticipated a narrow question - "does this
+## nearby region contain any hostile soldier?" - because a cheaper yes/no might have been
+## what a staged target check wanted. Measurement said no: the two questions the new
+## target path asks are "may I still continue with the enemy I have" and "is that enemy
+## within my reach", and both are answered from data the soldier is already holding. The
+## one query-shaped decision - whether a lost opponent was lost mid-swing - is a distance
+## against a corpse, which costs a subtraction and needs no index at all. Adding an API
+## nobody calls would be a wider surface for no gain, so this class is unchanged in
+## Step 7.4. See D-083.
+
+
 ## Size the grid for a battlefield. Cheap and idempotent: calling it again with the same
 ## arguments does nothing, and calling it with different ones reallocates.
 func configure(p_field_size: Vector2, p_cell_size: float) -> void:

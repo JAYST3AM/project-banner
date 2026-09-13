@@ -32,6 +32,17 @@ extends Node
 ## godot --headless --path . res://scenes/dev/battle_benchmark.tscn -- --units=5000 --profile=1
 ## godot --headless --path . res://scenes/dev/battle_benchmark.tscn -- --grid-scale=1
 ## [/codeblock]
+##
+## Step 7.4 added four switches for sweeping the target schedule rather than editing the
+## config between runs, and two for the evidence the milestone needed:
+## [codeblock]
+## --reacquire=4      ticks between a soldier's own awareness searches (1 = every tick)
+## --retention=32     how far a remembered opponent may be before it is released
+## --switch=1.25      how much closer a new candidate must be to take over
+## --immediate=0      switch the urgency rule off, to measure what it costs
+## --spikes=1         sample every tick and report average, p50, p95, p99 and worst
+## --storm=1          kill an entire front rank on one tick and measure the tick it lands on
+## [/codeblock]
 
 const DEFAULT_UNITS := [100, 500, 1000, 2500, 5000]
 const DEFAULT_TICKS := 600
@@ -58,6 +69,21 @@ const STEP_7_BASELINE := {
 	5000: 10988.004,
 }
 
+## Step 7.3's measured cost per tick, same harness, same machine, same seed, same budget,
+## recorded in docs/CURRENT_STATE.md when Step 7.3 shipped. Hard-coded for the same reason
+## as the Step 7 figures: the behaviour that produced them has been replaced, and a
+## comparison against a re-measurement would be a comparison against the new code
+## pretending to be the old one.
+const STEP_7_3_BASELINE := {
+	100: 3.651,
+	500: 33.939,
+	1000: 57.537,
+	2500: 172.164,
+	5000: 425.177,
+	10000: 781.491,
+	20000: 1632.897,
+}
+
 ## Benchmark B: a battlefield that grows with the army, so density stays where a real
 ## battle would put it instead of rising until the soldiers are standing in each other.
 ##
@@ -81,6 +107,17 @@ const GRID_SCALE_QUERIES := 2000
 ## config between runs. Zero means "use whatever the config says".
 var _overlap_cell_override: float = 0.0
 
+## Step 7.4's swept values, each zero-or-negative meaning "use whatever the config says",
+## so that a cadence, a retention radius or a hysteresis margin can be swept without
+## editing data/config/game_config.json between runs. A sweep that required editing the
+## config would not be a sweep - it would be five runs and four chances to forget one.
+var _reacquire_override: int = 0
+var _retention_override: float = 0.0
+var _switch_override: float = 0.0
+## -1 means "use the config"; 0 and 1 switch the urgency rule off and on.
+var _immediate_override: int = -1
+var _spikes: bool = false
+
 
 func _ready() -> void:
 	var options := _parse_args()
@@ -92,6 +129,11 @@ func _ready() -> void:
 	var breakdown_max: int = options["breakdown_max"]
 	var cell_size := GameManager.config().get_float("battle.spatial_cell_size", 4.0)
 	_overlap_cell_override = float(options["overlap_cell"])
+	_reacquire_override = int(options["reacquire"])
+	_retention_override = float(options["retention"])
+	_switch_override = float(options["switch"])
+	_immediate_override = int(options["immediate"])
+	_spikes = bool(options["spikes"])
 
 	print("=== PROJECT BANNER - BATTLE SCALE BENCHMARK ===")
 	print("cpu      %s (%d threads)" % [OS.get_processor_name(), OS.get_processor_count()])
@@ -103,6 +145,15 @@ func _ready() -> void:
 	print("separation cell %.2f units%s" % [
 		_overlap_cell_override if _overlap_cell_override > 0.0 else GameManager.config().get_float("battle.overlap_cell_size", 0.9),
 		"  (--overlap-cell override)" if _overlap_cell_override > 0.0 else ""])
+	print("targets  cadence %d ticks%s   retention %.1f units%s   switch margin x%.2f%s   urgent on contact loss %s%s" % [
+		_reacquire_override if _reacquire_override > 0 else GameManager.config().get_int("battle.target_reacquisition_ticks", 4),
+		"  (--reacquire override)" if _reacquire_override > 0 else "",
+		_retention_override if _retention_override > 0.0 else GameManager.config().get_float("battle.target_retention_radius", 32.0),
+		"  (--retention override)" if _retention_override > 0.0 else "",
+		_switch_override if _switch_override > 0.0 else GameManager.config().get_float("battle.target_switch_advantage", 1.25),
+		"  (--switch override)" if _switch_override > 0.0 else "",
+		"yes" if _immediate_enabled() else "no",
+		"  (--immediate override)" if _immediate_override >= 0 else ""])
 	print("")
 	print("%7s | %7s | %10s | %10s | %9s | %8s | %7s | %7s | %6s | %s" % [
 		"units", "ticks", "sim total", "per tick", "ticks/sec", "setup", "alive", "busiest", "contact", "setup checksum"])
@@ -138,6 +189,11 @@ func _ready() -> void:
 	if bool(options["reliable"]):
 		_print_scaled(options)
 
+	if bool(options["profile"]):
+		_print_scaled_profile(options)
+
+	if bool(options["storm"]):
+		_print_storm(options)
 	if bool(options["grid_scale"]):
 		_print_grid_scale(cell_size)
 
@@ -164,6 +220,12 @@ func _parse_args() -> Dictionary:
 		"group": DEFAULT_GROUP_SIZE,
 		"battle_units": [1000, 2500, 5000, 10000, 20000],
 		"overlap_cell": 0.0,
+		"reacquire": 0,
+		"retention": 0.0,
+		"switch": 0.0,
+		"immediate": -1,
+		"spikes": false,
+		"storm": false,
 	}
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--units="):
@@ -204,6 +266,18 @@ func _parse_args() -> Dictionary:
 			options["group"] = maxi(10, int(arg.substr(8)))
 		elif arg.begins_with("--overlap-cell="):
 			options["overlap_cell"] = maxf(0.0, float(arg.substr(15)))
+		elif arg.begins_with("--reacquire="):
+			options["reacquire"] = maxi(0, int(arg.substr(12)))
+		elif arg.begins_with("--retention="):
+			options["retention"] = maxf(0.0, float(arg.substr(12)))
+		elif arg.begins_with("--switch="):
+			options["switch"] = maxf(0.0, float(arg.substr(9)))
+		elif arg.begins_with("--immediate="):
+			options["immediate"] = arg.substr(12).to_int()
+		elif arg.begins_with("--spikes="):
+			options["spikes"] = arg.substr(9).to_int() != 0
+		elif arg.begins_with("--storm="):
+			options["storm"] = arg.substr(8).to_int() != 0
 	return options
 
 
@@ -281,6 +355,7 @@ func _run_battle(
 	if _overlap_cell_override > 0.0:
 		simulator.overlap_cell_size = _overlap_cell_override
 		simulator.overlap_grid.configure(simulator.field_size, _overlap_cell_override)
+	_apply_target_overrides(simulator)
 	var units := _build_ranks(count, config)
 	simulator.add_units(units)
 	if use_terrain:
@@ -300,6 +375,7 @@ func _run_battle(
 	if profile:
 		simulator.reset_profile()
 		simulator.profile_enabled = true
+		simulator.sample_phases = _spikes
 
 	simulator.start()
 	var started := Time.get_ticks_usec()
@@ -347,6 +423,12 @@ func _run_battle(
 	if profile:
 		out["profile"] = simulator.profile.duplicate()
 		out["overlap_report"] = simulator.overlap_report()
+		out["target_report"] = simulator.target_report()
+		if _spikes:
+			var stats := {}
+			for key in ["total", "target", "overlap", "soldiers"]:
+				stats[key] = simulator.phase_stats(key)
+			out["spike_stats"] = stats
 	return out
 
 
@@ -406,9 +488,10 @@ func _setup_checksum(simulator: BattleSimulator) -> String:
 	return "%08x" % RngService.stable_hash("|".join(parts))
 
 
-## Step 7 against Step 7.2, at the sizes both measured. This is the table the milestone
-## exists to produce, and it is printed from the same run that produced the numbers above
-## rather than assembled by hand afterwards.
+## Step 7 against Step 7.2, at the sizes both measured. This is the table the Step 7.2
+## milestone exists to produce, and it is kept because the history is the point: a
+## milestone that quietly stops reporting the milestones before it is a milestone nobody
+## can audit. Step 7.4's own table follows it.
 func _print_comparison(reports: Array[Dictionary]) -> void:
 	var comparable: Array[Dictionary] = []
 	for report in reports:
@@ -430,6 +513,10 @@ func _print_comparison(reports: Array[Dictionary]) -> void:
 	print("-".repeat(76))
 	print("  Step 7 figures are the recorded measurements from docs/PROJECT_REPORT.md 9.7,")
 	print("  taken on this machine with this harness before the spatial work existed.")
+	print("  The Step 7.2 column is this run's own figure for the same battle, so the table")
+	print("  above is history rather than a claim about this milestone.")
+
+	_print_recent_comparison(reports)
 
 	# 16.67 ms is 60 FPS. The simulation does not have to run at render frequency, and
 	# Step 7.2 does not decide that it should - so this is a reference point, not a
@@ -441,13 +528,39 @@ func _print_comparison(reports: Array[Dictionary]) -> void:
 	print("  and nothing else. The largest size measured under that figure here is reported")
 	print("  below rather than claimed.")
 	var holds := 0
-	for report in comparable:
+	for report in reports:
 		if float(report["per_tick"]) <= frame_budget:
 			holds = maxi(holds, int(report["units"]))
 	if holds > 0:
 		print("  Largest measured size with a simulation tick under one 60 FPS frame: %d soldiers." % holds)
 	else:
 		print("  No measured size has a simulation tick under one 60 FPS frame yet.")
+
+
+## Step 7.3 against Step 7.4: the table this milestone exists to produce. Same seed, same
+## fixed-area layout, same rules, same budget - only the target schedule differs.
+func _print_recent_comparison(reports: Array[Dictionary]) -> void:
+	var comparable: Array[Dictionary] = []
+	for report in reports:
+		if STEP_7_3_BASELINE.has(int(report["units"])):
+			comparable.append(report)
+	if comparable.is_empty():
+		return
+	print("")
+	print("=== STEP 7.3 vs STEP 7.4 (fixed-area torture test, same seed and budget) ===")
+	print("%7s | %16s | %16s | %10s | %12s | %s" % [
+		"units", "Step 7.3 ms/tick", "Step 7.4 ms/tick", "speedup", "7.4 ticks/s", "contact"])
+	print("-".repeat(80))
+	for report in comparable:
+		var before := float(STEP_7_3_BASELINE[int(report["units"])])
+		var after := float(report["per_tick"])
+		print("%7d | %14.3f | %14.3f | %9.2fx | %12.1f | %s" % [
+			int(report["units"]), before, after, before / maxf(0.000001, after),
+			float(report["ticks_per_second"]), "yes" if bool(report["contact"]) else "no"])
+	print("-".repeat(80))
+	print("  Step 7.3 figures are the recorded measurements from docs/CURRENT_STATE.md when")
+	print("  Step 7.3 shipped, taken on this machine with this harness. Step 7.4 changed how")
+	print("  often a soldier looks for an enemy and nothing else about it.")
 
 
 ## Where the time actually goes now. Enabled with --profile=1, and reported at phase
@@ -459,6 +572,8 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 		"units", "grid", "focus", "formations", "soldiers", "of which target", "overlap", "accounted", "total"])
 	print("-".repeat(114))
 	var overlaps: Array[Dictionary] = []
+	var targets: Array[Dictionary] = []
+	var spikes: Array[Dictionary] = []
 	for count_value in counts:
 		var count := int(count_value)
 		var effective := minf(MAX_BUDGET, budget * maxf(1.0, float(count) / 1000.0))
@@ -479,6 +594,13 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 		report["ticks"] = int(run["ticks"])
 		report["pass_ms"] = float(phases.get("overlap", 0.0))
 		overlaps.append(report)
+		var target_report: Dictionary = run.get("target_report", {})
+		target_report["units"] = count
+		target_report["ticks"] = int(run["ticks"])
+		targets.append(target_report)
+		var stats: Dictionary = run.get("spike_stats", {})
+		if not stats.is_empty():
+			spikes.append({"units": count, "stats": stats})
 	print("-".repeat(114))
 	print("  'accounted' is the sum of the phases and should sit just under 'total'; the gap")
 	print("  is the parts of a tick nothing has been instrumented for. 'soldiers' is the")
@@ -529,6 +651,8 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 	print("  touching: two soldiers standing within the settle distance of their assigned")
 	print("  places are a slot apart, and a slot is wider than a body. That is the one place")
 	print("  the pass declines to do work, and it declines on a proof rather than a guess.")
+	_print_target_table(targets)
+	_print_spike_table(spikes)
 
 
 ## ---------- Benchmark B: battlefield scaled with the army -------------------
@@ -555,7 +679,8 @@ func _run_battle_scaled(
 	seed_value: int,
 	budget: float,
 	gap_fraction: float,
-	group_size: int
+	group_size: int,
+	profile: bool = false
 ) -> Dictionary:
 	var config := GameManager.config()
 	var field := _battlefield_for(count)
@@ -573,6 +698,7 @@ func _run_battle_scaled(
 	simulator.field_size = field
 	simulator.grid.configure(field, simulator.cell_size)
 	simulator.overlap_grid.configure(field, simulator.overlap_cell_size)
+	_apply_target_overrides(simulator)
 
 	var units := _build_ranks_scaled(count, field, gap_fraction)
 	simulator.add_units(units)
@@ -582,6 +708,11 @@ func _run_battle_scaled(
 	var checksum := _setup_checksum(simulator)
 	var ai := BattleAI.create(config)
 	var setup_ms := float(Time.get_ticks_usec() - setup_start) / 1000.0
+
+	if profile:
+		simulator.reset_profile()
+		simulator.profile_enabled = true
+		simulator.sample_phases = _spikes
 
 	simulator.start()
 	var started := Time.get_ticks_usec()
@@ -617,7 +748,7 @@ func _run_battle_scaled(
 			alive += 1
 
 	var per_tick_ms := 0.0 if done == 0 else (float(total_us) / 1000.0) / float(done)
-	return {
+	var out := {
 		"units": count,
 		"field": field,
 		"density": float(count) / (field.x * field.y),
@@ -634,6 +765,15 @@ func _run_battle_scaled(
 		"checksum": checksum,
 		"simulator": simulator,
 	}
+	if profile:
+		out["profile"] = simulator.profile.duplicate()
+		out["target_report"] = simulator.target_report()
+		if _spikes:
+			var stats := {}
+			for key in ["total", "target", "overlap", "soldiers"]:
+				stats[key] = simulator.phase_stats(key)
+			out["spike_stats"] = stats
+	return out
 
 
 ## Each side's soldiers split into several line bodies rather than one enormous one, which
@@ -869,6 +1009,334 @@ func _scaling_note(reports: Array[Dictionary]) -> String:
 	lines.append("  Measured on this machine, headless, with the simulation stepped directly -")
 	lines.append("  it excludes rendering, which the large-battle milestone will also have to pay.")
 	return "\n".join(lines)
+
+
+## ---------- Step 7.4: what target handling did, and what it cost -------------
+
+## Whether the urgency rule is on, as the config or an override has it.
+func _immediate_enabled() -> bool:
+	if _immediate_override >= 0:
+		return _immediate_override != 0
+	return GameManager.config().get_bool("battle.target_immediate_on_contact_loss", true)
+
+
+## Apply the swept values to a freshly built battle simulator. Called before the roster is
+## added, because that is where the awareness phases are handed out.
+func _apply_target_overrides(simulator: BattleSimulator) -> void:
+	if _reacquire_override > 0:
+		simulator.target_reacquisition_ticks = _reacquire_override
+	if _retention_override > 0.0:
+		simulator.target_retention_radius = _retention_override
+	if _switch_override > 0.0:
+		simulator.target_switch_advantage = _switch_override
+	if _immediate_override >= 0:
+		simulator.target_immediate_on_contact_loss = _immediate_override != 0
+
+
+## What target handling did, per size: the figures that say why the tick got cheaper.
+##
+## Counters rather than a clock. "Target selection is now 60 ms" says the milestone
+## worked; "twenty thousand soldiers looked 1,400 times a tick instead of 20,000, and
+## nineteen out of twenty were dealing with an enemy they already had" says how, and a
+## number that cannot say how is a number nobody can check.
+func _print_target_table(targets: Array[Dictionary]) -> void:
+	if targets.is_empty():
+		return
+	print("")
+	print("=== TARGET ACQUISITION: what it did, per tick ===")
+	print("%7s | %10s | %11s | %11s | %11s | %10s | %10s | %9s" % [
+		"units", "looks", "kept/in reach", "kept/holding", "focus", "avoided", "avoided%", "switches"])
+	print("-".repeat(100))
+	for report in targets:
+		var ticks := maxf(1.0, float(report.get("ticks", 1)))
+		print("%7d | %10.1f | %11.1f | %11.1f | %11.1f | %10.1f | %9.1f%% | %9.1f" % [
+			int(report["units"]),
+			float(report["searches"]) / ticks,
+			float(report["retained_in_reach"]) / ticks,
+			float(report["retained_held"]) / ticks,
+			float(report["focus_fallbacks"]) / ticks,
+			float(report["searches_avoided"]) / ticks,
+			float(report["searches_avoided_pct"]),
+			float(report["switches"]) / ticks])
+	print("-".repeat(100))
+	print("  'focus' is the cheap answer: soldiers pointed at the fighting without looking. Of")
+	print("  those, the looks skipped on a proof that they would have found nobody:")
+	for report in targets:
+		var ticks := maxf(1.0, float(report.get("ticks", 1)))
+		print("      %6d soldiers: %.1f per tick, %.1f%% of the cheap path" % [
+			int(report["units"]), float(report.get("focus_proven", 0)) / ticks,
+			float(report.get("focus_proven_pct", 0.0))])
+	print("-".repeat(100))
+	print("%7s | %10s | %11s | %11s | %11s | %10s | %10s | %9s" % [
+		"units", "looks/sld", "dead", "too far", "urgent", "scheduled", "cand/look", "cand max"])
+	print("-".repeat(100))
+	for report in targets:
+		var soldier_seconds := maxf(0.0001, float(report["soldier_ticks"]) * TICK)
+		print("%7d | %10.2f | %11.1f | %11.1f | %11.1f | %10.1f | %10.1f | %9d" % [
+			int(report["units"]),
+			float(report["searches"]) / soldier_seconds,
+			float(report["invalid_dead"]) / maxf(1.0, float(report.get("ticks", 1))),
+			float(report["invalid_far"]) / maxf(1.0, float(report.get("ticks", 1))),
+			float(report["immediate_reacquires"]) / maxf(1.0, float(report.get("ticks", 1))),
+			float(report["scheduled_reacquires"]) / maxf(1.0, float(report.get("ticks", 1))),
+			float(report["candidates_per_search"]),
+			int(report["candidates_max"])])
+	print("-".repeat(100))
+	for report in targets:
+		print("  %d soldiers: %.2f looks per soldier per simulated second (the old rule was" % [
+			int(report["units"]), float(report["searches_per_soldier_second"])])
+		print("              %d per second), %.1f%% of soldier-ticks did not look at all, and" % [
+			int(round(1.0 / TICK)), float(report["searches_avoided_pct"])])
+		print("              %.2f of them spent the tick fighting, holding or chasing the enemy" % [
+			float(report["retained_uses"]) / maxf(1.0, float(report["soldier_ticks"]))])
+		print("              they already had.")
+	var with_latency: Array[Dictionary] = []
+	for report in targets:
+		if int(report.get("latency_samples", 0)) > 0:
+			with_latency.append(report)
+	if not with_latency.is_empty():
+		print("")
+		print("  Acquisition latency, for soldiers that lost an opponent and had to find" )
+		print("  another: measured in simulation ticks from the loss to the replacement. The")
+		print("  average is bounded by the cadence; the worst is not, and is a soldier with")
+		print("  nobody left to find rather than a schedule arriving late.")
+		print("  %7s | %11s | %11s | %11s | %11s | %s" % [
+			"units", "avg ticks", "worst ticks", "samples", "over cadence", "within cadence"])
+		for report in with_latency:
+			var samples := maxi(1, int(report["latency_samples"]))
+			var over := int(report["latency_over_cadence"])
+			print("  %7d | %11.1f | %11d | %11d | %11d | %.1f%%" % [
+				int(report["units"]), float(report["latency_avg_ticks"]),
+				int(report["latency_worst_ticks"]), samples, over,
+				100.0 * float(samples - over) / float(samples)])
+
+
+## The frame-spike analysis: average, worst and tail for the phases that matter. A system
+## that averages well and spikes every sixth tick is the failure mode a staggered cadence
+## is most likely to introduce, so the average alone is not evidence.
+func _print_spike_table(rows: Array[Dictionary]) -> void:
+	if rows.is_empty():
+		return
+	print("")
+	print("=== SPIKES: per-tick distribution of the phases (milliseconds) ===")
+	print("%7s | %8s | %22s | %22s | %s" % ["units", "phase", "avg / p50", "p95 / p99", "worst"])
+	print("-".repeat(96))
+	for row in rows:
+		var stats: Dictionary = row["stats"]
+		for key in ["total", "target", "overlap", "soldiers"]:
+			if not stats.has(key) or stats[key].is_empty():
+				continue
+			var phase: Dictionary = stats[key]
+			print("%7d | %8s | %10.3f / %10.3f | %10.3f / %10.3f | %9.3f" % [
+				int(row["units"]), key,
+				float(phase["avg"]), float(phase["p50"]),
+				float(phase["p95"]), float(phase["p99"]), float(phase["max"])])
+	print("-".repeat(96))
+	print("  Nearest-rank percentiles over every tick of the run, from the phase clock. A")
+	print("  spread between the average and the tail is the price of staggering: it is the")
+	print("  worst tick, not the average one, that a frame notices.")
+
+
+## Family B, profiled. The same battles as the table above, run a second time with the
+## clock on, because the 20K realistic-density case is now a primary engineering metric
+## and a metric nobody breaks down is a metric nobody can act on.
+func _print_scaled_profile(options: Dictionary) -> void:
+	# Family B is the family --reliable=0 switches off, profiling and all: a run that
+	# cannot afford the battles cannot afford their breakdown either.
+	if not bool(options["reliable"]):
+		return
+	var counts: Array = options["battle_units"]
+	var ticks: int = options["ticks"]
+	var seed_value: int = options["seed"]
+	var budget: float = options["budget"]
+	var gap: float = options["gap"]
+	var group: int = options["group"]
+
+	print("")
+	print("=== FAMILY B PHASE PROFILE (scaled battlefield, clock on) ===")
+	print("%7s | %10s | %9s | %11s | %10s | %12s | %9s | %10s | %s" % [
+		"units", "grid", "focus", "formations", "soldiers", "of which target", "overlap", "accounted", "total"])
+	print("-".repeat(114))
+	var targets: Array[Dictionary] = []
+	var spikes: Array[Dictionary] = []
+	for count_value in counts:
+		var count := int(count_value)
+		var effective := minf(MAX_BUDGET, budget * maxf(1.0, float(count) / 1000.0))
+		var run := _run_battle_scaled(count, ticks, seed_value, effective, gap, group, true)
+		var done := maxf(1.0, float(run["ticks"]))
+		var phases: Dictionary = run.get("profile", {})
+		var grid := float(phases.get("grid", 0.0)) / done
+		var focus := float(phases.get("focus", 0.0)) / done
+		var formations := float(phases.get("formation", 0.0)) / done
+		var soldiers := float(phases.get("soldiers", 0.0)) / done
+		var target := float(phases.get("target", 0.0)) / done
+		var overlap := float(phases.get("overlap", 0.0)) / done
+		var accounted := grid + focus + formations + soldiers + overlap
+		print("%7d | %7.3f ms | %6.3f ms | %8.3f ms | %7.3f ms | %9.3f ms | %6.3f ms | %7.3f ms | %7.3f ms" % [
+			count, grid, focus, formations, soldiers, target, overlap, accounted, float(run["per_tick_ms"])])
+		var report: Dictionary = run.get("target_report", {})
+		report["units"] = count
+		report["ticks"] = int(run["ticks"])
+		targets.append(report)
+		var stats: Dictionary = run.get("spike_stats", {})
+		if not stats.is_empty():
+			spikes.append({"units": count, "stats": stats})
+	print("-".repeat(114))
+	print("  Combat ticks for each size are reported in the table above; a size that never")
+	print("  reached contact is an approach measurement and its profile says so.")
+	_print_target_table(targets)
+	_print_spike_table(spikes)
+
+
+## ---------- the death storm ------------------------------------------------
+
+## The worst case a staggered schedule has to survive: a great many soldiers losing the
+## opponent they were fighting, all on the same tick.
+##
+## The shape is deliberate. Two lines of three ranks are dressed and already in contact,
+## and the armies are held exactly where they are - speed zero - so that the only thing
+## that changes between the measured ticks is the storm. The average tick is measured over
+## a window of ordinary fighting first, with the same clock, so the storm tick is compared
+## against the battle it interrupted rather than against a guess.
+##
+## The question is not whether the storm tick costs more. It must: work that did not
+## happen before now happens at once. The question is whether it is a step or a cliff, and
+## whether the tick after it goes back to the schedule.
+const STORM_FILES := 200
+const STORM_SETTLE_TICKS := 40
+const STORM_WINDOW_TICKS := 30
+const STORM_SIZES := [600, 1200, 2400]
+
+func _print_storm(_options: Dictionary) -> void:
+	print("")
+	print("=== THE DEATH STORM: an entire front rank lost on one tick ===")
+	print("  %d files of three ranks a side, dressed and in contact, held still so that the" % STORM_FILES)
+	print("  storm is the only thing that changes. Everything below is the phase clock's own")
+	print("  per-tick total, so the storm tick is measured with the same instrument as the")
+	print("  %d ticks of ordinary fighting it interrupts." % STORM_WINDOW_TICKS)
+	print("")
+	print("%8s | %11s | %11s | %9s | %7s | %8s | %10s | %10s | %10s | %s" % [
+		"soldiers", "front rank", "avg tick", "storm", "spike", "next tick", "looks/tick",
+		"storm looks", "immediate", "waiting"])
+	print("-".repeat(122))
+	for count in STORM_SIZES:
+		var row := _storm_measure(count)
+		if row.is_empty():
+			continue
+		print("%8d | %11d | %8.3f ms | %6.3f ms | %8.2fx | %7.3f ms | %10.1f | %10d | %10d | %10.1f" % [
+			int(row["soldiers"]), int(row["front"]), float(row["avg_ms"]), float(row["storm_ms"]),
+			float(row["storm_ms"]) / maxf(0.0001, float(row["avg_ms"])), float(row["next_ms"]),
+			float(row["window_searches"]) / float(STORM_WINDOW_TICKS), int(row["storm_searches"]),
+			int(row["immediate"]), float(row["waiting"])])
+	print("-".repeat(122))
+	print("  'immediate' is how many soldiers lost an opponent they could have struck and had")
+	print("  another one in the same tick; 'waiting' is how many lost one that was never in")
+	print("  reach and were left to their own turn. 'looks/tick' is the same battle's ordinary")
+	print("  rate, and the storm column is what one tick of it cost when a line died at once.")
+
+
+## One run of the storm, reduced to the numbers the table prints.
+func _storm_measure(count: int) -> Dictionary:
+	var config := GameManager.config()
+	var ranks := 3
+	var files := maxi(1, count / 2 / ranks)
+	var width := float(files) * 1.4 + 20.0
+	var field := Vector2(width, 30.0 + float(files) * 1.4)
+	var simulator := BattleSimulator.new(config, DEFAULT_SEED)
+	simulator.field_size = field
+	simulator.grid.configure(field, simulator.cell_size)
+	simulator.overlap_grid.configure(field, simulator.overlap_cell_size)
+	_apply_target_overrides(simulator)
+
+	var units: Array[BattleUnit] = []
+	var front: Array[BattleUnit] = []
+	var next_id := 0
+	for rank_index in ranks:
+		for file in files:
+			var y := 10.0 + float(file) * 1.4
+			var front_x := 10.0 + float(files) * 1.4 * 0.5
+			var player := _storm_unit(next_id, BattleContext.SIDE_PLAYER,
+				Vector2(front_x - float(ranks - 1 - rank_index) * 1.4 - 1.7, y))
+			next_id += 1
+			units.append(player)
+			var enemy := _storm_unit(next_id, BattleContext.SIDE_ENEMY,
+				Vector2(front_x + float(rank_index) * 1.4, y))
+			next_id += 1
+			units.append(enemy)
+			if rank_index == 0:
+				front.append(enemy)
+	simulator.add_units(units)
+	simulator.call("_rebuild_spatial", TICK)
+	simulator.call("_refresh_focus")
+	simulator.start()
+	simulator.reset_profile()
+	simulator.profile_enabled = true
+
+	for i in STORM_SETTLE_TICKS:
+		simulator.step(TICK)
+
+	# A window of ordinary fighting, tick by tick, through the same clock everything else
+	# uses. The phase clock is cumulative, so a tick's cost is the difference.
+	var window_ms := 0.0
+	var window_searches := 0
+	for i in STORM_WINDOW_TICKS:
+		var mark := float(simulator.profile.get("total", 0.0))
+		var searches_before := simulator.tgt_searches
+		simulator.step(TICK)
+		window_ms += float(simulator.profile.get("total", 0.0)) - mark
+		window_searches += simulator.tgt_searches - searches_before
+	var avg_ms := window_ms / float(STORM_WINDOW_TICKS)
+
+	# The storm: every soldier in the enemy front rank dies on the same tick.
+	var mark := float(simulator.profile.get("total", 0.0))
+	var searches_before := simulator.tgt_searches
+	var immediates_before := simulator.tgt_immediate_reacquires
+	var scheduled_before := simulator.tgt_scheduled_reacquires
+	for victim in front:
+		victim.hp = 0
+		victim.alive = false
+	simulator.step(TICK)
+	var storm_ms := float(simulator.profile.get("total", 0.0)) - mark
+	var storm_searches := simulator.tgt_searches - searches_before
+	var immediate := simulator.tgt_immediate_reacquires - immediates_before
+	var waiting := simulator.tgt_scheduled_reacquires - scheduled_before
+
+	# And the tick after it, which is the one that says whether the schedule reasserted
+	# itself or whether the storm broke it.
+	mark = float(simulator.profile.get("total", 0.0))
+	simulator.step(TICK)
+	var next_ms := float(simulator.profile.get("total", 0.0)) - mark
+
+	return {
+		"soldiers": units.size(),
+		"front": front.size(),
+		"avg_ms": avg_ms,
+		"storm_ms": storm_ms,
+		"next_ms": next_ms,
+		"window_searches": window_searches,
+		"storm_searches": storm_searches,
+		"immediate": immediate,
+		"waiting": float(waiting),
+	}
+
+
+## A soldier for the storm fixture: a real reach, real hit points, and no movement at all,
+## so that the two lines stay exactly where they were put.
+func _storm_unit(id: int, side: String, position: Vector2) -> BattleUnit:
+	var unit := BattleUnit.new()
+	unit.id = id
+	unit.side = side
+	unit.soldier_id = "s_storm_%d" % id
+	unit.display_name = "Storm %d" % id
+	unit.max_hp = 40
+	unit.hp = 40
+	unit.attack = 5
+	unit.defence = 2
+	unit.move_speed = 0.0
+	unit.attack_range = 1.8
+	unit.attack_cooldown = 1.2
+	unit.position = position
+	return unit
 
 
 func _ms(value: float) -> String:
