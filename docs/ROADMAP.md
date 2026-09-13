@@ -485,7 +485,7 @@ GDExtension, no ECS, no second multi-rate system.
   behaviour bought with no measurable saving. Declining it is a decision with a reason rather
   than an omission. See D-089.
 
-**Definition of done:** measured; **20 suites, 2826 assertions, 0 failures**; 95 restart
+**Definition of done:** measured; **20 suites, 2831 assertions, 0 failures**; 95 restart
 checks, 0 failures; the windowed flow clean; CI green. See D-088 through D-091.
 
 ---
