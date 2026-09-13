@@ -337,6 +337,40 @@ formation; rotated bounds contain every slot; **2207 assertions across 16 suites
 failures**; 95 restart checks, 0 failures; the windowed flow clean with the drill; CI
 green. See D-054 through D-058.
 
+
+## Step 7.2 - Battle simulation scaling foundation (`milestone-07.2`)
+
+**Goal:** remove the architectural bottleneck the Step 7 benchmark exposed. An
+engineering milestone: no new gameplay, and nothing from Step 8.
+
+The Step 7 measurement put the cost precisely: fifty times the soldiers was about
+2,300 times the time per tick, from two loops that compared every soldier with every
+other soldier. Both predated Step 7.
+
+- **A battlefield proximity index.** `BattleSpatialGrid` is a uniform grid, `RefCounted`
+  and data-first, `battle.spatial_cell_size` units to a cell, rebuilt in one linear pass
+  per tick. Buckets are a linked list in packed arrays, so nothing is allocated after
+  configuration and a query writes into a caller-supplied array. It answers in cells
+  rather than in circles and the order is part of its contract, because two callers
+  depend on it. See D-059, D-060, D-066, D-068.
+- **Target acquisition searches outward and stops.** Within
+  `battle.target_search_max_radius` the answer is *provably identical* to the exhaustive
+  scan it replaced, and a test proves it soldier-for-soldier against a brute-force
+  reference. Beyond that bound a soldier is pointed at the fighting by its body rather
+  than measuring the whole battlefield for itself. See D-061, D-065, D-067.
+- **Overlap resolution goes local**, with a pair resolved once by the lower id and in the
+  order the old loop used, so it produces the same positions rather than merely a
+  defensible set. See D-062.
+- **Dead soldiers are excluded at query time, not only at index time** - a defect the
+  equivalence probe found in a live battle, not by reading the code. See D-063.
+- **Phase instrumentation**, off by default and free when off. See D-064.
+- **The benchmark reports before and after**, at Step 7's sizes plus 10,000 and 20,000,
+  with the busiest cell and whether contact was reached, and measures the spatial layer
+  alone at constant density.
+
+**Definition of done:** measured; 17 suites, **2364 assertions, 0 failures**; 95 restart
+checks, 0 failures; the windowed flow clean; CI green. See D-059 through D-069.
+
 ---
 
 ## Standing design principle

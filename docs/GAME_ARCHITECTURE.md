@@ -434,27 +434,129 @@ cannot dissolve into a crowd, and a body told to `hold` holds whatever the enemy
 The flag costs one boolean, set inside the per-soldier reach test that already had to be
 made.
 
-### Scaling: what is known to be quadratic
+### Proximity: the battlefield index (Step 7.2)
 
-Two loops in `BattleSimulator` compare every soldier with every other soldier:
+Every proximity question a battle asks goes through one object. `BattleSpatialGrid` is a
+uniform grid over the battlefield, one cell per `battle.spatial_cell_size` world units
+(4.0), and it holds index positions and nothing else.
 
-| Loop | What it does | Why |
-| --- | --- | --- |
-| `_choose_target()` | nearest living enemy | no spatial structure exists |
-| `_resolve_overlaps()` | push apart units standing on each other | same |
+**The rule it exists to enforce:**
 
-Both predate Step 7 and both are measured, not guessed: the benchmark in
-`scenes/dev/battle_benchmark.tscn` reports cost per tick from 100 to 5,000 soldiers, and
-the same battle is run with terrain and formations switched off to attribute the cost.
-Terrain and formations together are a few per cent; the quadratic pair is the whole
-story.
+> Battlefield-local spatial queries are the authoritative broadphase for soldier
+> proximity. Systems must not reintroduce full battlefield scans inside per-soldier hot
+> loops.
 
-**These are documented, not fixed.** A spatial grid or a locality-based neighbour search
-is the obvious answer and it is the first task of the large-battle milestone, where it
-can be designed against a measurement rather than guessed at now. Step 7's own additions
-are kept linear so they do not add to the problem: a formed soldier's per-step work is a
-reference and an array read, cohesion is one pass over a formation, and body-to-body
-lookups are a short loop over a handful of formations.
+A soldier does not ask which of every soldier on the battlefield is near it. It asks
+which soldiers are near its position, and the grid answers that without looking at the
+rest of the field.
+
+**Shape.** `RefCounted`, not a node. Data-first: no rendering, no physics, usable
+headlessly. Battle-local: a battle builds one, and it does not outlive the battle.
+Buckets are a linked list in two `PackedInt32Array`s - a head per cell, a next per slot -
+rather than an array per cell, so nothing is allocated after `configure()`.
+
+**Membership is a snapshot, rebuilt once per tick and again before overlap resolution.**
+The brief asked for this to be chosen on measurement rather than assumption, and the
+measurement is unambiguous: a rebuild is one linear pass writing into preallocated arrays,
+and it costs 0.7 ms at five hundred soldiers and 3.8 ms at two thousand five hundred,
+against per-tick totals in the tens and hundreds of milliseconds. Incremental maintenance
+would buy nothing and would add a way for the index to drift out of step with the units it
+describes. There is no update path, so there is no update path to get wrong.
+
+**Dead soldiers are not in it**, and are not returned from it either. The index only
+admits the living, and a query re-checks liveness, because soldiers die *during* the tick
+whose index was taken at its start (D-063). A casualty still keeps its place on its
+formation's roll so that a gap in a line stays a gap (D-048); it simply has no answers.
+
+**Queries answer in cells, not circles.** `collect_within(position, radius, side, out)`
+returns every indexed unit whose cell the search box touches, in a defined order, into a
+caller-supplied array that keeps its capacity between calls. It is a superset of the
+circle and it is not sorted. Callers measure - the target search discards anyone beyond
+the radius it asked about (D-065), and the overlap pass measures the exact gap before
+pushing. Returning a sorted or exact result would make the grid do per-candidate work the
+caller has to do anyway.
+
+**The order is part of the contract** (D-059). Two callers depend on it: the overlap pass
+resolves pairs in the order it meets them, and the equivalence tests pin that order
+against the loop it replaced. A structure whose iteration order is unspecified cannot make
+that promise, so the order is specified and the implementation preserves it - including
+through the occupied-cell shortcut (D-066).
+
+`collect_within()` chooses between two ways of walking the same cells and takes whichever
+visits fewer: every cell in the box, or the list of cells that actually hold somebody.
+On a sparse field a wide search covers hundreds of empty cells, and reading empty bucket
+heads to find a handful of soldiers is work proportional to the battlefield rather than to
+the army (D-066). Cells also carry a one-byte record of which sides are present, so a
+query can skip a bucket holding only the other army without walking it (D-068).
+
+#### Target selection
+
+`_choose_target()` searches outward from the soldier: `battle.target_search_radius` (8)
+first, widening by `battle.target_search_escalation` (4) to a bound of
+`battle.target_search_max_radius` (32). Within the bound the answer is **exactly** the
+nearest living enemy, ties to the lower id, and provably identical to the exhaustive scan
+it replaced (D-061) - that equivalence is tested soldier-for-soldier against a brute-force
+reference, on generated layouts and across eighty ticks of a moving battle.
+
+Beyond the bound a per-soldier search stops being local: answering it means examining the
+whole enemy army, per soldier, per tick, which is the quadratic cost this milestone
+removed. So a soldier with nobody near it is *pointed at the fighting* instead - by its
+body, at the nearest enemy to the formation anchor, or failing that by its side's centre
+of mass. Those are computed once per tick rather than once per soldier (D-067).
+
+This is a deliberate trade and it is stated plainly: a soldier marching towards a distant
+enemy faces the enemy its body is pointed at rather than its own private nearest. Its
+conduct is unchanged - a formed soldier dressing to its slot does not steer by its target
+at all - so the difference is the direction it faces while marching. Within the bound,
+which is where every soldier who is actually fighting lives, nothing changed.
+
+The radius is deliberately not tied to melee reach: archers, long spears and cavalry
+threat detection all want to search further than they can hit, and widening the ladder is
+a config change (D-061). Step 7.2 adds none of those systems.
+
+#### Overlap resolution
+
+`_resolve_overlaps()` asks the grid for the soldiers near each one and resolves a pair
+only when `other.id > unit.id`. The pair rule means each overlap is pushed once rather
+than once per side, which both halves the work and removes the outcome's dependence on
+which soldier was considered first. The processing order reproduces the exhaustive loop's
+order rather than merely a defensible one, so the spatial pass produces **the same
+positions** the old loop produced - checked directly against the exhaustive loop on eight
+arrangements including a cell-boundary pair and two soldiers in the same spot (D-062).
+
+#### Instrumentation
+
+`BattleSimulator` carries phase accumulators behind `profile_enabled` (D-064): grid
+rebuild, focus refresh, formation update, the per-soldier loop and the share of it spent
+choosing targets, and overlap resolution. Off by default and free when off; the one loop
+that would otherwise cost a call per soldier without profiling simply has two copies. The
+benchmark prints the profile on request, labelled as profiled, because two clock reads per
+soldier are affordable but not free.
+
+#### What it costs now
+
+The benchmark in `scenes/dev/battle_benchmark.tscn` reports cost per tick from 100 to
+5,000 soldiers at the sizes Step 7 measured, plus larger sizes, and compares against Step
+7's recorded figures. It runs the same battle four times with terrain and formations
+switched off to attribute the cost, reports the busiest single cell so that saturation is
+visible rather than inferred, and prints whether the armies actually reached each other so
+an approach measurement is never passed off as a fight. `--grid-scale=1` measures the
+spatial layer alone at constant density, which is the only configuration in which the
+shape of the curve can be seen rather than the shape of a saturated battlefield.
+
+**Step 7's quadratic pair is gone.** What is left is proportional to the army and to how
+crowded each soldier's own neighbourhood is.
+
+Two limits that remain, and are not claims to the contrary:
+
+- **Density is not constant.** The battlefield is a fixed 100 x 60 however many soldiers
+  are on it, so the soldiers-per-cell column grows with the army. A crowd packed into one
+  cell degrades a uniform grid towards the scan it replaced; that is inherent to a uniform
+  grid, it is measured rather than assumed, and the honest answer at that point is a
+  larger battlefield or a finer cell, not a different data structure.
+- **No threading, no GDExtension, no ECS.** This is GDScript throughout (D-069).
+
+---
 
 ---
 

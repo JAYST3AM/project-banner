@@ -2,17 +2,18 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 7.1 - formation hardening
+**Last updated:** end of Step 7.2 - battle simulation scaling foundation
 **Engine:** Godot 4.7.2-stable
-**Test status:** `2207 assertions, 0 failures, 16 of 16 suites` headless, plus
+**Test status:** `2364 assertions, 0 failures, 17 of 17 suites` headless, plus
 `95 checks, 0 failures` in a genuine two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
 every pull request against it, pinned to Godot 4.7.2-stable.
 
-**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, not new gameplay. Step 7 added
-terrain and formations. See [Step 7 - terrain and formation
-foundation](#step-7---terrain-and-formation-foundation) and [Step 7.1 - formation
-hardening](#step-71---formation-hardening) below.
+**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes and Step 7.2 was an engineering
+milestone; none of them added gameplay. Step 7 added terrain and formations. See [Step 7 -
+terrain and formation foundation](#step-7---terrain-and-formation-foundation), [Step 7.1 -
+formation hardening](#step-71---formation-hardening) and [Step 7.2 - battle simulation
+scaling foundation](#step-72---battle-simulation-scaling-foundation) below.
 
 ---
 
@@ -45,7 +46,7 @@ NEW CAMPAIGN -> WORLD MAP -> TRAVEL -> TOWN -> RECRUIT -> INDIVIDUAL SOLDIERS
 
 Everything below is asserted by an automated run, not claimed by hand.
 
-**Sixteen headless suites, 2207 assertions, 0 failures**
+**Seventeen headless suites, 2364 assertions, 0 failures**
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -434,6 +435,163 @@ files by 2 ranks", which is loose order's geometry, not a line's.
   Marking membership changes as reforming is what exposed it: the body was correctly
   reported as un-dressed, and the test had never actually dressed it.
 
+
+## Step 7.2 - Battle simulation scaling foundation
+
+Step 7 measured the problem and refused to guess at it: two loops compared every soldier
+with every other soldier, and fifty times the soldiers cost about 2,300 times the time per
+tick. Step 7.2 replaced both. It added **no gameplay**.
+
+### 1. Every proximity question goes through one index
+
+`BattleSpatialGrid` is a uniform grid over the battlefield, `battle.spatial_cell_size`
+(4.0 world units) to a cell. `RefCounted`, data-first, battle-local, no rendering and no
+physics: a soldier is still plain data. Buckets are a linked list held in two
+`PackedInt32Array`s rather than an array per cell, so nothing is allocated after
+`configure()`, and queries write into an array the caller owns and reuses.
+
+Membership is a **snapshot rebuilt once per tick** - plus a second rebuild before overlap
+resolution, which is the one phase where being a body's width behind actually matters.
+The brief asked for this choice to be made on measurement rather than assumption, and the
+measurement is lopsided: a rebuild costs **0.8 ms at 500 soldiers and 8.0 ms at 5,000**
+against per-tick totals of tens and hundreds of milliseconds. Incremental maintenance
+would buy nothing and add a way for the index to drift out of step with the units it
+describes. There is no update path, so there is no update path to get wrong.
+
+Queries answer in **cells, not circles**. A query returns everyone whose cell the search
+box touches - a superset - in a defined order, and the caller measures. The caller has to
+measure anyway, to pick a nearest or to push a pair apart, and a grid that sorted would
+just be doing that work twice. The order is part of the contract because the overlap pass
+resolves pairs in the order it meets them.
+
+### 2. Target selection is local, and provably so
+
+`_choose_target()` searches outward: 8 units first, widening to 32, and **within that bound
+the answer is exactly what the exhaustive scan would have returned** - not approximately,
+exactly, with ties going to the lower unit id. The proof is a property rather than a hope:
+if the search stops at the first radius containing any enemy, the nearest enemy inside
+that radius *is* the nearest enemy, because anything nearer would have been inside a
+smaller radius that found nobody. A test checks it soldier-for-soldier against a
+brute-force reference, on generated layouts and across eighty ticks of a moving battle.
+
+Beyond the bound a per-soldier search stops being local - answering it means examining the
+whole enemy army, per soldier, per tick - so a soldier with nobody near it is **pointed at
+the fighting** instead: by its body, at the nearest enemy to the formation anchor, or
+failing that by its side's centre of mass. Those are computed once per tick rather than
+once per soldier.
+
+This is a real trade and it is stated rather than buried. A soldier marching towards a
+distant enemy faces the enemy its body is pointed at rather than its own private nearest.
+Its *conduct* is unchanged - a formed soldier dressing to its slot does not steer by its
+target at all - so the visible difference is the direction it faces while marching. Inside
+the bound, which is where every soldier who is actually fighting lives, nothing changed.
+
+### 3. Overlap resolution goes local, and reproduces the old answer
+
+`_resolve_overlaps()` asks the grid for the soldiers near each one and resolves a pair
+only when `other.id > unit.id`. The pair rule means each overlap is pushed once rather
+than once per side. The processing order deliberately reproduces the exhaustive loop's
+order, because positional relaxation is sequential - a different visit order would produce
+different battles, which would mean an optimisation had quietly changed the game. Since a
+pair that is out of range does nothing, skipping the far ones is a no-op, and the spatial
+pass produces **the same positions** the old loop produced. A test checks that directly
+against the exhaustive loop, on eight arrangements including a cell-boundary pair and two
+soldiers standing in exactly the same place.
+
+### 4. Two defects, both found by measurement rather than by reading
+
+1. **Dead soldiers were still answerable.** The index is a snapshot taken at the start of a
+   tick and soldiers die *during* that tick. A soldier processed late in the loop could be
+   handed a comrade who fell earlier in the same tick and could select, face, chase or
+   shove a corpse. The scan this replaced re-checked liveness on every candidate and the
+   grid did not, so the grid returned a different nearest enemy in a real fight and a
+   battle's outcome changed. Found by a probe comparing the two answers inside a live
+   battle. See D-063.
+2. **The escalation's premise was false.** The grid returns a box, and the box is
+   deliberately larger than the circle, so the search "found" enemies slightly beyond the
+   radius it had asked about - and stopped there. A soldier whose true nearest was 11.6
+   units away was handed one at 13.1 because the first rung had returned *something*. Not
+   a near miss: a different decision, in the first radius rather than the last. See D-065.
+
+A third finding was a cost rather than a defect, and the profile is what surfaced it:
+after the search was bounded, target selection still held four fifths of the soldier loop
+because every query walked the soldier's own army and discarded it. One byte per cell
+recording which sides are present took that from 794 ms of soldier loop to 58 ms. See
+D-068.
+
+### 5. Benchmark: Step 7 against Step 7.2
+
+Same harness, same seed (70707), same layouts, same budget, this machine, headless:
+
+| units | Step 7 ms/tick | Step 7.2 ms/tick | speedup | ticks/sec | busiest cell | contact |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 100 | 4.783 | **4.160** | 1.1x | 240 | 2 | yes |
+| 500 | 110.337 | **36.165** | 3.1x | 28 | 8 | yes |
+| 1,000 | 439.993 | **65.299** | 6.7x | 15 | 12 | yes |
+| 2,500 | 2,684.557 | **254.277** | 10.6x | 4 | 27 | no |
+| 5,000 | 10,988.004 | **703.456** | 15.6x | 1 | 52 | no |
+| 10,000 | not measured | **2,872.690** | - | 0.3 | 105 | no |
+| 20,000 | not measured | **12,016.796** | - | 0.08 | 210 | no |
+
+**10,000 and 20,000 were both run.** 20,000 soldiers simulate at 12.0 seconds per tick,
+and that is reported rather than extrapolated. It is not 60 FPS and is not claimed to be:
+the largest size this machine simulates under a single 60 FPS frame is **100 soldiers**,
+and the simulation need not update at render frequency at all - that decision is later
+work.
+
+Formations now *reduce* the cost rather than adding to it (at 500 soldiers: 51.9 ms
+without them, 36.2 ms with), which is the intended shape. A formed soldier dresses to a
+slot instead of steering by a target, so putting an army in formation removes work.
+
+The spatial layer measured alone, at constant density so the curve is the algorithm's
+rather than the battlefield's:
+
+| units | field | rebuild | cells | query avg |
+| ---: | --- | ---: | ---: | ---: |
+| 1,000 | 35x35 | 1.481 ms | 81 | 0.0340 ms |
+| 5,000 | 77x77 | 8.073 ms | 400 | 0.0551 ms |
+| 10,000 | 110x110 | 16.987 ms | 784 | 0.0766 ms |
+| 20,000 | 155x155 | 31.826 ms | 1,521 | 0.1105 ms |
+| 50,000 | 245x245 | 81.964 ms | 3,844 | 0.1131 ms |
+
+Fifty times the soldiers is fifty-five times the rebuild - linear - and a query at a fixed
+radius stays flat, returning about fifty-five candidates whether the army is one thousand
+or fifty thousand.
+
+### 6. What is now the most expensive phase
+
+By phase, ms per tick, clock on:
+
+| units | grid | focus | formations | soldiers | of which target | overlap |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 0.825 | 0.725 | 0.752 | 11.465 | 8.256 | 12.845 |
+| 2,500 | 3.788 | 3.472 | 3.155 | 78.040 | 63.709 | 104.753 |
+| 5,000 | 7.986 | 7.913 | 6.901 | 161.400 | 131.782 | 387.150 |
+
+**Overlap resolution is now the dominant cost** - 66% of a tick at 5,000 soldiers, and it
+overtakes target selection somewhere between 500 and 2,500. That is a genuinely new
+finding rather than the old one restated: it was never visible under the quadratic
+scan the old `_choose_target()` was doing.
+
+It is a **density** limit, not an algorithmic one. `_resolve_overlaps()` asks each soldier
+who is near it, and the answer grows with how many soldiers share a cell - which on a
+fixed 100x60 battlefield grows with the army. The busiest cell at 5,000 soldiers holds 52
+of them. The honest next question is whether the battlefield should grow with the army,
+before anyone asks whether GDScript is fast enough - which is why the work stayed in
+GDScript (D-069).
+
+### 7. Verification
+
+| | |
+| --- | --- |
+| Headless suites | **17 of 17 reported, 2364 assertions, 0 failures** (was 2207 across 16) |
+| New suite | `test_spatial_grid` (127) - insertion, rebuild, empty, one, many, cell boundaries, radius queries, side filtering, dead-unit exclusion, query order, duplicates, dense cells, movement between cells, large-radius queries, the scratch buffer, brute-force agreement over 200 generated queries, and the margin |
+| Extended | `test_formation_battle` 99 -> 132 - combat across a cell boundary and a cell corner, every soldier able to find a target over 40 ticks, a formed body pointed by its own focus, and a 300-soldier pile in one cell run twice |
+| Two-process restart | **95 checks, 0 failures** - unchanged; no save-format change |
+| Windowed smoke | campaign -> settlement -> recruit -> battle -> **formation drill** -> results, zero script errors, drill reported 3 player bodies and 0 inconsistencies |
+| Bogus `--suite=` | exit 1 |
+| CI | **green on the tip** - 17 of 17 suites, 2364 assertions, both persistence phases, read from the raw job log |
+
 ## Known limitations
 
 The honest list. None of these blocks the checkpoint; all of them are the natural
@@ -473,10 +631,14 @@ next work.
 16. Balance is deliberately rough. Fights work and are decisive; they have not been
     tuned for a long campaign, and the formation path has never been balance-measured
     the way the unformed path has.
-17. **The battle simulation is quadratic in soldiers.** `_choose_target()` and
-    `_resolve_overlaps()` compare every soldier with every other soldier, which is why
-    5,000 soldiers costs eleven seconds a tick. Measured, documented, and the first task
-    of the large-battle milestone - see D-053 and the benchmark table above.
+17. **Overlap resolution is the most expensive phase**, once the quadratic scans were
+    removed in Step 7.2 (see the profile above). It is bounded by how many soldiers share
+    a grid cell, and the battlefield is a fixed 100x60 however many soldiers are on it,
+    so density - not the algorithm - is now the limit. 20,000 soldiers simulate at 12.0
+    seconds a tick, measured rather than extrapolated.
+18. **Rendering is not in any of these measurements.** The benchmark steps the simulation
+    directly. Drawing twenty thousand soldiers is a separate problem the large-battle
+    milestone will also have to pay for, and nothing here claims otherwise.
 
 ## Recommended next milestone
 

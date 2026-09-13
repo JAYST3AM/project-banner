@@ -1012,3 +1012,249 @@ geometry system to keep correct, and the requirement is only that the box truthf
 contains the body. The cost is a linear pass over the slots, on a method that is called
 by the debug overlay and by tests rather than by the simulation.
 
+
+## D-059: The proximity index answers in cells and promises nothing about order
+
+**Decision.** `BattleSpatialGrid` exposes `collect_within(position, radius, side, out)`,
+which returns every indexed unit whose cell the search box touches, in ascending cell
+order and then in the order the units were handed to `rebuild()`. It does not sort, and
+it does not promise to be the nearest. Callers measure.
+
+**Why.** A cell query that returned candidates "nearest first" would have to sort, and a
+sort is exactly the per-candidate cost the grid exists to avoid. What callers actually
+need differs anyway: one wants the nearest, one wants everyone within a separation
+distance, one will later want everyone in an arc. Returning a superset in a defined
+order lets each of them do its own arithmetic once, on candidates it already has to
+measure.
+
+The order is part of the contract rather than an accident, because two callers depend on
+it: the overlap pass resolves pairs in the order it meets them, and the equivalence
+tests pin that order against the loop it replaced. A data structure whose iteration order
+is unspecified cannot make that promise, so the order is specified. See D-062 and D-066.
+
+## D-060: The cell size is one configurable number, and density is reported rather than assumed
+
+**Decision.** The cell size comes from `battle.spatial_cell_size`, currently 4.0 world
+units; the radius at which a target search starts comes from
+`battle.target_search_radius` (8.0), and the ladder by which it widens from
+`battle.target_search_escalation` (4.0).
+
+**Why.** Four units is chosen against the numbers that already exist rather than picked
+for looking round: melee reach is 1.8, the separation minimum is 1.35, and formation
+spacing is 2.6 to 4.4. A cell that comfortably exceeds every local radius means a query
+touches one or two cells in the common case and the per-query cell overhead stays near
+its floor. Anything much smaller multiplies the cell count walked per query; anything
+much larger turns a cell into a bucket of half the army.
+
+The number lives in config rather than in the class because it is tuning, and the
+benchmark reports the busiest single cell at every size so that "is this cell size still
+right?" is answered by a measurement rather than by re-reading this paragraph. On a fixed
+battlefield, density rises with the army, so that column is expected to grow - and at
+some size it will say the field itself is too small, which is a different problem with a
+different answer.
+
+## D-061: A target search widens from the soldier outward and stops at the first radius that finds anyone
+
+**Decision.** `BattleSimulator._choose_target()` queries the grid at
+`battle.target_search_radius`, and if that returns no enemy within the radius, multiplies
+the radius by `battle.target_search_escalation` and tries again, up to a ceiling that
+defaults to the battlefield's diagonal. The nearest enemy within the first radius that
+contains an enemy at all is returned; ties go to the lower unit id.
+
+**Why.** This is exactly equivalent to the battlefield-wide scan it replaced, and the
+equivalence is a property rather than a hope: if the search stops at the first radius
+containing any enemy, then the nearest enemy inside that radius *is* the nearest enemy,
+because anything nearer would have been inside the smaller radius that found nobody. A
+test proves the two agree soldier for soldier, over generated layouts and over eighty
+ticks of a moving battle.
+
+Ties are broken explicitly on the lower id rather than left to whichever candidate the
+grid handed back first. A bucket is a linked list; letting its order decide who a soldier
+attacks would make a battle depend on how the index was built, which is precisely the
+nondeterminism a spatial index must not introduce.
+
+The starting radius is deliberately not tied to melee reach. Ranged units, long spears
+and cavalry threat detection all want to search further than they can hit, and widening
+a ladder is a config change. Step 7.2 adds none of those systems; it just declines to
+make them impossible.
+
+## D-062: Overlap pairs are resolved once, by the lower id, in the order the pairwise loop used
+
+**Decision.** `_resolve_overlaps()` asks the grid for the units near each soldier and
+processes a pair only when `other.id > unit.id`. The outer loop walks the unit list in
+its own order and the inner one walks a bucket, and buckets are appended to rather than
+prepended to, so the pairs are considered in the same relative order the exhaustive
+`for i: for j in range(i+1, n)` loop considered them.
+
+**Why.** The pair rule exists because without it an overlapping pair is pushed twice -
+once from each side - and the second push is a second independent event rather than the
+same one. That doubles the work and makes the outcome depend on which soldier was
+considered first. The rule is written in ids rather than array positions so it survives
+any future reordering of the unit list.
+
+The order is preserved because it is load-bearing for behaviour, not for tidiness.
+Positional relaxation is sequential: each push changes the positions the next pair is
+measured against. A version that visited the same pairs in a different order would be
+equally defensible and would produce different battles, which would mean an optimisation
+had quietly changed the game. Since a pair that is out of range does nothing, skipping
+the far ones is a no-op - so preserving the order makes the spatial pass produce *the
+same positions* the exhaustive loop produced, and a test checks that directly against the
+exhaustive loop, on eight arrangements including a cell-boundary pair and two soldiers in
+exactly the same place.
+
+## D-063: Liveness is checked when a query is answered, not only when the index is built
+
+**Decision.** `BattleSpatialGrid.collect_within()` skips units that are no longer alive,
+and `rebuild()` skips them too.
+
+**Why.** The index is a snapshot taken at the start of a tick, and soldiers die *during*
+that tick's soldier loop. Indexing only the living is not the same as answering only
+about the living: a soldier processed late in the loop would otherwise be handed a
+comrade who fell earlier in the same tick and could select, face, chase or shove a
+corpse.
+
+This was a real defect, found by a probe comparing the local search against the
+battlefield-wide scan on a live battle rather than by reasoning about it. The scan
+re-checked `is_alive()` on every candidate and the grid did not, so the grid returned a
+different nearest enemy in a real fight, which changed a battle's outcome. It is the
+clearest argument in this milestone for the equivalence tests existing at all: the bug
+was invisible to every test that only asked whether the battle finished.
+
+Dead soldiers remain on their formation's roll so that a gap in a line stays a gap
+(D-048). They are simply not answerable.
+
+## D-064: Profiling is development-only, and the unmeasured path is unchanged
+
+**Decision.** `BattleSimulator` carries phase accumulators behind `profile_enabled`,
+false by default. Every entry point returns immediately behind that boolean, and the one
+place that would otherwise have cost a function call per soldier without profiling has
+two copies of its loop instead of one guarded one.
+
+**Why.** The brief for this milestone asks to be able to say where the time goes, and
+also asks that instrumentation not be paid for in production. Those are in tension only
+if the guard is inside the hot loop; a duplicated loop costs a line of source and nothing
+at runtime. The measured phase set is deliberately coarse - grid rebuild, formation
+update, per-soldier update, the share of that spent choosing targets, overlap resolution -
+because the question worth answering is which phase to attack next, not which statement.
+
+The profiled figure is not the figure in the benchmark's main table. Two clock reads per
+soldier are affordable but not free, and a benchmark that reported a profiled number as
+an unprofiled one would be lying by a few per cent. Both are printed, labelled, and the
+comparison table uses the unprofiled one.
+
+## D-065: The query radius filters the candidate set; it is a promise, not a hint
+
+**Decision.** `_nearest_enemy_within()` discards candidates further away than the radius
+it was asked about, even though the grid already narrowed the field.
+
+**Why.** The grid returns a *box*, not a circle, and the box is deliberately larger than
+the circle so that a soldier who has walked since the snapshot cannot be missed. That is
+harmless for finding the nearest - a superset cannot hide one - and fatal for the
+escalation, which stops at the first radius that returns anything. Without the filter, a
+candidate half a cell beyond the radius ended the search early and the answer was a
+soldier who was not the nearest after all: not a near miss but a different decision, in
+the first radius rather than the last.
+
+This was the second real defect of the milestone and it too was found by the probe, not
+by reasoning: the escalation's correctness argument is only true if the radius means what
+it says. It is now stated as a filter rather than a description.
+
+## D-066: A query walks occupied cells when that is fewer cells than the box contains
+
+**Decision.** `rebuild()` records every cell holding at least one unit, kept sorted by
+cell index. `collect_within()` walks that list instead of the box when the box spans more
+cells than there are occupied ones.
+
+**Why.** A uniform grid is cheap because most cells are empty and a local query touches
+few of them. The widest rung of a target search inverts that: on a sparse battlefield it
+covers most of the field, and stepping through every cell in the box means reading
+hundreds of empty bucket heads to find a handful of soldiers. Walking the occupied cells
+costs one pass over the soldiers who exist. Both visit the same cells in the same order,
+so this changes the cost and nothing else - which is why the list is kept sorted, since
+an optimisation that reordered the answer would not be an optimisation (D-059, D-062).
+
+The measurement that motivated it: on a fixed field, a hundred soldiers were searched by
+a box covering three hundred and seventy-five cells of which two held anybody. The
+milestone is about removing work proportional to the battlefield rather than to the army,
+and this was a place where the new code had reintroduced exactly that.
+
+## D-067: A target search is bounded, and beyond the bound a soldier is pointed at the fighting
+
+**Decision.** A soldier searches for its own nearest enemy out to
+`battle.target_search_max_radius` (32 world units), escalating from
+`battle.target_search_radius` (8). If there is no enemy inside that bound, it is given its
+body's *focus* - the nearest living enemy to its formation's anchor, recomputed once per
+tick - or, if it is not formed, the nearest living enemy to its side's centre of mass,
+computed once per tick per side on demand.
+
+**Why.** A local search cannot answer "who is nearest to me" for a soldier standing half
+a battlefield away; answering it requires examining the whole enemy army, which is the
+quadratic scan this milestone exists to remove. Measured with the profile clock at two
+thousand five hundred soldiers, the unbounded version spent **3,490 ms of a 3,526 ms
+soldier loop** on target selection: ninety-nine per cent of the phase, and a per-tick
+cost worse than Step 7's. Bounding the search took the same battle from 3,684 ms per tick
+to 203 ms.
+
+The trade is real and is stated rather than buried: *within* the bound the answer is
+unchanged and provably identical to the exhaustive scan (D-061), and that is where every
+soldier who is actually fighting lives. Beyond it, a soldier marching towards a distant
+enemy is aimed by its body rather than by its own private measurement, so the specific
+enemy it faces at long range may differ from the one the old scan would have picked. Its
+*conduct* does not: a formed soldier dressing to its slot does not steer by its target at
+all, so the visible difference is the direction it faces while marching. The brief for
+this milestone asked for exactly this pattern - "a formation supplies an opposing
+formation; soldiers search locally around their formation's contact region" - and asked
+that a soldier not be left unable to find the battle.
+
+That last part is what makes the fallback non-optional rather than an optimisation. A
+bounded search with no answer beyond the bound is an army that stands still, so the test
+that matters is the one asserting every living soldier has something to face at every
+tick of a battle that starts with the armies most of a field apart.
+
+The side fallback exists for battles that have no formations at all - the legacy
+deployment path - and is computed on demand rather than every tick, because a battle with
+formations never asks for it.
+
+## D-068: The grid records which sides are present in a cell, so a query can skip a bucket without walking it
+
+**Decision.** `BattleSpatialGrid` keeps one byte per cell recording whether the player,
+the enemy, or both are present. A query that asks for one side reads that byte and skips
+the cell when the side it wants is not in it.
+
+**Why.** This is the second half of D-067's cost. After bounding the search, the largest
+remaining term was a target query covering a box that contained the soldier's own army
+and nobody else: every cell in the box was walked, every soldier in it examined, and every
+one discarded by a side comparison. At two thousand five hundred soldiers that was some
+three million wasted examinations per tick, and it showed up as target selection still
+holding four fifths of the soldier loop after the bound was in place. Reading one byte per
+cell instead of walking a bucket of seventeen soldiers took the same battle from 794 ms of
+soldier loop to 58 ms.
+
+The mask is set in the same place membership is, so there is no second invariant to keep
+true. It stores a bit per side rather than a single "this cell is occupied" flag because
+the whole point is to answer "is the side I want in here", and a cell holding only the
+other army is the case that was costing the time.
+
+## D-069: The scaling work stayed in GDScript
+
+**Decision.** The spatial grid, the bounded target search, the overlap rewrite and the
+focus cache are all GDScript. No threads, no GDExtension, no ECS, no MultiMesh, no physics
+broadphase.
+
+**Why.** The brief for this milestone asked for exactly that and gave the reason: threading
+a bad algorithm hides it temporarily and makes determinism harder, and C++ remains an
+option for *measured* hot paths only. What was measured was a quadratic pair of loops, and
+removing a quadratic term is an algorithmic change that a faster language would not have
+made. So the language was left alone until the algorithm was right.
+
+What is left after that change is worth recording, because it is what a future decision
+about GDScript would be made against: at five thousand soldiers a tick costs a few tens of
+milliseconds, and the dominant phase is overlap resolution - a per-soldier local query
+whose candidate count scales with how many soldiers share a cell, which on a fixed
+battlefield grows with the army. That is a *density* limit rather than a language limit,
+and the honest next question is whether the battlefield should grow with the army before
+anyone asks whether GDScript is fast enough.
+
+No GDScript-hostile architecture was introduced either: soldiers remain plain data, a
+formed soldier's per-step work is a reference and an array read, and the per-soldier cost
+that remains is measured rather than asserted.

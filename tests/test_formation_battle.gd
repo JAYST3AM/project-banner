@@ -22,6 +22,10 @@ func run() -> void:
 	_test_a_formed_battle_resolves()
 	_test_a_formed_battle_is_deterministic()
 	_test_soldiers_are_data_not_scene_nodes()
+	_test_combat_crosses_cell_boundaries()
+	_test_every_soldier_can_find_a_target()
+	_test_a_distant_body_is_pointed_by_its_own_focus()
+	_test_a_dense_pile_is_survivable()
 	_test_scale_smoke()
 	GameManager.end_campaign()
 	_complete()
@@ -688,3 +692,181 @@ func _synthetic_context(count: int) -> BattleContext:
 	context.battle_seed = 31337
 	context.enemy_display_name = "Scale Probes"
 	return context
+
+
+## ---------- Step 7.2: proximity goes local, nothing else changes -------------
+
+## A cell boundary is an implementation detail of the proximity index. It must never
+## behave like a wall, and the place that would show up first is a real fight.
+func _test_combat_crosses_cell_boundaries() -> void:
+	section("a cell boundary is not a wall in a real fight")
+	var config := _config()
+	# The configured cell size puts an edge at x = 40. These two are on opposite sides
+	# of it and inside each other's reach.
+	var left := _probe_unit(0, BattleContext.SIDE_PLAYER, Vector2(39.6, 30.0), 5.0)
+	var right := _probe_unit(1, BattleContext.SIDE_ENEMY, Vector2(41.0, 30.0), 5.0)
+	var simulator := BattleSimulator.new(config, 31)
+	simulator.add_units([left, right])
+	simulator.start()
+
+	not_equal(simulator.grid.cell_index_of(left.position), simulator.grid.cell_index_of(right.position),
+		"the two soldiers really are in different cells")
+	approx(simulator.grid.cell_size, config.get_float("battle.spatial_cell_size", 4.0), 0.0001,
+		"and the cell size is the configured one")
+
+	for tick in 100:
+		if simulator.is_finished():
+			break
+		simulator.step(0.5)
+	less(float(left.hp), float(left.max_hp), "the soldier left of the boundary was struck")
+	less(float(right.hp), float(right.max_hp), "and so was the one right of it")
+
+	# The same at a corner, where four cells meet.
+	var corner_a := _probe_unit(0, BattleContext.SIDE_PLAYER, Vector2(39.6, 39.6), 5.0)
+	var corner_b := _probe_unit(1, BattleContext.SIDE_ENEMY, Vector2(40.4, 40.4), 5.0)
+	var corner_sim := BattleSimulator.new(config, 33)
+	corner_sim.add_units([corner_a, corner_b])
+	corner_sim.start()
+	not_equal(corner_sim.grid.cell_index_of(corner_a.position), corner_sim.grid.cell_index_of(corner_b.position),
+		"the corner pair are in diagonally opposite cells")
+	for tick in 100:
+		if corner_sim.is_finished():
+			break
+		corner_sim.step(0.5)
+	less(float(corner_a.hp), float(corner_a.max_hp), "soldiers across a corner still find each other")
+	less(float(corner_b.hp), float(corner_b.max_hp), "on both sides")
+
+
+## The failure the escalation ladder exists to prevent: an army that never engages
+## because no soldier can see anyone. Two bodies starting most of a battlefield apart is
+## the case a purely local search gets wrong.
+func _test_every_soldier_can_find_a_target() -> void:
+	section("nobody is left standing about with no target")
+	var config := _config()
+	var simulator := BattleSimulator.new(config, 51)
+	var players := _add_body(simulator, "player_line", BattleContext.SIDE_PLAYER, Vector2(12.0, 30.0), 0.0, 12, 0, 5.0)
+	var enemies := _add_body(simulator, "enemy_line", BattleContext.SIDE_ENEMY, Vector2(88.0, 30.0), PI, 12, 100, 5.0)
+	simulator.start()
+
+	var apart := players.bounds().get_center().distance_to(enemies.bounds().get_center())
+	greater(apart, 60.0, "the two bodies start the better part of a battlefield apart")
+	less(simulator.target_search_radius, apart, "which is further than a single local query reaches")
+
+	var examined := 0
+	var stranded := 0
+	for tick in 40:
+		if simulator.is_finished():
+			break
+		simulator.step(0.05)
+		simulator.call("_rebuild_spatial", 0.05)
+		for unit in simulator.units:
+			if not unit.is_alive():
+				continue
+			examined += 1
+			if simulator.call("_choose_target", unit) == null:
+				stranded += 1
+	greater(float(examined), 100.0, "there were plenty of soldiers to ask")
+	equal(stranded, 0, "every living soldier had an enemy to face, at every tick")
+
+
+## A uniform grid degrades when everything lands in one cell, and the brief asks for that
+## case to be met rather than hoped about. It has to survive, stay deterministic, and
+## lose nobody.
+func _test_a_dense_pile_is_survivable() -> void:
+	section("three hundred soldiers packed into one cell")
+	var config := _config()
+	var first := _pile(config, 300)
+	var second := _pile(config, 300)
+
+	equal(int(first["busiest"]), 300, "the grid says honestly that all three hundred share a cell")
+	equal(int(first["standing"]) + int(first["fallen"]), 300,
+		"every soldier is still accounted for, standing or fallen")
+	greater(float(first["ticks"]), 0.0, "the pile ran without hanging")
+	equal(String(second["signature"]), String(first["signature"]),
+		"and two identical piles produce the identical brawl")
+	equal(int(second["standing"]), int(first["standing"]), "with the same number left standing")
+	less(float(first["standing"]), 300.0, "which is not all of them, because they were fighting")
+
+
+## Run one pile and report what happened. Deliberately built from raw units rather than
+## through a campaign: this is a stress case, not a scenario.
+func _pile(config: GameConfig, count: int) -> Dictionary:
+	var simulator := BattleSimulator.new(config, 61)
+	var units: Array[BattleUnit] = []
+	for i in count:
+		var side := BattleContext.SIDE_PLAYER if i % 2 == 0 else BattleContext.SIDE_ENEMY
+		var unit := _probe_unit(i, side, Vector2(20.0 + float(i % 20) * 0.1, 20.0 + float(i / 20) * 0.1), 5.0, 8)
+		unit.attack_range = 1.2
+		unit.attack_cooldown = 1.0
+		units.append(unit)
+	simulator.add_units(units)
+	simulator.call("_rebuild_spatial", 0.05)
+	var busiest := simulator.grid.busiest_cell()
+	simulator.start()
+
+	var ticks := 0
+	while not simulator.is_finished() and ticks < 300:
+		simulator.step(0.05)
+		ticks += 1
+
+	var parts := PackedStringArray()
+	parts.append("%d:%d" % [simulator.state, ticks])
+	var standing := 0
+	for unit in units:
+		if unit.is_alive():
+			standing += 1
+			parts.append("%d:%d:%.3f:%.3f" % [unit.id, unit.hp, unit.position.x, unit.position.y])
+	return {
+		"signature": "|".join(parts),
+		"standing": standing,
+		"fallen": count - standing,
+		"busiest": busiest,
+		"ticks": ticks,
+	}
+
+
+## A local search answers "who is nearest to me" for a soldier in the fighting, and
+## cannot answer it for one standing half a battlefield away without looking at the whole
+## enemy army - per soldier, per tick, which is the cost Step 7.2 removed. Beyond the
+## search bound a formed soldier is pointed at the fighting by its body instead. This test
+## is about that being a decision rather than a silence.
+func _test_a_distant_body_is_pointed_by_its_own_focus() -> void:
+	section("a formed body far from the enemy is pointed at it")
+	var config := _config()
+	var simulator := BattleSimulator.new(config, 71)
+	var players := _add_body(simulator, "player_line", BattleContext.SIDE_PLAYER, Vector2(12.0, 30.0), 0.0, 8, 0, 5.0)
+	var enemies := _add_body(simulator, "enemy_line", BattleContext.SIDE_ENEMY, Vector2(88.0, 30.0), PI, 8, 100, 5.0)
+	simulator.start()
+	simulator.step(0.05)
+	simulator.call("_rebuild_spatial", 0.05)
+	simulator.call("_refresh_focus")
+
+	var apart := players.anchor.distance_to(enemies.anchor)
+	greater(apart, simulator.target_search_max_radius,
+		"the two bodies are further apart than a single soldier's search reaches")
+
+	# What the body is pointed at: the nearest living enemy to its own anchor, decided
+	# once for the body.
+	var expected: BattleUnit = simulator.call("_nearest_enemy_to_point", BattleContext.SIDE_PLAYER, players.anchor)
+	not_null(expected, "there is an enemy for the body to be pointed at")
+
+	var asked := 0
+	var shared := {}
+	for unit_id in players.unit_ids:
+		var unit := simulator.find_unit(unit_id)
+		if unit == null or not unit.is_alive():
+			continue
+		var chosen: BattleUnit = simulator.call("_choose_target", unit)
+		equal(chosen, expected, "soldier %d faces the enemy its body is pointed at" % unit_id)
+		shared[chosen] = true
+		asked += 1
+	equal(asked, 8, "every soldier in the body was asked")
+	equal(shared.size(), 1, "and the body is pointed at one enemy rather than eight different ones")
+
+	# The other body is pointed the other way, and both are real enemies rather than
+	# whatever happened to be nearest in the index.
+	var their_focus: BattleUnit = simulator.call("_nearest_enemy_to_point", BattleContext.SIDE_ENEMY, enemies.anchor)
+	not_null(their_focus, "and the enemy body has one too")
+	equal(their_focus.side, BattleContext.SIDE_PLAYER, "pointing at one of ours")
+	equal(expected.side, BattleContext.SIDE_ENEMY, "as ours points at one of theirs")
+	not_equal(their_focus, expected, "which are not the same soldier")

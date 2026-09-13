@@ -98,7 +98,13 @@ godotc --headless --path "$PROJ" --check-only --script res://scripts/core/main.g
 godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100,500,1000
 #     The full sweep. Large sizes stop on a time budget, so they report the tick count
 #     they actually managed rather than running for hours. Takes several minutes.
-godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100,500,1000,2500,5000
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100,500,1000,2500,5000,10000,20000
+#     Where the time goes, by phase. Costs two clock reads per soldier, so it is a
+#     separate measurement and is labelled as one.
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=500,2500 --profile=1
+#     The spatial layer alone, at constant density, so the curve is the algorithm's
+#     rather than the battlefield's.
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100 --ticks=1 --grid-scale=1
 ```
 
 `--check-only` does **not** load autoloads, so "Identifier not found: GameData" or

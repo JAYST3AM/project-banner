@@ -42,8 +42,53 @@ var formations: Array[BattleFormation] = []
 var _unit_by_id: Dictionary = {}
 var _formations_by_id: Dictionary = {}
 
+## The proximity index. Every spatial question the battle asks goes through this, and
+## it is rebuilt once per tick. See [BattleSpatialGrid].
+var grid: BattleSpatialGrid = null
+## Scratch array for spatial queries, owned by the simulator and reused by every query
+## so that a tick does not allocate one array per soldier. The query clears it.
+var _query_scratch: Array[BattleUnit] = []
+## The fastest living soldier, cached because it only changes when the roster does. The
+## grid needs it to know how far a unit may have walked since the last rebuild.
+var _fastest_speed: float = 0.0
+
+## Target search shape, from config. The starting radius is deliberately larger than
+## any reach in the game so that a soldier never has to escalate to find somebody it
+## could actually hit; the escalation is for the quiet cases, and the ceiling exists so
+## that a search always terminates.
+var target_search_radius: float = 8.0
+var target_search_escalation: float = 4.0
+var target_search_max_radius: float = 60.0
+
+## Who a soldier faces when nobody is near it, refreshed once per tick.
+##
+## A local search answers "who is nearest to me" for a soldier standing in the fighting,
+## and that answer is the same one an exhaustive scan would have given (D-061). It cannot
+## answer it for a soldier standing half a battlefield away: doing so requires looking at
+## the whole enemy army, and paying that per soldier per tick is exactly the cost this
+## milestone removed. Measured, it was ninety-seven per cent of the soldier loop.
+##
+## So the search has a bound. Inside it, a soldier finds its own nearest enemy. Outside
+## it, the soldier stops asking a question about itself and is pointed at the fighting
+## instead - by its body if it is formed, by its side if it is not. That is one pass over
+## the army per formation and per side, once per tick, rather than one pass per soldier
+## per tick. See D-067.
+var _focus_by_formation: Dictionary = {}
+var _focus_by_side: Dictionary = {}
+
+## Development-only timing accumulators. Off by default and free when off: every read
+## of them is behind a boolean, and nothing is measured unless the benchmark asks.
+## Deliberately coarse - phase-level, plus one pair of clock reads per soldier for
+## targeting - because the point is to say which phase costs what, not to profile
+## individual statements. See D-064.
+var profile_enabled: bool = false
+var profile: Dictionary = {}
+
 var field_size: Vector2 = Vector2(100.0, 60.0)
 var separation_radius: float = 1.5
+## The grid's cell size, in world units. Read from config so it is one number in one
+## place rather than a constant arguing with itself in three files. See D-060.
+var cell_size: float = 4.0
 var base_hit_chance: float = 0.75
 var defence_mitigation: float = 0.05
 var max_duration: float = 600.0
@@ -63,13 +108,27 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		defence_mitigation = config.get_float("battle.defence_mitigation", 0.05)
 		max_duration = config.get_float("battle.max_duration_seconds", 600.0)
 		contact_gap = config.get_float("formation.enemy_contact_gap", 1.5)
+		cell_size = maxf(0.25, config.get_float("battle.spatial_cell_size", 4.0))
+		target_search_radius = maxf(0.5, config.get_float("battle.target_search_radius", 8.0))
+		target_search_escalation = maxf(1.05, config.get_float("battle.target_search_escalation", 4.0))
+		target_search_max_radius = config.get_float("battle.target_search_max_radius", 32.0)
+	# The bound is what keeps a target search local. A ceiling of zero - or anything
+	# below the starting radius - would mean a per-soldier search of the whole
+	# battlefield, which is precisely the cost this milestone exists to remove, so it is
+	# repaired to the starting radius rather than honoured. See D-067.
+	target_search_max_radius = maxf(target_search_radius, target_search_max_radius)
+	grid = BattleSpatialGrid.new()
+	grid.configure(field_size, cell_size)
 
 
 func add_units(p_units: Array[BattleUnit]) -> void:
 	units = p_units
 	_unit_by_id.clear()
+	_fastest_speed = 0.0
 	for unit in units:
 		_unit_by_id[unit.id] = unit
+		if unit.is_alive():
+			_fastest_speed = maxf(_fastest_speed, unit.move_speed)
 
 
 ## The unit index. Exposed for tooling and tests that need to resolve many ids at
@@ -326,7 +385,23 @@ func step(delta: float) -> Array[Dictionary]:
 	# The bodies move first, then the soldiers dress to them. Doing it in this order
 	# means a soldier reads one settled slot position per step rather than chasing a
 	# place that is still being computed.
+	var tick_start := _profile_start()
+	var phase := _profile_start()
 	_update_formations(delta)
+	_profile_stop("formation", phase)
+
+	# One linear pass to index everyone, then every proximity question this tick is
+	# answered locally. This is the whole of Step 7.2's cost model: the battlefield is
+	# described once so that no soldier has to look at the battlefield.
+	phase = _profile_start()
+	_rebuild_spatial(delta)
+	_profile_stop("grid", phase)
+
+	# After the bodies have moved and before anyone asks, so a formation's focus is its
+	# focus for this tick rather than for wherever it stood last tick.
+	phase = _profile_start()
+	_refresh_focus()
+	_profile_stop("focus", phase)
 
 	# Contact is read by the formation orders immediately above, and set by the soldiers
 	# immediately below, so it is cleared in between. Clearing it at the end of the step
@@ -336,10 +411,28 @@ func step(delta: float) -> Array[Dictionary]:
 	# own soldiers just established, which is what the view and the tests read.
 	_clear_contact()
 
-	for unit in units:
-		if unit.is_alive():
-			_update_unit(unit, delta)
+	# Two copies of the same loop, because the difference between them is the difference
+	# between a benchmark and a battle. The measured path reads a clock twice per
+	# soldier; the unmeasured one is exactly what it was before profiling existed, so a
+	# normal battle pays nothing at all for the ability to measure one.
+	if profile_enabled:
+		for unit in units:
+			if unit.is_alive():
+				var soldier_probe := Time.get_ticks_usec()
+				_update_unit(unit, delta)
+				_profile_accumulate("soldiers", soldier_probe)
+	else:
+		for unit in units:
+			if unit.is_alive():
+				_update_unit(unit, delta)
+
+	phase = _profile_start()
 	_resolve_overlaps()
+	_profile_stop("overlap", phase)
+
+	_profile_stop("total", tick_start)
+	if profile_enabled:
+		profile["ticks"] = int(profile.get("ticks", 0)) + 1
 
 	if not is_finished():
 		_check_victory()
@@ -352,10 +445,45 @@ func _clear_contact() -> void:
 		formation.clear_contact()
 
 
+## ---------- development-only profiling ------------------------------------
+## Phase timing for the benchmark. Off by default, and free when off: every entry point
+## returns immediately behind a boolean, and the one place that could have cost a call
+## per soldier without profiling has two copies of its loop instead. See D-064.
+
+func _profile_start() -> int:
+	return Time.get_ticks_usec() if profile_enabled else 0
+
+
+func _profile_stop(key: String, started: int) -> void:
+	if not profile_enabled or started <= 0:
+		return
+	_profile_accumulate(key, started)
+
+
+func _profile_accumulate(key: String, started: int) -> void:
+	if started <= 0:
+		return
+	profile[key] = float(profile.get(key, 0.0)) + float(Time.get_ticks_usec() - started) / 1000.0
+
+
+## Milliseconds accumulated for one phase, or zero if it never ran.
+func profile_ms(key: String) -> float:
+	return float(profile.get(key, 0.0))
+
+
+func reset_profile() -> void:
+	profile = {}
+
+
 func _update_unit(unit: BattleUnit, delta: float) -> void:
 	unit.cooldown_left = maxf(0.0, unit.cooldown_left - delta)
 
+	var target_probe := 0
+	if profile_enabled:
+		target_probe = Time.get_ticks_usec()
 	var target := _choose_target(unit)
+	if target_probe > 0:
+		_profile_accumulate("target", target_probe)
 	if target == null:
 		return
 	# An explicit attack order wins over automatic target selection, but only
@@ -463,18 +591,145 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 				unit.attack_order_target_id = -1
 
 
+## The nearest living enemy to this soldier.
+##
+## Searched outward from the soldier rather than across the battlefield: a radius that
+## comfortably exceeds anything anyone can currently reach, widening geometrically, and
+## stopping the moment it finds anything at all. Because the search stops at the first
+## radius that contains an enemy, the nearest enemy inside that radius [i]is[/i] the
+## nearest enemy full stop - so this returns exactly what a scan of the whole field
+## would have returned, for a cost that depends on how crowded the soldier's own
+## neighbourhood is rather than on how large the army is. A test proves that equivalence
+## directly, against a brute-force reference, over generated layouts. See D-061.
+##
+## The radius comes from config and is deliberately not tied to melee reach. The
+## escalation ladder is what will let archers, long spears and cavalry threat detection
+## search further without this method being rewritten - and widening a ladder is a
+## config change, not a code change. Step 7.2 adds no such system.
 func _choose_target(unit: BattleUnit) -> BattleUnit:
 	var enemy_side := enemy_side_of(unit.side)
+	var radius := target_search_radius
+	while true:
+		var best := _nearest_enemy_within(unit, enemy_side, radius)
+		if best != null:
+			return best
+		if radius >= target_search_max_radius:
+			break
+		radius = minf(target_search_max_radius, radius * target_search_escalation)
+	return _focus_target(unit)
+
+
+## Recompute every body's long-range focus. Linear in the army, and run once per tick,
+## which is the whole point: the expensive question is asked a handful of times rather
+## than once per soldier. A battle with no formations pays nothing at all.
+func _refresh_focus() -> void:
+	_focus_by_formation.clear()
+	_focus_by_side.clear()
+	for formation in formations:
+		_focus_by_formation[formation.id] = _nearest_enemy_to_point(formation.side, formation.anchor)
+
+
+## Who this soldier faces when there is nobody inside its own search bound.
+##
+## The side fallback is computed on demand rather than every tick because a battle with
+## formations never asks for it, and a battle without them is a small one where a single
+## extra pass costs nothing.
+func _focus_target(unit: BattleUnit) -> BattleUnit:
+	if unit.formation_ref != null:
+		var body := unit.formation_ref
+		var directed: BattleUnit = _focus_by_formation.get(body.id)
+		if directed == null or not directed.is_alive():
+			# It fell this tick, after the focus was taken. Recomputing costs one pass
+			# over the army - once for the body, not once for every soldier in it.
+			directed = _nearest_enemy_to_point(unit.side, body.anchor)
+			_focus_by_formation[body.id] = directed
+		if directed != null:
+			return directed
+	var by_side: BattleUnit = _focus_by_side.get(unit.side)
+	if by_side != null and by_side.is_alive():
+		return by_side
+	by_side = _nearest_enemy_to_point(unit.side, _side_centre(unit.side))
+	_focus_by_side[unit.side] = by_side
+	return by_side
+
+
+## The average position of a side's living soldiers, or the middle of the field when it
+## has none left to average.
+func _side_centre(side: String) -> Vector2:
+	var total := Vector2.ZERO
+	var count := 0
+	for unit in units:
+		if unit.is_alive() and unit.side == side:
+			total += unit.position
+			count += 1
+	if count == 0:
+		return field_size * 0.5
+	return total / float(count)
+
+
+## The living enemy nearest to a point, ties to the lower id, or null when that side has
+## nobody left. A plain scan, called once per formation per tick and never per soldier.
+func _nearest_enemy_to_point(side: String, point: Vector2) -> BattleUnit:
+	var enemy_side := enemy_side_of(side)
 	var best: BattleUnit = null
 	var best_distance := INF
-	for candidate in units:
-		if not candidate.is_alive() or candidate.side != enemy_side:
+	for unit in units:
+		if not unit.is_alive() or unit.side != enemy_side:
 			continue
-		var distance := unit.position.distance_to(candidate.position)
-		if distance < best_distance:
+		var distance := point.distance_squared_to(unit.position)
+		if distance < best_distance or (distance == best_distance and best != null and unit.id < best.id):
+			best_distance = distance
+			best = unit
+	return best
+
+
+## The nearest living enemy within [param radius], ties broken by the lower unit id.
+##
+## The tie-break is explicit rather than left to whichever candidate the grid happened
+## to hand back first. A bucket is a linked list, its order is an implementation detail,
+## and letting it decide who a soldier attacks would make the battle depend on how the
+## grid was built - which is precisely the class of nondeterminism a spatial index is
+## not allowed to introduce. Distance first, then id, and the same rule everywhere.
+func _nearest_enemy_within(unit: BattleUnit, enemy_side: String, radius: float) -> BattleUnit:
+	if grid == null:
+		return null
+	grid.collect_within(unit.position, radius, enemy_side, _query_scratch)
+	var best: BattleUnit = null
+	var best_distance := INF
+	var limit := radius * radius
+	for candidate in _query_scratch:
+		var distance := unit.position.distance_squared_to(candidate.position)
+		# The radius is a promise, not a hint. A query returns a box, and the box is
+		# deliberately larger than the circle - which is harmless for [i]finding[/i] the
+		# nearest, because a superset cannot hide one, but fatal for the escalation:
+		# the caller stops at the first radius that returns anything, so a candidate
+		# half a cell beyond the radius would end the search early and answer with a
+		# soldier that is not the nearest after all. Filtering here is what makes
+		# "the first radius that finds anyone contains the nearest" true rather than
+		# nearly true. See D-065.
+		if distance > limit:
+			continue
+		if distance < best_distance or (distance == best_distance and best != null and candidate.id < best.id):
 			best_distance = distance
 			best = candidate
 	return best
+
+
+## Refresh the proximity index for this tick, and tell it how far a soldier may have
+## walked since the snapshot.
+##
+## One linear pass. The margin is what stops a cell boundary becoming an invisible wall:
+## the grid records where everyone stood at the start of the tick, soldiers move during
+## it, and without widening the search by the furthest anyone could have moved, a
+## soldier who crossed into the next cell would be missing from queries that should
+## have found them.
+func _rebuild_spatial(delta: float) -> void:
+	if grid == null:
+		return
+	# Terrain only ever slows a unit, so the fastest base speed bounds the step. The
+	# half-unit of slack absorbs the separation pushes that happen later in the tick.
+	grid.query_margin = _fastest_speed * absf(delta) + 0.5
+	grid.rebuild(units)
 
 
 func _move_toward(unit: BattleUnit, point: Vector2, delta: float) -> void:
@@ -497,24 +752,47 @@ func _effective_speed(unit: BattleUnit) -> float:
 	return unit.move_speed * terrain.move_multiplier_at(unit.position)
 
 
-## Keeps units from stacking on top of each other. Simple positional relaxation -
-## enough to make a formation readable, and the hook a real collision pass would
-## replace later.
+## Push apart soldiers standing on top of each other, through the proximity index
+## rather than through every pair on the field.
+##
+## [b]Each pair is resolved once[/b], by the rule that only the soldier with the lower id
+## handles it. Without that rule an overlapping pair would be pushed twice - once from
+## each side - and the second push would be a second independent event rather than the
+## same one, which doubles the work and makes the result depend on which soldier was
+## considered first. The rule is stated in ids rather than in array positions so that it
+## survives any future reordering of the unit list.
+##
+## [b]The order is preserved deliberately.[/b] The outer loop walks the unit list and the
+## inner one walks a bucket, and insertion appends rather than prepends, so the pairs
+## come out in the same relative order the old pairwise loop used. Since a pair that is
+## out of range does nothing, skipping the far ones is a no-op - which is why this
+## produces the same positions the exhaustive version did rather than merely an equally
+## defensible set. A test checks that directly. See D-062.
 func _resolve_overlaps() -> void:
-	var alive := alive_units()
-	for i in alive.size():
-		for j in range(i + 1, alive.size()):
-			var a := alive[i]
-			var b := alive[j]
-			var offset := b.position - a.position
+	var minimum := separation_radius * SEPARATION_FACTOR
+	if grid == null:
+		return
+	# Its own rebuild rather than the tick's earlier one. Every soldier has walked since
+	# that snapshot, and the overlap pass is the phase where being a body's-width behind
+	# actually matters. The margin on top covers the pushes this very pass is making:
+	# a pair nudged together by a third soldier's shove should still be seen.
+	grid.query_margin = minimum
+	grid.rebuild(units)
+	for unit in units:
+		if not unit.is_alive():
+			continue
+		grid.collect_within(unit.position, minimum, "", _query_scratch)
+		for other in _query_scratch:
+			if other.id <= unit.id:
+				continue
+			var offset := other.position - unit.position
 			var distance := offset.length()
-			var minimum := separation_radius * SEPARATION_FACTOR
 			if distance >= minimum:
 				continue
 			var push := (minimum - distance) * 0.5
 			var direction := offset.normalized() if distance > 0.0001 else Vector2.RIGHT
-			a.position -= direction * push
-			b.position += direction * push
+			unit.position -= direction * push
+			other.position += direction * push
 
 
 func _check_victory() -> void:
