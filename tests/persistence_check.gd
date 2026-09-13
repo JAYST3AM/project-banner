@@ -357,6 +357,8 @@ func _party_facts(state: CampaignState) -> Dictionary:
 ## ---------- phase 2: a brand-new process loads it ------------------------
 
 func _run_verify() -> void:
+	# TEMPORARY: prove the persistence gate can go red on its own. Reverted immediately.
+	_fail("deliberate persistence failure to prove CI goes red")
 	var witness := _read_witness()
 	if witness.is_empty():
 		_fail("no witness file - run the write phase first")
