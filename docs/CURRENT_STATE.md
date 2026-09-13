@@ -317,7 +317,13 @@ contact, so the per-tick cost is representative - but it is an approach, not a b
 | Two-process restart | 95 checks, 0 failures - unchanged, and now with formations and terrain in the flow |
 | Windowed smoke | campaign → settlement → recruit → battle → results → campaign |
 | Bogus `--suite=` | exit 1 |
-| CI | green on the pushed commit |
+| CI | **green** on `c4c2bd2` — [run 34744677802](https://github.com/JAYST3AM/project-banner/actions/runs/34744677802), read from the raw log: 16 of 16 suites, 2058 assertions, both persistence phases |
+
+The windowed run takes the whole loop through the real UI with the development switches:
+`world_map → settlement → world_map → battle → battle_results`, five recruits against
+whatever band the seed produced, zero script errors. Four runs across four seeds produced
+two victories and two defeats, tracking the size of the band — see §7 of the report for
+the numbers and for what that measurement does *not* cover.
 
 New coverage is behavioural rather than structural: the same enemy fought twice across
 a restart, a real reformation that drops cohesion and recovers it, a line ordered into a

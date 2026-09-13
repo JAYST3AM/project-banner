@@ -117,8 +117,10 @@ runner's `SUITES` list, since several are meant to fail.
 | `4770e6b` | milestone-05: complete first end-to-end combat gameplay loop |
 | `2b987d9` | milestone-06: validate persistent campaign save and load |
 | `a0bf817`, `cf9c69a` | the full project report, and a README for a public reader |
-| `24ae05d`, `484b4a8` | milestone-06.5: harden vertical slice after external audit |
-| `128d07e` | milestone-06.6: lock the Steps 0-6 foundation |
+| `24ae05d`, `484b4a8` | milestone-06.5: harden the vertical slice after an external audit |
+| `128d07e`, `2d7d65c` | milestone-06.6: lock the Steps 0–6 foundation |
+| `17afd2b` | docs: the CI gate was proven able to go red, not only green |
+| `c4c2bd2` | milestone-07: establish terrain and formation warfare foundation |
 
 ---
 
@@ -552,6 +554,26 @@ engine: 4.7.2.stable.official.ed1daf0bf
     26 soldiers restored, 9 of them dead
 --------- persistence verify: PASS (95 checks, 0 failures) ---------
 ```
+
+**Observed result after Step 7** ([run 34744677802](https://github.com/JAYST3AM/project-banner/actions/runs/34744677802),
+commit `c4c2bd2`) — read from the runner's raw log rather than from the status badge:
+
+```
+engine: 4.7.2.stable.official.ed1daf0bf
+  PASS  (69 assertions, 0 failures)     <- test_terrain
+  PASS  (203 assertions, 0 failures)    <- test_formation
+  PASS  (78 assertions, 0 failures)     <- test_formation_battle
+  suites: 16 of 16 reported   assertions: 2058   failures: 0
+  RESULT: PASS
+--------- persistence write: PASS (6 checks, 0 failures) ---------
+--------- persistence verify: PASS (95 checks, 0 failures) ---------
+```
+
+Every step in the job ran green — install, version assertion, import, the full suite,
+and both persistence phases — with only the on-failure log upload skipped. The
+three new suites appearing by assertion count in the raw log is the part that matters:
+a green badge on its own would not have shown that the new coverage was actually
+executed on the runner rather than merely present in the repository.
 
 Every required step ran; the only skipped step was the failure-artifact upload, which
 is correct on a passing run. The engine the runner used is the pinned one, not whatever
