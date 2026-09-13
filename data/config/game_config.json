@@ -1,0 +1,79 @@
+{
+  "config_version": 1,
+
+  "campaign": {
+    "starting_gold": 250,
+    "max_party_size": 24,
+    "player_party_name": "The Banner",
+    "player_party_kind": "player",
+    "starting_faction_id": "free_companies",
+    "default_campaign_name": "A New Banner"
+  },
+
+  "time": {
+    "seconds_per_game_hour": 2.0,
+    "hours_per_day": 24,
+    "starting_day": 1,
+    "starting_hour": 8.0,
+    "default_speed": "normal",
+    "speed_multipliers": {
+      "paused": 0.0,
+      "normal": 1.0,
+      "fast": 3.0
+    }
+  },
+
+  "travel": {
+    "world_units_per_game_hour": 150.0,
+    "arrival_radius": 16.0,
+    "party_size_speed_penalty": 0.012,
+    "min_speed_fraction": 0.55
+  },
+
+  "battle": {
+    "tick_rate": 30.0,
+    "max_duration_seconds": 600.0,
+    "field_width": 100.0,
+    "field_height": 60.0,
+    "deploy_depth": 20.0,
+    "deploy_margin": 8.0,
+    "separation_radius": 1.5,
+    "terrain_seed_salt": 17,
+    "battle_seed_salt": 91,
+    "base_hit_chance": 0.75,
+    "defence_mitigation": 0.05
+  },
+
+  "xp": {
+    "participation": 10,
+    "per_kill": 20,
+    "survived_battle": 15,
+    "victory": 25,
+    "level_curve_base": 100,
+    "level_curve_growth": 1.35,
+    "max_level": 40,
+    "hp_per_level": 3,
+    "attack_per_level": 1
+  },
+
+  "rewards": {
+    "gold_per_defeated_min": 8,
+    "gold_per_defeated_max": 14,
+    "victory_gold_bonus": 25,
+    "loot_rolls_min": 0,
+    "loot_rolls_max": 2
+  },
+
+  "encounters": {
+    "trigger_radius": 26.0,
+    "cooldown_hours": 3.0,
+    "aggro_radius": 190.0,
+    "return_home_radius": 320.0,
+    "auto_resolve": false
+  },
+
+  "debug": {
+    "enabled": true,
+    "debug_build_only": true
+  }
+}

@@ -114,7 +114,12 @@ via a per-command `http.extraheader`. The token is never written into `.git/conf
 
 ```bash
 TOKEN=$(bash "$LOCALAPPDATA/hermes/vault/vault.sh" get GITHUB_PERSONAL_ACCESS_TOKEN)
-git -c http.extraheader="AUTHORIZATION: bearer $TOKEN" push origin main
+git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)" push origin main
 ```
+
+Use the `basic`/`x-access-token` form. A plain `bearer <token>` extraheader is **rejected**
+(`remote: invalid credentials`) for `gho_`-prefixed OAuth tokens; and do not put the token
+in the remote URL, because git then writes it into `.git/config` and into the branch's
+upstream tracking ref. Verify with `grep -ri "gho_" .git/config` returning nothing.
 
 Token scope confirmed: `repo`, `workflow`, `gist` (account `JAYST3AM`).
