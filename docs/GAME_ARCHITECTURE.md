@@ -231,6 +231,40 @@ immediately after finishing on timeout - no unit updates, no attacks, no overlap
 resolution, no victory check - so nothing can move, strike, take damage or die after
 the fight is over. See D-035.
 
+### Battle consequences are symmetric
+
+Enemy soldiers are persistent `Soldier` objects in `CampaignState`, exactly like the
+player's. So `BattleResult` carries **four** rosters, and `apply()` writes back all
+four:
+
+| Roster | Meaning | Written back as |
+| --- | --- | --- |
+| `player_survivors` | our soldiers still standing | kills, HP, XP, levels, `battles_fought`, `battles_survived`, history |
+| `player_dead` | our fallen | kills made before falling, dead, `battles_fought`, history |
+| `enemy_survivors` | their soldiers still standing | kills, **remaining HP**, `battles_fought`, `battles_survived`, history |
+| `enemy_dead` | their fallen | kills made before falling, dead, `battles_fought`, history |
+
+**Enemy soldiers get no progression.** No XP, no levels, no loyalty, no morale
+progression, no equipment damage. They have no XP curve in Steps 0-6, and inventing
+one here would be a new system rather than a record of what happened.
+
+**Enemy survivors keep their real remaining hit points.** This is the part that
+matters most: without it, a band that survived a fight came back at full strength and
+was a completely fresh fight next time, so a hostile party could never be worn down
+and withdrawing was a free reset *for the enemy*. The next `BattleContext` is built
+from `_snapshot_party()`, which reads `soldier.hp` - so once the campaign record is
+right, the second battle is right too, with no extra plumbing.
+
+**The rule for `battles_survived` is the same on both sides:** taking the field counts
+as `battles_fought`, and breaking off does not count as surviving (see the withdrawal
+rule above). The entry carries an explicit `survival_credited` flag so `apply()` never
+has to infer it. See D-041.
+
+`build_result()` still mutates nothing. The split between describing a battle and
+applying it (D-024) is what made this a small change: the battle already knew
+everything that had happened to every unit on both sides; only the write-back was
+missing.
+
 ### Why parties store ids
 
 If a `Party` held `Array[Soldier]`, then a save would serialise each soldier twice

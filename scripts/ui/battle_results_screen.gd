@@ -145,6 +145,10 @@ func _build_spoils_panel() -> Control:
 	box.add_child(UiTheme.label("Enemy: %d of %d put down" % [
 		_result.enemy_dead.size(), _result.enemy_total,
 	], 14, UiTheme.TEXT))
+	if _result.enemy_survivor_count() > 0:
+		box.add_child(UiTheme.dim_label("      %d still standing, and they keep the wounds they took" % (
+			_result.enemy_survivor_count()
+		)))
 	box.add_child(UiTheme.label("Your kills: %d" % _result.total_player_kills(), 14, UiTheme.TEXT))
 	return _wrap(box)
 

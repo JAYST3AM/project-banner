@@ -4,12 +4,13 @@
 reader (human or AI) who needs to understand, review, or advise on Project Banner
 without access to the repository.
 
-**Repository state:** `github.com/JAYST3AM/project-banner`
-**Revision:** `main` at the Step 6.5 remediation — 10 commits, working tree clean
+**Repository state:** `github.com/JAYST3AM/project-banner` (public)
+**Revision:** `main` at the Step 6.6 foundation lock — 12 commits, working tree clean
 **Engine:** Godot 4.7.2-stable, GDScript only
-**Status:** Steps 0–6 of the brief are complete, and the **Step 6.5 external audit
-remediation** is done. **The first major checkpoint (the full vertical slice) is
-reached and verified.**
+**Status:** Steps 0–6 of the brief are complete, and the **Step 6.5** external audit
+remediation and **Step 6.6** foundation lock are both done. **The first major
+checkpoint (the full vertical slice) is reached and verified**, on a clean CI runner as
+well as locally.
 
 > This is a snapshot. `docs/CURRENT_STATE.md` in the repository is the living version
 > and is updated every milestone.
@@ -80,12 +81,13 @@ Every step in that chain runs. Concretely, a player can:
 
 | Area | Files | Lines |
 | --- | --- | --- |
-| `scripts/` | 44 GDScript (+49 Godot-generated `.uid` sidecars) | 6,995 |
-| `tests/` | 14 GDScript (8 suites, 5 support files, 1 runner) + 6 fixtures | 4,600 |
+| `scripts/` | 44 GDScript (+49 Godot-generated `.uid` sidecars) | 7,103 |
+| `tests/` | 22 GDScript (13 suites, 2 harness files, the restart check, 6 fixtures) | 5,240 |
 | `data/` | 7 JSON | 496 |
 | `scenes/` | 8 `.tscn` | 197 |
-| `docs/` | 6 Markdown (including this file) | 2,207 |
-| **total tracked** | **167** | — |
+| `.github/workflows/` | 1 YAML | 100 |
+| `docs/` | 6 Markdown (including this file) | 2,541 |
+| **total tracked** | **181** | — |
 
 GDScript is roughly three-fifths production code and two-fifths tests. The `.uid`
 files are Godot-generated resource identifiers and are committed deliberately (Godot
@@ -108,7 +110,8 @@ runner's `SUITES` list, since several are meant to fail.
 | `4770e6b` | milestone-05: complete first end-to-end combat gameplay loop |
 | `2b987d9` | milestone-06: validate persistent campaign save and load |
 | `a0bf817`, `cf9c69a` | the full project report, and a README for a public reader |
-| `24ae05d` | milestone-06.5: harden vertical slice after external audit |
+| `24ae05d`, `484b4a8` | milestone-06.5: harden vertical slice after external audit |
+| `TBD` | milestone-06.6: lock the Steps 0-6 foundation |
 
 ---
 
@@ -379,7 +382,7 @@ survivors, 5 of 5 enemies down, 88 gold, 280 XP).
 
 The working rule is: **never claim something works unless it has been run.**
 
-### 9.1 Headless suites — 11 suites, 1,557 assertions, 0 failures
+### 9.1 Headless suites — 13 suites, 1,708 assertions, 0 failures
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -391,15 +394,18 @@ The working rule is: **never claim something works unless it has been run.**
 | `test_encounters` | 282 | spawning, movement, aggro, detection, `BattleContext`, deployment, simulator |
 | `test_combat` | 266 | damage, death, attribution, victory conditions, results, resolver, balance |
 | `test_battle_outcomes` | 224 | **victory / defeat / draw / withdrawal**, the retreat farming loop, timeout freezing the field, results-screen wording |
+| `test_enemy_persistence` | 121 | **the same enemy fought twice** — battle → campaign → save/load → second battle |
 | `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path**, through the real scenes — including the real `BattleResult` reaching the real results screen |
 | `test_persistence` | 154 | every persisted field, migration, refusal, corrupt files, metadata for every save shape |
+| `test_legacy_menu` | 30 | **the real main menu scene** against a legacy save — status text, Continue offered, Continue migrating and opening |
 | `test_runner_contract` | 30 | **the runner itself** — aborts, early returns, empty suites, non-suites, missing files, filter selection |
 
 Suites may `await`, so they drive real scene transitions and real save files. The
 end-to-end suite loads the actual battlefield scene and drives its `_process` the way
-the engine would.
+the engine would; the legacy-menu suite loads the actual main menu and presses its real
+Continue button.
 
-### 9.2 The restart check — 91 checks, 0 failures
+### 9.2 The restart check — 95 checks, 0 failures
 
 A genuine **two-process** test, because a same-process save/load only proves the
 serialiser round-trips and not that the game can be closed and reopened:
@@ -417,15 +423,17 @@ re-saving is stable. Result:
 
 ```
 broke off from Road Bandits: WITHDREW, 0 xp, 0 gold, enemy still present: true
+wounded s_0008: 28 -> 11 hp, must survive the restart
 wrote: 5 soldiers (3 active, 2 dead), 269 gold, 3 enemy parties, save v1
 --------- persistence write: PASS (6 checks, 0 failures) ---------
 26 soldiers restored, 9 of them dead
---------- persistence verify: PASS (91 checks, 0 failures) ---------
+--------- persistence verify: PASS (95 checks, 0 failures) ---------
 ```
 
 The second process sees the withdrawal the first one made — 0 experience, 0 gold,
-`battles_survived` untouched, and the bandits still on the map — without any shared
-memory beyond the save file.
+`battles_survived` untouched — and the bandits still on the map **with the specific
+soldier `s_0008` still on the 11 hit points it was wounded to**, not restored to full.
+No shared memory beyond the save file.
 
 ### 9.3 The test harness guards against false greens
 
@@ -463,7 +471,7 @@ scene -> settlement
 scene -> world_map
 scene -> battle
 [Encounter] battle battle_0001 at 880,551: player (5) vs enemy (5), clear
-[Resolver]  battle_0001: VICTORY - 4 of 5 survived, 5 of 5 enemies down, 97 gold, 280 xp
+[Resolver]  battle_0001: VICTORY - 4 of 5 survived, 5 of 5 enemies down (0 standing), 97 gold, 280 xp
 [Resolver]  Road Bandits is destroyed and removed from the map
 scene -> battle_results
 ```
@@ -471,7 +479,36 @@ scene -> battle_results
 with **zero script errors or warnings**. (The engine prints some shutdown noise under
 `--quit-after`; that is teardown, not gameplay.)
 
-### 9.5 Other verification
+### 9.5 The independent gate — GitHub Actions
+
+Local tests prove the suites pass on one machine; they cannot catch a suite that
+depends on a local import cache, a leftover save file or a working directory. So the
+same two gates run on a clean runner on every push to `main` and every pull request
+against it:
+
+```
+.github/workflows/godot-tests.yml
+  install Godot 4.7.2-stable, then assert `godot --version` reports 4.7.2
+  godot --headless --path . --import
+  godot --headless --path . res://scenes/dev/tests.tscn           -> must report PASS
+  godot --headless --path . res://scenes/dev/persistence_check.tscn -- --phase=write
+  godot --headless --path . res://scenes/dev/persistence_check.tscn -- --phase=verify
+```
+
+The engine version is pinned by explicit release URL rather than "latest", because a
+red run against an unpinned engine would not tell anyone whether the project or the
+engine had changed. No verification step uses `continue-on-error`, and every step is
+written so the engine's exit status survives the log capture: `set -o pipefail` around
+the `tee`, plus an explicit grep for the runner's own `PASS` line, so a run that
+somehow exited 0 without reporting success is still red. Logs upload as an artifact on
+failure.
+
+**CI does not fail on the runner self-test's deliberate runtime error.** That fixture
+provokes a real engine error on purpose (see §9.3) and the engine still exits 0 because
+the suite handles it. The workflow carries a comment saying so, so that nobody removes
+the fixture in the belief that they are cleaning up noisy output.
+
+### 9.6 Other verification
 
 The development switches above exercise the real button handlers, so a flag-driven run
 is not a simulation of the UI - it is the UI, driven by something other than a mouse.
@@ -480,8 +517,11 @@ The same pass also had to prove the **negative** cases, which is where the value
 
 - `--suite=this_does_not_exist` → exit 1, with the filter and the available suites named.
 - `--suite=battle_outcomes` → exit 0, 224 assertions, 1 of 1 suite.
+- `--suite=enemy_persistence` → exit 0, 121 assertions, 1 of 1 suite.
+- `--suite=legacy_menu` → exit 0, 30 assertions, 1 of 1 suite.
 - A windowed run with no save present logs `main menu: continue offered` as unavailable.
-- The two-process restart check was re-run from scratch after the withdrawal changes.
+- The two-process restart check was re-run from scratch after the withdrawal and enemy
+  persistence changes.
 
 ---
 
@@ -574,13 +614,39 @@ Two lessons worth carrying forward:
    and 3 were both a wrong quantity used consistently, and the only way to see either
    was to compute the correct value independently and compare.
 
+### 10.5 The Step 6.6 pass — persistence, one-sided
+
+Step 6.6 closed the last gaps before declaring the foundation locked. The central one
+is the same shape as the bugs above, and it is the clearest example in the project of
+a rule applied to one half of a system and not the other.
+
+| # | What was wrong | Why it was silent | Now guarded by |
+| --- | --- | --- | --- |
+| 1 | `BattleResult` described enemy **dead** but not enemy **survivors**, so an enemy damaged and left standing returned to the campaign at full health. The same band was a fresh band every time, so a hostile party could never be worn down and withdrawal was a free reset *for the enemy*. | Nothing looked wrong. The enemy was supposed to still be there — it was. Only its hit points quietly healed. | `test_enemy_persistence.gd` — the same soldier damaged, withdrawn from, saved, reloaded and fought again |
+| 2 | Enemy **dead** kept none of the kills they had made before falling. `_fallen_entry` recorded them and `apply()` discarded them — the same bug as D-029, one layer further out. | A dead enemy is gone; nobody reads a corpse's stat block, so nobody notices it reads zero. | `test_enemy_persistence.gd` — an enemy kills one of ours, then dies |
+| 3 | The **real main menu** was never tested against a legacy save. Step 6.5 fixed `peek_metadata()` and proved the Continue *path*, but not the menu scene the player actually meets. | The underlying calls were tested and passing. The untested part was the code the player touches first. | `test_legacy_menu.gd` — real scene, real status text, real Continue |
+| 4 | No independent CI gate. | Local tests pass locally. That is what local tests do. | `.github/workflows/godot-tests.yml`, pinned to 4.7.2-stable |
+
+**The generalisable lesson** — the one worth more than the four fixes — is that
+"persistent soldiers" is a property of *the soldier model*, not of the player's half of
+it. The project had a rule, wrote it down, enforced it for the party the player owns,
+and never applied it to the party the player fights. Both bugs in the table are that
+same omission, seen from two angles: a survivor's hit points, and a casualty's kills.
+
+The related lesson is about **what the test was actually testing**. Step 6.5's gap 3 is
+the same shape as its own gap 5: a test that exercises the layer underneath the thing
+the player touches. `peek_metadata()` passing does not mean the menu works, in exactly
+the way that `battle_results` existing does not mean the payload arrived.
+
 ---
 
 ## 11. What is *not* implemented
 
-The honest list of gaps. **Step 6.5 did not close any of these** — it was a hardening
-pass over what already existed, and it deliberately added no gameplay. The list below
-is unchanged from the end of Step 6, plus one clarifying note.
+The honest list of gaps.
+
+**Step 6.5 and Step 6.6 did not close any of these.** Both were hardening passes over
+what already existed, and both deliberately added no gameplay. The list is unchanged
+from the end of Step 6.
 
 **Combat depth**
 
@@ -647,9 +713,11 @@ is unchanged from the end of Step 6, plus one clarifying note.
 | D-034 | Roster membership and active force are separate quantities | Two numbers describe one party once anyone dies, and using the wrong one fails quietly |
 | D-036 | A suite must reach its completion marker to pass | Verified, not assumed: an aborted suite returns looking healthy with `N assertions, 0 failures` |
 | D-039 | Tests wait for transitions; they never cause them | A second transition replaces the first payload, so the test proves nothing while looking thorough |
+| D-041 | Battle consequences are symmetric — enemy soldiers persist too | Persisting only the player's half makes "persistent soldiers" a property of one side, not of the world |
+| D-042 | CI is an independent gate, pinned to the engine version | Local tests cannot catch a suite that depends on local state; "latest" CI reports on the engine, not the project |
 
 Decisions D-006 to D-032 are recorded in full in `docs/DECISIONS.md`, along with
-D-033 to D-040 from the Step 6.5 remediation.
+D-033 to D-042 from the Step 6.5 and 6.6 hardening passes.
 
 ---
 

@@ -75,7 +75,9 @@ func build_result(
 				result.player_dead.append(_fallen_entry(unit, simulator, context.enemy_display_name))
 		else:
 			result.enemy_total += 1
-			if not unit.is_alive():
+			if unit.is_alive():
+				result.enemy_survivors.append(_enemy_survivor_entry(unit, result.withdrawal))
+			else:
 				result.enemy_dead.append(_fallen_entry(unit, simulator, context.enemy_display_name))
 
 	for entry in result.player_survivors:
@@ -86,10 +88,10 @@ func build_result(
 	if victory:
 		_award_spoils(result, context, location)
 
-	DebugLogger.info("%s: %s - %d of %d survived, %d of %d enemies down, %d gold, %d xp" % [
+	DebugLogger.info("%s: %s - %d of %d survived, %d of %d enemies down (%d standing), %d gold, %d xp" % [
 		result.battle_id, result.title(),
 		result.player_survivors.size(), result.player_total,
-		result.enemy_dead.size(), result.enemy_total,
+		result.enemy_dead.size(), result.enemy_total, result.enemy_survivors.size(),
 		result.gold_total(), result.xp_awarded,
 	], "Resolver")
 	return result
@@ -129,6 +131,30 @@ func _survivor_entry(unit: BattleUnit, victory: bool, withdrawal: bool) -> Dicti
 		"participated": true,
 		## Whether this soldier's battles_survived should advance for this fight.
 		## Explicit so [method apply] never has to infer it from the winner.
+		"survival_credited": not withdrawal,
+		"withdrawn": withdrawal,
+	}
+
+
+## What happened to one [b]enemy[/b] soldier who came through the fight alive.
+##
+## Deliberately the same factual core as a player survivor entry, and deliberately
+## nothing more. Hostile soldiers have no experience, levels, loyalty or XP curve in
+## Steps 0-6, so there is no progression to record here - inventing one would be a
+## new system, not persistence. What matters is that the facts come back: the hit
+## points they actually have left, the kills they actually made, and whether they
+## took the field at all.
+func _enemy_survivor_entry(unit: BattleUnit, withdrawal: bool) -> Dictionary:
+	return {
+		"soldier_id": unit.soldier_id,
+		"name": unit.display_name,
+		"level": unit.level,
+		"kills": unit.kills,
+		"damage_dealt": unit.damage_dealt,
+		"hp": unit.hp,
+		"max_hp": unit.max_hp,
+		"participated": true,
+		## The same rule as the player's own soldiers: breaking off is not surviving.
 		"survival_credited": not withdrawal,
 		"withdrawn": withdrawal,
 	}
@@ -271,14 +297,37 @@ func apply(result: BattleResult, context: BattleContext) -> void:
 		var note := str(entry.get("death_note", ""))
 		soldier.record_history(day, "death", note if not note.is_empty() else "Killed at %s." % location)
 
-	# Enemy dead are their own people; mark them so they are never fielded again.
-	for entry in result.enemy_dead:
-		var enemy := state.soldier(str(entry.get("soldier_id", "")))
-		if enemy == null:
+	# Enemy survivors are persistent people too, so their post-battle state has to
+	# come back. Without this the next encounter with the same band starts them at
+	# full strength as though the first fight never happened, which turns every
+	# withdrawal and every defeat into a free reset for the enemy.
+	for entry in result.enemy_survivors:
+		var standing := state.soldier(str(entry.get("soldier_id", "")))
+		if standing == null:
 			continue
-		enemy.battles_fought += 1
-		enemy.hp = 0
-		enemy.status = Soldier.STATUS_DEAD
+		standing.battles_fought += 1
+		# The same rule as the player's own soldiers: taking the field counts,
+		# breaking off does not count as having survived it.
+		if bool(entry.get("survival_credited", not withdrew)):
+			standing.battles_survived += 1
+		standing.kills += int(entry.get("kills", 0))
+		standing.hp = clampi(int(entry.get("hp", standing.hp)), 1, standing.max_hp)
+		standing.record_history(day, "battle", "Fought at %s and lived." % location)
+
+	# Enemy dead are their own people; mark them so they are never fielded again.
+	# A hostile soldier who cut someone down before falling still did so - the same
+	# rule that already applies to the player's own casualties (D-029). Dropping it
+	# here erased enemy kills in exactly the fights where they cost the most, because
+	# _fallen_entry recorded them and this loop then threw them away.
+	for entry in result.enemy_dead:
+		var slain := state.soldier(str(entry.get("soldier_id", "")))
+		if slain == null:
+			continue
+		slain.battles_fought += 1
+		slain.kills += int(entry.get("kills", 0))
+		slain.hp = 0
+		slain.status = Soldier.STATUS_DEAD
+		slain.record_history(day, "death", "Killed at %s." % location)
 
 	state.player_gold += result.gold_total()
 

@@ -1,0 +1,105 @@
+name: Project Banner verification
+
+# The independent gate. Local runs prove the tests pass on one machine; this proves
+# they pass on a clean one, from a fresh checkout, with nothing installed but the
+# engine - which is the only way to catch a test that depends on local state.
+#
+# Every step that verifies something is allowed to fail the job. There is no
+# `continue-on-error` anywhere in this file, and no command is piped in a way that
+# could swallow the engine's exit code.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push supersedes an in-flight run on the same branch.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned deliberately, not "latest". The project is developed against exactly this
+  # release; testing against a different engine would make CI a source of noise
+  # rather than a source of truth.
+  GODOT_RELEASE: "4.7.2-stable"
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  verify:
+    name: Headless suites and restart check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install Godot ${{ env.GODOT_RELEASE }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip"
+          curl -fsSL -o /tmp/godot.zip "$URL"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          install -m 0755 "/tmp/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          godot --version
+
+      # Installing the pinned release is not the same as running it. If the download
+      # URL ever silently redirects to something else, this is what notices.
+      - name: Confirm the engine is the pinned version
+        run: |
+          set -euo pipefail
+          VERSION="$(godot --version)"
+          echo "engine: $VERSION"
+          case "$VERSION" in
+            ${GODOT_VERSION}.*) echo "::notice::running Godot $VERSION" ;;
+            *) echo "::error::expected Godot ${GODOT_VERSION}, got $VERSION"; exit 1 ;;
+          esac
+
+      # .godot/ is gitignored, so a fresh checkout has no import cache.
+      - name: Import project resources
+        run: godot --headless --path . --import
+
+      # NO `-e` swallowing here: `set -o pipefail` means the pipeline fails if the
+      # engine fails, and the explicit grep means a run that reported no overall
+      # PASS is a failure even if the exit code somehow said otherwise.
+      - name: Run the full headless test suite
+        run: |
+          set -euo pipefail
+          godot --headless --path . res://scenes/dev/tests.tscn 2>&1 | tee test-output.log
+          grep -q "RESULT: PASS" test-output.log \
+            || { echo "::error::the test runner did not report PASS"; exit 1; }
+
+      # A genuine two-process restart check: `verify` runs in a new engine process
+      # that has never seen the write phase's memory, only its save file.
+      - name: Persistence phase 1 - play, save, exit
+        run: |
+          set -euo pipefail
+          godot --headless --path . res://scenes/dev/persistence_check.tscn -- --phase=write 2>&1 | tee persistence-write.log
+          grep -q "persistence write: PASS" persistence-write.log \
+            || { echo "::error::the persistence write phase did not report PASS"; exit 1; }
+
+      - name: Persistence phase 2 - a new process continues it
+        run: |
+          set -euo pipefail
+          godot --headless --path . res://scenes/dev/persistence_check.tscn -- --phase=verify 2>&1 | tee persistence-verify.log
+          grep -q "persistence verify: PASS" persistence-verify.log \
+            || { echo "::error::the persistence verify phase did not report PASS"; exit 1; }
+
+      # The runner self-test provokes one genuine runtime error on purpose, to prove
+      # that a suite which aborts mid-run is detected rather than passing. The engine
+      # still exits 0 because the suite handles it. Do NOT add a "fail on SCRIPT
+      # ERROR" step here - it would break the very test that keeps the runner honest.
+      # The failure goes away by removing a fixture, which is the wrong fix.
+
+      - name: Upload logs when the run fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-logs
+          path: |
+            test-output.log
+            persistence-write.log
+            persistence-verify.log
+          if-no-files-found: ignore

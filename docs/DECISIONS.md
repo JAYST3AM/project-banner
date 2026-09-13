@@ -622,3 +622,73 @@ against the *second* battle's log entry. The failures were loud rather than sile
 but the underlying assumption - that the entry you want is the last one - is simply
 false for any campaign that has fought more than once.
 
+---
+
+## D-041: Battle consequences are symmetric - enemy soldiers persist too
+
+**Decision.** `BattleResult` carries `enemy_survivors` alongside `enemy_dead`, and
+`BattleResolver.apply()` writes enemy post-battle state back to the campaign:
+
+- **survivors**: `hp` (their real remaining hit points), `kills`, `battles_fought`,
+  and `battles_survived` on the same rule as the player's soldiers - taking the field
+  counts, breaking off does not;
+- **the fallen**: `hp = 0`, dead, `battles_fought`, and the kills they made before
+  falling, which `_fallen_entry` had been recording and `apply()` had been discarding.
+
+Enemy soldiers get **no** experience, levels, loyalty, morale progression or equipment
+damage. They have no XP curve and no progression in Steps 0-6, and inventing one here
+would be a new system rather than a record of what happened. `damage_dealt` stays in
+the result entry (where the results screen already reads it) and is deliberately not
+added to `Soldier`, because item 5 of the audit asks only for fields the model already
+supports.
+
+**Why.** A party that keeps its soldiers as persistent people, but only persists the
+ones the player owns, is not persistent - it is one-sided. The concrete failure: an
+enemy damaged to 23 hit points and left standing (player withdrew, lost, or the clock
+ran out) returned to the campaign at full health and was a completely fresh band next
+time. Every withdrawal was a free reset for the enemy, so a hostile band could never
+actually be worn down, and the strategic option of "bloody them, pull out, come back
+stronger" did not exist.
+
+The dead half was the same bug as D-029, one layer further out. `_fallen_entry` duly
+recorded an enemy's kills, and `apply()` then threw them away - so a bandit who cut
+down two of the player's soldiers before dying was remembered as having killed nobody,
+in exactly the fight where those kills mattered most.
+
+**A consequence worth stating:** the resolve-then-apply split (D-024) is what makes
+this a small change. The battle already knew everything; only the write-back was
+missing. `build_result()` still mutates nothing, and the regression test checks that
+attacking it directly.
+
+---
+
+## D-042: CI is an independent gate, pinned to the engine version
+
+**Decision.** GitHub Actions runs the full headless suite and the genuine two-process
+restart check on every push to `main` and every pull request against it. The workflow
+installs Godot **4.7.2-stable** by explicit release URL, asserts the installed engine
+reports that version, and fails the job if any verified step fails.
+
+**Why.** Local tests prove the suites pass on one machine. They cannot catch a test
+that depends on something local - an import cache, a stale `.godot/`, a save file left
+behind by an earlier run, a difference in working directory. A clean checkout on a
+clean runner is a different question, and it is the question that matters before the
+foundation is declared locked.
+
+Pinning is the other half. "Latest Godot" would make CI report on the engine rather
+than on the project, and a red run would not tell anyone which of the two had changed.
+Installing the pinned release is also not the same as running it, so the workflow
+asserts `godot --version` rather than trusting the download.
+
+Two deliberate details:
+
+- **No `continue-on-error` on any verification step**, and no command piped in a way
+  that could swallow the engine's exit code. `set -o pipefail` plus `tee` keeps the
+  failure, and each phase additionally greps its own log for the runner's explicit
+  `PASS` line - so a run that somehow exited 0 without reporting PASS is still red.
+- **CI does not fail on the runner self-test's deliberate runtime error.** That
+  fixture provokes a real engine error to prove an aborted suite is caught, and the
+  engine exits 0 because the suite handles it. Adding a "fail on SCRIPT ERROR" step
+  would break the very mechanism that keeps the runner honest; the workflow says so in
+  a comment, so nobody removes the fixture thinking they are cleaning up output.
+

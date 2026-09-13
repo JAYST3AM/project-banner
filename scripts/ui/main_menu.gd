@@ -63,3 +63,31 @@ func _on_continue() -> void:
 func _on_quit() -> void:
 	DebugLogger.info("quit requested from main menu", "MainMenu")
 	get_tree().quit()
+
+
+## ---------- read-only access for the tests -------------------------------
+##
+## These expose what the menu is currently showing and offering, so the tests can
+## check the real menu rather than re-implementing its logic. They cannot change
+## anything, and they depend on state rather than on node paths, so a layout tweak
+## does not break them.
+
+## Whether Continue is currently offered.
+func continue_available() -> bool:
+	return not _continue_button.disabled
+
+
+## The status line the menu is currently showing the player.
+func status_text() -> String:
+	return _status.text
+
+
+## The campaign name the menu is offering to continue, or "" if it offers none.
+func offered_campaign_name() -> String:
+	return str(GameManager.continue_summary().get("campaign_name", ""))
+
+
+## Press Continue. This is the button's own handler, made callable by name so a test
+## drives the real path rather than a copy of it - not a test-only mutation hook.
+func press_continue() -> void:
+	_on_continue()

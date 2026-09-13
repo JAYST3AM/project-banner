@@ -33,6 +33,15 @@ var campaign_hour: float = 8.0
 var player_survivors: Array[Dictionary] = []
 ## The fallen. {"soldier_id", "name", "level", "kills", "killed_by"}
 var player_dead: Array[Dictionary] = []
+## Enemy soldiers left standing, in the order they deployed.
+##
+## Same factual shape as [member player_survivors] minus anything to do with
+## progression: hostile soldiers do not earn experience, level up or owe loyalty in
+## Steps 0-6, and inventing that here would be a new system rather than a record of
+## what happened. They are persistent people though, so the facts must still come
+## back - without this, an enemy that survives a fight keeps whatever hit points it
+## had before the fighting started, and the same band is a fresh band every time.
+var enemy_survivors: Array[Dictionary] = []
 ## Enemy soldiers put out of action by the player's party.
 var enemy_dead: Array[Dictionary] = []
 
@@ -98,6 +107,22 @@ func total_player_kills() -> int:
 	return kills
 
 
+## How many of the player's soldiers the enemy put down, counting only kills that
+## still stand on a persistent enemy record.
+func total_enemy_kills() -> int:
+	var kills := 0
+	for entry in enemy_survivors:
+		kills += int(entry.get("kills", 0))
+	for entry in enemy_dead:
+		kills += int(entry.get("kills", 0))
+	return kills
+
+
+## Enemy soldiers still on their feet at the end of the fight.
+func enemy_survivor_count() -> int:
+	return enemy_survivors.size()
+
+
 ## True when the player's party no longer exists.
 func party_wiped() -> bool:
 	return player_total > 0 and player_survivors.is_empty()
@@ -132,6 +157,7 @@ func to_dict() -> Dictionary:
 		"campaign_hour": campaign_hour,
 		"player_survivors": player_survivors.duplicate(true),
 		"player_dead": player_dead.duplicate(true),
+		"enemy_survivors": enemy_survivors.duplicate(true),
 		"enemy_dead": enemy_dead.duplicate(true),
 		"enemy_total": enemy_total,
 		"player_total": player_total,
@@ -160,6 +186,7 @@ static func from_dict(data: Dictionary) -> BattleResult:
 	result.xp_awarded = int(data.get("xp_awarded", 0))
 	result.player_survivors = _dict_array(data.get("player_survivors", []))
 	result.player_dead = _dict_array(data.get("player_dead", []))
+	result.enemy_survivors = _dict_array(data.get("enemy_survivors", []))
 	result.enemy_dead = _dict_array(data.get("enemy_dead", []))
 	result.loot = _dict_array(data.get("loot", []))
 	return result

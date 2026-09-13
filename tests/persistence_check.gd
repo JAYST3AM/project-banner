@@ -187,6 +187,21 @@ func _withdraw_from_one_battle(state: CampaignState, avoid_party_id: String) -> 
 	# fighting case, which is exactly the one that used to pay experience.
 	simulator.step(0.05)
 
+	# Wound one of them meaningfully before breaking off. Enemy survivors are
+	# persistent people, so their remaining hit points have to come back to the
+	# campaign and survive the restart - this is what gives the verify phase
+	# something to catch if that ever regresses.
+	var wounded_id := ""
+	var wounded_hp := 0
+	var wounded_start_hp := 0
+	var enemy_units := simulator.alive_units(BattleContext.SIDE_ENEMY)
+	if not enemy_units.is_empty():
+		var wounded := enemy_units[0]
+		wounded_id = wounded.soldier_id
+		wounded_start_hp = wounded.hp
+		wounded_hp = maxi(1, int(round(float(wounded.hp) * 0.4)))
+		wounded.take_damage(wounded.hp - wounded_hp, -1)
+
 	var resolver := BattleResolver.build(state, config)
 	var result := resolver.build_result(context, simulator, "", simulator.elapsed, true)
 	resolver.apply(result, context)
@@ -195,6 +210,8 @@ func _withdraw_from_one_battle(state: CampaignState, avoid_party_id: String) -> 
 	print("    broke off from %s: %s, %d xp, %d gold, enemy still present: %s" % [
 		chosen.display_name, result.title(), result.xp_awarded, result.gold_total(), str(chosen.is_available()),
 	])
+	if not wounded_id.is_empty():
+		print("    wounded %s: %d -> %d hp, must survive the restart" % [wounded_id, wounded_start_hp, wounded_hp])
 	return {
 		"battle_id": result.battle_id,
 		"enemy_party_id": chosen.id,
@@ -208,6 +225,11 @@ func _withdraw_from_one_battle(state: CampaignState, avoid_party_id: String) -> 
 		"enemy_still_available": chosen.is_available(),
 		"enemy_active": state.active_member_count(state.party_of(chosen)),
 		"enemy_active_before": enemy_active_before,
+		## The persistent enemy this phase wounded, and the hit points it must be
+		## found with in the next process.
+		"enemy_wounded_id": wounded_id,
+		"enemy_wounded_hp": wounded_hp,
+		"enemy_survivors_described": result.enemy_survivors.size(),
 	}
 
 
@@ -480,6 +502,19 @@ func _run_verify() -> void:
 			"every soldier who took the field was counted as having fought")
 		_equal(int(last.get("player_survivors", -1)), int(withdrawal["survivors_taken_field"]),
 			"and the chronicle agrees on how many were on the field")
+		_equal(int(withdrawal["enemy_survivors_described"]), int(withdrawal["enemy_active"]),
+			"every enemy left standing was described in the result")
+		# The enemy this phase wounded must come back with exactly those hit points,
+		# not healed to full. This is the enemy-side half of the same rule that
+		# already applied to the player's own soldiers.
+		var wounded_id := str(withdrawal.get("enemy_wounded_id", ""))
+		if not wounded_id.is_empty():
+			var wounded := state.soldier(wounded_id)
+			_check(wounded != null, "the wounded enemy came back after the restart")
+			if wounded != null:
+				_equal(wounded.hp, int(withdrawal["enemy_wounded_hp"]),
+					"and still has the hit points the battle left it with")
+				_equal(wounded.battles_fought, 1, "with its battle recorded")
 		var broken_off_from := state.world_party(str(withdrawal["enemy_party_id"]))
 		_check(broken_off_from != null, "the party they broke off from came back")
 		if broken_off_from != null:

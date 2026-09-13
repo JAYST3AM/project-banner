@@ -2,14 +2,15 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 6.5 - external audit remediation
+**Last updated:** end of Step 6.6 - final foundation lock
 **Engine:** Godot 4.7.2-stable
-**Test status:** `1557 assertions, 0 failures, 11 of 11 suites` headless, plus
-`91 checks, 0 failures` in a genuine two-process restart check.
+**Test status:** `1708 assertions, 0 failures, 13 of 13 suites` headless, plus
+`95 checks, 0 failures` in a genuine two-process restart check.
+**Independent gate:** GitHub Actions runs both of those on every push to `main` and
+every pull request against it, pinned to Godot 4.7.2-stable.
 
-**Note:** Step 6.5 was a hardening pass over Steps 0-6, not new gameplay. See
-[Step 6.5 - external audit remediation](#step-65---external-audit-remediation)
-below for what changed and what each fix is now guarded by.
+**Note:** Steps 6.5 and 6.6 were hardening passes over Steps 0-6, not new gameplay.
+See [Step 6.6 - final foundation lock](#step-66---final-foundation-lock) below.
 
 ---
 
@@ -42,7 +43,7 @@ NEW CAMPAIGN -> WORLD MAP -> TRAVEL -> TOWN -> RECRUIT -> INDIVIDUAL SOLDIERS
 
 Everything below is asserted by an automated run, not claimed by hand.
 
-**Eleven headless suites, 1557 assertions, 0 failures**
+**Thirteen headless suites, 1708 assertions, 0 failures**
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -54,8 +55,10 @@ Everything below is asserted by an automated run, not claimed by hand.
 | `test_encounters` | 282 | spawning, movement, aggro, detection, `BattleContext`, deployment, simulator |
 | `test_combat` | 266 | damage, death, attribution, victory conditions, results, resolver, balance |
 | `test_battle_outcomes` | 224 | **victory / defeat / draw / withdrawal**, the retreat farming loop, timeout freezing the field, results-screen wording |
+| `test_enemy_persistence` | 121 | **the same enemy fought twice**: battle → campaign → save/load → second battle, enemy survivors and enemy dead |
 | `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path, through the real scenes** - including the real `BattleResult` reaching the real results screen |
 | `test_persistence` | 154 | every field the milestone lists, migration, refusal, corrupt files, metadata for every save shape |
+| `test_legacy_menu` | 30 | **the real main menu scene** against a legacy unversioned save: status text, Continue offered, real Continue migrating and opening |
 | `test_runner_contract` | 30 | **the runner itself**: aborts, early returns, empty suites, non-suites, missing files, filter selection |
 
 **The restart check** (`scenes/dev/persistence_check.tscn`) runs as two separate
@@ -80,7 +83,9 @@ intact; enemy parties with their positions, rosters and `defeated` flags intact;
 the battle chronicle intact, including the withdrawal and the rules it applied; the
 active-force and roster counts both restored and agreeing with the main menu's own
 summary; the world map opens on the restored campaign; and re-saving is stable.
-**91 checks, 0 failures.**
+It also wounds a specific enemy before breaking off (`s_0008: 28 -> 11 hp`) and the
+next process confirms that exact soldier still has those hit points.
+**95 checks, 0 failures.**
 
 **A real windowed launch** driving the whole loop through the actual UI
 (`--autostart-campaign --autotravel --autostart-town --autorecruit --autoleave
@@ -90,8 +95,11 @@ summary; the world map opens on the restored campaign; and re-saving is stable.
 world_map -> settlement -> world_map -> battle -> battle_results
 ```
 
-and logs `battle_0001: VICTORY - 4 of 5 survived, 5 of 5 enemies down, 97 gold,
-280 xp`, with **zero script errors or warnings**.
+and logs `battle_0001: VICTORY - 4 of 5 survived, 5 of 5 enemies down (0 standing),
+97 gold, 280 xp`, with **zero script errors or warnings**.
+
+**An independent CI gate** (`.github/workflows/godot-tests.yml`) repeats the headless
+suite and both persistence phases on a clean runner, so nothing can pass locally only.
 
 **Opening-fight balance**, measured across 24 campaign seeds in a real simulator:
 
@@ -142,6 +150,59 @@ One fixture raises a genuine runtime error on purpose and prints a `SCRIPT ERROR
 line. It is bracketed by banners in the output so it cannot be mistaken for a real
 defect. **Every other line in a clean run is error-free** - that was checked, not
 assumed.
+
+## Step 6.6 - final foundation lock
+
+Three gaps remained after Step 6.5, all of them persistence or infrastructure rather
+than gameplay. Closing them is what makes the Steps 0-6 foundation safe to build on.
+
+### 1. Enemy soldiers are persisted like the player's own
+
+`BattleResult` described enemy **dead** but not enemy **survivors**, so `apply()`
+wrote back only the deaths. An enemy damaged to 23 hit points and left standing -
+because the player withdrew, lost, or the clock ran out - returned to the campaign at
+**full health**, and the next meeting with the same band was a completely fresh fight.
+Every withdrawal was a free reset for the enemy, so a hostile band could never be worn
+down and "bloody them, pull out, come back stronger" was not a strategy the game
+supported.
+
+`BattleResult.enemy_survivors` now carries the same factual shape as a player
+survivor entry (minus anything to do with progression - hostile soldiers have none in
+Steps 0-6), and `apply()` writes it back. Same for the fallen: `_fallen_entry` had
+always recorded an enemy's kills, and `apply()` had been discarding them, so a bandit
+who cut down two of the player's soldiers before dying was remembered as having killed
+nobody. **Battle consequences are now symmetric between the player's soldiers and the
+enemy's.** See D-041.
+
+The regression test walks all three boundaries in one pass rather than testing the
+result object in isolation:
+
+```
+battle -> campaign          the fight's damage reaches the persistent soldier
+campaign -> save/load       and survives the game being closed and reopened
+campaign -> second battle   and the next encounter starts from it, not from full HP
+```
+
+### 2. The real main menu, against a legacy save
+
+Step 6.5 fixed `peek_metadata()` and tested the Continue path through
+`GameManager.continue_campaign()`. That left a gap: nothing proved the actual menu
+*scene* could open a legacy save, and the menu is where a player meets the problem - it
+reads metadata, decides whether to offer Continue, and formats its own status line.
+
+`tests/test_legacy_menu.gd` now drives the real `main_menu.tscn` against an
+unversioned, bare-array save and checks its real state through small **read-only**
+accessors (`continue_available()`, `status_text()`), then presses the real Continue
+action and follows it to the world map with the party intact. It also confirms the
+newer-version refusal still wins and that no save means no Continue.
+
+### 3. GitHub Actions
+
+An independent gate now runs the full headless suite and both persistence phases on
+every push to `main` and every pull request against it, pinned to Godot 4.7.2-stable by
+explicit release URL - and asserts the installed engine actually reports that version.
+No `continue-on-error` on any verification step, and `set -o pipefail` keeps the
+engine's exit code through the log `tee`. See D-042.
 
 ## Known limitations
 

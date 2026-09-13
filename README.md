@@ -61,10 +61,16 @@ Two distinctions are easy to get wrong, and both fail quietly:
   actually made and nothing else, and does not touch `battles_survived`. Otherwise
   enter-fight-press-Retreat is a risk-free progression loop.
 
+And one rule worth stating plainly, because it was applied to only half the world for
+a while: **enemy soldiers are persistent people too.** A band that survives a fight
+comes back with the hit points it has left, not a fresh set. Battle consequences are
+symmetric — see `docs/GAME_ARCHITECTURE.md`.
+
 Verification is the point of this repository. If you change something, the claim to
 check is not "it compiles" but that
-`tests/` still reports `1557 assertions, 0 failures, 11 of 11 suites` and that the
-two-process restart check still passes.
+`tests/` still reports `1708 assertions, 0 failures, 13 of 13 suites` and that the
+two-process restart check still passes. Both run automatically in CI on every push and
+pull request, pinned to Godot 4.7.2-stable.
 
 ## Documentation
 
@@ -110,4 +116,5 @@ scenes/     core, world, settlements, battle, ui, dev
 scripts/    core, world, battle, units, ui
 docs/       report, architecture, roadmap, current state, decisions, environment
 tests/      headless test suites, plus the two-process restart check
+.github/    CI: the headless suites and both persistence phases, on a clean runner
 ```

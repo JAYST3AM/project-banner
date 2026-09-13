@@ -14,6 +14,7 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | 5 | First functional tactical combat | **DONE** |
 | 6 | Persistent campaign save/load validation | **DONE** |
 | 6.5 | External audit remediation (hardening pass, no new gameplay) | **DONE** |
+| 6.6 | Final foundation lock (enemy persistence, legacy menu, CI) | **DONE** |
 | — | **First major checkpoint: the full vertical slice** | **DONE** |
 | 7+ | Post-checkpoint systems (see below) | TODO |
 
@@ -169,6 +170,37 @@ looked fine while behaving wrongly.
 fix; all suites green; the two-process restart check green; a windowed run of the
 whole loop clean. **1557 assertions, 0 failures, 11 of 11 suites** headless, and
 **91 checks, 0 failures** across the restart. See D-033 to D-040.
+
+---
+
+## Step 6.6 - Final foundation lock (`milestone-06.6`)
+
+**Goal:** close the last persistence and infrastructure gaps so Steps 0-6 can be
+declared foundation-locked. Still no new gameplay - nothing from Step 7, no
+formations, terrain, cavalry, projectiles or morale.
+
+Three gaps, each one a case of the game knowing something and not writing it down:
+
+- **Enemy soldiers were persisted one-sidedly.** `BattleResult` described enemy dead
+  but not enemy survivors, so a band that survived a fight - through a withdrawal, a
+  defeat, or a timeout - came back to the campaign at full strength. Every withdrawal
+  was a free reset *for the enemy*, and a hostile band could never be worn down. Enemy
+  survivors now return with their real remaining hit points, their kills and their
+  battle count; enemy dead keep the kills they made before falling, which
+  `_fallen_entry` had been recording and `apply()` discarding.
+- **The real main menu was never tested against a legacy save.** Step 6.5 fixed
+  `peek_metadata()` and tested the Continue *path*, but not the menu scene the player
+  actually meets - which reads metadata, decides whether to offer Continue, and
+  formats its own status line. Now driven directly.
+- **No independent CI gate.** Local tests cannot catch a suite that depends on a
+  local import cache, a leftover save, or a working directory. GitHub Actions now runs
+  the suite and both persistence phases on a clean runner, pinned to Godot 4.7.2-stable.
+
+**Definition of done:** the same persistent enemy can be damaged, withdrawn from,
+saved, reloaded and fought again without resetting; the real menu opens a legacy save
+and Continue migrates it; CI is green on the pushed commit. **1708 assertions, 0
+failures, 13 of 13 suites** headless, **95 checks, 0 failures** across the restart,
+windowed flow clean. See D-041 and D-042.
 
 ---
 
