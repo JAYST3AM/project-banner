@@ -67,6 +67,9 @@ func _apply_dev_autorecruit() -> void:
 		return
 	DebugLogger.info("dev flag: autorecruiting %d" % count, "Settlement")
 	_on_recruit_pressed("peasant_recruit", count)
+	if DevFlags.autoleave_town():
+		DebugLogger.info("dev flag: leaving town immediately", "Settlement")
+		_on_leave()
 
 
 ## ---------- layout -------------------------------------------------------
@@ -213,7 +216,7 @@ func _rebuild_recruit_rows() -> void:
 		child.queue_free()
 
 	var any_row := false
-	for unit_type_id in _units.ids():
+	for unit_type_id in _units.recruitable_ids():
 		var stock := _recruitment.available_at(_settlement, unit_type_id)
 		if stock <= 0:
 			continue

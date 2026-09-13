@@ -165,6 +165,24 @@ traits, health) and the **service** decides whether the player may have them
 `CampaignState.register_soldier`, which is what guarantees a soldier has exactly
 one owner.
 
+### Overworld parties and battle (Step 4)
+
+| Class | File | Notes |
+| --- | --- | --- |
+| `OverworldService` | `scripts/world/overworld_service.gd` | spawns hostile parties from data; wanders/chases them; deterministic |
+| `EncounterService` | `scripts/world/encounter_service.gd` | when a meeting is an encounter, builds the `BattleContext`, records retreats |
+| `BattleContext` | `scripts/core/battle_context.gd` | **the only channel** between campaign and battle |
+| `BattleUnit` | `scripts/battle/battle_unit.gd` | one fighting body; holds a `soldier_id`, never a `Soldier` |
+| `BattleSetup` | `scripts/battle/battle_setup.gd` | builds units from a context and deploys both lines |
+| `BattleSimulator` | `scripts/battle/battle_simulator.gd` | the fight as pure data; the scene is a view over it |
+| `BattleView` | `scripts/battle/battle_view.gd` | draws the field, units, health bars and the selection box |
+| `EncounterDialog` | `scripts/ui/encounter_dialog.gd` | the pause-and-decide prompt |
+
+**The battle scene never looks anything up.** It receives a `BattleContext` through
+the scene payload, and that context already contains both rosters as snapshots with
+resolved stats. Adding ambushes, sieges or scripted battles later means building a
+different context, not changing the battle scene. See D-019 and D-020.
+
 ### Why parties store ids
 
 If a `Party` held `Array[Soldier]`, then a save would serialise each soldier twice
@@ -255,7 +273,9 @@ reads the object; if it needs to know something *happened*, it connects to a sig
 ```
 clock.advance_real_seconds(delta)  ->  game_hours
 travel.step(game_hours)            ->  report {moved, arrived, settlement_id}
-on arrival: select the settlement, refresh the HUD
+overworld.step(game_hours)         ->  hostile parties wander or chase
+encounters.detect()                ->  a party the player is standing on, or null
+on encounter: pause the clock, show the prompt, wait for Attack or Retreat
 view.queue_redraw()                (presentation only)
 ```
 

@@ -26,6 +26,9 @@ var destination: Vector2 = Vector2.ZERO
 var encounter_cooldown_until_hours: float = 0.0
 ## Set once this party has been destroyed in battle.
 var defeated: bool = false
+## Increments each time the party picks a new wander target. Persisted so wander
+## destinations stay deterministic across a save/load without storing an RNG.
+var wander_count: int = 0
 
 
 func is_available() -> bool:
@@ -45,6 +48,7 @@ func to_dict() -> Dictionary:
 		"destination": [destination.x, destination.y],
 		"encounter_cooldown_until_hours": encounter_cooldown_until_hours,
 		"defeated": defeated,
+		"wander_count": wander_count,
 	}
 
 
@@ -61,4 +65,5 @@ static func from_dict(data: Dictionary) -> WorldParty:
 	w.destination = DataUtils.vec2_from(data.get("destination", [w.position.x, w.position.y]))
 	w.encounter_cooldown_until_hours = float(data.get("encounter_cooldown_until_hours", 0.0))
 	w.defeated = bool(data.get("defeated", false))
+	w.wander_count = int(data.get("wander_count", 0))
 	return w

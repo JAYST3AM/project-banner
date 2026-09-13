@@ -15,6 +15,11 @@ var _state: CampaignState = null
 var _config: GameConfig = null
 var _travel: TravelService = null
 var _debug: DebugPanel = null
+var _overworld: OverworldService = null
+var _encounters: EncounterService = null
+var _dialog: EncounterDialog = null
+var _dialog_party_id: String = ""
+var _speed_before_dialog: int = CampaignClock.Speed.NORMAL
 
 var _panning := false
 var _hud_timer := 0.0
@@ -39,12 +44,21 @@ func _ready() -> void:
 	_travel = TravelService.new(_state, _config)
 	_view.bind(_state, _config, _travel)
 
+	_overworld = OverworldService.build(_state, _config)
+	_overworld.spawn_if_needed()
+	_encounters = EncounterService.build(_state, _config)
+
 	_hud.setup(_state, _config, _travel)
 	_hud.speed_requested.connect(_on_speed_requested)
 	_hud.travel_requested.connect(_on_travel_requested)
 	_hud.enter_settlement_requested.connect(_on_enter_settlement)
 	_hud.save_requested.connect(_on_save_requested)
 	_hud.menu_requested.connect(_on_menu_requested)
+
+	_dialog = EncounterDialog.new()
+	_hud.add_child(_dialog)
+	_dialog.attack_requested.connect(_on_encounter_attack)
+	_dialog.retreat_requested.connect(_on_encounter_retreat)
 
 	_debug = DebugPanel.new()
 	_hud.add_child(_debug)
@@ -59,13 +73,28 @@ func _ready() -> void:
 	_refresh()
 	_hud.set_hint("Click a settlement to inspect it. Click Travel Here to set out. F1 opens debug tools.")
 
+	_apply_dev_autoengage()
 	_apply_dev_autotravel()
+
+
+## Dev-only: drop the player next to the nearest hostile party so the encounter
+## path runs without waiting for one to wander into them.
+func _apply_dev_autoengage() -> void:
+	if not DevFlags.autoengage() or _overworld == null:
+		return
+	var parties := _overworld.available_parties()
+	if parties.is_empty():
+		DebugLogger.warn("dev flag: no hostile parties to engage", "WorldMap")
+		return
+	var target := parties[0]
+	_state.world_position = target.position
+	DebugLogger.info("dev flag: moved the party onto %s" % target.display_name, "WorldMap")
 
 
 ## Dev-only: begin travelling immediately (see DevFlags). Used by automated runs
 ## to exercise the real rendered world map without a mouse.
 func _apply_dev_autotravel() -> void:
-	var town := DevFlags.autostart_town()
+	var town := DevFlags.consume_autostart_town()
 	if not town.is_empty():
 		DebugLogger.info("dev flag: entering %s directly" % town, "WorldMap")
 		_travel.teleport_to(town)
@@ -95,6 +124,10 @@ func _process(delta: float) -> void:
 		var report := _travel.step(game_hours)
 		if report.get("arrived", false):
 			_on_arrived(str(report.get("settlement_id", "")))
+		if _overworld != null:
+			_overworld.step(game_hours)
+
+	_check_for_encounter()
 
 	_view.queue_redraw()
 
@@ -117,6 +150,76 @@ func _on_arrived(settlement_id: String) -> void:
 		return
 	_hud.set_hint("Arrived at %s on %s." % [settlement.name, _state.clock.full_string()])
 	_select(settlement)
+	_refresh()
+
+
+## ---------- encounters ---------------------------------------------------
+
+## The world pauses the moment two parties touch, exactly as the brief specifies.
+func _check_for_encounter() -> void:
+	if _dialog_party_id != "" or _encounters == null:
+		return
+	var world_party := _encounters.detect()
+	if world_party == null:
+		return
+	if world_party.kind != Party.KIND_BANDIT:
+		return
+	_show_encounter(world_party)
+	if DevFlags.autoattack():
+		DebugLogger.info("dev flag: auto-attacking", "WorldMap")
+		_on_encounter_attack()
+
+
+func _show_encounter(world_party: WorldParty) -> void:
+	_dialog_party_id = world_party.id
+	_speed_before_dialog = int(_state.clock.speed)
+	_state.clock.set_speed(CampaignClock.Speed.PAUSED)
+
+	var party := _state.party_of(world_party)
+	var enemy_count := _state.active_members(party).size()
+	_dialog.show_encounter(
+		world_party.display_name,
+		_encounters.enemy_strength(world_party),
+		enemy_count,
+		_encounters.player_strength(),
+		_state.active_members(_state.player_party).size()
+	)
+	_hud.set_hint("The world is paused while you decide.")
+	DebugLogger.info("encounter with %s (%d soldiers) at %s" % [
+		world_party.display_name, enemy_count, _state.clock.full_string(),
+	], "WorldMap")
+	_refresh()
+
+
+func _close_encounter_dialog() -> void:
+	_dialog_party_id = ""
+	_dialog.hide_dialog()
+	_state.clock.set_speed(_speed_before_dialog as CampaignClock.Speed)
+
+
+func _on_encounter_attack() -> void:
+	var world_party := _state.world_party(_dialog_party_id)
+	var party_id := _dialog_party_id
+	if world_party == null or _encounters == null:
+		_close_encounter_dialog()
+		return
+	var context := _encounters.build_context(world_party, true)
+	if context == null:
+		_hud.set_hint("That fight could not be started - see the log.")
+		_close_encounter_dialog()
+		return
+	DebugLogger.info("attacking %s (battle %s)" % [world_party.display_name, context.battle_id], "WorldMap")
+	_close_encounter_dialog()
+	_hud.set_hint("Loading the battlefield against %s..." % party_id)
+	SceneManager.change_scene("battle", {"context": context})
+
+
+func _on_encounter_retreat() -> void:
+	var world_party := _state.world_party(_dialog_party_id)
+	if world_party != null and _encounters != null:
+		_encounters.apply_retreat(world_party)
+		_hud.set_hint("You pulled away from %s." % world_party.display_name)
+	_close_encounter_dialog()
 	_refresh()
 
 

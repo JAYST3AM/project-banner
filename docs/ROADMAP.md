@@ -10,7 +10,7 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | 1 | Project architecture and campaign foundation | **DONE** |
 | 2 | Playable world map and settlement travel | **DONE** |
 | 3 | Persistent soldiers, recruitment, party roster | **DONE** |
-| 4 | World encounters and tactical battle transition | TODO |
+| 4 | World encounters and tactical battle transition | **DONE** |
 | 5 | First functional tactical combat | TODO |
 | 6 | Persistent campaign save/load validation | TODO |
 | — | **First major checkpoint: the full vertical slice** | TODO |
@@ -90,7 +90,10 @@ windowed run that recruits four soldiers through the real button handler.
 - Battle scene: placeholder markers, camera pan/zoom, Start Battle, Retreat
 
 **Definition of done:** travel -> encounter bandits -> Attack -> battlefield loads
-with the correct units -> return to the same campaign.
+with the correct units -> return to the same campaign. Verified by 282 assertions in
+`tests/test_encounters.gd`, including that exact path through the real battle scene,
+and in a windowed run that recruits four soldiers, meets eight bandits, attacks, and
+logs all twelve of them by name on the field.
 
 ## Step 5 - First functional combat (`milestone-05`)
 

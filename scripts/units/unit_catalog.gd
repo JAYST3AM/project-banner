@@ -61,6 +61,18 @@ func ids() -> Array[String]:
 	return out
 
 
+## Archetypes a settlement may offer. Non-player troops (bandits) share the same
+## stat machinery but must never appear in a recruit list.
+func recruitable_ids() -> Array[String]:
+	var out: Array[String] = []
+	for key in definitions.keys():
+		var definition := definitions[key] as UnitDefinition
+		if definition != null and definition.recruitable:
+			out.append(str(key))
+	out.sort()
+	return out
+
+
 func all() -> Array[UnitDefinition]:
 	var out: Array[UnitDefinition] = []
 	for key in definitions.keys():

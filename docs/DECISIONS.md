@@ -257,3 +257,75 @@ all. A test harness that can report a silent false green is worse than no harnes
 because it converts "I did not check" into "I checked and it is fine". The guards
 are: `GDScript.can_instantiate()`, a `checks == 0` post-condition, and a
 reported-versus-expected suite count.
+
+---
+
+## D-019: `BattleContext` is the only channel between campaign and battle
+
+**Decision.** A battle scene receives everything through the scene payload as a
+`BattleContext`. It never reads `GameManager.campaign`, never resolves a party, and
+never consults a unit catalog.
+
+**Why.** The brief requires it, and the reason is worth restating: a battle that
+reconstructs its armies from global state can only ever fight the fight the world
+happens to be in *right now*. Making the context the only channel means an ambush,
+a siege, a tournament or a scripted historical battle is a different context object
+and nothing else. It also means a battle is fully describable - and therefore
+loggable, replayable and testable - without a campaign.
+
+---
+
+## D-020: Battle snapshots carry identity **and** resolved stats
+
+**Decision.** Each roster entry in the context is a dictionary holding the
+`soldier_id` plus the soldier's fully resolved combat stats (including trait
+modifiers), rather than a reference to the `Soldier` or a bare id.
+
+**Why.** Two requirements pull in opposite directions: the battle must know exactly
+which person it is moving around the field (so it needs identity), and it must not
+be able to mutate campaign data or reach into a catalog (so it needs self-contained
+stats). A snapshot satisfies both. Trait `attack_pct` and `move_speed_pct` are
+applied while building the snapshot, which is the single place D-017 promised they
+would be consumed.
+
+---
+
+## D-021: Every overworld party is spawned from data, deterministically
+
+**Decision.** Spawn points are explicit entries in
+`data/encounters/bandit_parties.json`; composition is rolled from named RNG streams
+derived from the campaign seed; wander targets are derived from the party id and a
+persisted wander counter.
+
+**Why.** A campaign seed is only meaningful if the same seed produces the same
+world, and that has to include the things trying to kill you. Deriving wander
+targets from a counter instead of a live generator means party behaviour needs no
+RNG state in the save file, exactly as with soldier names (D-016). The windowed
+verification confirmed it: two separate processes with seed 4321 produced identical
+soldiers and an identical battle seed.
+
+---
+
+## D-022: Development flags are consumed once where they would otherwise loop
+
+**Decision.** `--autostart-town` is consumed on first use; the other flags are
+idempotent and re-evaluate every time.
+
+**Why.** Automated verification returns to the world map several times in one run.
+A flag that fires on *every* world-map load turned the intended path
+(town -> map -> encounter -> battle) into a loop between the town and the map, which
+is exactly the sort of thing that makes a verification run look like it passed when
+it never reached the part that mattered.
+
+---
+
+## D-023: The battle scene's debug exit is a real, separate path from Retreat
+
+**Decision.** "Retreat" applies the campaign consequence (push clear, set a
+cooldown). "Debug Exit", available only in debug builds, leaves the battlefield
+without touching the campaign.
+
+**Why.** A developer inspecting a battlefield repeatedly does not want to move the
+player party every time. Keeping them as two paths means the consequence-bearing
+one stays honest - it is the path a player takes - while the inspection path stays
+free of side effects.

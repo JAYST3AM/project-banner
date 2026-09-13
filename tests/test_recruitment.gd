@@ -31,7 +31,10 @@ func _test_catalogs() -> void:
 	section("unit and trait data")
 	var units := UnitCatalog.load_from()
 	equal(units.load_errors.size(), 0, "unit catalog loads without errors")
-	equal(units.definitions.size(), 3, "three archetypes defined")
+	equal(units.definitions.size(), 6, "six archetypes defined (three recruitable, three hostile)")
+	equal(units.recruitable_ids().size(), 3, "exactly three archetypes are recruitable")
+	check("bandit_ruffian" not in units.recruitable_ids(), "bandits are never offered as recruits")
+	check("bandit_ruffian" in units.ids(), "bandits are still defined as archetypes")
 
 	for unit_type_id in ["peasant_recruit", "spearman", "archer"]:
 		check(units.has(unit_type_id), "%s exists" % unit_type_id)

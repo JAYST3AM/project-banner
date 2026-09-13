@@ -15,7 +15,8 @@
       "ranged": false,
       "recruit_cost": 20,
       "upgrade_to": "spearman",
-      "recruit_weight": 10
+      "recruit_weight": 10,
+      "recruitable": true
     },
     {
       "id": "spearman",
@@ -30,7 +31,8 @@
       "ranged": false,
       "recruit_cost": 55,
       "upgrade_to": "",
-      "recruit_weight": 5
+      "recruit_weight": 5,
+      "recruitable": true
     },
     {
       "id": "archer",
@@ -45,7 +47,57 @@
       "ranged": true,
       "recruit_cost": 45,
       "upgrade_to": "",
-      "recruit_weight": 4
+      "recruit_weight": 4,
+      "recruitable": true
+    },
+
+    {
+      "id": "bandit_ruffian",
+      "name": "Bandit Ruffian",
+      "description": "A deserter or a farmer who gave up on farming. Armed with whatever came to hand.",
+      "hp": 32,
+      "attack": 5,
+      "defence": 2,
+      "move_speed": 5.2,
+      "attack_range": 1.1,
+      "attack_cooldown": 1.4,
+      "ranged": false,
+      "recruit_cost": 0,
+      "upgrade_to": "",
+      "recruit_weight": 0,
+      "recruitable": false
+    },
+    {
+      "id": "bandit_brigand",
+      "name": "Bandit Brigand",
+      "description": "The one who has done this before, and owns a mail shirt to prove it.",
+      "hp": 46,
+      "attack": 8,
+      "defence": 5,
+      "move_speed": 4.8,
+      "attack_range": 1.4,
+      "attack_cooldown": 1.6,
+      "ranged": false,
+      "recruit_cost": 0,
+      "upgrade_to": "",
+      "recruit_weight": 0,
+      "recruitable": false
+    },
+    {
+      "id": "bandit_archer",
+      "name": "Bandit Archer",
+      "description": "Shoots from the treeline and runs when approached.",
+      "hp": 26,
+      "attack": 6,
+      "defence": 0,
+      "move_speed": 5.5,
+      "attack_range": 9.0,
+      "attack_cooldown": 2.2,
+      "ranged": true,
+      "recruit_cost": 0,
+      "upgrade_to": "",
+      "recruit_weight": 0,
+      "recruitable": false
     }
   ]
 }

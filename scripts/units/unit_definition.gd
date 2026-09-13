@@ -22,6 +22,10 @@ var recruit_cost: int = 0
 var upgrade_to: String = ""
 ## Relative likelihood of appearing in a settlement's recruit pool (reserved).
 var recruit_weight: int = 1
+## Whether a settlement may offer this archetype to the player at all. Bandits
+## and other non-player troops are defined here so they share the same stat and
+## progression machinery, but are never recruitable.
+var recruitable: bool = true
 
 
 static func from_dict(data: Dictionary) -> UnitDefinition:
@@ -39,6 +43,7 @@ static func from_dict(data: Dictionary) -> UnitDefinition:
 	d.recruit_cost = maxi(0, int(data.get("recruit_cost", 0)))
 	d.upgrade_to = str(data.get("upgrade_to", ""))
 	d.recruit_weight = maxi(0, int(data.get("recruit_weight", 1)))
+	d.recruitable = bool(data.get("recruitable", true))
 	return d
 
 
@@ -57,6 +62,7 @@ func to_dict() -> Dictionary:
 		"recruit_cost": recruit_cost,
 		"upgrade_to": upgrade_to,
 		"recruit_weight": recruit_weight,
+		"recruitable": recruitable,
 	}
 
 

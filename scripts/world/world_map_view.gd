@@ -15,6 +15,7 @@ const COLOR_WILDERNESS := Color("7f8a6a")
 const COLOR_SELECTED := Color("ffd479")
 const COLOR_HOVERED := Color("c9d4de")
 const COLOR_PLAYER := Color("4fa8e0")
+const COLOR_ENEMY := Color("d0603f")
 const COLOR_PARTY_OUTLINE := Color("0b1017")
 
 var state: CampaignState = null
@@ -113,6 +114,7 @@ func _draw() -> void:
 	_draw_roads()
 	_draw_travel_line()
 	_draw_settlements()
+	_draw_world_parties()
 	_draw_player_party()
 
 
@@ -171,6 +173,36 @@ func _draw_player_party() -> void:
 	draw_arc(position, 14.0, 0.0, TAU, 32, COLOR_PLAYER.lightened(0.25), 2.0)
 	if state.player_party != null and not state.player_party.display_name.is_empty():
 		_draw_label(state.player_party.display_name, position + Vector2(0.0, 30.0), COLOR_PLAYER, label_font_size() - 2)
+
+
+## Hostile and neutral parties sharing the map with the player. Hostile ones get
+## a threat ring that reaches as far as they will chase from, so "am I about to be
+## jumped?" is answerable at a glance.
+func _draw_world_parties() -> void:
+	if state == null:
+		return
+	var font_size := label_font_size() - 2
+	for key in state.parties.keys():
+		var world_party := state.parties[key] as WorldParty
+		if world_party == null or not world_party.is_available():
+			continue
+		var party := state.party_of(world_party)
+		var soldiers := party.size() if party != null else 0
+		var color := COLOR_ENEMY if world_party.kind == Party.KIND_BANDIT else COLOR_HOVERED
+		var position := world_party.position
+
+		draw_circle(position, 11.0, COLOR_PARTY_OUTLINE)
+		# A diamond, so parties never read as settlements or as the player.
+		var points := PackedVector2Array([
+			position + Vector2(0.0, -9.0),
+			position + Vector2(9.0, 0.0),
+			position + Vector2(0.0, 9.0),
+			position + Vector2(-9.0, 0.0),
+		])
+		draw_colored_polygon(points, color)
+
+		var label := "%s (%d)" % [world_party.display_name, soldiers]
+		_draw_label(label, position + Vector2(0.0, 26.0), color.lightened(0.15), font_size)
 
 
 ## Centred text with a hard shadow so labels stay readable over any backdrop.

@@ -17,6 +17,9 @@ const AUTOSTART_PREFIX := "--autostart-campaign"
 const AUTOTRAVEL_PREFIX := "--autotravel="
 const AUTOTOWN_PREFIX := "--autostart-town="
 const AUTORECRUIT_PREFIX := "--autorecruit="
+const AUTOENGAGE_FLAG := "--autoengage"
+const AUTOATTACK_FLAG := "--autoattack"
+const AUTOLEAVE_FLAG := "--autoleave"
 
 
 static func _user_args() -> PackedStringArray:
@@ -55,10 +58,18 @@ static func autotravel_destination() -> String:
 	return ""
 
 
-## Settlement id to jump straight into on world-map load, or "".
-static func autostart_town() -> String:
+## Settlement id to jump straight into on world-map load, or "". Consumed once:
+## after the first use it returns "" so an automated run does not loop back into
+## the town every time the world map reloads.
+static var _town_consumed: bool = false
+
+
+static func consume_autostart_town() -> String:
+	if _town_consumed:
+		return ""
 	for arg in _user_args():
 		if arg.begins_with(AUTOTOWN_PREFIX):
+			_town_consumed = true
 			return arg.trim_prefix(AUTOTOWN_PREFIX)
 	return ""
 
@@ -71,3 +82,29 @@ static func autorecruit_count() -> int:
 			var raw := arg.trim_prefix(AUTORECRUIT_PREFIX)
 			return int(raw) if raw.is_valid_int() else 0
 	return 0
+
+
+## Jump the player straight onto the nearest hostile party so an encounter fires.
+static func autoengage() -> bool:
+	return _has_flag(AUTOENGAGE_FLAG)
+
+
+## Accept the first encounter prompt automatically instead of waiting for a click.
+static func autoattack() -> bool:
+	return _has_flag(AUTOATTACK_FLAG)
+
+
+## Leave a settlement immediately after the automatic recruitment, so an
+## automated run can chain town -> world map -> encounter -> battle.
+static func autoleave_town() -> bool:
+	return _has_flag(AUTOLEAVE_FLAG)
+
+
+static func _has_flag(flag: String) -> bool:
+	for arg in _user_args():
+		if arg == flag or arg.begins_with(flag + "="):
+			return true
+	for arg in OS.get_cmdline_args():
+		if arg == flag or arg.begins_with(flag + "="):
+			return true
+	return false
