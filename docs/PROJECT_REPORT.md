@@ -121,6 +121,7 @@ runner's `SUITES` list, since several are meant to fail.
 | `128d07e`, `2d7d65c` | milestone-06.6: lock the Steps 0–6 foundation |
 | `17afd2b` | docs: the CI gate was proven able to go red, not only green |
 | `c4c2bd2` | milestone-07: establish terrain and formation warfare foundation |
+| `ccf9cff` | milestone-07.1: harden formation ownership and contact semantics |
 
 ---
 
@@ -578,6 +579,23 @@ executed on the runner rather than merely present in the repository.
 Every required step ran; the only skipped step was the failure-artifact upload, which
 is correct on a passing run. The engine the runner used is the pinned one, not whatever
 `latest` resolved to on the day.
+
+**Observed result after Step 7.1** ([run 34746351217](https://github.com/JAYST3AM/project-banner/actions/runs/34746351217),
+commit `ccf9cff`), again read from the runner's raw log:
+
+```
+engine: 4.7.2.stable.official.ed1daf0bf
+  PASS  (72 assertions, 0 failures)     <- test_terrain
+  PASS  (328 assertions, 0 failures)    <- test_formation
+  PASS  (99 assertions, 0 failures)     <- test_formation_battle
+  suites: 16 of 16 reported   assertions: 2207   failures: 0
+  RESULT: PASS
+--------- persistence write: PASS (6 checks, 0 failures) ---------
+--------- persistence verify: PASS (95 checks, 0 failures) ---------
+```
+
+Same shape as the run above: every step green, only the on-failure upload skipped, and
+the new assertion counts visible in the log rather than inferred from a badge.
 
 **The gate was also proven to go red**, on a throwaway branch and a pull request that
 was closed without merging, so `main` was never affected. Two separate failures were

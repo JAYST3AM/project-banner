@@ -407,7 +407,7 @@ nothing. The contract is now checked first. See D-057.
 | Two-process restart | **95 checks, 0 failures** - unchanged; no save-format change |
 | Windowed smoke | campaign → settlement → recruit → battle → **scripted formation drill** → results, zero script errors |
 | Bogus `--suite=` | exit 1 |
-| CI | green on the pushed tip |
+| CI | **green** on `ccf9cff` — [run 34746351217](https://github.com/JAYST3AM/project-banner/actions/runs/34746351217), read from the raw log: 16 of 16 suites, 2207 assertions, both persistence phases |
 
 The windowed run now includes a **formation drill** (`--autoformations`) that drives the
 scene's real order methods - select all, form line, detach three as a column, move them
