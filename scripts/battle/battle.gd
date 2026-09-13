@@ -29,6 +29,11 @@ var _drag_threshold_px := 6.0
 var _resolved := false
 ## Battle-time multiplier used by automated runs (DevFlags.battle_speed()).
 var _battle_speed := 1.0
+## The enemy's commander. Formation-level thinking, kept out of the simulator.
+var _ai: BattleAI = null
+var _formations_built := 0
+## Counter for formations the player detaches, so their ids stay readable and unique.
+var _formation_counter := 0
 
 
 func _ready() -> void:
@@ -47,7 +52,14 @@ func _ready() -> void:
 
 	_simulator = BattleSimulator.new(_config, _context.battle_seed)
 	_simulator.add_units(units)
+	# The ground comes from the context's terrain seed, so the same battle is fought on
+	# the same field every time it is replayed. It is built before the armies are formed
+	# because where the armies end up standing is a question about the ground.
+	_simulator.set_terrain_from_context(_context, _config)
+	var formations := BattleSetup.assign_default_formations(_simulator, _config)
+	_ai = BattleAI.create(_config)
 	_view.bind(_simulator, _context)
+	_formations_built = formations.size()
 
 	var roster: Array[String] = []
 	for unit in units:
@@ -124,6 +136,47 @@ func _build_hud() -> void:
 	_retreat_button.pressed.connect(_on_retreat)
 	action_box.add_child(_retreat_button)
 
+	# Formation commands. Development-grade controls, but real orders: each one is
+	# something a commander would actually say, and each one is executed by soldiers
+	# walking rather than by the shape changing under them.
+	var formation_panel := PanelContainer.new()
+	formation_panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
+	formation_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	formation_panel.position = Vector2(12.0, -104.0)
+	hud.add_child(formation_panel)
+	var formation_box := HBoxContainer.new()
+	formation_box.add_theme_constant_override("separation", 6)
+	formation_panel.add_child(formation_box)
+
+	formation_box.add_child(UiTheme.label("Selected:", 13, UiTheme.DIM))
+	var line_button := UiTheme.button("Line (1)", 84.0)
+	line_button.pressed.connect(_order_formation_type.bind("line"))
+	formation_box.add_child(line_button)
+	var column_button := UiTheme.button("Column (2)", 96.0)
+	column_button.pressed.connect(_order_formation_type.bind("column"))
+	formation_box.add_child(column_button)
+	var loose_button := UiTheme.button("Loose (3)", 88.0)
+	loose_button.pressed.connect(_order_formation_type.bind("loose"))
+	formation_box.add_child(loose_button)
+	var turn_left := UiTheme.button("Turn L (Q)", 92.0)
+	turn_left.pressed.connect(_turn_selection.bind(-PI * 0.25))
+	formation_box.add_child(turn_left)
+	var turn_right := UiTheme.button("Turn R (E)", 92.0)
+	turn_right.pressed.connect(_turn_selection.bind(PI * 0.25))
+	formation_box.add_child(turn_right)
+	var hold_button := UiTheme.button("Hold (H)", 84.0)
+	hold_button.tooltip_text = "Stand fast: soldiers hold their places instead of closing."
+	hold_button.pressed.connect(_order_stance.bind(BattleFormation.ORDER_HOLD))
+	formation_box.add_child(hold_button)
+	var engage_button := UiTheme.button("Engage (G)", 102.0)
+	engage_button.tooltip_text = "Close with the enemy and keep closing."
+	engage_button.pressed.connect(_order_stance.bind(BattleFormation.ORDER_ENGAGE))
+	formation_box.add_child(engage_button)
+	var overlay_button := UiTheme.button("Overlay (F3)", 110.0)
+	overlay_button.tooltip_text = "Show anchors, facing, target slots and cohesion."
+	overlay_button.pressed.connect(_toggle_overlay)
+	formation_box.add_child(overlay_button)
+
 	if OS.is_debug_build():
 		var leave := UiTheme.button("Debug Exit", 110.0)
 		leave.tooltip_text = "Leave the battlefield without resolving it (debug builds only)"
@@ -143,6 +196,7 @@ func _refresh() -> void:
 			_simulator.side_count(BattleContext.SIDE_ENEMY), _context.strength_of(BattleContext.SIDE_ENEMY),
 		],
 		"Ground:       %s, seed %d" % [_context.weather, _context.terrain_seed],
+		_terrain_line(),
 		"Time:         Day %d %s   (elapsed %d:%02d)" % [
 			_context.campaign_day,
 			CampaignClock.time_string_from_hour(_context.campaign_hour),
@@ -150,10 +204,46 @@ func _refresh() -> void:
 			int(_simulator.elapsed) % 60,
 		],
 		"Battle state: %s" % _state_name(),
+		"",
+		_formation_summary(),
 	])
 	_start_button.disabled = _simulator.is_running()
 	var selected := _view.selected_ids.size()
 	_retreat_button.text = "Retreat" if selected == 0 else "Retreat (%d selected)" % selected
+
+
+## What the field is made of. Worth showing: the ground is now a fact about the battle
+## rather than decoration, and a player who cannot see it cannot plan around it.
+func _terrain_line() -> String:
+	if _simulator == null or _simulator.terrain == null:
+		return "Terrain:      featureless"
+	var counts := _simulator.terrain.counts_by_type()
+	var parts: Array[String] = []
+	for id in counts.keys():
+		parts.append("%s %d" % [str(id), int(counts[id])])
+	if parts.is_empty():
+		return "Terrain:      featureless"
+	return "Terrain:      %s cells" % ", ".join(parts)
+
+
+## One line per player body. Cohesion is the number worth watching: it is the honest
+## answer to the only question that matters about a formation, which is whether it is
+## still one.
+func _formation_summary() -> String:
+	if _simulator == null:
+		return ""
+	var lines: Array[String] = []
+	for formation in _simulator.formations:
+		if formation.side != BattleContext.SIDE_PLAYER:
+			continue
+		if not formation.has_living_units(_simulator.units_by_id()):
+			continue
+		lines.append("  %-15s %-7s %2dx%-2d  %3.0f%%  %s" % [
+			formation.id, formation.display_name(), formation.file_count, formation.rank_count,
+			formation.cohesion * 100.0, formation.state_name()])
+	if lines.is_empty():
+		return "Formations:   none - soldiers are acting on their own"
+	return "Formations (%d):\n%s" % [lines.size(), "\n".join(lines)]
 
 
 func _state_name() -> String:
@@ -173,6 +263,11 @@ func _process(delta: float) -> void:
 		return
 	_update_camera_pan(delta)
 	if _simulator.is_running():
+		# The enemy's thinking happens here, above the soldiers and outside the
+		# simulator: the battlefield does not decide anything on its own, so a battle
+		# with no commander attached is a battle where nothing moves that was not
+		# ordered to.
+		_ai.update(_simulator, delta * _battle_speed)
 		var events := _simulator.step(delta * _battle_speed)
 		_view.add_events(events)
 		_view.queue_redraw()
@@ -257,8 +352,188 @@ func _handle_key(event: InputEventKey) -> void:
 			_clear_selection()
 		KEY_R:
 			_on_retreat()
+		# Formation orders. Development-grade keys, but the commands themselves are the
+		# real ones: each of these is an order a commander would give, not a debug knob.
+		KEY_1:
+			_order_formation_type("line")
+		KEY_2:
+			_order_formation_type("column")
+		KEY_3:
+			_order_formation_type("loose")
+		KEY_Q:
+			_turn_selection(-PI * 0.25)
+		KEY_E:
+			_turn_selection(PI * 0.25)
+		KEY_H:
+			_order_stance(BattleFormation.ORDER_HOLD)
+		KEY_G:
+			_order_stance(BattleFormation.ORDER_ENGAGE)
+		KEY_F3:
+			_toggle_overlay()
+		KEY_F4:
+			_view.show_terrain = not _view.show_terrain
+			_hint.text = "Ground rendering %s." % ("on" if _view.show_terrain else "off")
+			_view.queue_redraw()
 		_:
 			return
+
+
+## ---------- formation orders ---------------------------------------------
+
+## Every selected soldier still on their feet.
+func _living_selection() -> Array[int]:
+	var out: Array[int] = []
+	for unit_id in _view.selected_ids:
+		var unit := _simulator.find_unit(unit_id)
+		if unit != null and unit.is_alive():
+			out.append(unit_id)
+	return out
+
+
+## The body the selection is being treated as.
+##
+## The rule is deliberately simple: everything selected acts as one formation. If the
+## selection is exactly an existing body, that body is reused so repeated orders do not
+## spawn a new one each time. Otherwise the selected soldiers are gathered into a fresh
+## body and taken out of whatever held them - which is how a commander detaches a group
+## from the line, and it is why the line it came from now has a gap in it.
+func _formation_for_selection() -> BattleFormation:
+	var ids := _living_selection()
+	if ids.is_empty():
+		return null
+
+	for formation in _simulator.formations:
+		if formation.side != BattleContext.SIDE_PLAYER or formation.unit_ids.size() != ids.size():
+			continue
+		var matches := true
+		for unit_id in ids:
+			if not formation.has_unit(unit_id):
+				matches = false
+				break
+		if matches:
+			return formation
+
+	_formation_counter += 1
+	var formation := BattleFormation.create(
+		"player_body_%d" % _formation_counter,
+		BattleContext.SIDE_PLAYER,
+		_centroid_of(ids),
+		_facing_toward_enemy(),
+		"line",
+		FormationCatalog.load_from(),
+		_config
+	)
+	formation.order_hold()
+	_simulator.add_formation(formation)
+	_simulator.assign_formation(formation, ids)
+	return formation
+
+
+func _centroid_of(unit_ids: Array[int]) -> Vector2:
+	var total := Vector2.ZERO
+	var counted := 0
+	for unit_id in unit_ids:
+		var unit := _simulator.find_unit(unit_id)
+		if unit == null:
+			continue
+		total += unit.position
+		counted += 1
+	if counted == 0:
+		return Vector2.ZERO
+	return total / float(counted)
+
+
+## Which way a freshly detached body should face: at the enemy, since that is what a
+## soldier who has just been told to form up is about to be doing.
+func _facing_toward_enemy() -> float:
+	var mine := _simulator.side_count(BattleContext.SIDE_PLAYER)
+	var theirs := _simulator.side_count(BattleContext.SIDE_ENEMY)
+	if mine == 0 or theirs == 0:
+		return 0.0
+	var our_centre := Vector2.ZERO
+	var their_centre := Vector2.ZERO
+	var ours := 0
+	var theirs_counted := 0
+	for unit in _simulator.units:
+		if not unit.is_alive():
+			continue
+		if unit.side == BattleContext.SIDE_PLAYER:
+			our_centre += unit.position
+			ours += 1
+		else:
+			their_centre += unit.position
+			theirs_counted += 1
+	if ours == 0 or theirs_counted == 0:
+		return 0.0
+	var to_enemy := (their_centre / float(theirs_counted)) - (our_centre / float(ours))
+	if to_enemy.length() < 0.001:
+		return 0.0
+	return to_enemy.angle()
+
+
+## Order every body that has a selected soldier in it. A body is the unit of command;
+## a soldier standing in one is not given its own destination.
+func _selected_formations() -> Array[BattleFormation]:
+	var out: Array[BattleFormation] = []
+	var selected := {}
+	for unit_id in _living_selection():
+		selected[unit_id] = true
+	for formation in _simulator.formations:
+		if formation.side != BattleContext.SIDE_PLAYER:
+			continue
+		for unit_id in formation.unit_ids:
+			if selected.has(unit_id):
+				out.append(formation)
+				break
+	return out
+
+
+func _order_formation_type(type_id: String) -> void:
+	if _living_selection().is_empty():
+		_hint.text = "Select soldiers first (click, shift-click or drag), then choose a formation."
+		return
+	var formation := _formation_for_selection()
+	if formation == null:
+		return
+	formation.set_type(type_id)
+	if formation.is_empty():
+		return
+	_hint.text = "%s ordered into %s: %d files by %d ranks%s." % [
+		formation.id, formation.display_name(), formation.file_count, formation.rank_count,
+		" - they will walk into it" if _simulator.is_running() else "",
+	]
+	_view.queue_redraw()
+
+
+func _turn_selection(radians: float) -> void:
+	var formations := _selected_formations()
+	if formations.is_empty():
+		_hint.text = "Select soldiers in a formation first, then Q or E to turn them."
+		return
+	for formation in formations:
+		formation.order_face(formation.desired_facing + radians)
+	_hint.text = "%d formation(s) turning to %.0f degrees." % [formations.size(), rad_to_deg(formations[0].desired_facing)]
+
+
+func _order_stance(order: String) -> void:
+	var formations := _selected_formations()
+	if formations.is_empty():
+		_hint.text = "Select soldiers in a formation first."
+		return
+	for formation in formations:
+		if order == BattleFormation.ORDER_HOLD:
+			formation.order_hold()
+		else:
+			formation.order_engage()
+	_hint.text = "%d formation(s) told to %s." % [
+		formations.size(), "hold the line" if order == BattleFormation.ORDER_HOLD else "close with the enemy"]
+
+
+func _toggle_overlay() -> void:
+	_view.show_formation_debug = not _view.show_formation_debug
+	_hint.text = "Formation overlay %s (anchors, facing, target slots, cohesion)." % (
+		"on" if _view.show_formation_debug else "off")
+	_view.queue_redraw()
 
 
 func _zoom_by(factor: float) -> void:
@@ -312,9 +587,14 @@ func _clear_selection() -> void:
 	_view.queue_redraw()
 
 
-## Right-click on an enemy orders an attack; right-click on open ground orders a
-## move. Orders issued before the battle starts are held until it does, so a plan
-## can be set up first.
+## Right-click on an enemy orders an attack; right-click on open ground orders a move.
+## Orders issued before the battle starts are held until it does, so a plan can be set
+## up first.
+##
+## Move orders go to [b]formations[/b], not to individual soldiers. A soldier standing
+## in a body is not given its own destination: the body is told where to go, and its
+## soldiers are told where their places are. That is the whole architectural change
+## this milestone exists to make, and it is visible here first.
 func _issue_move_order(world_point: Vector2) -> void:
 	if _view.selected_ids.is_empty():
 		_hint.text = "Select a unit first (click it, shift-click to add, or drag a box)."
@@ -323,29 +603,69 @@ func _issue_move_order(world_point: Vector2) -> void:
 	var target_unit := _simulator.find_unit(target_id) if target_id >= 0 else null
 	var is_enemy := target_unit != null and target_unit.side != BattleContext.SIDE_PLAYER
 
-	var issued := 0
-	for unit_id in _view.selected_ids:
-		var unit := _simulator.find_unit(unit_id)
-		if unit == null or not unit.is_alive():
-			continue
-		if is_enemy:
+	if is_enemy:
+		# Attack orders stay per-soldier. Telling one man to go for a particular enemy
+		# is a thing a commander does, and it does not change the shape of the line.
+		var issued := 0
+		for unit_id in _view.selected_ids:
+			var unit := _simulator.find_unit(unit_id)
+			if unit == null or not unit.is_alive():
+				continue
 			unit.attack_order_target_id = target_id
 			unit.has_move_order = false
-		else:
-			unit.attack_order_target_id = -1
-			unit.move_order = world_point
-			unit.has_move_order = true
-		issued += 1
-
-	if issued <= 0:
-		return
-	if is_enemy:
+			issued += 1
+		if issued <= 0:
+			return
 		_hint.text = "%d unit(s) ordered to attack %s." % [issued, target_unit.display_name]
-	else:
-		_hint.text = "%d unit(s) ordered to %.0f, %.0f. Right-click an enemy to attack it instead." % [
-			issued, world_point.x, world_point.y,
-		]
+		_view.queue_redraw()
+		return
+
+	_move_selection_to(world_point)
+
+
+## Send the selection somewhere, as bodies.
+##
+## Two cases, and the difference is worth stating because it is the whole command
+## model: selecting whole formations moves those formations, while selecting part of
+## one detaches those soldiers into a body of their own and sends that. Either way what
+## arrives on the far side is a formation, not a straggle.
+func _move_selection_to(world_point: Vector2) -> void:
+	if _selection_is_whole_bodies():
+		var formations := _selected_formations()
+		for formation in formations:
+			formation.order_move_to(world_point)
+		_hint.text = "%d formation(s) ordered to %.0f, %.0f." % [
+			formations.size(), world_point.x, world_point.y]
+		_view.queue_redraw()
+		return
+
+	var formation := _formation_for_selection()
+	if formation == null:
+		return
+	formation.order_move_to(world_point)
+	_hint.text = "%d soldiers detached as %s and ordered to %.0f, %.0f." % [
+		formation.unit_ids.size(), formation.id, world_point.x, world_point.y]
 	_view.queue_redraw()
+
+
+## Whether the selection is exactly one or more entire formations. If it is, a move
+## order moves them; if it is not, it is a detachment and has to be formed up first.
+func _selection_is_whole_bodies() -> bool:
+	var ids := _living_selection()
+	if ids.is_empty():
+		return false
+	var selected := {}
+	for unit_id in ids:
+		selected[unit_id] = true
+	for unit_id in ids:
+		var unit := _simulator.find_unit(unit_id)
+		if unit == null or unit.formation_ref == null:
+			return false
+		for brother_id in unit.formation_ref.unit_ids:
+			var brother := _simulator.find_unit(brother_id)
+			if brother != null and brother.is_alive() and not selected.has(brother_id):
+				return false
+	return true
 
 
 func _world_rect(a: Vector2, b: Vector2) -> Rect2:
@@ -360,7 +680,7 @@ func _on_start_battle() -> void:
 		return
 	_simulator.start()
 	DebugLogger.info("battle started", "Battle")
-	_hint.text = "The lines have engaged. Left-click to select, right-click an enemy to attack it, right-click ground to move. Space starts, R retreats."
+	_hint.text = "Select soldiers, then 1/2/3 for line, column or loose, Q/E to turn, H to hold, G to engage, right-click to move them as a body. F3 shows the formation overlay. Space starts, R retreats."
 	_refresh()
 
 

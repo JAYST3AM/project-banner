@@ -14,6 +14,9 @@ enum State { DEPLOYING, RUNNING, FINISHED }
 
 ## Distance within which units shove each other apart instead of overlapping.
 const SEPARATION_FACTOR := 0.9
+## How close to its slot a soldier has to be before it stops shuffling. Without this
+## a formed unit jitters forever around a point it can never exactly reach.
+const ARRIVE_EPSILON := 0.15
 
 var config: GameConfig = null
 var rng: RandomNumberGenerator = null
@@ -27,11 +30,32 @@ var winner: String = ""
 ## nothing else should depend on their contents surviving a frame.
 var events: Array[Dictionary] = []
 
+## The ground. Null means a featureless field, which is what every unformed test
+## battle and every milestone before this one ran on.
+var terrain: BattlefieldTerrain = null
+## The bodies of soldiers. Empty means every soldier fights for itself, which is the
+## pre-formation behaviour and is kept working on purpose.
+var formations: Array[BattleFormation] = []
+
+## Unit id -> unit. Rebuilt only when the roster changes, so a lookup during a step is
+## a probe rather than a walk of the whole battlefield.
+var _unit_by_id: Dictionary = {}
+var _formations_by_id: Dictionary = {}
+
+## Side -> whether any soldier of that side currently has an enemy within reach.
+## Rebuilt every step inside the per-soldier loop that already makes that comparison,
+## so it costs a boolean rather than a search. The formation stances read it to decide
+## whether a body is fighting or merely standing near the enemy.
+var _in_contact: Dictionary = {}
+
 var field_size: Vector2 = Vector2(100.0, 60.0)
 var separation_radius: float = 1.5
 var base_hit_chance: float = 0.75
 var defence_mitigation: float = 0.05
 var max_duration: float = 600.0
+## How close an engaged body brings its centre to the enemy's before it considers the
+## lines to have met. Small: the ranks are what actually touch.
+var contact_gap: float = 1.5
 
 
 func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
@@ -44,10 +68,204 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		base_hit_chance = config.get_float("battle.base_hit_chance", 0.75)
 		defence_mitigation = config.get_float("battle.defence_mitigation", 0.05)
 		max_duration = config.get_float("battle.max_duration_seconds", 600.0)
+		contact_gap = config.get_float("formation.enemy_contact_gap", 1.5)
+	_in_contact = {BattleContext.SIDE_PLAYER: false, BattleContext.SIDE_ENEMY: false}
 
 
 func add_units(p_units: Array[BattleUnit]) -> void:
 	units = p_units
+	_unit_by_id.clear()
+	for unit in units:
+		_unit_by_id[unit.id] = unit
+
+
+## The unit index. Exposed for tooling and tests that need to resolve many ids at
+## once - the cohesion measure takes it directly, and reaching into a private field
+## from outside would be the sort of coupling this project keeps out of its tests.
+func units_by_id() -> Dictionary:
+	return _unit_by_id
+
+
+## ---------- terrain ------------------------------------------------------
+
+## Build this battle's ground from the context's seed. Deterministic: the same
+## context always produces the same battlefield.
+func set_terrain_from_context(context: BattleContext, p_config: GameConfig = null) -> BattlefieldTerrain:
+	if context == null:
+		return null
+	var source := p_config if p_config != null else config
+	terrain = BattlefieldTerrain.generate(context.terrain_seed, field_size, source)
+	return terrain
+
+
+func set_terrain(p_terrain: BattlefieldTerrain) -> void:
+	terrain = p_terrain
+
+
+## ---------- formations ---------------------------------------------------
+
+func add_formation(formation: BattleFormation) -> void:
+	if formation == null:
+		return
+	formations.append(formation)
+	_formations_by_id[formation.id] = formation
+
+
+func formation(formation_id: String) -> BattleFormation:
+	var found: Variant = _formations_by_id.get(formation_id)
+	return found as BattleFormation
+
+
+func formations_of(side: String) -> Array[BattleFormation]:
+	var out: Array[BattleFormation] = []
+	for formation in formations:
+		if formation.side == side:
+			out.append(formation)
+	return out
+
+
+## Put a set of soldiers into a formation, in the order given.
+##
+## Membership is rebuilt from the list rather than appended to, so the result does not
+## depend on what the formation held before - which is what makes an assignment
+## reproducible. Nobody is moved by this: each soldier is told where its place now is
+## and walks there itself.
+##
+## A soldier belongs to one body. Anyone in the list is taken out of whatever formation
+## held them first, so detaching a group never leaves its men standing in two places at
+## once - which is the sort of thing that only shows up as two formations both believing
+## they own a soldier, and then as a very strange battle.
+func assign_formation(formation: BattleFormation, unit_ids: Array[int]) -> void:
+	if formation == null:
+		return
+	var wanted := {}
+	for unit_id in unit_ids:
+		wanted[unit_id] = true
+
+	for other in formations:
+		if other == formation:
+			continue
+		var removed := false
+		for existing in other.unit_ids.duplicate():
+			if wanted.has(existing):
+				other.unit_ids.erase(existing)
+				removed = true
+		if removed:
+			other.ensure_slots()
+			_sync_formation_slots(other)
+
+	for existing in formation.unit_ids:
+		var unit: BattleUnit = _unit_by_id.get(existing)
+		if unit != null and not wanted.has(existing):
+			unit.formation_ref = null
+			unit.slot_index = -1
+	formation.unit_ids.clear()
+	formation.unit_ids.append_array(unit_ids)
+	formation.ensure_slots()
+	_sync_formation_slots(formation)
+
+
+func _sync_formation_slots(formation: BattleFormation) -> void:
+	for i in formation.unit_ids.size():
+		var unit: BattleUnit = _unit_by_id.get(formation.unit_ids[i])
+		if unit != null:
+			unit.formation_ref = formation
+			unit.slot_index = i
+
+
+func _update_formations(delta: float) -> void:
+	for formation in formations:
+		if formation.order == BattleFormation.ORDER_ENGAGE:
+			formation.steer_toward(_engage_target_for(formation))
+		formation.advance(delta, _formation_speed(formation))
+		formation.ensure_slots()
+		formation.update_cohesion(_unit_by_id, _cohesion_reference(formation))
+
+
+## Where a body that has been told to close with the enemy wants its centre to be.
+##
+## Normally it stops a rank's depth short of the enemy centre: a formation decides
+## where the body stands, and whether that puts steel in reach is the soldiers'
+## business.
+##
+## The exception is the stalled battle. If the lines have stopped touching - the enemy
+## line broken, a survivor standing in a gap wider than a sword, nobody able to reach
+## anybody - then stopping short leaves both armies standing a few feet apart forever.
+## So a body whose side is not in contact at all closes the whole way. The check costs
+## one flag, because the per-soldier reach test already had to be made.
+func _engage_target_for(formation: BattleFormation) -> Vector2:
+	var target := _nearest_enemy_formation(formation)
+	if target == null:
+		return formation.anchor
+	var to_target := target.anchor - formation.anchor
+	var distance := to_target.length()
+	if distance <= 0.0001:
+		return formation.anchor
+	if bool(_in_contact.get(formation.side, false)):
+		var stop := (formation.depth() + target.depth()) * 0.5 + contact_gap
+		return target.anchor - (to_target / distance) * stop
+	return target.anchor
+
+
+## The nearest opposing body. Bodies are few - one or two a side - so this is a short
+## loop over a short list, not a battlefield-wide search.
+func _nearest_enemy_formation(formation: BattleFormation) -> BattleFormation:
+	var best: BattleFormation = null
+	var best_distance := INF
+	for other in formations:
+		if other.side == formation.side or not other.has_living_units(_unit_by_id):
+			continue
+		var distance := formation.anchor.distance_squared_to(other.anchor)
+		if distance < best_distance:
+			best_distance = distance
+			best = other
+	return best
+
+
+## Whether this soldier may leave its place to restart a fight that has stopped
+## happening.
+##
+## Three conditions, all of them narrow. The body must have been told to engage - a
+## body told to hold holds, whatever the enemy is doing. The body must have stopped -
+## a body still marching is dressing, not fighting. And nobody on this side may
+## currently be within reach of anybody, because if the line is fighting then the line
+## is what matters and a soldier leaving it is a hole opening in it.
+func _can_press_forward(unit: BattleUnit, body: BattleFormation) -> bool:
+	if body == null or unit.slot_index < 0:
+		return false
+	if body.order != BattleFormation.ORDER_ENGAGE:
+		return false
+	if body.is_moving() or body.is_turning() or body.is_reforming():
+		return false
+	return not bool(_in_contact.get(unit.side, false))
+
+
+## The pace of the whole body: set by its slowest soldier, so a formation never walks
+## away from its own rear rank, and slowed further by the ground under its centre.
+func _formation_speed(formation: BattleFormation) -> float:
+	var slowest := INF
+	for unit_id in formation.unit_ids:
+		var unit: BattleUnit = _unit_by_id.get(unit_id)
+		if unit != null and unit.is_alive():
+			slowest = minf(slowest, unit.move_speed)
+	if slowest == INF:
+		return 0.0
+	var factor := 1.0
+	if config != null:
+		factor = maxf(0.05, config.get_float("formation.move_speed_factor", 0.9))
+	if terrain != null:
+		factor *= terrain.move_multiplier_at(formation.anchor)
+	return slowest * formation.move_factor * factor
+
+
+## Distance at which a soldier counts as completely out of place, used to turn raw
+## position error into a 0..1 cohesion figure.
+func _cohesion_reference(formation: BattleFormation) -> float:
+	var spacing := 3.0
+	if config != null:
+		spacing = maxf(0.1, config.get_float("formation.cohesion_reference_spacing", 3.0))
+	return maxf(0.1, spacing * formation.spacing)
+
 
 
 func start() -> void:
@@ -64,10 +282,8 @@ func is_finished() -> bool:
 
 
 func find_unit(unit_id: int) -> BattleUnit:
-	for unit in units:
-		if unit.id == unit_id:
-			return unit
-	return null
+	var found: Variant = _unit_by_id.get(unit_id)
+	return found as BattleUnit
 
 
 func alive_units(side: String = "") -> Array[BattleUnit]:
@@ -103,6 +319,13 @@ func step(delta: float) -> Array[Dictionary]:
 		_finish("")
 		return events
 
+	# The bodies move first, then the soldiers dress to them. Doing it in this order
+	# means a soldier reads one settled slot position per step rather than chasing a
+	# place that is still being computed.
+	_update_formations(delta)
+
+	_in_contact[BattleContext.SIDE_PLAYER] = false
+	_in_contact[BattleContext.SIDE_ENEMY] = false
 	for unit in units:
 		if unit.is_alive():
 			_update_unit(unit, delta)
@@ -131,9 +354,33 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 	unit.facing = (target.position - unit.position).normalized()
 
 	if unit.position.distance_to(target.position) <= unit.attack_range:
-		# In reach: stand and strike rather than walk into the enemy.
+		# In reach: stand and strike rather than walk into the enemy. This is also the
+		# only place that decides what "in contact" means, which is why the flag is set
+		# here rather than being recomputed later by someone else.
+		_in_contact[unit.side] = true
 		if unit.cooldown_left <= 0.0:
 			_attack(unit, target)
+		return
+
+	# A formed soldier holds its place in the body. It does not pick its own ground and
+	# does not run off after a target: the formation decides where the body is, and this
+	# soldier's job is to be where it was put. That is what keeps a line a line - and it
+	# is also why a large battle stays affordable, because most soldiers are doing
+	# arithmetic rather than deciding anything.
+	if unit.is_formed():
+		var body := unit.formation_ref
+		# Pressing forward is the one exception, and it is deliberately narrow. A body
+		# that has stopped, has been told to engage, and has nobody on its side
+		# fighting has no line left to hold: the fighting has stopped happening, and
+		# the nearest men crossing the gap is what starts it again. While anyone on
+		# this side is in contact the dressing wins, which is what stops a battle
+		# dissolving into a crowd.
+		if _can_press_forward(unit, body):
+			_move_toward(unit, target.position, delta)
+			return
+		var place := unit.formation_slot()
+		if unit.position.distance_to(place) > ARRIVE_EPSILON:
+			_move_toward(unit, place, delta)
 		return
 
 	if unit.has_move_order:
@@ -215,11 +462,20 @@ func _move_toward(unit: BattleUnit, point: Vector2, delta: float) -> void:
 	var to_point := point - unit.position
 	if to_point.length() <= 0.0001:
 		return
-	unit.position += to_point.normalized() * unit.move_speed * delta
+	unit.position += to_point.normalized() * _effective_speed(unit) * delta
 	unit.position = Vector2(
 		clampf(unit.position.x, 0.5, field_size.x - 0.5),
 		clampf(unit.position.y, 0.5, field_size.y - 0.5)
 	)
+
+
+## A soldier's speed over the ground it is standing on. Terrain is read here and
+## nowhere else, so the rule lives in one place and every kind of movement - formed,
+## ordered, or chasing - gets it for free.
+func _effective_speed(unit: BattleUnit) -> float:
+	if terrain == null:
+		return unit.move_speed
+	return unit.move_speed * terrain.move_multiplier_at(unit.position)
 
 
 ## Keeps units from stacking on top of each other. Simple positional relaxation -

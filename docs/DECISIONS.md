@@ -692,3 +692,218 @@ Two deliberate details:
   would break the very mechanism that keeps the runner honest; the workflow says so in
   a comment, so nobody removes the fixture thinking they are cleaning up output.
 
+---
+
+## D-043: Terrain is simulation data with a view, not a rendered thing with a model
+
+**Decision.** `BattlefieldTerrain` is a `RefCounted` grid of type, elevation and
+resolved movement multiplier. It is generated from a seed, queried by position, and
+knows nothing about how it is drawn. The renderer reads it; it never reads the renderer.
+
+**Why.** The alternative - terrain implied by whatever tiles happened to be on screen -
+makes the ground a presentation detail that gameplay then has to interpret, and the
+first time an artist moves a tile the balance changes. It also makes the battlefield
+untestable headlessly, and every milestone in this project is gated on headless tests.
+
+The split is enforced by types rather than by convention: `BattlefieldTerrain extends
+RefCounted`, so it *cannot* be a node, and a test asserts exactly that. A rule enforced
+by the compiler is one nobody has to remember.
+
+## D-044: A cell's terrain comes from hashing where it is, not from a generator's state
+
+**Decision.** `BattlefieldTerrain.generate()` derives both noise fields from
+`RngService.stable_hash` over each lattice coordinate. It does not use a
+`RandomNumberGenerator`, and it does not depend on the order cells are visited in.
+
+**Why.** Determinism from a seeded generator is only as good as the discipline of
+everyone who touches the loop. A hash of the coordinate is deterministic by
+construction: reordering the loop, generating one cell, or generating the field twice
+all give the same answer, and there is no state to accidentally advance. It also means
+generating a battlefield cannot disturb any other random stream in the process - a test
+proves a seeded `randi()` returns the same value whether or not terrain was generated in
+between, because a shared generator would have made every battle after the first
+subtly different.
+
+`terrain.generation_version` is mixed into the hash. Changing how terrain is generated
+therefore changes the ground on purpose, rather than silently changing what an existing
+seed means.
+
+## D-045: Terrain affects movement only, for now
+
+**Decision.** Step 7 terrain changes how fast soldiers move across it and nothing else.
+No attack or defence modifier, in either the data or the code.
+
+**Why.** The brief said terrain must affect something real and must not be overbuilt,
+and it explicitly allowed a small elevation combat effect "if appropriate". It is not
+appropriate yet: a defence modifier would change the outcome of every seeded battle in
+the balance measurements, which means re-deriving a set of numbers that currently mean
+something, in exchange for a bonus nobody can feel yet. Movement is a real consequence -
+crossing woods takes visibly longer, and a test measures the ratio against the type
+table's own numbers rather than against a hardcoded expectation.
+
+The terrain type table is where a defence field would go. Adding it later is a data
+change plus one read in `_attack()`, and it should be done when there is a mechanic
+that makes it interesting.
+
+## D-046: A formation is a geometry, not an enum with bonuses
+
+**Decision.** `BattleFormation` holds real state: anchor, facing, desired facing,
+frontage, depth, spacing, file and rank counts, per-soldier slot positions, order, and
+a measured cohesion. Formation types are data - `data/formations/formation_types.json` -
+and supply geometry and movement parameters, not modifiers.
+
+**Why.** The brief's first pillar is that formations must matter through geometry,
+facing, spacing, cohesion and terrain rather than through `shield wall = +15% defence`.
+That is only achievable if the formation actually knows its shape. A formation that
+only knows "I am a shield wall" cannot have its value depend on how tightly it is packed
+or whether its flank is turned, because it has no packing and no flank.
+
+Concretely, a type in the table supplies `max_files` - how wide the shape is willing to
+spread - plus a spacing multiplier, a turn rate and a move factor. Everything else is
+derived. That is why line, column and loose differ in ways a test can measure (frontage,
+depth, spacing) without any of them being special-cased in code, and why adding a wedge
+or a square later is a data entry plus, at most, a generator for a non-rectangular slot
+pattern.
+
+## D-047: Slots are generated in the formation's own frame, then transformed
+
+**Decision.** Slot positions are computed as `anchor + right * lateral + forward * depth`,
+where `right` and `forward` come from the formation's facing angle.
+
+**Why.** The obvious implementation - place a line along X, a column along Y - works for
+exactly the two directions deployment happens to use, and then every facing-sensitive
+mechanic added later has to unpick it. Generating in local space makes arbitrary facing
+a rotation rather than a special case, and although Step 7 implements no directional
+mechanics, the shield wall, phalanx frontage, flanking and rear-attack systems that come
+later all need a formation to be able to say which of its edges is its front.
+
+A test drives seven facings including 37, 143.5 and -61 degrees and checks that
+neighbours are one spacing apart along the formation's own width at every one of them.
+
+## D-048: Assignment is by index, and a casualty leaves a gap in the line
+
+**Decision.** `unit_ids[i]` owns `slots[i]`. A formation change leaves every soldier in
+the same place in the order, so it walks to a new position rather than being reshuffled.
+A fallen soldier is **not** removed from `unit_ids`: its slot stays reserved and the
+formation keeps its frontage with a hole in it.
+
+**Why, for the first part:** the brief asks for stable, deterministic assignment that
+preserves existing assignments and reassigns only when necessary. Index stability gets
+that without an assignment solver, and it has a property worth keeping - a soldier
+changing formation type keeps its place in the queue, so the reorganisation reads as the
+same body changing shape rather than as strangers finding new seats.
+
+**Why, for the second part:** the obvious alternative - compact the roster on death -
+re-dresses the entire formation every time anyone falls, which means a large battle has
+its soldiers permanently shuffling forward, and it is O(size of formation) per casualty.
+Keeping the slot costs nothing and is more honest about what a formation is: a gap in a
+line is a real thing, it is what makes a formation permeable, and the shield wall and
+phalanx work that comes later will specifically want to know about it. Removing a
+soldier is still possible via `remove_unit()` for transfers; it is death specifically
+that leaves the gap.
+
+## D-049: A formed soldier's place is its whole job
+
+**Decision.** A formed soldier whose enemy is in reach fights. Otherwise it walks to the
+slot the formation gave it. It does not choose its own ground, and it does not leave its
+place to chase a target.
+
+**Why.** This is the architectural change the milestone exists to make. Before Step 7,
+every soldier independently picked the nearest enemy and walked at it, which meant the
+"army" was a hundred separate decisions that happened to start in a block. Now the
+formation decides where the body is and the soldiers dress to it, which is both the only
+way a line stays a line and the only way a large battle stays affordable - most soldiers
+are doing arithmetic, not deciding anything.
+
+It also puts the decision where the brief says it belongs: above the soldier. The future
+performance model is one order per formation and then cheap local execution, not twenty
+thousand tactical planners.
+
+## D-050: Engagement is a stance, and a stalled battle is restarted by pressing forward
+
+**Decision.** A formation's order is `engage`, `hold` or `move`. `engage` is the default.
+A body that has stopped, has been told to engage, and whose side currently has nobody in
+reach of anybody, lets its soldiers leave their places and close the distance.
+
+**Why.** Without a default stance, a battle where the player gives no orders never
+resolves - and "the lines fight when they meet" is behaviour the game already had and
+must keep.
+
+But the default stance alone was not enough, and the reason is worth recording because
+it was found by running the game rather than by thinking about it. A battle resolved to
+nine players against one enemy and then stopped for four simulated minutes: the survivor
+was standing in the gap left by a fallen man, 2.6 units from the next soldier along,
+which is further than a sword reaches. Both bodies were engaged and both had stopped, so
+neither would close and neither could reach. A battle that cannot end is worse than a
+battle that ends badly.
+
+The fix is narrow on purpose. Pressing forward requires all three of: the body is
+engaged, the body has stopped, and *nobody on that side is in contact*. The third
+condition is what makes it safe - if the line is fighting, dressing wins and no soldier
+leaves it, so a battle cannot dissolve into a crowd. The state costs one boolean,
+maintained inside the per-soldier reach test that already had to be made, so the check
+is a lookup rather than a search.
+
+Related and deliberate: an engaged body's arrival tolerance is `0.05` units rather than
+the `0.6` used for waypoints. A body closing on an enemy is not making for a map pin, and
+stopping six tenths of a unit short of one is indistinguishable from stopping.
+
+## D-051: Enemy thinking lives outside the simulator
+
+**Decision.** `BattleAI` is not called by `BattleSimulator`. Whoever owns the battle loop
+calls `ai.update(simulator, delta)` before `simulator.step(delta)` - the battle scene
+does, the benchmark does, the tests do.
+
+**Why.** A simulator that thinks on its own is a simulator whose tests cannot isolate
+what they are testing. Keeping the commander outside means most of the suite steps a
+battle with no AI attached and gets exactly the mechanics it asked for, while the scene
+and the benchmark attach one and get a battle that progresses.
+
+It also keeps the boundary honest for the future. What `BattleAI` does today is small -
+face the enemy, tell the body to engage - and that is the point: closing the distance is
+not decided there, because the battlefield is the only thing that knows where anyone is
+standing. The AI says *what the body is for*; the battlefield works out what that means
+this step. Flanking, refusing a flank and withdrawing are decisions, and they belong in
+the same place this does.
+
+## D-052: Formations are battle state and never enter a campaign save
+
+**Decision.** No formation data is written to a save file. A battle reconstructs its
+formations from the `BattleContext` when it starts. The save format is unchanged and
+`save_version` stays at 1.
+
+**Why.** The brief says not to add formation state to campaign saves without a strong
+reason, and there is no strong reason: a formation is a thing an army is doing during
+one afternoon's fight, not a fact about who a soldier is. Persisting it would mean a
+save written mid-battle has to describe a half-executed manoeuvre, and every future
+change to formation geometry would need a migration for data that is discarded the
+moment the battle ends anyway.
+
+What survives a battle is still exactly what survived before Step 7: `BattleResult`
+describing what happened to individual soldiers, applied by `BattleResolver.apply()`.
+The existing saves load, the existing restart check passes, and the persistence suite -
+including the legacy-save path through the real main menu - is untouched.
+
+## D-053: The quadratic loops are measured and documented, not rewritten
+
+**Decision.** `_choose_target()` and `_resolve_overlaps()` compare every soldier with
+every other soldier. Step 7 measures what that costs at 100 to 5,000 soldiers, records
+the result in the report, and does not restructure the simulation.
+
+**Why.** The brief is explicit: do not perform a large architecture rewrite merely
+because 5,000 is slow, and do not claim a future capacity based on design alone. Both
+temptations are real here, and the honest middle path is a benchmark that produces
+numbers, an attribution that shows the new systems are not the cause, and a written
+record of what would have to change.
+
+The specific thing that would make this a mistake to fix now: optimizing before there is
+a target to optimize against produces an abstraction shaped by guesswork. A spatial grid
+sized for Step 7's two-army field would very likely be the wrong shape for a battlefield
+with cavalry on the wings and reserves in the rear, which is what the large-battle
+milestone will actually be optimizing for.
+
+What Step 7 does owe the future is not making it worse: every loop it adds is linear in
+soldiers, and the per-soldier cost of standing in a formation is a reference and an array
+read. A test asserts the type of that access, so the property is checked rather than
+claimed.
+

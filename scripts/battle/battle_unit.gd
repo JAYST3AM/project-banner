@@ -47,6 +47,33 @@ var has_move_order: bool = false
 ## Player-issued attack order: a unit id to hunt, or -1. Cleared when it dies.
 var attack_order_target_id: int = -1
 
+## The formation this soldier belongs to, if any, and the place in it the soldier
+## stands.
+##
+## Held as a direct reference rather than looked up by id: a formed soldier asks for
+## its place every step, and a string-keyed dictionary probe there would be paid
+## millions of times in a large battle. Both are battle-local objects, so there is no
+## ownership question and nothing here ever reaches the campaign.
+var formation_ref: BattleFormation = null
+var slot_index: int = -1
+
+
+## Whether this soldier is fighting as part of a formed body.
+func is_formed() -> bool:
+	return formation_ref != null and slot_index >= 0
+
+
+## The place this soldier has been told to stand, or its current position when it is
+## not in a formation.
+func formation_slot() -> Vector2:
+	if not is_formed():
+		return position
+	var slots := formation_ref.slots
+	if slot_index >= slots.size():
+		return position
+	return slots[slot_index]
+
+
 
 static func from_snapshot(snapshot: Dictionary, side: String, id: int) -> BattleUnit:
 	var unit := BattleUnit.new()

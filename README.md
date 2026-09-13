@@ -14,10 +14,12 @@ All assets, names, factions, lore, UI and code in this repository are original.
 
 ## Status
 
-**The first vertical slice is complete and verified.** You can start a campaign,
-travel, recruit individual named soldiers, take them into a tactical battle, watch
-some of them die, earn experience and gold, and find all of it intact after closing
-and reopening the game.
+**The first vertical slice is complete and verified**, and **Step 7 — terrain and
+formations** is now in. You can start a campaign, travel, recruit individual named
+soldiers, take them into a tactical battle on generated ground, form them into a line,
+a column or loose order, watch them walk into that shape while the enemy closes, watch
+some of them die, earn experience and gold, and find all of it intact after closing and
+reopening the game.
 
 See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for exactly what is playable
 and how it is verified, and [`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next.
@@ -44,12 +46,15 @@ Where the risk actually lives, and where the interesting reading is:
 
 | File | Why |
 | --- | --- |
-| `scripts/battle/battle_simulator.gd` | the whole fight, as pure data — combat maths, targeting, death |
+| `scripts/battle/battle_simulator.gd` | the whole fight, as pure data — combat maths, targeting, death, terrain-aware movement, formation steering |
+| `scripts/battle/battle_formation.gd` | a formation as a physical object — geometry, facing, slots, cohesion, reformation |
+| `scripts/battle/battlefield_terrain.gd` | the ground as data, generated from a seed and read by nothing else |
 | `scripts/battle/battle_resolver.gd` | the only function that lets a battle change the campaign |
 | `scripts/core/campaign_state.gd` | the persistence root; ownership rules live here |
 | `scripts/units/recruitment_service.gd` | the one transaction that adds a soldier to the party |
 | `tests/test_combat.gd` | includes the balance assertion that caught a silently broken melee system |
 | `tests/test_battle_outcomes.gd` | the four battle outcomes, and a deliberate attempt to farm the retreat loop |
+| `tests/test_formation_battle.gd` | both systems together — including the stalled battle that had to be fixed |
 | `tests/test_runner_contract.gd` | the runner testing itself against deliberately broken suites |
 
 Two distinctions are easy to get wrong, and both fail quietly:
@@ -66,11 +71,32 @@ a while: **enemy soldiers are persistent people too.** A band that survives a fi
 comes back with the hit points it has left, not a fresh set. Battle consequences are
 symmetric — see `docs/GAME_ARCHITECTURE.md`.
 
+**On formations, since they are new and easy to misread:** a formation is a physical
+object with real geometry — anchor, facing, frontage, depth, spacing, generated slots
+and a measured cohesion — and its value is meant to come from that shape rather than
+from a bonus. A soldier's slot is its whole job: it fights what it can reach and
+otherwise walks to the place it was given. Nothing in a formation's data table is a
+combat modifier, and there is deliberately nowhere to put one. See D-046 and the
+standing constraints in `docs/GAME_ARCHITECTURE.md`.
+
 Verification is the point of this repository. If you change something, the claim to
 check is not "it compiles" but that
-`tests/` still reports `1708 assertions, 0 failures, 13 of 13 suites` and that the
+`tests/` still reports `2058 assertions, 0 failures, 16 of 16 suites` and that the
 two-process restart check still passes. Both run automatically in CI on every push and
 pull request, pinned to Godot 4.7.2-stable.
+
+**Performance is measured, not claimed.** `scenes/dev/battle_benchmark.tscn` reports what
+a battle costs from 100 to 5,000 soldiers:
+
+```bash
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100,500,1000
+```
+
+The current numbers, and the two loops known to be responsible for the scaling, are in
+`docs/CURRENT_STATE.md`. The short version: 100 soldiers run at about 4.8 ms a tick, and
+5,000 at about eleven seconds, because target selection and overlap resolution compare
+every soldier with every other soldier. That is measured, documented, and the first task
+of the large-battle milestone rather than something optimised on a guess.
 
 ## Documentation
 
@@ -111,9 +137,9 @@ development switches that let the real game be driven without a mouse.
 
 ```
 assets/     audio, fonts, sprites, placeholders
-data/       data-driven definitions (units, items, settlements, encounters, config)
-scenes/     core, world, settlements, battle, ui, dev
-scripts/    core, world, battle, units, ui
+data/       data-driven definitions (units, items, settlements, encounters, terrain, formations, config)
+scenes/     core, world, settlements, battle, ui, dev (tests + the battle benchmark)
+scripts/    core, world, battle, units, ui, dev
 docs/       report, architecture, roadmap, current state, decisions, environment
 tests/      headless test suites, plus the two-process restart check
 .github/    CI: the headless suites and both persistence phases, on a clean runner

@@ -297,6 +297,167 @@ reach for `size()` because it is the shortest to type.
 
 ---
 
+### Battlefield terrain (Step 7)
+
+Terrain exists as **data first**. `BattlefieldTerrain` is a `RefCounted` holding a
+coarse grid - one cell every `terrain.cell_size` world units - with a terrain type
+index, an elevation, and a **resolved movement multiplier** per cell. Nothing in the
+simulation asks a renderer anything; the renderer asks the terrain.
+
+```
+BattlefieldTerrain
+  size, cell_size, cols, rows, terrain_seed, generation_version
+  _type_index : PackedInt32Array   per cell, index into the catalogue
+  _heights    : PackedFloat32Array per cell
+  _move       : PackedFloat32Array per cell, resolved at generation
+```
+
+**Generation is a pure function of the seed.** `generate(terrain_seed, size, config)`
+builds two value-noise fields - elevation and cover - by hashing each lattice
+coordinate with `RngService.stable_hash`, then classifying cells against
+`terrain.high_ground_threshold`, `terrain.woods_threshold` and `terrain.rough_threshold`.
+Because a cell's value depends only on *where it is* and not on the order cells were
+visited in, two runs of the same seed produce byte-identical ground, and generating a
+battlefield cannot disturb any other random stream. `terrain.generation_version` is
+mixed into the hash, so changing the generation algorithm changes the ground
+deliberately rather than silently invalidating every recorded seed.
+
+Four types, from `data/terrain/terrain_types.json`: open ground, rough ground, light
+woods, high ground. The type table is a catalogue like any other - adding a fifth type
+is a data change.
+
+**Queries are array reads.** `move_multiplier_at(point)`, `height_at(point)`,
+`type_id_at(point)`, `inside(point)` and `slope_between(from, to)` each resolve a cell
+index and read a `Packed*Array`. No temporary objects are allocated, because these run
+inside the per-soldier movement path. Out of bounds reads as open ground at zero
+height, which is the forgiving answer and the one that keeps a soldier who has been
+shoved off the field from changing speed for no reason the player can see.
+
+**Where terrain is read:** exactly one place, `BattleSimulator._effective_speed()`, and
+one more for the pace of a body, `BattleSimulator._formation_speed()`. Both multiply a
+unit's own speed by the ground's modifier, so the rule has one home.
+
+In this milestone terrain affects **movement only**. A defence modifier is where a
+later milestone would put one, and the terrain type table is where it would live - but
+adding one now would change the outcome of every seeded battle to no purpose, and
+"make terrain matter" is answered by movement being real.
+
+### Formations (Step 7)
+
+A formation is a first-class object, not a preset and not a buff. `BattleFormation`
+is a `RefCounted` that knows its own geometry:
+
+```
+id, side, type_id, anchor, facing, desired_facing, target_anchor, order
+unit_ids : Array[int]     unit_ids[i] owns slots[i] - battle unit ids, never soldier ids
+slots    : Array[Vector2] world-space target positions, regenerated when anything moves
+file_count, rank_count, spacing, cohesion, move_factor, turn_rate_deg
+```
+
+**Geometry is generated, not tabulated.** A formation type supplies one number that
+matters - `max_files`, how wide the shape is willing to spread - and everything else
+follows:
+
+```
+file_count = min(count, max_files)
+rank_count = ceil(count / file_count)
+lateral    = (file - (file_count - 1) / 2) * spacing
+depth      = ((rank_count - 1) / 2 - rank) * spacing
+slot       = anchor + right * lateral + forward * depth
+```
+
+Slots are computed in the formation's **own** frame and transformed into the world, so
+facing is a rotation of the geometry rather than a special case per direction. This is
+what makes arbitrary facings work, and it is the groundwork for the directional
+mechanics - shields, phalanx frontage, flanking - that will need exactly this later.
+
+With `max_files` of 10 for line, 2 for column and 6 for loose at 1.7x spacing, the
+consequences fall out rather than being asserted: a line is wide and shallow, a column
+is narrow and deep, loose order is spread further apart and reaches further back.
+
+**A soldier belongs to one formation.** `assign_formation()` rebuilds the body's roster
+from the list it is given and removes those soldiers from any other body first, so a
+detachment is a transfer rather than a duplication.
+
+**Assignment is by index, and a casualty leaves a gap.** `unit_ids[i]` owns `slots[i]`
+for the life of the assignment, so a formation change preserves every soldier's place -
+they walk to a new position in the same body rather than being reshuffled. When a
+soldier falls it is **not** removed from `unit_ids`: its slot stays reserved and the
+line keeps its frontage with a hole in it. Closing the files up would be a re-dress of
+the whole body on every death, and more importantly a gap in a formation is a physical
+fact that later mechanics - shield wall integrity, phalanx gaps - will want to read.
+`has_living_units()` is how anything asks whether a body is still a body.
+
+### Orders, stances, and the stalled battle
+
+A formation's `order` is one of three things:
+
+| Order | Meaning | Soldiers |
+| --- | --- | --- |
+| `engage` | close with the enemy and keep closing | dress while the body moves; press forward when it has stopped and nobody is fighting |
+| `hold` | stand on this ground | always dress to slots |
+| `move` | go to `target_anchor`, then revert to `hold` | always dress to slots |
+
+`engage` is the default, and it is what makes a battle resolve when the player gives no
+orders at all - which is the behaviour the game had before formations existed and has to
+keep having.
+
+**A soldier's place is its whole job.** A formed soldier whose enemy is in reach fights;
+otherwise it walks to its slot. It does not pick its own ground and it does not run off
+after a target. This is what keeps a line a line, and it is also what keeps a large
+battle affordable: most soldiers are doing arithmetic rather than deciding anything.
+
+**Turning is not teleportation.** `facing` and `desired_facing` are separate, and
+`advance()` walks `facing` toward `desired_facing` at `turn_rate_deg` per second. The
+slots rotate with it and the soldiers follow the moving slots, so a formation ordered to
+about-face takes a second or two and the men are seen to do it.
+
+**Cohesion** is the answer to the only question that matters about a formation, which is
+whether it is still one. It is derived, not stored as progress: the mean distance
+between each soldier and the slot it was given, normalised by
+`formation.cohesion_reference_spacing`, inverted and clamped - `1.0` dressed, `0.0`
+scattered. `is_reforming()` is true from the moment a new shape is ordered until
+cohesion recovers past `formation.settled_cohesion`.
+
+**The stalled battle, and why pressing forward exists.** During Step 7 testing a battle
+resolved to nine players against one enemy and then stopped for four simulated minutes.
+The last enemy was standing in a gap where the soldier opposite it had fallen: two point
+six units from the next man along, which is further than a sword reaches. Both bodies
+were in `engage`, both had stopped, and neither would close - so neither could reach.
+The fight had stopped happening and nothing was going to restart it.
+
+The fix is deliberately narrow, and it is a formation-level rule rather than a
+per-soldier one. A body whose side currently has **nobody** within reach of anybody, and
+which has stopped, and which has been told to engage, lets its soldiers press forward out
+of their places. While anyone on that side is in contact the dressing wins - so a battle
+cannot dissolve into a crowd, and a body told to `hold` holds whatever the enemy does.
+The flag costs one boolean, set inside the per-soldier reach test that already had to be
+made.
+
+### Scaling: what is known to be quadratic
+
+Two loops in `BattleSimulator` compare every soldier with every other soldier:
+
+| Loop | What it does | Why |
+| --- | --- | --- |
+| `_choose_target()` | nearest living enemy | no spatial structure exists |
+| `_resolve_overlaps()` | push apart units standing on each other | same |
+
+Both predate Step 7 and both are measured, not guessed: the benchmark in
+`scenes/dev/battle_benchmark.tscn` reports cost per tick from 100 to 5,000 soldiers, and
+the same battle is run with terrain and formations switched off to attribute the cost.
+Terrain and formations together are a few per cent; the quadratic pair is the whole
+story.
+
+**These are documented, not fixed.** A spatial grid or a locality-based neighbour search
+is the obvious answer and it is the first task of the large-battle milestone, where it
+can be designed against a measurement rather than guessed at now. Step 7's own additions
+are kept linear so they do not add to the problem: a formed soldier's per-step work is a
+reference and an array read, cohesion is one pass over a formation, and body-to-body
+lookups are a short loop over a handful of formations.
+
+---
+
 ## 6. Data-driven content
 
 Everything tunable lives in `data/`, loaded once by `GameData`:
@@ -461,3 +622,83 @@ scene. Calling `change_scene_and_wait()` on a scene the code under test already
 transitions to queues a *second* transition carrying no payload, which replaces the
 first - the scene ends up empty and the test proves nothing while looking thorough.
 See D-039.
+
+---
+
+## 12. Standing design constraints
+
+These are long-term constraints rather than descriptions of what is built. They are
+recorded here because they constrain decisions in milestones that do not exist yet, and
+because a constraint that only lives in a conversation is a constraint nobody can be
+held to.
+
+### Formation warfare
+
+> Formations are physical battlefield systems defined by geometry, facing, spacing,
+> cohesion, equipment and terrain. They are not cosmetic layouts or passive buff
+> buttons.
+
+The practical consequence, whenever a new formation is proposed: **its value has to come
+from its shape.** A shield wall should be hard to break through because its men are
+close together and facing the right way, not because a flag adds fifteen per cent to a
+defence number. If a proposed formation cannot be described in terms of what its
+soldiers are physically doing, it is not a formation yet.
+
+This is already load-bearing in the code. A type in
+`data/formations/formation_types.json` supplies geometry and movement parameters and
+nothing else, and there is no field for a bonus to go in.
+
+### Dynamic reformation
+
+> Formations may change shape and facing while combat is underway. A reformation is
+> executed physically by soldiers moving to new slots rather than teleporting.
+
+The practical consequence: `set_type()` changes a formation's *intent* and its geometry,
+and moves nobody. Every soldier then walks to the place it has been given, at its own
+speed, over whatever ground is in the way. A test asserts exactly this - one frame after
+a line-to-column order, not one soldier has moved.
+
+The rule: formations must never be architected as deployment-only information. A shape
+an army cannot change in contact is a shape that has no tactical meaning.
+
+### Massive battle target
+
+> Project Banner has a future engineering target of approximately 20,000 active
+> battlefield soldiers at stable 60 FPS on the target development hardware.
+> Architecture should preserve a path toward this without prematurely optimizing
+> unmeasured systems.
+
+The consequences that bind current work:
+
+- **A soldier is gameplay data first, not an autonomous Godot scene.** `BattleUnit` and
+  `BattleFormation` are `RefCounted`. No `Node2D`, no `CharacterBody2D`, no
+  `NavigationAgent2D` per soldier, no per-soldier high-level AI, no per-soldier
+  collision against every other soldier. A test asserts the types, so the rule is
+  checked rather than hoped for.
+- **Thinking belongs above the soldier.** Army decides, formation decides, soldiers
+  execute cheap local instructions. The reverse shape - twenty thousand independent
+  tactical planners - is the architecture this project is avoiding, and it is much
+  cheaper to avoid on purpose than to unwind later.
+- **Measure before optimising.** `scenes/dev/battle_benchmark.tscn` exists so that a
+  performance claim is a number with a checksum beside it. Do not assert a capacity that
+  has not been measured; the current measurement is in `docs/CURRENT_STATE.md`.
+- **Optimise against a target, not a theory.** The known quadratic loops are documented
+  and deliberately left alone until the large-battle milestone can design against the
+  battle it actually needs to run.
+
+### What Step 7 deliberately does not implement
+
+Recorded so that the next milestone does not have to guess what was left undone on
+purpose, and so that nobody mistakes an absence for an oversight:
+
+shield wall · pike phalanx · spear bracing · flank and rear bonuses · directional shield
+blocking · projectiles and ammunition · cavalry and charge physics · morale and routing ·
+unit capabilities and equipment-driven formations · pursuit · advanced commander AI ·
+sieges and faction warfare · equipment overhaul and wounds · ECS · GDExtension ·
+multithreading · MultiMesh · the 20,000-soldier optimisation · finished art and
+animations.
+
+The interfaces those need are the ones Step 7 built: a formation knows its own geometry
+and facing, cohesion is queryable, a soldier's position relative to its formation's
+frame is available, and terrain answers questions about itself. Nothing in that list
+requires unpicking something built here.

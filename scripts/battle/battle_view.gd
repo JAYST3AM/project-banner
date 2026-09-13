@@ -17,8 +17,20 @@ const COLOR_GOLD := Color("e8ce8c")
 
 const UNIT_RADIUS := 1.5
 
+## Formation debugging. Off by default: the overlay exists to make behaviour observable
+## while the systems are being built, and it is deliberately separable from the
+## simulation so that leaving it on cannot change what happens.
+const COLOR_ANCHOR := Color("ffd166")
+const COLOR_SLOT := Color("9ad1d4")
+const COLOR_FACING := Color("ffe9a8")
+
 var simulator: BattleSimulator = null
 var context: BattleContext = null
+
+## Ground is drawn from the simulation's terrain data, never the other way round.
+var show_terrain: bool = true
+## The development overlay: anchors, facing, target slots, formation bounds, cohesion.
+var show_formation_debug: bool = false
 
 var selected_ids: Array[int] = []
 
@@ -84,14 +96,20 @@ func _draw() -> void:
 		return
 	var size := simulator.field_size
 
-	# Ground
-	draw_rect(Rect2(Vector2.ZERO, size), COLOR_GROUND)
+	# Ground. Terrain is data first, so this draws what the simulation is already
+	# walking on rather than deciding anything about it.
+	if show_terrain and simulator.terrain != null:
+		_draw_terrain()
+	else:
+		draw_rect(Rect2(Vector2.ZERO, size), COLOR_GROUND)
 	draw_rect(Rect2(Vector2.ZERO, size), COLOR_GROUND_EDGE, false, 0.4)
 
 	# Centre line and deployment bounds, so the layout is legible before the fight
 	var centre := size.x * 0.5
 	draw_line(Vector2(centre, 0.0), Vector2(centre, size.y), COLOR_LINE, 0.15)
-	draw_dashed_line(Vector2(centre, 0.0), Vector2(centre, size.y), COLOR_LINE.lightened(0.2), 0.1, 1.6)
+
+	if show_formation_debug:
+		_draw_formations()
 
 	for unit in simulator.units:
 		if unit.is_alive():
@@ -99,11 +117,73 @@ func _draw() -> void:
 		else:
 			_draw_fallen(unit)
 
+	if show_formation_debug:
+		_draw_formation_labels()
+
 	if box_select_active:
 		draw_rect(box_select_rect, COLOR_GOLD.darkened(0.2), false, 0.18)
 		draw_rect(box_select_rect, Color(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b, 0.12))
 
 	_draw_popups()
+
+
+## One rectangle per terrain cell, shaded by elevation. Coarse on purpose - the cell
+## size is the simulation's, not a pixel's - and cheap, because the cells are few.
+func _draw_terrain() -> void:
+	var terrain := simulator.terrain
+	var tallest := maxf(0.001, terrain.max_height())
+	for index in terrain.cell_count():
+		var colour := terrain.colour_of_cell(index)
+		# A little elevation shading so the shape of the ground reads at a glance
+		# without needing a legend.
+		var relief := terrain.height_of_cell(index) / tallest
+		if relief > 0.5:
+			colour = colour.lightened((relief - 0.5) * 0.55)
+		else:
+			colour = colour.darkened((0.5 - relief) * 0.45)
+		draw_rect(terrain.cell_rect(index), colour)
+
+
+## The development overlay: where each body means to be, which way it is turned, the
+## places it has handed out, and how well it is holding them.
+##
+## This is the picture that will matter most once a shield wall's value depends on its
+## gaps - a formation's shape is much easier to believe when you can see it separately
+## from the men standing in it.
+func _draw_formations() -> void:
+	if simulator == null:
+		return
+	for formation in simulator.formations:
+		draw_rect(formation.bounds(), COLOR_SLOT.darkened(0.3), false, 0.18)
+		for index in formation.slots.size():
+			var owner_id := formation.unit_ids[index] if index < formation.unit_ids.size() else -1
+			var occupied := false
+			if owner_id >= 0:
+				var unit := simulator.find_unit(owner_id)
+				occupied = unit != null and unit.is_alive()
+			draw_circle(formation.slot_at(index), 0.55, COLOR_SLOT if occupied else COLOR_SLOT.darkened(0.6))
+
+	# Anchors and facing arrows on top, so they are never hidden by a slot marker.
+	for formation in simulator.formations:
+		var forward := formation.forward()
+		draw_line(formation.anchor, formation.anchor + forward * 5.0, COLOR_FACING, 0.4)
+		draw_circle(formation.anchor, 0.9, COLOR_ANCHOR)
+		draw_line(
+			formation.anchor - formation.right_vector() * (formation.frontage() * 0.5),
+			formation.anchor + formation.right_vector() * (formation.frontage() * 0.5),
+			COLOR_ANCHOR.darkened(0.35), 0.22
+		)
+
+
+func _draw_formation_labels() -> void:
+	if _font == null:
+		return
+	for formation in simulator.formations:
+		var text := "%s  %s  coh %.0f%%  %dfx%dr" % [
+			formation.id, formation.state_name(), formation.cohesion * 100.0,
+			formation.file_count, formation.rank_count]
+		draw_string(_font, formation.anchor + Vector2(-6.0, -6.0), text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, COLOR_FACING)
 
 
 func _draw_popups() -> void:

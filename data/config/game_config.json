@@ -56,6 +56,29 @@
     "defence_mitigation": 0.05
   },
 
+  "terrain": {
+    "_comment": "Battlefield terrain generation. The same terrain_seed, field size and generation_version always produce the same battlefield. Bump generation_version when the generation rules change, so old seeds are not silently reinterpreted.",
+    "cell_size": 4.0,
+    "generation_version": 1,
+    "lattice_cells": 7,
+    "elevation_amplitude": 5.0,
+    "high_ground_threshold": 0.66,
+    "woods_threshold": 0.60,
+    "rough_threshold": 0.42
+  },
+
+  "formation": {
+    "_comment": "Generic formation tuning. Per-formation-type shape lives in data/formations/formation_types.json; these are the numbers shared by every formation.",
+    "base_spacing": 2.6,
+    "cohesion_reference_spacing": 3.0,
+    "arrive_radius": 0.6,
+    "move_speed_factor": 0.9,
+    "rotate_speed_factor": 0.75,
+    "enemy_think_interval": 0.5,
+    "enemy_contact_gap": 1.5,
+    "settled_cohesion": 0.8
+  },
+
   "xp": {
     "participation": 10,
     "per_kill": 20,

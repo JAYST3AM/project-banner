@@ -5,12 +5,13 @@ reader (human or AI) who needs to understand, review, or advise on Project Banne
 without access to the repository.
 
 **Repository state:** `github.com/JAYST3AM/project-banner` (public)
-**Revision:** `main` at the Step 6.6 foundation lock — 12 commits, working tree clean
+**Revision:** `main` at the Step 7 terrain and formation foundation — 15 commits, working
+tree clean
 **Engine:** Godot 4.7.2-stable, GDScript only
-**Status:** Steps 0–6 of the brief are complete, and the **Step 6.5** external audit
-remediation and **Step 6.6** foundation lock are both done. **The first major
-checkpoint (the full vertical slice) is reached and verified**, on a clean CI runner as
-well as locally.
+**Status:** Steps 0–6 of the brief are complete and independently foundation-locked
+(6.5 audit remediation, 6.6 lock), and **Step 7 — Tactical Combat 2.0: terrain and
+formation foundation** is complete. **The first major checkpoint (the full vertical
+slice) is reached and verified**, on a clean CI runner as well as locally.
 
 > This is a snapshot. `docs/CURRENT_STATE.md` in the repository is the living version
 > and is updated every milestone.
@@ -21,6 +22,12 @@ review that found seven defects, and **six of the seven were silent** — the ga
 and looked correct while behaving wrongly. Section 10.4 covers them, including which
 one was found only by asking "could a broken test suite still pass?" and measuring the
 answer instead of assuming it.
+
+Step 7 added two systems and a measuring tool, and section 10.6 covers the two defects
+it found — one of which was **a battle that could not end**, found by running the game
+rather than by reading it. Section 7 covers what terrain and formations do, and
+section 9.1 reports what they cost at 100 to 5,000 soldiers, measured rather than
+asserted.
 
 ---
 
@@ -81,13 +88,13 @@ Every step in that chain runs. Concretely, a player can:
 
 | Area | Files | Lines |
 | --- | --- | --- |
-| `scripts/` | 44 GDScript (+49 Godot-generated `.uid` sidecars) | 7,103 |
-| `tests/` | 22 GDScript (13 suites, 2 harness files, the restart check, 6 fixtures) | 5,240 |
-| `data/` | 7 JSON | 496 |
-| `scenes/` | 8 `.tscn` | 197 |
+| `scripts/` | 50 GDScript (+55 Godot-generated `.uid` sidecars) | 9,243 |
+| `tests/` | 25 GDScript (16 suites, 2 harness files, the restart check, 6 fixtures) | 6,688 |
+| `data/` | 9 JSON | 586 |
+| `scenes/` | 9 `.tscn` | 203 |
 | `.github/workflows/` | 1 YAML | 100 |
-| `docs/` | 6 Markdown (including this file) | 2,541 |
-| **total tracked** | **181** | — |
+| `docs/` | 6 Markdown (including this file) | 3,900+ |
+| **total tracked** | **190+** | — |
 
 GDScript is roughly three-fifths production code and two-fifths tests. The `.uid`
 files are Godot-generated resource identifiers and are committed deliberately (Godot
@@ -324,9 +331,25 @@ loyalty currently have no mechanical effect beyond display.
 re-targeted. An explicit player attack order overrides automatic selection until the
 ordered target dies.
 
+**Formation.** A soldier in a formation fights what it can reach and otherwise walks to
+the slot its formation gave it — it does not pick its own ground and does not chase. A
+formation moves as a body at the pace of its slowest soldier, turns toward
+`desired_facing` at its type's turn rate, and reforms by its soldiers walking to new
+slots. Its order is `engage` (default), `hold` or `move`. Cohesion — the mean distance
+between each soldier and its slot, normalised and inverted, so `1.0` is dressed — is
+recomputed every step and consumed by nothing yet. See D-046 through D-050.
+
+**Ground.** Terrain multiplies a unit's speed by the cell it is standing on, and a
+formation's pace by the cell under its centre. In woods (0.6) a body crosses at
+three-fifths the speed it manages on open ground. Terrain has no other effect.
+
 **Orders.** Left click selects, shift-click adds, drag-box selects; a click on empty
 ground clears. Right-click on an enemy orders an attack; right-click on open ground
-orders a move. Orders may be issued before `Start Battle`.
+orders the selected formations to move — or, if the selection is part of one, detaches
+those soldiers into a body of their own and sends that. `1`/`2`/`3` order line, column
+or loose on the selection; `Q`/`E` turn it; `H` holds; `G` engages; `F3` shows the
+formation overlay. Orders may be issued before `Start Battle`, and a formation given a
+shape before the start walks into it when the fighting begins.
 
 **Deaths.** `take_damage` returns whether the blow was the killing one; the killer's
 kill count increments exactly once (a target struck down earlier in the same step is
@@ -344,7 +367,9 @@ per level, current HP raised by the same amount), a human-readable history entry
 soldier, the gold, and the fate of the enemy party. A bounded JSON-safe chronicle of
 the last 40 battles is kept in the campaign.
 
-**Balance as measured.** Across 24 campaign seeds, five freshly recruited peasants:
+**Balance as measured.** Across 24 campaign seeds, five freshly recruited peasants,
+fighting **without formations** (this is the pre-Step-7 measurement, and it is the
+unformed path that `test_combat` still gates):
 
 | Opponent | Won | Enemy casualties |
 | --- | --- | --- |
@@ -355,6 +380,15 @@ Player choice therefore matters more than luck. Fights are decisive, not stalema
 Three real windowed playthroughs produced: a defeat (2 of 6 enemies down), a narrow
 victory (1 of 5 survivors, 6 of 6 enemies down, 102 gold), and a solid victory (4 of 5
 survivors, 5 of 5 enemies down, 88 gold, 280 XP).
+
+**The formed path is a separate, smaller measurement**, because formations change the
+shape of a fight and the 24-seed figure above does not cover them. Four windowed runs of
+five recruits against whatever band the seed produced: two victories (5 of 5 survivors,
+6 of 6 and 5 of 5 enemies down, 89 gold and 350–370 XP) and two defeats (one against five
+enemies with 4 of 5 down, one against eight with only 3 of 8 down). Outcomes track the
+size of the band, which is the right behaviour and not evidence of a systematic swing.
+**A proper formation-path balance sweep is not done** and is listed as an open item in
+§11 — the number above should not be read as covering it.
 
 ---
 
@@ -382,7 +416,7 @@ survivors, 5 of 5 enemies down, 88 gold, 280 XP).
 
 The working rule is: **never claim something works unless it has been run.**
 
-### 9.1 Headless suites — 13 suites, 1,708 assertions, 0 failures
+### 9.1 Headless suites — 16 suites, 2,058 assertions, 0 failures
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -394,6 +428,9 @@ The working rule is: **never claim something works unless it has been run.**
 | `test_encounters` | 282 | spawning, movement, aggro, detection, `BattleContext`, deployment, simulator |
 | `test_combat` | 266 | damage, death, attribution, victory conditions, results, resolver, balance |
 | `test_battle_outcomes` | 224 | **victory / defeat / draw / withdrawal**, the retreat farming loop, timeout freezing the field, results-screen wording |
+| `test_terrain` | 69 | **deterministic ground** — same seed same field, different seed different field, bounds, movement modifiers, terrain actually changing movement, independence from rendering |
+| `test_formation` | 203 | **formations as physical objects** — geometry across seven facings, distinct slots, assignment, movement without teleporting, turning, reformation, cohesion, casualties leaving gaps |
+| `test_formation_battle` | 78 | **both systems together** — both armies formed, the enemy on the same engine, terrain slowing a body, a formed battle resolving and being reproducible, the architecture guardrails, a 500-unit scale smoke |
 | `test_enemy_persistence` | 121 | **the same enemy fought twice** — battle → campaign → save/load → second battle |
 | `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path**, through the real scenes — including the real `BattleResult` reaching the real results screen |
 | `test_persistence` | 154 | every persisted field, migration, refusal, corrupt files, metadata for every save shape |
@@ -555,6 +592,55 @@ The same pass also had to prove the **negative** cases, which is where the value
 - The two-process restart check was re-run from scratch after the withdrawal and enemy
   persistence changes.
 
+### 9.7 The benchmark — what 100 to 5,000 soldiers actually costs
+
+`scenes/dev/battle_benchmark.tscn` is a development-only harness. It builds one
+deterministic battle per size, steps the simulation directly (no rendering) for as many
+ticks as a wall-clock budget allows, and reports the cost. It also **re-runs the same
+battle three more times** with terrain and formations switched off, so the cost of the
+new systems is attributed by measurement rather than by assertion.
+
+Headless, Godot 4.7.2-stable, one machine:
+
+| units | ticks run | per tick | ticks/sec |
+| --- | --- | --- | --- |
+| 100 | 600 | 4.78 ms | 209 |
+| 500 | 109 | 110.3 ms | 9 |
+| 1,000 | 28 | 440.0 ms | 2 |
+| 2,500 | 12 | 2,684.6 ms | 0.4 |
+| 5,000 | 6 | 10,988.0 ms | 0.05 |
+
+**Attribution:**
+
+| units | units only | +terrain | +formations | both |
+| --- | --- | --- | --- | --- |
+| 100 | 3.271 ms | 3.269 ms | 4.583 ms | 4.783 ms |
+| 500 | 108.145 ms | 108.776 ms | 108.690 ms | 110.337 ms |
+| 1,000 | 432.896 ms | 427.976 ms | 430.173 ms | 439.993 ms |
+
+Terrain is free. Formations cost nothing measurable above 500 soldiers. **The cost is two
+loops that compare every soldier with every other soldier** — `_choose_target()` and
+`_resolve_overlaps()` — and both predate this milestone. Fifty times the soldiers is
+about 2,300 times the time per tick.
+
+Three things stated plainly rather than left for a reader to infer:
+
+- **This is not a claim about 20,000 soldiers.** It is a measurement of five sizes, and
+  the shape of the number says the current architecture will not get there without the
+  spatial work described in §12.
+- **The large sizes measured the approach, not the melee.** Above 500 soldiers the
+  budget ran out before the armies made contact, so those runs are movement and targeting
+  rather than a fight. Both quadratic loops run every tick regardless of contact, so the
+  per-tick figure is representative — but it is an approach.
+- **The tick counts differ between sizes on purpose.** A fixed tick count would have made
+  the top of the range take hours, so each run stops on a time budget and reports what it
+  achieved. A size that managed six ticks says six.
+
+The harness prints a checksum of each battle's *starting position*, so a performance
+comparison across commits is comparing the same battle rather than merely the same number
+of soldiers. The checksum is taken before the fighting starts, so it does not move when a
+budget runs out a tick or two earlier.
+
 ---
 
 ## 10. Bugs found, and how
@@ -670,29 +756,72 @@ the same shape as its own gap 5: a test that exercises the layer underneath the 
 the player touches. `peek_metadata()` passing does not mean the menu works, in exactly
 the way that `battle_results` existing does not mean the payload arrived.
 
+### 10.6 The Step 7 pass — a battle that could not end
+
+Step 7 was a new-systems milestone, not a hardening pass, and it still turned up two
+defects. Both were found by **running the game**, and neither would have been visible
+by reading the code that introduced them.
+
+| # | Defect | Why it was invisible | Caught by |
+| --- | --- | --- | --- |
+| 1 | **A battle could stall permanently.** A fight resolved to nine players against one enemy and then ran for four more simulated minutes achieving nothing. The last enemy stood in the gap left by a fallen man: 2.6 units from the next soldier along, which is further than a sword reaches. Both formations were in `engage`, both had stopped, and neither would close — so nobody could reach anybody, and nothing was going to change. | Every individual piece was behaving correctly. The formations were steady, the cohesion was high, the men were exactly where they had been told to stand. The bug lived in the *interaction*: "hold your place" and "close with the enemy" were both true, and the second one had no way to express itself. | `test_formation_battle.gd` — a formed battle is required to reach a winner inside its step budget |
+| 2 | **A formation closing on an enemy stopped six tenths of a unit short of it.** The arrival tolerance was written for a move order — walk to a waypoint and stop near it — and was being applied to "close with that body of men". | Stopping 0.6 units short of an enemy looks like stopping. It was found by printing the formation state during the stalled battle and seeing `moving` reported by a body that was not going anywhere. | The same suite, plus `test_formation.gd`'s "a body with no order is not moving" |
+
+**Defect 1 is the interesting one**, and it is worth stating precisely why it happened,
+because the same shape will recur. Step 7 gave formations a rule — soldiers hold their
+places — which is exactly what makes a line a line. It also gave them a stance —
+`engage`, close with the enemy — which is exactly what makes a battle happen. Neither is
+wrong. Their combination is wrong in one specific case: **when the fight has stopped for
+a reason neither rule can see.** The survivors are not in contact, so no soldier attacks;
+no soldier is under orders to move, so none of them walks; and both bodies are holding
+formation, correctly, while the battle quietly never ends.
+
+The fix is narrow rather than a new system — a stopped, engaged body whose *side* has
+nobody in contact lets its men press forward, and the moment anyone is in contact the
+dressing wins again. But the lesson is broader, and it is the one to carry into Step 8:
+**an invariant that is enforced everywhere individually can still be violated
+collectively.** "Every soldier is in its correct place" was true throughout the stall.
+The battle was still broken.
+
+The second-order lesson is about measurement: this was caught because a test asserted
+that a battle *reaches a conclusion*, rather than asserting things about the formations
+in it. A suite full of correct per-system assertions would have passed for four hundred
+simulated seconds while the game sat there doing nothing.
+
 ---
 
 ## 11. What is *not* implemented
 
 The honest list of gaps.
 
-**Step 6.5 and Step 6.6 did not close any of these.** Both were hardening passes over
-what already existed, and both deliberately added no gameplay. The list is unchanged
-from the end of Step 6.
+**Step 6.5 and Step 6.6 closed none of these** — both were hardening passes over what
+already existed, and both deliberately added no gameplay. **Step 7 closed the first two**
+and left the rest untouched: battlefields are no longer flat, and formations exist. What
+Step 7 did *not* do is change how any of it fights; the gaps below are the current list.
 
 **Combat depth**
 
-1. **Flat battlefields.** `terrain_seed` is generated and carried in the battle
-   context and read by nothing. No cover, elevation, obstacles or rivers.
-2. **No formations.** Units seek the nearest enemy and pile in. No ranks, no lines,
-   no held formation.
+1. **Terrain affects movement and nothing else.** Elevation, cover and a slope query
+   exist as data, but there is no combat modifier, no obstacles, no line of sight and
+   no ammunition. Terrain is a movement fact, not yet a tactical one.
+2. **Formations are shapes, not fighting styles.** LINE, COLUMN and LOOSE exist as real
+   geometry with facing and cohesion, and both armies use them. But a formation's shape
+   does not change how it fights: no shield wall, no phalanx, no bracing, no
+   facing-dependent defence, no flank or rear bonus, and nothing consumes cohesion.
+   There is also no retreating or refusing a flank — the only orders are engage, hold
+   and move.
 3. **No morale behaviour or fleeing.** A unit fights to its last hit point. Morale is
-   tracked and displayed but does not affect anything.
+   tracked and displayed but does not affect anything. A broken enemy is killed where it
+   stands rather than routed and run down.
 4. **No cavalry and no anti-cavalry role** for the spear, which the brief anticipated.
 5. **No projectiles.** Ranged hits apply immediately with a floating damage number;
-   ammunition is unlimited.
+   ammunition is unlimited, and there are no firing arcs or lines of fire.
 6. **No wounds, fatigue, or weather effects.** Weather is a placeholder string in the
    context.
+7. **The simulation is quadratic in soldiers.** `_choose_target()` and
+   `_resolve_overlaps()` compare every soldier with every other soldier, which is why
+   5,000 soldiers costs eleven seconds a tick. Measured and documented rather than
+   fixed — see §9.1 and D-053.
 
 **Soldier depth**
 

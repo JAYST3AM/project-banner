@@ -91,6 +91,14 @@ godotc --path "$PROJ" -- --autostart-campaign=2026 --autostart-town=greywatch \
 
 # --- Check a single script parses ---
 godotc --headless --path "$PROJ" --check-only --script res://scripts/core/main.gd
+
+# --- Measure what a battle costs, by size (dev tooling; not part of the game) ---
+#     Reports ms per tick, ticks/sec, and a setup checksum for cross-commit comparison.
+#     Re-runs each size with terrain and formations off, to attribute the cost.
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100,500,1000
+#     The full sweep. Large sizes stop on a time budget, so they report the tick count
+#     they actually managed rather than running for hours. Takes several minutes.
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100,500,1000,2500,5000
 ```
 
 `--check-only` does **not** load autoloads, so "Identifier not found: GameData" or

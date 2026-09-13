@@ -212,36 +212,162 @@ skipped) and once by a failing verify phase with the suite and write phase both 
 (later step fails, job red). A gate that has only ever been seen to pass is not evidence
 of anything.
 
+## Step 7 - terrain and formation foundation
+
+Two systems and a measuring tool. No shield wall, no phalanx, no bracing, no
+projectiles, no cavalry, no morale, no advanced tactical AI, no large-battle
+optimisation - those are future milestones, and Step 7 exists to make them possible
+rather than to be them.
+
+### 1. Battlefield terrain is data
+
+`BattlefieldTerrain` is a `RefCounted` grid: a type index, an elevation and a resolved
+movement multiplier per cell, at `terrain.cell_size` world units per cell. Four types in
+`data/terrain/terrain_types.json` - open, rough, light woods, high ground.
+
+Generation is a pure function of `BattleContext.terrain_seed`. Both noise fields come
+from hashing lattice coordinates rather than from a generator's state, so the same seed
+always produces the same ground regardless of the order anything is visited in, and
+generating a battlefield cannot disturb any other random stream.
+
+Terrain affects movement - `speed = base_speed * terrain.move_multiplier_at(position)` -
+and nothing else. That is the deliberate scope: a defence modifier would move every
+seeded balance measurement to no purpose yet. See D-045.
+
+### 2. A formation is a geometry
+
+`BattleFormation` carries anchor, facing, desired facing, frontage, depth, spacing, file
+and rank counts, per-soldier slot positions, an order and a measured cohesion. LINE,
+COLUMN and LOOSE come from `data/formations/formation_types.json` and differ through
+generated geometry, not through bonuses:
+
+| | files x ranks for 20 | frontage | depth | spacing |
+| --- | --- | --- | --- | --- |
+| line | 10 x 2 | 23.4 | 2.6 | 2.60 |
+| column | 2 x 10 | 2.6 | 23.4 | 2.60 |
+| loose | 6 x 4 | 22.1 | 13.3 | 4.42 |
+
+Slots are generated in the formation's own frame and transformed into the world, so any
+facing works. The tests drive seven facings including 37, 143.5 and -61 degrees.
+
+Formations move as bodies (at the pace of the slowest soldier, so nobody is left
+behind), turn at a rate rather than snapping, and reform by their soldiers *walking* to
+new places. A test steps one frame after ordering a line-to-column change and asserts
+that not one soldier moved - only the places did.
+
+### 3. Two defects found by running it
+
+- **A battle could stall forever.** A fight resolved to nine players against one enemy
+  and then stopped for four simulated minutes. The survivor stood in the gap left by a
+  fallen man, 2.6 units from the next soldier along - further than a sword reaches. Both
+  bodies were engaged, both had stopped, neither would close. Fixed with one narrow rule:
+  a stopped, engaged body whose side has *nobody* in contact lets its soldiers press
+  forward. While anyone is fighting, dressing wins. See D-050.
+- **The arrival tolerance was a waypoint tolerance.** A body closing on an enemy stopped
+  0.6 units short of it, which is indistinguishable from stopping. Engaged bodies now
+  close to 0.05.
+
+### 4. Benchmark: what 100 to 5,000 soldiers actually costs
+
+`scenes/dev/battle_benchmark.tscn`, headless, simulation stepped directly (no
+rendering), Godot 4.7.2-stable, one machine:
+
+| units | ticks run | per tick | ticks/sec |
+| --- | --- | --- | --- |
+| 100 | 600 | 4.78 ms | 209 |
+| 500 | 109 | 110.3 ms | 9 |
+| 1,000 | 28 | 440.0 ms | 2 |
+| 2,500 | 12 | 2,684.6 ms | 0.4 |
+| 5,000 | 6 | 10,988.0 ms | 0.05 |
+
+The larger sizes ran fewer ticks because each run stops on a wall-clock budget - a fixed
+tick count would have made the top of the range take hours. The counts achieved are
+reported rather than hidden.
+
+**Attribution** - the same battle re-run with the new systems switched off:
+
+| units | units only | +terrain | +formations | both |
+| --- | --- | --- | --- | --- |
+| 100 | 3.271 ms | 3.269 ms | 4.583 ms | 4.783 ms |
+| 500 | 108.145 ms | 108.776 ms | 108.690 ms | 110.337 ms |
+| 1,000 | 432.896 ms | 427.976 ms | 430.173 ms | 439.993 ms |
+
+Terrain is free and formations are within noise above 500 soldiers. **The cost is two
+loops that compare every soldier with every other soldier** - `_choose_target()` and
+`_resolve_overlaps()` - and both predate this milestone. From 100 to 5,000 soldiers is
+50x the army and about 2,300x the time per tick.
+
+This is measured and documented, not fixed: the brief forbids a large rewrite on the
+strength of a slow number, and a spatial structure designed now would be shaped for this
+field rather than for the one with cavalry on the wings that the large-battle milestone
+will actually have to serve. What Step 7 does owe the future is not making it worse, and
+every loop it adds is linear in soldiers.
+
+**One thing the numbers do not say, stated plainly:** above 500 soldiers the measured
+ticks ran out before the armies made contact, so those figures are the approach and
+targeting phase rather than a melee. Both quadratic loops run every tick regardless of
+contact, so the per-tick cost is representative - but it is an approach, not a battle.
+
+### 5. Verification
+
+| Check | Result |
+| --- | --- |
+| Headless suites | **16 of 16 reported, 2058 assertions, 0 failures** |
+| New suites this milestone | `test_terrain` (69), `test_formation` (203), `test_formation_battle` (78) |
+| Two-process restart | 95 checks, 0 failures - unchanged, and now with formations and terrain in the flow |
+| Windowed smoke | campaign → settlement → recruit → battle → results → campaign |
+| Bogus `--suite=` | exit 1 |
+| CI | green on the pushed commit |
+
+New coverage is behavioural rather than structural: the same enemy fought twice across
+a restart, a real reformation that drops cohesion and recovers it, a line ordered into a
+column with a one-frame "nobody moved" assertion, an arbitrary-facing geometry sweep,
+terrain that measurably slows a body in proportion to its own data, and a stalled battle
+that is required to reach a winner inside its step budget.
+
 ## Known limitations
 
 The honest list. None of these blocks the checkpoint; all of them are the natural
 next work.
 
-1. **A battle is fought on flat ground.** `terrain_seed` is generated and carried in
-   the context but nothing reads it yet. No cover, elevation or obstacles.
-2. **No formations.** Units seek the nearest enemy and pile in.
-3. **No morale or fleeing.** A unit fights to its last hit point. `morale` is
+1. **Terrain affects movement and nothing else.** There is cover, elevation and a slope
+   query, but no combat modifier, no obstacles, no line of sight and no ammunition.
+   `terrain.generation_version` exists so a change to generation is deliberate.
+2. **Formations exist as shapes, not yet as fighting styles.** LINE, COLUMN and LOOSE
+   are geometry and movement; a formation's shape does not yet change how it fights. No
+   shield wall, no phalanx, no bracing, no facing-dependent defence, no flank or rear
+   bonus, no cavalry. Cohesion is measured and queryable but nothing consumes it.
+3. **A stalled battle is resolved by pressing forward, not by pursuit.** A broken enemy
+   does not rout and is not run down; the survivors are simply killed where they stand.
+   Morale and fleeing will change this.
+4. **No morale or fleeing.** A unit fights to its last hit point. `morale` is
    tracked and displayed but does not affect behaviour yet.
-4. **Losing the whole party is not a game over.** The campaign continues with an
+5. **Losing the whole party is not a game over.** The campaign continues with an
    empty party; you can walk back to a town and recruit again. Prisoners, capture
    and ransom are future work.
-5. **Wounded soldiers do not exist.** Survivors return at whatever hit points they
+6. **Wounded soldiers do not exist.** Survivors return at whatever hit points they
    ended with. No treatment, no recovery time.
-6. **Loot is sold immediately** for coin, because there is no inventory.
-7. Trait `attack_pct` and `move_speed_pct` are applied when a battle unit is built;
+7. **Loot is sold immediately** for coin, because there is no inventory.
+8. Trait `attack_pct` and `move_speed_pct` are applied when a battle unit is built;
    `morale` and `loyalty` have no mechanical effect beyond display.
-8. **Only bandit parties exist.** Caravans, patrols and lord armies have the data
+9. **Only bandit parties exist.** Caravans, patrols and lord armies have the data
    model (`WorldParty`, `Party.kind`) but no spawn data or behaviour.
-9. **No ambushes yet.** `BattleContext` supports them (`build_context(party, false)`
-   flips attacker and defender) but nothing calls it that way.
-10. Ammunition is unlimited and there are no projectiles; ranged hits apply
+10. **No ambushes yet.** `BattleContext` supports them (`build_context(party, false)`
+    flips attacker and defender) but nothing calls it that way.
+11. Ammunition is unlimited and there are no projectiles; ranged hits apply
     immediately with a floating damage number.
-11. Only the single default save slot is used. Multi-slot UI is not built.
-12. `Settlement.market` and `Soldier.equipment` remain empty placeholders.
-13. **No artwork.** The world map and battlefields are drawn procedurally.
-14. No export templates installed - the project runs from source only.
-15. Balance is deliberately rough. Fights work and are decisive; they have not been
-    tuned for a long campaign.
+12. Only the single default save slot is used. Multi-slot UI is not built.
+13. `Settlement.market` and `Soldier.equipment` remain empty placeholders.
+14. **No artwork.** The world map and battlefields are drawn procedurally. Terrain is
+    flat-coloured cells and formations are debug markers.
+15. No export templates installed - the project runs from source only.
+16. Balance is deliberately rough. Fights work and are decisive; they have not been
+    tuned for a long campaign, and the formation path has never been balance-measured
+    the way the unformed path has.
+17. **The battle simulation is quadratic in soldiers.** `_choose_target()` and
+    `_resolve_overlaps()` compare every soldier with every other soldier, which is why
+    5,000 soldiers costs eleven seconds a tick. Measured, documented, and the first task
+    of the large-battle milestone - see D-053 and the benchmark table above.
 
 ## Recommended next milestone
 

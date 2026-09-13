@@ -1,0 +1,33 @@
+{
+  "_comment": "Formation shapes. max_files is the width the shape is willing to spread to - it is the single number that distinguishes a wide shape from a deep one, and every other geometric consequence follows from it. spacing_multiplier scales the shared base spacing, so LOOSE is genuinely looser rather than merely relabelled. These values describe geometry and movement only; nothing here is a combat bonus. A future shield wall or pike phalanx is another entry in this table plus its own mechanics, not a rewrite.",
+
+  "formations": [
+    {
+      "id": "line",
+      "name": "Line",
+      "description": "Wide and shallow. The default fighting shape: maximum frontage, minimum depth.",
+      "max_files": 10,
+      "spacing_multiplier": 1.0,
+      "turn_rate_deg": 120.0,
+      "move_factor": 1.0
+    },
+    {
+      "id": "column",
+      "name": "Column",
+      "description": "Narrow and deep. For moving down a road, through a gap, or turning a flank.",
+      "max_files": 2,
+      "spacing_multiplier": 1.0,
+      "turn_rate_deg": 180.0,
+      "move_factor": 1.15
+    },
+    {
+      "id": "loose",
+      "name": "Loose",
+      "description": "Open order with room between soldiers. Harder to disorder, slower to dress.",
+      "max_files": 6,
+      "spacing_multiplier": 1.7,
+      "turn_rate_deg": 150.0,
+      "move_factor": 1.0
+    }
+  ]
+}

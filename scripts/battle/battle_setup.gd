@@ -95,3 +95,95 @@ static func _front_to_back(units: Array[BattleUnit]) -> Array[BattleUnit]:
 	out.append_array(melee)
 	out.append_array(ranged)
 	return out
+
+
+## ---------- formations ---------------------------------------------------
+
+## Put both armies into formations: melee as the line, ranged as a looser body behind.
+##
+## This is the same arrangement the deployment above already used - front rank to the
+## enemy, missiles behind - but expressed as formations, so from here on the shape of
+## an army is something a formation decides rather than something a loop of
+## coordinates decides. Both sides go through the identical call: the enemy is not a
+## special case, it is an army that happens to be given orders by [BattleAI].
+##
+## Units are only [i]told[/i] where their place is. They walk there when the battle
+## starts, so a freshly deployed battle opens with the ranks dressing rather than with
+## everyone already standing on their marks - which is the honest version, and it
+## gives the cohesion measure something real to report from the first second.
+static func assign_default_formations(
+	simulator: BattleSimulator,
+	config: GameConfig,
+	catalog: FormationCatalog = null
+) -> Array[BattleFormation]:
+	var created: Array[BattleFormation] = []
+	if simulator == null:
+		return created
+	var types := catalog if catalog != null else FormationCatalog.load_from()
+	if not types.is_valid():
+		DebugLogger.error("no formation types available; armies stay unformed", "BattleSetup")
+		return created
+
+	var line_anchors := {}
+	for side in [SIDE_PLAYER, SIDE_ENEMY]:
+		var melee: Array[int] = []
+		var ranged: Array[int] = []
+		for unit in simulator.units:
+			if unit.side != side:
+				continue
+			if unit.ranged:
+				ranged.append(unit.id)
+			else:
+				melee.append(unit.id)
+
+		var facing := 0.0 if side == SIDE_PLAYER else PI
+		var anchor := _centroid(simulator, melee)
+		if melee.is_empty():
+			anchor = _centroid(simulator, ranged)
+		line_anchors[side] = anchor
+
+		if not melee.is_empty():
+			var body := BattleFormation.create("%s_line" % side, side, anchor, facing, "line", types, config)
+			simulator.add_formation(body)
+			simulator.assign_formation(body, melee)
+			created.append(body)
+		if not ranged.is_empty():
+			var skirmishers := BattleFormation.create(
+				"%s_ranged" % side, side, _centroid(simulator, ranged), facing, "loose", types, config
+			)
+			simulator.add_formation(skirmishers)
+			simulator.assign_formation(skirmishers, ranged)
+			created.append(skirmishers)
+
+	# Face each body at the other army rather than at a direction chosen in advance, so
+	# this works whatever way round the deployment happened to put them. Engagement is
+	# the battle's default stance, but it is stated here anyway: a freshly deployed army
+	# is an army that intends to fight, and the fighting has to start whether or not
+	# anyone gives another order.
+	for body in created:
+		var opposing: Vector2 = line_anchors.get(_other_side(body.side), body.anchor)
+		body.order_face_toward(opposing)
+		body.set_facing(body.desired_facing)
+		body.order_engage()
+		body.ensure_slots()
+	return created
+
+
+static func _other_side(side: String) -> String:
+	return SIDE_ENEMY if side == SIDE_PLAYER else SIDE_PLAYER
+
+
+static func _centroid(simulator: BattleSimulator, unit_ids: Array[int]) -> Vector2:
+	if unit_ids.is_empty():
+		return Vector2.ZERO
+	var total := Vector2.ZERO
+	var counted := 0
+	for unit_id in unit_ids:
+		var unit := simulator.find_unit(unit_id)
+		if unit == null:
+			continue
+		total += unit.position
+		counted += 1
+	if counted == 0:
+		return Vector2.ZERO
+	return total / float(counted)

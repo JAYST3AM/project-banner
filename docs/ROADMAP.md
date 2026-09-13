@@ -16,6 +16,7 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | 6.5 | External audit remediation (hardening pass, no new gameplay) | **DONE** |
 | 6.6 | Final foundation lock (enemy persistence, legacy menu, CI) | **DONE** |
 | — | **First major checkpoint: the full vertical slice** | **DONE** |
+| 7 | Tactical Combat 2.0: terrain and formation foundation | **DONE** |
 | 7+ | Post-checkpoint systems (see below) | TODO |
 
 ---
@@ -237,6 +238,66 @@ they lean on what already exists:
 5. **Grand strategy** - faction ownership, lords, armies, wars, diplomacy,
    territory, castles, sieges, prisoners, mercenaries, kingdom creation
 6. **World generation** - procedural map and political simulation, relationships
+
+---
+
+## Step 7 - Tactical Combat 2.0: terrain and formation foundation (`milestone-07`)
+
+**Goal:** turn a collection of individually moving combatants into the beginning of a
+real formation-based battlefield system, on deterministic terrain, with an architecture
+that can grow toward very large battles. Still a foundation milestone: it deliberately
+implements no shield wall, no phalanx, no bracing, no projectiles, no cavalry, no morale,
+no advanced tactical AI and no large-battle optimisation.
+
+This begins item 1 of the post-checkpoint list above. Three systems, all of them
+load-bearing rather than decorative:
+
+- **Deterministic battlefield terrain.** `BattlefieldTerrain` is a data grid - type,
+  elevation and a resolved movement multiplier per cell - generated from
+  `BattleContext.terrain_seed` by hashing lattice coordinates, so the same seed always
+  produces the same ground and generating it cannot disturb any other random stream.
+  Four types (open, rough, light woods, high ground) from a JSON catalogue. Terrain
+  affects movement, which is a real consequence, and nothing else - see D-045 for why a
+  defence modifier is deliberately absent.
+- **A generic formation engine.** `BattleFormation` is a first-class object with real
+  geometry: anchor, facing, desired facing, frontage, depth, spacing, file and rank
+  counts, generated slot positions, an order, and a measured cohesion. LINE, COLUMN and
+  LOOSE come from a data table and differ in ways the tests measure rather than assert.
+  Slots are generated in the formation's own frame, so arbitrary facing works and the
+  directional mechanics that come later have the hook they need.
+- **A benchmark harness.** `scenes/dev/battle_benchmark.tscn` runs the same battle at
+  100 to 5,000 soldiers, reports cost per tick and a setup checksum for cross-commit
+  comparison, and attributes the cost by re-running with terrain and formations switched
+  off. It exists so that "is this getting slower?" has an answer that is a number.
+
+**The architectural change, stated plainly:** a soldier's formation slot is its whole
+job. It fights what it can reach, otherwise it walks to the place it was given. It does
+not pick its own ground and does not chase. Formations move as bodies, turn rather than
+snap, and reform by their soldiers walking into a new shape. `BattleAI` sits above them
+and does the only thing a commander does at this stage - face the enemy and order the
+body to engage.
+
+**Two defects found by running it, not by reading it:**
+
+- **A battle could stall forever.** Nine players against one enemy, stopped for four
+  simulated minutes: the survivor stood in the gap left by a fallen man, 2.6 units from
+  the next soldier along, which is further than a sword reaches. Both bodies were engaged
+  and both had stopped, so neither closed and neither could reach. Fixed with a narrow
+  rule - a stopped, engaged body whose side has *nobody* in contact lets its soldiers
+  press forward - which cannot dissolve a fighting line into a crowd because the contact
+  check turns it off the moment anyone is actually fighting. See D-050.
+- **The formation arrival tolerance was a waypoint tolerance.** A body closing on an
+  enemy stopped six tenths of a unit short of it, which is indistinguishable from
+  stopping. Engaged bodies now close to 0.05.
+
+**Definition of done:** deterministic terrain as data, influenced by `terrain_seed`;
+LINE, COLUMN and LOOSE with deterministic slots and arbitrary facing; formations that
+move, turn, reform physically and measure their own cohesion; the same engine used by
+both sides; player formation orders; **2058 assertions across 16 suites, 0 failures**;
+the two-process restart check unchanged; the windowed flow clean; CI green. See D-043
+through D-053.
+
+---
 
 ## Standing design principle
 
