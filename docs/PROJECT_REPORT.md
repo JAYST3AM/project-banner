@@ -131,7 +131,7 @@ runner's `SUITES` list, since several are meant to fail.
 | `c4c2bd2` | milestone-07: establish terrain and formation warfare foundation |
 | `ccf9cff` | milestone-07.1: harden formation ownership and contact semantics |
 | `b35d868` | milestone-07.2: replace quadratic battlefield proximity scans |
-| `TIP73` | milestone-07.3: scale dense soldier overlap resolution |
+| `e32bfbc` | milestone-07.3: scale dense soldier overlap resolution |
 
 ---
 
@@ -625,6 +625,21 @@ engine: 4.7.2.stable.official.ed1daf0bf
 The seventeen suites and 2364 assertions on the CI runner are identical to the local run,
 which is the check that matters for a change of this size: the engine on the runner is the
 pinned one, and the numbers there are the numbers here.
+
+**Observed result after Step 7.3** ([run 34754179794](https://github.com/JAYST3AM/project-banner/actions/runs/34754179794),
+commit `e32bfbc`), again read from the runner's raw log:
+
+```
+  == test_spatial_grid ==
+  == test_overlap ==
+  suites: 18 of 18 reported   assertions: 2490   failures: 0
+  RESULT: PASS
+--------- persistence write: PASS (6 checks, 0 failures) ---------
+--------- persistence verify: PASS (95 checks, 0 failures) ---------
+```
+
+Eighteen suites and 2490 assertions on the runner, identical to the local run, with the
+new suite visible in the log by name rather than inferred from a badge.
 
 **The gate was also proven to go red**, on a throwaway branch and a pull request that
 was closed without merging, so `main` was never affected. Two separate failures were
