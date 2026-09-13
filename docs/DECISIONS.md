@@ -1583,21 +1583,21 @@ The cadence, at five thousand soldiers:
 
 | cadence (ticks) | looks per soldier per second | target ms/tick | total ms/tick | 2,500 total |
 | --- | --- | --- | --- | --- |
-| 1 (every tick) | 18.65 | 123.013 | 246.204 | 92.546 |
-| 2 | 10.10 | 93.290 | 213.519 | 77.332 |
-| 3 | 6.79 | 66.438 | 178.096 | 70.308 |
-| **4** | **5.09** | **58.745** | **182.575** | **64.430** |
-| 6 | 3.39 | 38.743 | 148.948 | 59.825 |
-| 8 | 2.54 | 31.850 | 141.573 | 58.100 |
+| 1 (every tick) | 13.57 | 174.402 | 280.559 | 86.452 |
+| 2 | 6.79 | 93.756 | 200.397 | 69.476 |
+| 3 | 4.52 | 66.498 | 173.012 | 63.828 |
+| **4** | **3.39** | **52.825** | **160.079** | **61.260** |
+| 6 | 2.26 | 39.389 | 146.134 | 58.225 |
+| 8 | 1.70 | 32.322 | 139.951 | 56.437 |
 
 **Why 4 and not 1.** One is the behaviour the milestone replaced, and it is measurably the
-worst column: twice the target cost of four, and the widest spread between the average tick
-and the worst one (D-084).
+worst column: **3.3 times the target cost of four**, and the widest spread between the average
+tick and the worst one (D-084).
 
-**Why 4 and not 8.** Eight is cheaper - about a fifth of the tick at five thousand soldiers
-in this window - and it costs 350 ms of worst-case awareness latency instead of 150 ms. The
-sweep's returns diminish quickly after four (the target phase falls by half again from 4 to
-8, but the *total* by a fifth, because the target phase is no longer most of the tick), while
+**Why 4 and not 8.** Eight is cheaper - 12.6% of the tick at five thousand soldiers in this
+window, against 8.7% for six - and it costs 350 ms of worst-case awareness latency instead of
+150 ms. The sweep's returns diminish quickly after four (the target phase falls by half again from 4 to
+8, but the *total* by an eighth, because the target phase is no longer most of the tick), while
 the latency a soldier pays for it grows linearly and without limit. Four ticks is a sixth of
 a melee swing; eight is nearly two fifths. The value is a config knob and this table is the
 reason it is four, not a number somebody liked.
@@ -1624,13 +1624,14 @@ what the soldiers *did*:
 
 | retention radius | 5,000 total ms/tick | target ms/tick | releases per tick ("too far") |
 | --- | --- | --- | --- |
-| 8 | 161.700 | 51.668 | 127.1 |
-| 16 | 167.871 | 52.569 | 110.7 |
-| 24 | 164.380 | 52.652 | 68.9 |
-| **32** | **163.458** | **52.410** | **0.1** |
+| 8 | 157.077 | 52.315 | 127.1 |
+| 16 | 156.608 | 52.256 | 110.7 |
+| 24 | 157.357 | 52.463 | 68.9 |
+| **32** | **157.397** | **52.624** | **0.1** |
 
-**What the numbers say.** The time is flat - the retention radius is not where the
-milliseconds are. The behaviour is not flat at all: at 8, 16 and 24 a soldier acquires an
+**What the numbers say.** The time is flat - flat to within half a per cent across the whole
+sweep, so the retention radius is not where the milliseconds are. The behaviour is not flat at
+all: at 8, 16 and 24 a soldier acquires an
 enemy at long range via the second rung of the ladder and then releases it again on the very
 next tick, because the radius it will *keep* is narrower than the radius it is allowed to
 *search*. A hundred and twenty-seven releases a tick at eight units is not a retention rule;
@@ -1694,14 +1695,23 @@ same seed, same window, milliseconds per tick for the whole tick:
 
 | cadence | average | p50 | p95 | p99 | worst | worst / average |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 (every tick) | 233.091 | 179.714 | 487.453 | 542.521 | 592.590 | 2.54x |
-| **4 (shipped)** | **161.339** | **141.300** | **244.874** | **259.029** | **263.095** | **1.63x** |
+| 1 (every tick) | 281.102 | 194.409 | 659.079 | 690.166 | 713.892 | 2.54x |
+| **4 (shipped)** | **159.043** | **139.720** | **247.364** | **255.819** | **258.250** | **1.62x** |
+
+And the phase this milestone attacked, sampled the same way:
+
+| cadence | target average | target p50 | target p95 | target p99 | target worst |
+| --- | --- | --- | --- | --- | --- |
+| 1 (every tick) | 173.152 | 91.603 | 559.090 | 590.106 | 610.120 |
+| **4 (shipped)** | **52.255** | **31.490** | **149.717** | **158.498** | **159.589** |
 
 The tail is where the cadence pays most. Both configurations are measured over the same
 battle and both have a long tail, because the tail is the battle itself - the tick on which
 the armies meet - but the every-tick baseline is two and a half times its own average at the
-worst tick, and the staggered schedule is one and a half times its own. The spread the
-milestone is most likely to have introduced is the spread it measurably reduced.
+worst tick, and the staggered schedule is one and a half times its own. In absolute terms the
+worst tick of the battle falls from **713.892 ms to 258.250 ms**, and the worst target tick
+from 610.120 to 159.589 ms. The spread the milestone is most likely to have introduced is the
+spread it measurably reduced.
 
 The same instrument answers the question the brief asked about synchronized bursts: the
 phases are sampled per tick, so a system that saved work on five ticks out of six and spent

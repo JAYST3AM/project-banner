@@ -865,6 +865,25 @@ The worst case is not the schedule arriving late: it is a soldier with nobody le
 standing at the edge of a battle where its side has already won. The distinction is counted
 rather than excused (`latency_over_cadence`).
 
+The sweep that chose the value, tick-matched so that every cadence measures the *same* 120
+ticks of the same battle (2,500 and 5,000 soldiers, one run per value, no wall-clock cap that
+would shorten a slower run's window):
+
+| cadence (ticks) | looks/soldier/s at 5,000 | target ms/tick at 5,000 | total ms/tick at 5,000 | total at 2,500 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 (every tick) | 13.57 | 174.402 | 280.559 | 86.452 |
+| 2 | 6.79 | 93.756 | 200.397 | 69.476 |
+| 3 | 4.52 | 66.498 | 173.012 | 63.828 |
+| **4 (shipped)** | **3.39** | **52.825** | **160.079** | **61.260** |
+| 6 | 2.26 | 39.389 | 146.134 | 58.225 |
+| 8 | 1.70 | 32.322 | 139.951 | 56.437 |
+
+Four is **3.3x cheaper than every-tick on the target phase** (174.4 to 52.8 ms) at a
+worst-case awareness latency of three ticks, and the cadences beyond it buy less and less: 6
+and 8 are 8.7% and 12.6% cheaper in total than 4, for a hundred and two hundred milliseconds
+more latency. The returns diminish because the target phase stops being most of the tick -
+by eight ticks it is 23% of it - which is the milestone working.
+
 ### 4. The bound that stops a chase, and the margin that stops a twitch
 
 `battle.target_retention_radius` is how far a remembered opponent may be before it stops
@@ -872,6 +891,19 @@ being worth continuing with. It ships at 32 units - **equal to the search ceilin
 purpose**, and the sweep says why: at 8, 16 and 24 a soldier acquires an enemy at long range
 and releases it again on the very next tick, which is thrash dressed up as a rule. What the
 bound is for is the opponent that genuinely leaves, and for that it only has to be finite.
+
+The sweep, tick-matched the same way (2,500 and 5,000, 120 ticks, one run per value):
+
+| retention radius | 5,000 total ms/tick | target ms/tick at 5,000 | releases per tick ("too far") |
+| ---: | ---: | ---: | ---: |
+| 8 | 157.077 | 52.315 | 127.1 |
+| 16 | 156.608 | 52.256 | 110.7 |
+| 24 | 157.357 | 52.463 | 68.9 |
+| **32 (shipped)** | **157.397** | **52.624** | **0.1** |
+
+The time is flat to within half a per cent across the whole sweep: the radius is *not* where
+the milliseconds are, so the choice between these values is a choice about behaviour, and
+only one of them produces no acquire-and-release loop.
 
 `battle.target_switch_advantage` (1.25) is hysteresis: a new candidate has to be a quarter
 closer before it takes over from the enemy a soldier already has. Two enemies at similar
