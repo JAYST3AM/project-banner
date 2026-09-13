@@ -2115,9 +2115,22 @@ loop bounds are the ones a rectangle already has.
 **Decision: the search is unchanged.** No re-implementation is shipped. The ladder's staging - a
 small first rung that answers most looks, widening only for the looks that find nobody - is
 already the right architecture for this cost model, and its blunt loops are the cheapest form
-the language offers. The blocks-and-rings version was discarded with the block mask it needed,
-because keeping the mask would have cost a write per soldier per tick in the rebuild for a path
-that never runs.
+the language offers. The blocks-and-rings version was discarded with the block-level mask it
+needed - an addition on top of the per-cell side mask the grid has carried since Step 7.2.
+
+**The per-cell mask is not a leftover, and removing it is not free.** It was mistaken for
+remnant code while this milestone's revert was audited, and the removal was measured before it
+was believed. Delete the mask - the one that costs a write per soldier per tick in the rebuild -
+and the realistic twenty-thousand-soldier target phase goes from **602.7 to 2,776.3 ms/tick**,
+the tick from 995.7 to 3,126.0 ms, and the torture family's total from 1,138.6 to 3,349.0 ms.
+The spatial query costs 55.8 us per look with it and 173.1 without, while the rebuild gets 4.9 ms
+cheaper: about four hundred times the cost for the write. The mask is why a look that finds
+nobody is cheap - in the approach, a cell holding only one's own side is skipped by its bit
+instead of being walked and its soldiers rejected one at a time. The removal was reverted and
+the tree restored to the locked shape; the measurement is kept here because it says something
+the milestone's own figures cannot: **the search this milestone chose to leave alone is not a
+bare ladder. It is the ladder plus a Step 7.2 cell mask, and that mask is worth more than
+anything the five re-implementations could add.**
 
 **What ships instead, and why it is not nothing.** The instruments that produced the finding,
 and they are the milestone's deliverable: the search-shape counters (queries per look, cells read

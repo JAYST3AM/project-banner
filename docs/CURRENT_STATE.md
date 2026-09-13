@@ -1521,8 +1521,13 @@ looks before the second rung is reached, not because of how it walks.
 ### What ships
 
 - **The search itself: nothing.** Unchanged since Step 7.5, and that is the milestone's decision
-  rather than an omission. The block-indexed attempt went with the block mask it needed, because
-  the mask cost a write per soldier per tick in the spatial rebuild for a path that never runs.
+  rather than an omission. The block-indexed attempt went with the block-level mask it needed -
+  an addition on top of the per-cell side mask the grid has carried since Step 7.2, which stays.
+  Removing that per-cell mask was measured rather than assumed, because a revert can leave a
+  load-bearing line looking like a leftover: without it the realistic 20K target phase goes from
+  **602.7 to 2,776.3 ms/tick** and the torture family's total from 1,138.6 to 3,349.0 ms. It
+  costs 4.9 ms/tick in the rebuild and saves 2.16 s/tick in the query - four hundred times over.
+  The removal was reverted and the tree restored to the locked shape; see D-094.
 - **Search-shape counters** on the grid and the simulator: queries per look, cells read and
   cells walked twice, candidates split by rung, escalations, the distance an answer was found
   at, and exact per-search percentiles from one sample per search. Development-only.
