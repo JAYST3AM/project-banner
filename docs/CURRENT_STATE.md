@@ -1095,7 +1095,7 @@ the scaled battlefield - one hundred bodies, which is the realistic case - the c
 | soldiers answered straight from their body's focus | 12,318.9 |
 | focus answers that changed since the previous tick | 36.29 |
 
-The phase cost **760 ms** of a 1,786 ms tick in that run. The arithmetic is exact and
+The phase cost **760 ms** of a 1,786 ms tick in that run - 43% of it. The arithmetic is exact and
 uninteresting - **100 bodies x 20,000 soldiers = 2,000,000 soldier-visits a tick** - but the
 second figure is the one worth naming: 9.5 of those walks a tick were made *on behalf of one
 soldier*, because a body's answer that died mid-tick was recomputed by whoever noticed. That
@@ -1196,9 +1196,9 @@ Matched-window runs, twenty ticks each, both builds:
 The milestone's target was three times better on the focus phase at twenty thousand soldiers.
 **Measured, it is 18.3 times better**, and the total simulation cost of that battle is
 **2.3 times smaller**. What that means in the units this project does not confuse with
-rendering: **twenty thousand soldiers now simulate at about 1.04 ticks a second**, which is
-1,003 milliseconds a tick and still nowhere near playable. Twenty thousand soldiers remain a
-goal, not a result.
+rendering: **twenty thousand soldiers now simulate at about 1.0 ticks a second** - 1,003 ms a
+tick in the matched window above, 968 ms in the budgeted one - and that is still nowhere near
+playable. Twenty thousand soldiers remain a goal, not a result.
 
 ### 5. The focus phase, measured on its own
 
@@ -1243,8 +1243,8 @@ By phase, ms per tick, matched twenty-tick windows, clock on:
 soldier target acquisition**, at 575.1 ms of a 1,003.4 ms tick at twenty thousand soldiers -
 57% of it, and 85% of the soldier loop. Step 7.4 made looking cheaper and less frequent; the
 looks that remain are the expensive ones, because they are the soldiers with nobody near them
-widening their search. Formation focus, which was 44% of this tick a milestone ago, is now
-**4.1%**. See the entry in Known limitations.
+widening their search. Formation focus, which was 43% of that same tick a milestone ago (44%
+in the Step 7.4 report's own window), is now **4.1%**. See the entry in Known limitations.
 
 ### 7. Spikes
 
@@ -1287,7 +1287,7 @@ brief asked for by name reads zero in every battle the suite drives.
 | New suite | `test_formation_focus` (99) - the equivalence of the bounded selection against a full scan in live battles, summaries after movement and after casualties, membership changes through the Step 7.1 APIs, an empty body holding no focus, deterministic tie-breaking, the pass running once per body per tick, zero soldier-originated scans, the repair path, the wiped-out case, the allocation audit, determinism, and explicit orders staying authoritative |
 | Two-process restart | **95 checks + 6 checks, 0 failures** - unchanged; no save-format change |
 | Windowed smoke | campaign -> settlement -> recruit -> battle -> **formation drill (3 bodies, 0 inconsistencies)** -> contact -> DEFEAT -> results, no script errors. Step 7.4's build was run the same way for comparison: identical outcome, identical log shape |
-| CI | **green on the milestone tip** - run id, head SHA and the raw job log's suite and assertion counts are in the milestone report |
+| CI | **green on the milestone tip** - [run 34768187866](https://github.com/JAYST3AM/project-banner/actions/runs/34768187866), head `266d1b46`, job *Headless suites and restart check*: `completed` / `success`. Read from the raw job log: `suites: 20 of 20 reported   assertions: 2831   failures: 0`, `RESULT: PASS`, `persistence write: PASS (6 checks, 0 failures)`, `persistence verify: PASS (95 checks, 0 failures)` |
 | Leak check | 110 leaked objects found and fixed during development (a formation must not hold a reference to a soldier); the suite now exits with no `ObjectDB` leak warning |
 
 ## Known limitations
@@ -1337,7 +1337,7 @@ next work.
     ran out of it mid-march. What remains is stated in the entry below rather than claimed
     as solved.
 18. ~~**Target selection is the largest phase.**~~ **Step 7.5 closed this in the way the
-    measurement suggested: by making the phase above it cheap.** Formation focus was 44% of
+    measurement suggested: by making the phase above it cheap.** Formation focus was 43% of
     the realistic twenty-thousand-soldier tick and is now **4.1%** of it, which promotes target
     acquisition to the top of the profile at **575.1 ms of 1,003.4 ms**. It is not solved,
     only named. The cadence is a floor, not a solution: soldiers still look once every four
