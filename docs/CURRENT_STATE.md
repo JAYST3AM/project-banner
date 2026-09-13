@@ -1461,10 +1461,13 @@ battlefield, the same run the rest of this milestone's figures come from. A hund
 over the same battles draws the same picture within a few percent - 1.77 queries, 260 cells, 171
 candidates per look - and reports the same 8.4% of cells walked twice by one look.
 
-A look is asked only on cadence, and half the soldier-ticks whose turn it is are answered by the
-D-087 proof without asking the battlefield at all - so the cost of this phase is not how many
-questions are asked but **what one question costs**, and the answer is a second-rung rectangle
-walk of 289 cells handing over 171 candidates to keep one.
+A look is asked only on cadence, and **half of the looks a cadence of four implies never
+happen**: 2,438 a tick against 5,000, the other 2,562 already answered - a retained opponent
+still in reach, or the formation's answer, or the D-087 proof that the search would find nobody.
+The log's own decomposition of the 17,486 avoided looks is 2,662 + 3,363 + 11,461 across those
+three, and it settles what this phase is: not how many questions are asked, but **what one
+question costs** - a second-rung rectangle walk of 289 cells handing over 171 candidates to keep
+one.
 
 ### The five searches that were tried, and what they measured
 
