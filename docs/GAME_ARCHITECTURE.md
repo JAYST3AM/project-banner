@@ -514,16 +514,122 @@ The radius is deliberately not tied to melee reach: archers, long spears and cav
 threat detection all want to search further than they can hit, and widening the ladder is
 a config change (D-061). Step 7.2 adds none of those systems.
 
-#### Overlap resolution
+### The separation pass: keeping bodies apart (Step 7.3)
 
-`_resolve_overlaps()` asks the grid for the soldiers near each one and resolves a pair
-only when `other.id > unit.id`. The pair rule means each overlap is pushed once rather
-than once per side, which both halves the work and removes the outcome's dependence on
-which soldier was considered first. The processing order reproduces the exhaustive loop's
-order rather than merely a defensible one, so the spatial pass produces **the same
-positions** the old loop produced - checked directly against the exhaustive loop on eight
-arrangements including a cell-boundary pair and two soldiers in the same spot (D-062).
+Every soldier is a body on the ground. Two of them cannot stand in the same place, and
+the system that enforces that is `BattleOverlapGrid`.
 
+**The architectural rule it serves:**
+
+> Formation geometry is the primary mechanism for maintaining normal friendly soldier
+> spacing. Spatial overlap resolution is a local corrective system for genuine physical
+> conflicts and contact, not a substitute for formation geometry.
+
+That sentence is the whole design. A dressed formation is already spaced — a slot grid's
+closest two places are one `formation spacing` apart, and a spacing is 2.6 units against a
+separation distance of 1.35. The pass is not there to hold a formation together; it is
+there for the moments when the formation's geometry is not enough: a compress under
+contact, a body crossing another, a flank arriving, a crush.
+
+#### Why it has its own index
+
+Step 7.2 used the targeting grid for separation. It was the wrong shape for the job, and
+the measurement said so in a way no amount of reading could have: at five thousand
+soldiers the pass was handed **95.6 candidates per soldier** and found **226 touching
+pairs army-wide**. Twenty-one hundred candidates measured for every one that mattered,
+with the broadphase alone 62 to 66 per cent of the phase.
+
+The cause was a mismatch of distances. A target search starts at 8 units and wants to be
+generous; a separation happens at 1.35. One cell size cannot serve both, and 4-unit cells
+made the pass search a box several times the width of the distance it cared about.
+
+So the two are separate grids, with separate cell sizes, rebuilt separately:
+
+| | `BattleSpatialGrid` | `BattleOverlapGrid` |
+| --- | --- | --- |
+| Answers | "who is near this soldier" | "who is standing inside whom" |
+| Distance that matters | 8 units (target search) | 1.35 units (separation) |
+| Cell size | `battle.spatial_cell_size` (4.0) | `battle.overlap_cell_size` (0.9) |
+| Pair production | one query per soldier, filling a reused result array | each occupied cell against the half-neighbourhood in front of it |
+| Used by | `_choose_target`, `_refresh_focus` | `_resolve_overlaps` |
+
+The second grid enumerates **cell against cell** rather than soldier against soldier. Each
+occupied cell pairs itself with the half of its neighbourhood that lies in front of it —
+one cell to the right, three below, and so on — so every physical pair is produced exactly
+once by construction, with no id comparison and no per-soldier query to go with it.
+
+The neighbourhood radius is **derived, not configured**:
+`ceil(separation distance / cell size)` cells. A pair closer than the separation distance
+cannot be more than that many cells apart on either axis, however the two straddle a
+boundary, so a change to either number cannot silently produce a search that misses pairs.
+
+#### Pushes are accumulated, not applied
+
+Step 7.2 pushed each overlapping pair apart the instant it was found. That made the result
+depend on the order pairs were visited in — the second pair of a cluster was measured
+against positions the first pair had already moved — and it is why Step 7.2 had to
+reproduce the exhaustive loop's visit order exactly, and why its test compared positions
+against that loop.
+
+Step 7.3 sums every push into a per-soldier displacement and moves the field once, at the
+end. There is no visit order to preserve because there is no visit order that matters, and
+that is checkable rather than asserted: the order-independence test reverses the entire
+roster and checks that nobody's position moves by more than a thousandth of a unit.
+
+Each soldier's displacement is capped at `battle.max_separation_push` (1.35 units, one
+separation distance). A soldier buried in a crush takes a push from every body it is
+inside, and nothing in the arithmetic bounds that sum; the cap turns "usually stable" into
+"bounded by construction", and cannot slow an ordinary push down because an ordinary push
+is smaller than a body.
+
+**What is honestly different from Step 7.2.** This is not the same relaxation. A sequential
+pass resolves a cluster harder in a single tick, because each soldier sees the corrections
+already made to its neighbours. A simultaneous pass has everyone react to where everyone
+stood, and takes more ticks over the same cluster — measured on a deliberately
+pathological pile of three hundred soldiers in a six-unit square, two hundred passes leave
+under two per cent of the original overlap and the closest pair back out at 91% of the
+separation distance. For a battle that is the right trade: what matters is that the pass
+separates soldiers at least as fast as they can walk into each other, and that is tested
+directly by driving two lines into each other and checking the closest approach across a
+hundred and sixty ticks.
+
+#### Formation-aware skipping
+
+The pass skips cell-against-cell work where it can *prove* there is nothing there:
+
+- every soldier in both cells is standing within `battle.separation_settle_epsilon`
+  (0.15 units) of the place its formation gave it; **and**
+- both cells belong to the same formation; **and**
+- that formation's own slot spacing exceeds the separation distance plus twice the settle
+  distance.
+
+The claim is exact: two soldiers standing within ε of their assigned places are at least
+`spacing - 2ε` apart, and the closest two places in a slot grid are one spacing apart. If
+that exceeds the separation distance, no pair across two settled cells of one body can be
+touching, so neither a distance nor a push needs computing. A cramped formation does no
+skipping — the test is against the body's own spacing, not a constant. A body with one
+soldier out of place does no skipping in the cells that soldier touches.
+
+**It never applies across two bodies.** Two friendly formations touching or crossing are a
+real physical event — a reserve advancing through a gap, a line passing behind another —
+and so is enemy contact. Every pair between two bodies is measured, settled or not, and
+the tests for both are the ones that matter most.
+
+#### What the pass costs, and where it goes
+
+Counters behind `profile_enabled` report what the pass did rather than only what it cost:
+cell pairs considered and skipped, pairs measured, pairs touching, clamped displacements,
+settled soldiers, interior cells. They are what selected this architecture — see D-071 —
+and they are what says when the next change should be made.
+
+No allocation happens in a pass. Bucket heads, tails, occupancy, cell state, displacement
+accumulators and the offset tables are all persistent storage sized on first use; the
+rebuild clears only the cells the previous pass occupied, because filling a battlefield of
+hundreds of thousands of mostly-empty cells is work proportional to the ground rather than
+to the army. A test runs five hundred passes and asserts static memory grew by less than a
+page.
+
+---
 #### Instrumentation
 
 `BattleSimulator` carries phase accumulators behind `profile_enabled` (D-064): grid

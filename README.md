@@ -15,7 +15,8 @@ All assets, names, factions, lore, UI and code in this repository are original.
 ## Status
 
 **The first vertical slice is complete and verified**, and **Step 7 — terrain and
-formations** and **Step 7.2 — battle simulation scaling** are now in. You can start a campaign, travel, recruit individual named
+formations**, **Step 7.2 — battle simulation scaling** and **Step 7.3 — dense battle /
+overlap scaling** are now in. You can start a campaign, travel, recruit individual named
 soldiers, take them into a tactical battle on generated ground, form them into a line,
 a column or loose order, watch them walk into that shape while the enemy closes, watch
 some of them die, earn experience and gold, and find all of it intact after closing and
@@ -81,7 +82,7 @@ standing constraints in `docs/GAME_ARCHITECTURE.md`.
 
 Verification is the point of this repository. If you change something, the claim to
 check is not "it compiles" but that
-`tests/` still reports `2364 assertions, 0 failures, 17 of 17 suites` and that the
+`tests/` still reports `2490 assertions, 0 failures, 18 of 18 suites` and that the
 two-process restart check still passes. Both run automatically in CI on every push and
 pull request, pinned to Godot 4.7.2-stable.
 
@@ -92,17 +93,21 @@ a battle costs from 100 to 5,000 soldiers:
 godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100,500,1000
 ```
 
-The current numbers are in `docs/CURRENT_STATE.md`, with the before-and-after table
-against the previous implementation. The short version: **5,000 soldiers went from 11.0
-seconds a tick to 0.70 seconds** - a 15.6x improvement - and 20,000 soldiers now simulate
-at 12.0 seconds a tick, measured rather than extrapolated. Every proximity question a
-battle asks goes through a battlefield spatial index, and the answer to "who is near me"
-is answered by the soldiers near you rather than by the whole army.
+The current numbers are in `docs/CURRENT_STATE.md`, with the before-and-after tables
+against each previous implementation. The short version, on the fixed-area torture
+benchmark: **5,000 soldiers went from 11.0 seconds a tick to 0.43 seconds** and **20,000
+from 12.0 seconds to 1.63 seconds**, measured rather than extrapolated. Every proximity
+question a battle asks goes through a battlefield spatial index, and the separation pass
+has one of its own with a cell size exactly one body's width.
 
-The same harness measures the index on its own at constant density, where it is linear on
-rebuild and flat on query from one thousand soldiers to fifty thousand. What is left is
-reported honestly: overlap resolution is now the dominant phase, and it is bounded by how
-many soldiers share a grid cell rather than by the size of the army.
+There is a second benchmark family for the question the first one cannot answer. On a
+battlefield that grows with the army so that density stays realistic, **twenty thousand
+soldiers reach sustained contact at 5.9 seconds a tick** - a real measurement of a real
+twenty-thousand-soldier battle, at a size that is not yet playable and is not claimed to
+be.
+
+What is left is reported honestly: target selection is now the dominant phase, because
+every soldier searches for one every tick.
 
 ## Documentation
 

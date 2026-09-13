@@ -5,12 +5,13 @@ reader (human or AI) who needs to understand, review, or advise on Project Banne
 without access to the repository.
 
 **Repository state:** `github.com/JAYST3AM/project-banner` (public)
-**Revision:** `main` at the Step 7.2 battle simulation scaling foundation — 18 commits, working tree clean
+**Revision:** `main` at the Step 7.3 dense battle and overlap scaling — 20 commits, working tree clean
 **Engine:** Godot 4.7.2-stable, GDScript only
 **Status:** Steps 0–6 of the brief are complete and independently foundation-locked
 (6.5 audit remediation, 6.6 lock), **Step 7 — Tactical Combat 2.0: terrain and formation
-foundation** is complete, **Step 7.1** has hardened its edge cases, and **Step 7.2 has
-removed the scaling bottleneck Step 7 measured**. **The first major checkpoint (the full
+foundation** is complete, **Step 7.1** has hardened its edge cases, **Step 7.2** removed
+the scaling bottleneck Step 7 measured, and **Step 7.3 removed the one that measurement
+left behind**. **The first major checkpoint (the full
 vertical slice) is reached and verified**, on a clean CI runner as well as locally.
 
 > This is a snapshot. `docs/CURRENT_STATE.md` in the repository is the living version
@@ -130,6 +131,7 @@ runner's `SUITES` list, since several are meant to fail.
 | `c4c2bd2` | milestone-07: establish terrain and formation warfare foundation |
 | `ccf9cff` | milestone-07.1: harden formation ownership and contact semantics |
 | `b35d868` | milestone-07.2: replace quadratic battlefield proximity scans |
+| `TIP73` | milestone-07.3: scale dense soldier overlap resolution |
 
 ---
 
@@ -427,7 +429,7 @@ size of the band, which is the right behaviour and not evidence of a systematic 
 
 The working rule is: **never claim something works unless it has been run.**
 
-### 9.1 Headless suites — 17 suites, 2,364 assertions, 0 failures
+### 9.1 Headless suites — 18 suites, 2,490 assertions, 0 failures
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -437,12 +439,13 @@ The working rule is: **never claim something works unless it has been run.**
 | `test_recruitment` | 191 | unit/trait data, names, factory, recruitment rules, party limits |
 | `test_party_semantics` | 51 | **roster membership vs active force** — travel pace, HUD wording, capacity, the dead kept on the record |
 | `test_encounters` | 282 | spawning, movement, aggro, detection, `BattleContext`, deployment, simulator |
-| `test_combat` | 267 | damage, death, attribution, victory conditions, results, resolver, balance |
+| `test_combat` | 269 | damage, death, attribution, victory conditions, results, resolver, balance |
 | `test_battle_outcomes` | 224 | **victory / defeat / draw / withdrawal**, the retreat farming loop, timeout freezing the field, results-screen wording |
 | `test_terrain` | 72 | **deterministic ground** — same seed same field, different seed different field, bounds, movement modifiers, terrain actually changing movement, the slope contract at the edge of the field, independence from rendering |
 | `test_formation` | 328 | **formations as physical objects** — geometry across seven facings, distinct slots, ownership and partial detachment, repeated transfers, movement without teleporting, turning, reformation, cohesion, casualties leaving gaps, rotated debug bounds |
 | `test_formation_battle` | 132 | **both systems together** — both armies formed, the enemy on the same engine, the AI ignoring wiped-out bodies, contact belonging to a body rather than a side, terrain slowing a body, a formed battle resolving and being reproducible, the architecture guardrails, a 500-unit scale smoke, **combat across a cell boundary and a cell corner**, every soldier finding a target while the armies are apart, a body pointed by its own focus, and a 300-soldier pile in a single cell run twice |
-| `test_spatial_grid` | 127 | **the proximity index** — insertion, rebuild, empty and single-unit grids, many units, cell boundaries as non-walls, radius queries, side filtering, dead-unit exclusion at build time **and at query time**, movement between cells, duplicates, a saturated cell, large-radius queries, query order across index orderings, scratch-buffer reuse, **agreement with a brute-force reference over 200 generated queries**, the movement margin, target selection against the same brute-force reference over 80 ticks of a moving battle, the search bound and its long-range fallback, overlap resolution against the exhaustive pairwise loop on eight arrangements, explicit attack orders, and a seeded battle repeating tick-for-tick |
+| `test_spatial_grid` | 111 | **the proximity index** — insertion, rebuild, empty and single-unit grids, many units, cell boundaries as non-walls, radius queries, side filtering, dead-unit exclusion at build time **and at query time**, movement between cells, duplicates, a saturated cell, large-radius queries, query order across index orderings, scratch-buffer reuse, **agreement with a brute-force reference over 200 generated queries**, the movement margin, target selection against the same brute-force reference over 80 ticks of a moving battle, the search bound and its long-range fallback, overlap resolution against the exhaustive pairwise loop on eight arrangements, explicit attack orders, and a seeded battle repeating tick-for-tick |
+| `test_overlap` | 140 | **separating dense soldier bodies** — two soldiers separate and distant ones do not move, coincident soldiers resolve deterministically, cell boundaries including corners and exact coordinates, no pair resolved twice, **order independence** (the roster is reversed and nobody moves), repeatability, **no allocation after a rebuild**, settled-formation skipping for line/column/loose, a compressed line, two friendly bodies crossing, enemy contact, flank contact, dense piles of 200 and 800, no launches, convergence, brute-force agreement on sparse *and* deliberately dense deployments, and a cell-size sweep |
 | `test_enemy_persistence` | 121 | **the same enemy fought twice** — battle → campaign → save/load → second battle |
 | `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path**, through the real scenes — including the real `BattleResult` reaching the real results screen |
 | `test_persistence` | 150 | every persisted field, migration, refusal, corrupt files, metadata for every save shape |
@@ -750,6 +753,77 @@ comparison across commits is comparing the same battle rather than merely the sa
 of soldiers. The checksums are identical to Step 7's at every shared size, which is what
 makes the comparison above a comparison.
 
+
+### 9.8 The benchmark, three milestones on — and a second family
+
+Step 7.2's harness answered "what happens if an army is packed into the same hundred-by-
+sixty field regardless of size". Step 7.3 kept that — unchanged in seed, dimensions,
+layouts, rules and budget, so every figure remains comparable across three milestones —
+and added a second family for the question it cannot answer.
+
+**Family A: the fixed-area torture test.** Seed 70707, one 100x60 battlefield at every
+size, headless, Godot 4.7.2-stable, one machine, ~12 s of wall clock per variant scaled by
+size.
+
+| Soldiers | Step 7 ms/tick | Step 7.2 ms/tick | **Step 7.3 ms/tick** | speedup vs 7.2 | ticks/sec | contact |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 100 | 4.783 | 4.160 | **3.651** | 1.14x | 274 | yes |
+| 500 | 110.337 | 36.165 | **33.939** | 1.07x | 29 | yes |
+| 1,000 | 439.993 | 65.299 | **57.537** | 1.13x | 17 | yes |
+| 2,500 | 2,684.557 | 254.277 | **172.164** | 1.48x | 6 | yes |
+| 5,000 | 10,988.004 | 703.456 | **425.177** | 1.65x | 2 | yes |
+| 10,000 | not measured | 2,872.690 | **781.491** | 3.68x | 0.6 | no |
+| 20,000 | not measured | 12,016.796 | **1,632.897** | 7.36x | 0.6 | no |
+
+**Overlap alone**, the phase Step 7.3 attacked, under the same settings:
+
+| Soldiers | Step 7.2 overlap ms | Step 7.3 overlap ms | speedup |
+| ---: | ---: | ---: | ---: |
+| 500 | 12.845 | 6.968 | 1.8x |
+| 2,500 | 104.753 | 37.619 | 2.8x |
+| 5,000 | 387.150 | 65.972 | 5.9x |
+| 20,000 | not separately recorded | 845.582 | — |
+
+Total simulation time improved at **every** size. A milestone that merely moved time from
+one function to another would not have been one, and the requirement was stated that way
+in the brief.
+
+**Family B: battlefield scaled with the army.** Density held at the 500-on-100x60
+reference, 0.0833 soldiers per square unit, at the standard 5:3 aspect. Each side deploys
+as formed bodies of two hundred that start standing on their slots; the armies advance into
+each other.
+
+| Soldiers | field | density | ms/tick | ticks/sec | ticks | contact | combat ticks | armies |
+| ---: | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: |
+| 1,000 | 141x85 | 0.0833 | 145.160 | 7 | 83 | **yes** | 22 | 6 |
+| 2,500 | 224x134 | 0.0833 | 511.941 | 2 | 59 | **yes** | 39 | 14 |
+| 5,000 | 316x190 | 0.0833 | 1,182.920 | 1 | 51 | **yes** | 39 | 26 |
+| 10,000 | 447x268 | 0.0833 | 2,953.324 | 0.3 | 21 | **yes** | 18 | 50 |
+| 20,000 | 633x380 | 0.0833 | 5,852.212 | 0.2 | 11 | **yes** | 7 | 100 |
+
+Every size reached sustained contact and fought. Twenty times the army costs 40.3 times the
+time per tick at constant density — superlinear, but nothing like family A's 447x for 200x,
+and the shape is a battle rather than a crush. The twenty-thousand row is eleven ticks of a
+real fight between two hundred formed bodies, which is a small window and is described as
+one.
+
+**What is now dominant**, by phase, ms per tick:
+
+| units | grid | focus | formations | soldiers | of which target | overlap |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 5,000 | 9.237 | 10.297 | 8.353 | 247.726 | **211.057** | 65.972 |
+| 20,000 | 38.155 | 44.436 | 39.539 | 569.973 | **429.207** | 845.582 |
+
+Target selection is the dominant phase across the realistic range. Overlap has fallen from
+66% of a tick to 19% at five thousand soldiers, and becomes dominant again only at twenty
+thousand on the fixed-area field, where the army is several times denser than the field can
+hold and the pass is fighting a crush rather than a battle.
+
+**The measure of the improvement that is not a time.** Before this milestone the pass was
+handed 95.6 candidates per soldier to find 226 touching pairs. It now measures 3.3 pairs
+per pair that matters — a factor of six hundred fewer candidates measured per candidate
+acted on.
+
 ---
 
 ## 10. Bugs found, and how
@@ -981,7 +1055,7 @@ The honest list of gaps.
 already existed, and both deliberately added no gameplay. **Step 7 closed the first two**
 and left the rest untouched: battlefields are no longer flat, and formations exist.
 **Step 7.2 closed none of them either** — it was an engineering milestone, and the brief
-for it forbade new gameplay outright. What it closed was an *engineering* gap rather than
+for it forbade new gameplay outright, as did Step 7.3's. What it closed was an *engineering* gap rather than
 a gameplay one, and that gap had its own entry below; it is now struck out and replaced
 with what the measurement says remains.
 
@@ -1004,14 +1078,18 @@ with what the measurement says remains.
    ammunition is unlimited, and there are no firing arcs or lines of fire.
 6. **No wounds, fatigue, or weather effects.** Weather is a placeholder string in the
    context.
-7. **Overlap resolution is the most expensive phase.** With the quadratic scans gone
-   (Step 7.2), the dominant cost is the per-soldier separation pass, and it is bounded by
-   how many soldiers share a grid cell. On a fixed 100x60 battlefield that number grows
-   with the army, so density - not the algorithm - is now the limit: 66% of a tick at
-   5,000 soldiers, where the busiest cell holds 52 of them. A larger battlefield or a
-   finer cell is the honest next answer, and which of those is right is a decision for a
-   milestone that can measure the alternative.
-8. ~~**The simulation is quadratic in soldiers.**~~ **Closed in Step 7.2.** The two
+7. **Target selection is the most expensive phase.** After Step 7.3 took the separation
+   pass off the top of the profile, what remains is the per-soldier target search - 60% of
+   a tick at five thousand soldiers, because every soldier searches every tick. The
+   remaining question is how often a soldier needs to look rather than how the looking is
+   done, and that is a question about simulation cadence, which this milestone deliberately
+   did not touch.
+8. ~~**Overlap resolution is the most expensive phase.**~~ **Closed in Step 7.3.** It was
+   66% of a tick at five thousand soldiers and is now 19%, with the separation pass given
+   its own index, its own cell size and a pair enumeration that produces each pair once. A
+   separate benchmark family now measures the same thing on a battlefield that grows with
+   the army, where twenty thousand soldiers reach sustained contact.
+9. ~~**The simulation is quadratic in soldiers.**~~ **Closed in Step 7.2.** The two
    battlefield-wide per-soldier scans are gone and 5,000 soldiers went from 10,988 ms a
    tick to 703 ms. The entry read: *"`_choose_target()` and `_resolve_overlaps()` compare
    every soldier with every other soldier, which is why 5,000 soldiers costs eleven

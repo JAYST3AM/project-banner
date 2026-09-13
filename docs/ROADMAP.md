@@ -371,6 +371,102 @@ other soldier. Both predated Step 7.
 **Definition of done:** measured; 17 suites, **2364 assertions, 0 failures**; 95 restart
 checks, 0 failures; the windowed flow clean; CI green. See D-059 through D-069.
 
+
+## Step 7.3 - Dense battle / overlap scaling (`milestone-07.3`)
+
+**Goal:** remove the next measured bottleneck. Step 7.2 replaced the quadratic proximity
+scans and reported that 66% of a tick at five thousand soldiers was the separation pass.
+An engineering milestone: no new gameplay, nothing from Step 8.
+
+- **The measurement came first.** The separation pass was given counters before it was
+  changed, and they said it was handed **95.6 candidates per soldier to find 226 touching
+  pairs** army-wide, with the broadphase 62-66% of the phase. See D-071.
+- **A dedicated separation index.** `BattleOverlapGrid`, with its own cell size
+  (`battle.overlap_cell_size`, 1.35 - one body's width, chosen by a sweep), enumerating
+  cell against cell so every pair is produced once with no per-soldier query. See D-073,
+  D-078.
+- **Pushes accumulated rather than applied**, which removes order dependence from the
+  physics entirely and makes order independence a property that can be checked instead of
+  preserved. It is a deliberate change in relaxation and is documented as one. See D-074.
+- **A displacement ceiling**, so a crush cannot fling a soldier across the field. D-075.
+- **Formation geometry does the spacing.** Settled interiors of a body are skipped on a
+  proof, never across two bodies, and never where the formation's own spacing is tight.
+  See D-076.
+- **Two benchmark families**, because one battlefield cannot answer both "what if an army
+  is packed into too small a space" and "what does a battle of twenty thousand cost".
+  See D-077.
+- **Two Step 7.2 hardening fixes**: the grid's bucket tails are persistent storage rather
+  than a per-rebuild allocation (D-070), and an explicit attack order is resolved before
+  the automatic target search rather than after it (D-072).
+
+**Definition of done:** measured; **18 suites, 2490 assertions, 0 failures**; 95 restart
+checks, 0 failures; the windowed flow clean; CI green. Total simulation time improved at
+every size, 1.07x to 7.36x. See D-070 through D-078.
+
+
+## Step 7.3 - Dense battle / overlap scaling (`milestone-07.3`)
+
+**Goal:** remove the next measured bottleneck. Step 7.2 replaced the quadratic proximity
+scans and reported that 66% of a tick at five thousand soldiers was the separation pass.
+An engineering milestone: no new gameplay, nothing from Step 8.
+
+- **The measurement came first.** The separation pass was given counters before it was
+  changed, and they said it was handed **95.6 candidates per soldier to find 226 touching
+  pairs** army-wide, with the broadphase 62-66% of the phase. See D-071.
+- **A dedicated separation index.** `BattleOverlapGrid`, with its own cell size
+  (`battle.overlap_cell_size`, 1.35 - one body's width, chosen by a sweep), enumerating
+  cell against cell so every pair is produced once with no per-soldier query. See D-073,
+  D-078.
+- **Pushes accumulated rather than applied**, which removes order dependence from the
+  physics entirely and makes order independence a property that can be checked instead of
+  preserved. It is a deliberate change in relaxation and is documented as one. See D-074.
+- **A displacement ceiling**, so a crush cannot fling a soldier across the field. D-075.
+- **Formation geometry does the spacing.** Settled interiors of a body are skipped on a
+  proof, never across two bodies, and never where the formation's own spacing is tight.
+  See D-076.
+- **Two benchmark families**, because one battlefield cannot answer both "what if an army
+  is packed into too small a space" and "what does a battle of twenty thousand cost".
+  See D-077.
+- **Two Step 7.2 hardening fixes**: the grid's bucket tails are persistent storage rather
+  than a per-rebuild allocation (D-070), and an explicit attack order is resolved before
+  the automatic target search rather than after it (D-072).
+
+**Definition of done:** measured; **18 suites, 2490 assertions, 0 failures**; 95 restart
+checks, 0 failures; the windowed flow clean; CI green. Total simulation time improved at
+every size, 1.07x to 7.36x. See D-070 through D-078.
+
+
+## Step 7.3 - Dense battle / overlap scaling (`milestone-07.3`)
+
+**Goal:** remove the next measured bottleneck. Step 7.2 replaced the quadratic proximity
+scans and reported that 66% of a tick at five thousand soldiers was the separation pass.
+An engineering milestone: no new gameplay, nothing from Step 8.
+
+- **The measurement came first.** The separation pass was given counters before it was
+  changed, and they said it was handed **95.6 candidates per soldier to find 226 touching
+  pairs** army-wide, with the broadphase 62-66% of the phase. See D-071.
+- **A dedicated separation index.** `BattleOverlapGrid`, with its own cell size
+  (`battle.overlap_cell_size`, 1.35 - one body's width, chosen by a sweep), enumerating
+  cell against cell so every pair is produced once with no per-soldier query. See D-073,
+  D-078.
+- **Pushes accumulated rather than applied**, which removes order dependence from the
+  physics entirely and makes order independence a property that can be checked instead of
+  preserved. It is a deliberate change in relaxation and is documented as one. See D-074.
+- **A displacement ceiling**, so a crush cannot fling a soldier across the field. D-075.
+- **Formation geometry does the spacing.** Settled interiors of a body are skipped on a
+  proof, never across two bodies, and never where the formation's own spacing is tight.
+  See D-076.
+- **Two benchmark families**, because one battlefield cannot answer both "what if an army
+  is packed into too small a space" and "what does a battle of twenty thousand cost".
+  See D-077.
+- **Two Step 7.2 hardening fixes**: the grid's bucket tails are persistent storage rather
+  than a per-rebuild allocation (D-070), and an explicit attack order is resolved before
+  the automatic target search rather than after it (D-072).
+
+**Definition of done:** measured; **18 suites, 2490 assertions, 0 failures**; 95 restart
+checks, 0 failures; the windowed flow clean; CI green. Total simulation time improved at
+every size, 1.07x to 7.36x. See D-070 through D-078.
+
 ---
 
 ## Standing design principle

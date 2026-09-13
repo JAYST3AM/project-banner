@@ -105,6 +105,11 @@ godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --uni
 #     The spatial layer alone, at constant density, so the curve is the algorithm's
 #     rather than the battlefield's.
 godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100 --ticks=1 --grid-scale=1
+#     The second family: a battlefield that grows with the army, at constant density, with
+#     armies that start dressed and advance into contact. Says whether contact was reached.
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --battle-units=1000,2500,5000 --units=100
+#     Sweep the separation cell size without editing the config.
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=5000 --battle-units=100 --overlap-cell=0.9
 ```
 
 `--check-only` does **not** load autoloads, so "Identifier not found: GameData" or

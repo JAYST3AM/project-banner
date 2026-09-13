@@ -1258,3 +1258,229 @@ anyone asks whether GDScript is fast enough.
 No GDScript-hostile architecture was introduced either: soldiers remain plain data, a
 formed soldier's per-step work is a reference and an array read, and the per-soldier cost
 that remains is measured rather than asserted.
+
+## D-070: The grid's bucket tails are persistent storage, not a per-rebuild allocation
+
+**Decision.** `BattleSpatialGrid` keeps its bucket-tail array as grid storage, sized and
+cleared alongside the bucket heads, rather than creating one per rebuild.
+
+**Why.** `rebuild()` brought a destination it was writing into back to zero by allocating
+a fresh `PackedInt32Array` every time. That is small, it is bounded by the cell count
+rather than by the army, and it was invisible in every benchmark — and it made a comment
+in the same file untrue. The grid's cost model is "one linear pass writing into
+preallocated arrays", and a claim that is *nearly* true is worse than one that is not
+made: the next person to reason about the grid would have reasoned from it and been
+wrong, and the per-rebuild allocation is exactly the kind of thing that hides until a
+rebuild happens a thousand times a second.
+
+The fix is three lines. The verification is the part worth keeping: a test runs five
+hundred rebuilds and asserts that static memory grew by less than a page, which would
+fail loudly if a per-rebuild allocation ever came back. A comment cannot fail.
+
+## D-071: The separation pass counts what it did, not only what it cost
+
+**Decision.** `BattleOverlapGrid` carries counters — cell pairs considered and skipped,
+soldier pairs measured, touching pairs, clamped displacements, largest displacement,
+settled soldiers, interior cells — collected only when profiling is on.
+
+**Why.** The profile clock from Step 7.2 said the separation pass was 66% of a tick at
+five thousand soldiers. That is enough to know it matters and not nearly enough to know
+what to do: "eighty per cent of the phase is spent walking candidates that turn out to be
+far away" and "most of it is spent resolving genuine contacts" call for opposite
+responses, and the clock cannot tell them apart.
+
+The counters could. Measured before any restructuring: **95.6 candidates per soldier**,
+226 touching pairs army-wide, and the broadphase itself 62 to 66 per cent of the phase.
+Twenty-one hundred candidates measured per candidate that mattered. That number is what
+selected the architecture, and it was not reachable by reading the code — every line of
+the old pass looks reasonable.
+
+The counters cost two array writes and a comparison when they are on and a boolean test
+when they are off, and they are off in gameplay.
+
+## D-072: An explicit attack order is resolved before the automatic search, not after it
+
+**Decision.** `_update_unit()` resolves a soldier's explicit attack order first, and only
+runs the automatic target search if the order is absent or has lapsed.
+
+**Why.** Step 7.2 asked the battlefield for the nearest enemy and then threw the answer
+away whenever an order was in force. The order is authoritative whenever it is valid,
+which is most ticks of most ordered soldiers, so that was a per-soldier local search
+performed for no reason — and since Step 7.2 bounded the search, it is not free.
+
+The semantics are identical: the order is honoured while its target is a living enemy and
+lapses the moment it is not, in the same tick either way. What changes is only who does
+the work first. A regression test asserts both halves directly — an ordered soldier
+ignores a nearer enemy, and goes back to the nearest living enemy the tick its order
+target falls.
+
+## D-073: The separation pass gets its own index with its own cell size
+
+**Decision.** Overlap resolution no longer uses `BattleSpatialGrid`. It uses
+`BattleOverlapGrid`, a second index over the same battlefield with its own cell size from
+`battle.overlap_cell_size` (0.9 world units), and the two grids coexist for the length of
+a battle.
+
+**Why.** The two systems ask questions of completely different sizes. A target search
+starts at 8 units and wants to be generous; a separation happens at
+`separation_radius * SEPARATION_FACTOR`, which is 1.35 units. One cell size cannot serve
+both: 4-unit cells are right for a search reaching eight units and far too coarse for a
+distance of one and a third, and the measurement showed exactly that — the pass was
+handed a box several times the width of the distance it cared about and discarded 99.95%
+of it.
+
+Sharing one index also meant sharing one rebuild, one margin, and one set of semantics
+for two jobs that want different ones. Separating them removed the second rebuild per
+tick as well: the targeting grid is now built once, where the soldiers are, and never
+reconstructed for the separation pass.
+
+The class is a separate file rather than a second configuration of the same one because
+the *pair production* differs, not just the numbers. `BattleSpatialGrid` answers "who is
+near this soldier", one query at a time, because that is what a target search needs.
+`BattleOverlapGrid` enumerates cell against cell, because a separation pass wants every
+pair once and does not want a query per soldier or a result array to go with it.
+
+## D-074: Overlap pushes are accumulated and applied together, and that is a deliberate change
+
+**Decision.** Every overlapping pair contributes half a separation to each soldier's
+accumulated displacement; the field is moved once, at the end of the pass. Step 7.2
+pushed each pair apart the moment it was found.
+
+**Why.** Step 7.2's pass was sequential: the second pair of a cluster was measured
+against positions the first pair had already changed. That makes the outcome depend on
+the order pairs are visited in, which is why Step 7.2 had to reproduce the exhaustive
+loop's visit order exactly to get the same positions, and why its test compared positions
+against that loop. Preserving a visit order is possible; it is not free, and it is a
+constraint that every later change has to keep satisfying.
+
+A simultaneous pass has no visit order to preserve, because every soldier reacts to where
+everyone stood. That is a stronger guarantee than reproducing one, and it is why the
+order-independence test can reverse the entire roster and check that nobody's position
+moves by more than a thousandth of a unit. A claim about iteration order that is
+undone by reversing an array is not worth much; this one survives it.
+
+**What is honestly different.** This is not the same relaxation. A sequential pass
+resolves a cluster harder in a single tick than a simultaneous one, because each soldier
+sees the corrections already made to its neighbours. The two reach the same separated
+arrangement, but a simultaneous pass takes more ticks over it — measured on a
+deliberately pathological pile, two hundred passes leave under two per cent of the
+original overlap and the closest pair back out at 91% of the separation distance. For a
+battle that is the right trade: soldiers are separated at least as fast as they can walk
+into each other, which is tested directly, and the slow tail only appears in a crush no
+formation produces. Where a battle does press bodies together, the pass keeps up.
+
+**What is not a change.** Every soldier is still simulated, enemy contact is resolved by
+the same code as friendly contact, and no pair is skipped that could be touching.
+
+## D-075: A soldier can be shoved by at most one body's width per pass
+
+**Decision.** The displacement a single separation pass may apply to one soldier is capped
+at `battle.max_separation_push` (1.35 world units, the separation distance).
+
+**Why.** A soldier buried in a crowd takes a push from every body it is inside, and those
+pushes are summed. Nothing in the arithmetic bounds that sum, so a dense enough pile can
+displace one soldier by ten units in one tick — a launch, and a launch is the difference
+between a simulation that looks like a battle and one that looks like a physics bug. One
+separation distance is more than any single separation needs, so the cap cannot slow an
+ordinary push down; it only ever binds when something has gone badly wrong, which is
+exactly when it should.
+
+Two tests hold it: twenty soldiers stacked on a single point each move no further than
+the cap, and a four-hundred-soldier crush moves nobody further than ten caps over ten
+passes.
+
+## D-076: Formation geometry is the primary mechanism for friendly spacing
+
+**Decision.** The separation pass skips cell-against-cell work where every soldier in both
+cells is standing within `battle.separation_settle_epsilon` (0.15 world units) of the place
+its formation gave it *and* both cells belong to the same formation *and* that formation's
+slot spacing exceeds the separation distance plus twice the settle distance.
+
+**Why.** This is the architectural statement the milestone is built around:
+
+> Formation geometry is the primary mechanism for maintaining normal friendly soldier
+> spacing. Spatial overlap resolution is a local corrective system for genuine physical
+> conflicts and contact, not a substitute for formation geometry.
+
+Soldiers standing on their slots are already separated by construction — a slot grid's
+closest two places are one spacing apart, and a spacing is 2.6 units against a separation
+distance of 1.35. Asking the separation pass to rediscover that every tick, for every
+pair, is doing the same arithmetic twice; the first time was when the slots were laid out.
+
+The skip is taken on a proof rather than a heuristic, and the proof is checked three ways
+before it is taken: both cells must be uniformly settled, they must be the same body, and
+the body's own spacing must clear the requirement with room to spare. A cramped formation
+does no skipping. A body with one soldier out of place does no skipping in the cells that
+soldier touches — which is the interesting case, and is tested by putting a soldier inside
+one of its own neighbours and checking that the pair is then found and separated.
+
+**What it must never do** is apply across two bodies. Two friendly formations touching or
+crossing are a real physical event — a reserve advancing through a gap, a line passing
+behind another — and every pair between them is measured, settled or not. Enemy contact is
+the same code on the same terms. The tests for both are the ones that matter most here.
+
+## D-077: Two benchmark families, because one battlefield cannot answer both questions
+
+**Decision.** The benchmark reports two families. **Family A** is the fixed-area torture
+test, unchanged from Step 7 in seed, dimensions, layouts, tick budget and rules, so that
+every number remains comparable across three milestones. **Family B** scales the
+battlefield with the army so that density stays at the 500-soldiers-on-100x60 reference
+(0.0833 soldiers per square unit) and the standard 5:3 aspect, with armies deployed as
+formed bodies that start standing on their slots and advance into contact.
+
+**Why.** Family A answers "what happens if an army is packed into a space far too small
+for it", which is a genuinely useful question — it is the stress case a uniform grid is
+worst at, and it caught the density limit that Step 7.2 reported. It is not the question
+"what does a battle of twenty thousand soldiers cost", because past a few hundred
+soldiers the field stops being a battlefield and becomes a crowd: at twenty thousand, the
+soldiers do not fit in it dressed.
+
+Family B is the realistic one. It is also the only place where the formation-aware
+skipping of D-076 can be seen at all, because family A's armies never stand on their
+slots — its formations are created at a centroid and the soldiers walk towards them for
+the whole measured window.
+
+**What neither family reports.** Rendering. Both step the simulation directly. Both say
+whether contact was reached, and family B says how many ticks were spent fighting, so an
+approach measurement is never offered as the cost of a battle.
+
+## D-078: The separation cell size is one body's width, and it was chosen by measurement
+
+**Decision.** `battle.overlap_cell_size` is 1.35 world units - the separation distance
+itself, `separation_radius * SEPARATION_FACTOR`. It is a separate config value from
+`battle.spatial_cell_size`, not a fraction of it, and a sweep is what chose it.
+
+**Why 1.35 and not something else.** The neighbourhood radius is derived as
+`ceil(separation distance / cell size)`, so the cell size decides how many cell offsets
+each occupied cell has to walk. Making the cell exactly the separation distance gives a
+radius of one: a cell is paired with the four cells in front of it and no further, which
+is the smallest neighbourhood that can still be correct. Anything smaller needs a wider
+neighbourhood and pays for offsets that cannot contain a touching pair; anything larger
+packs more soldiers into a cell and pays for pairs that are measured and discarded.
+
+Measured on the fixed-area benchmark, total milliseconds per tick, same seed and budget:
+
+| `overlap_cell_size` | 2,500 soldiers | 5,000 soldiers |
+| --- | --- | --- |
+| 0.45 | 140.8 | 356.3 |
+| 0.70 | 138.1 | 350.1 |
+| 0.90 | 141.8 | 345.2 |
+| **1.35** | **128.4** | **326.5** |
+| 2.00 | 138.5 | 349.6 |
+
+The margin is not enormous - of the sizes tried, the worst is about ten per cent slower
+than the best - but the winner is also the size with a *reason*, which is worth more than
+a tuning number that happens to be fastest. One cell is one body's width; a cell is
+paired with the cells around it and nothing more.
+
+**What happens if the separation distance changes.** Nothing breaks. The reach is derived
+from both numbers at the start of every pass, so a separation distance that no longer
+matches the cell size produces a wider neighbourhood and the same correct answer, just
+more slowly. The value would then want re-sweeping, and the sweep is four commands.
+
+**Why it is not derived automatically.** It could be - `separation_radius *
+SEPARATION_FACTOR` is right there at start-up - and for one milestone it would have been
+the tidier choice. It is a config value instead because it is a *performance* decision
+that happens to equal a *physical* number today, and the two are not the same kind of
+thing. When ranged combat arrives and somebody wants a separation pass tuned for a
+different crowd, the number should be adjustable without changing what a body is.

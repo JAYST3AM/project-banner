@@ -58,6 +58,17 @@ const STEP_7_BASELINE := {
 	5000: 10988.004,
 }
 
+## Benchmark B: a battlefield that grows with the army, so density stays where a real
+## battle would put it instead of rising until the soldiers are standing in each other.
+##
+## The reference density is the 500-soldier case on the standard field - 500 soldiers on
+## 100 x 60, which is 0.0833 per square unit, or about 12 square units of ground each.
+## Every size in family B gets a field of that density and the standard 5:3 aspect, so
+## the only thing changing between rows is how many soldiers there are.
+const REALISTIC_DENSITY := 0.0833
+const FIELD_ASPECT := 100.0 / 60.0
+const DEFAULT_GROUP_SIZE := 200
+
 ## Sizes for the constant-density grid probe. This one measures the spatial layer on its
 ## own, with the field scaled so that the crowd is no denser at fifty thousand than it is
 ## at one, which is the only way to see the shape of the curve rather than the shape of a
@@ -65,6 +76,10 @@ const STEP_7_BASELINE := {
 const GRID_SCALE_UNITS := [1000, 5000, 10000, 20000, 50000]
 const GRID_SCALE_DENSITY := 0.833  # soldiers per square unit, the 5,000-on-100x60 case
 const GRID_SCALE_QUERIES := 2000
+
+## Set by --overlap-cell, so the separation cell size can be swept without editing the
+## config between runs. Zero means "use whatever the config says".
+var _overlap_cell_override: float = 0.0
 
 
 func _ready() -> void:
@@ -76,6 +91,7 @@ func _ready() -> void:
 	var breakdown: bool = options["breakdown"]
 	var breakdown_max: int = options["breakdown_max"]
 	var cell_size := GameManager.config().get_float("battle.spatial_cell_size", 4.0)
+	_overlap_cell_override = float(options["overlap_cell"])
 
 	print("=== PROJECT BANNER - BATTLE SCALE BENCHMARK ===")
 	print("cpu      %s (%d threads)" % [OS.get_processor_name(), OS.get_processor_count()])
@@ -84,6 +100,9 @@ func _ready() -> void:
 	print("engine   %s" % str(Engine.get_version_info().get("string", "?")))
 	print("tick     %.2fs   seed %d   budget %.0fs per variant, scaled by size" % [TICK, seed_value, budget])
 	print("grid     cell %.2f units (battle.spatial_cell_size)" % cell_size)
+	print("separation cell %.2f units%s" % [
+		_overlap_cell_override if _overlap_cell_override > 0.0 else GameManager.config().get_float("battle.overlap_cell_size", 0.9),
+		"  (--overlap-cell override)" if _overlap_cell_override > 0.0 else ""])
 	print("")
 	print("%7s | %7s | %10s | %10s | %9s | %8s | %7s | %7s | %6s | %s" % [
 		"units", "ticks", "sim total", "per tick", "ticks/sec", "setup", "alive", "busiest", "contact", "setup checksum"])
@@ -116,6 +135,9 @@ func _ready() -> void:
 	if bool(options["profile"]):
 		_print_profile(counts, ticks, seed_value, budget)
 
+	if bool(options["reliable"]):
+		_print_scaled(options)
+
 	if bool(options["grid_scale"]):
 		_print_grid_scale(cell_size)
 
@@ -137,6 +159,11 @@ func _parse_args() -> Dictionary:
 		"breakdown_max": DEFAULT_BREAKDOWN_MAX,
 		"profile": false,
 		"grid_scale": false,
+		"reliable": true,
+		"gap": 0.25,
+		"group": DEFAULT_GROUP_SIZE,
+		"battle_units": [1000, 2500, 5000, 10000, 20000],
+		"overlap_cell": 0.0,
 	}
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--units="):
@@ -161,6 +188,22 @@ func _parse_args() -> Dictionary:
 			options["profile"] = arg.substr(10).to_int() != 0
 		elif arg.begins_with("--grid-scale="):
 			options["grid_scale"] = arg.substr(13).to_int() != 0
+		elif arg.begins_with("--reliable="):
+			options["reliable"] = arg.substr(11).to_int() != 0
+		elif arg.begins_with("--battle-units="):
+			var wanted: Array[int] = []
+			for piece in arg.substr(15).split(",", false):
+				var value := int(piece.strip_edges())
+				if value > 0:
+					wanted.append(value)
+			if not wanted.is_empty():
+				options["battle_units"] = wanted
+		elif arg.begins_with("--gap="):
+			options["gap"] = clampf(float(arg.substr(6)), 0.0, 0.95)
+		elif arg.begins_with("--group="):
+			options["group"] = maxi(10, int(arg.substr(8)))
+		elif arg.begins_with("--overlap-cell="):
+			options["overlap_cell"] = maxf(0.0, float(arg.substr(15)))
 	return options
 
 
@@ -235,6 +278,9 @@ func _run_battle(
 	context.terrain_seed = seed_value
 
 	var simulator := BattleSimulator.new(config, seed_value)
+	if _overlap_cell_override > 0.0:
+		simulator.overlap_cell_size = _overlap_cell_override
+		simulator.overlap_grid.configure(simulator.field_size, _overlap_cell_override)
 	var units := _build_ranks(count, config)
 	simulator.add_units(units)
 	if use_terrain:
@@ -300,6 +346,7 @@ func _run_battle(
 	}
 	if profile:
 		out["profile"] = simulator.profile.duplicate()
+		out["overlap_report"] = simulator.overlap_report()
 	return out
 
 
@@ -411,6 +458,7 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 	print("%7s | %10s | %9s | %11s | %10s | %12s | %9s | %10s | %s" % [
 		"units", "grid", "focus", "formations", "soldiers", "of which target", "overlap", "accounted", "total"])
 	print("-".repeat(114))
+	var overlaps: Array[Dictionary] = []
 	for count_value in counts:
 		var count := int(count_value)
 		var effective := minf(MAX_BUDGET, budget * maxf(1.0, float(count) / 1000.0))
@@ -426,6 +474,11 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 		var accounted := grid + focus + formations + soldiers + overlap
 		print("%7d | %7.3f ms | %6.3f ms | %8.3f ms | %7.3f ms | %9.3f ms | %6.3f ms | %7.3f ms | %7.3f ms" % [
 			count, grid, focus, formations, soldiers, target, overlap, accounted, float(run["per_tick_ms"])])
+		var report: Dictionary = run.get("overlap_report", {})
+		report["units"] = count
+		report["ticks"] = int(run["ticks"])
+		report["pass_ms"] = float(phases.get("overlap", 0.0))
+		overlaps.append(report)
 	print("-".repeat(114))
 	print("  'accounted' is the sum of the phases and should sit just under 'total'; the gap")
 	print("  is the parts of a tick nothing has been instrumented for. 'soldiers' is the")
@@ -433,6 +486,298 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 	print("  it spent choosing targets. The clock costs two reads per soldier, so a profiled")
 	print("  figure is slightly higher than the unprofiled one in the table above - use the")
 	print("  table above for comparisons and this one for attribution.")
+
+	if overlaps.is_empty():
+		return
+	print("")
+	print("=== THE SEPARATION PASS: what it did, not only what it cost ===")
+	print("  Per tick. 'pairs' is how many soldier pairs the broadphase produced and measured;")
+	print("  'touching' is how many of them were actually inside the separation distance.")
+	print("")
+	print("%7s | %8s | %9s | %9s | %8s | %9s | %9s | %9s | %s" % [
+		"units", "cells", "pop/cell", "cell prs", "skipped", "pairs", "touching", "clamped", "diam/ms"])
+	print("-".repeat(102))
+	for report in overlaps:
+		var ticks_done := maxf(1.0, float(report.get("ticks", 1)))
+		print("%7d | %8.0f | %9.1f | %9.0f | %8.0f | %9.0f | %9.1f | %9.0f | %s" % [
+			int(report["units"]),
+			float(report.get("occupied_cells", 0)),
+			float(report.get("cell_population_avg", 0.0)),
+			float(report.get("cell_pairs", 0)) / ticks_done,
+			float(report.get("cell_pairs_skipped", 0)) / ticks_done,
+			float(report.get("pairs", 0)) / ticks_done,
+			float(report.get("touching", 0)) / ticks_done,
+			float(report.get("clamped", 0)) / ticks_done,
+			"%.3f ms" % (float(report.get("pass_ms", 0.0)) / ticks_done)])
+	print("-".repeat(102))
+	for report in overlaps:
+		var ticks_done := maxf(1.0, float(report.get("ticks", 1)))
+		var pairs := maxf(1.0, float(report.get("pairs", 0)))
+		print("  %d units: reach %d cells of %.2f units; %.1f pairs measured per touching pair;" % [
+			int(report["units"]),
+			int(report.get("reach_cells", 0)),
+			float(report.get("cell_size", 0.0)),
+			pairs / maxf(1.0, float(report.get("touching", 0)))])
+		print("            %d of %d soldiers stood on their assigned place; %d cells were a" % [
+			int(report.get("settled_units", 0)),
+			int(report.get("indexed_units", 0)),
+			int(report.get("interior_cells", 0))])
+		print("            settled body's interior, %.0f of them skipped outright." % [
+			float(report.get("cell_pairs_skipped", 0)) / ticks_done])
+	print("")
+	print("  'skipped' counts cell pairs a formation's own spacing already proves cannot be")
+	print("  touching: two soldiers standing within the settle distance of their assigned")
+	print("  places are a slot apart, and a slot is wider than a body. That is the one place")
+	print("  the pass declines to do work, and it declines on a proof rather than a guess.")
+
+
+## ---------- Benchmark B: battlefield scaled with the army -------------------
+
+## The field a given army gets at the reference density, keeping the standard aspect.
+func _battlefield_for(count: int) -> Vector2:
+	var area := float(count) / REALISTIC_DENSITY
+	var height := sqrt(area / FIELD_ASPECT)
+	return Vector2(height * FIELD_ASPECT, height)
+
+
+## Two coherent armies that march into each other on a field sized for them.
+##
+## This is the benchmark that answers the question the fixed-area one cannot: what a real
+## battle of this size costs. The fixed-area harness crams every army into the same
+## hundred-by-sixty field, which is a deliberate torture test and is useful precisely
+## because it is cruel - but past a few hundred soldiers it stops describing a battle and
+## starts describing a crowd. Here the ground grows with the army, the armies deploy as
+## several formed bodies a side, stand on the places their formations give them, and
+## advance until they meet.
+func _run_battle_scaled(
+	count: int,
+	ticks: int,
+	seed_value: int,
+	budget: float,
+	gap_fraction: float,
+	group_size: int
+) -> Dictionary:
+	var config := GameManager.config()
+	var field := _battlefield_for(count)
+	var setup_start := Time.get_ticks_usec()
+
+	var context := BattleContext.new()
+	context.battle_id = "scale_%d" % count
+	context.battle_seed = seed_value
+	context.terrain_seed = seed_value
+
+	var simulator := BattleSimulator.new(config, seed_value)
+	# The field is a property of the battle rather than of the game, so it is set on the
+	# simulator and its two indexes rather than edited into the config. Nothing else reads
+	# the field size.
+	simulator.field_size = field
+	simulator.grid.configure(field, simulator.cell_size)
+	simulator.overlap_grid.configure(field, simulator.overlap_cell_size)
+
+	var units := _build_ranks_scaled(count, field, gap_fraction)
+	simulator.add_units(units)
+	simulator.set_terrain_from_context(context, config)
+	_assign_armies(simulator, field, group_size)
+
+	var checksum := _setup_checksum(simulator)
+	var ai := BattleAI.create(config)
+	var setup_ms := float(Time.get_ticks_usec() - setup_start) / 1000.0
+
+	simulator.start()
+	var started := Time.get_ticks_usec()
+	var budget_us := int(budget * 1000000.0)
+	var done := 0
+	var combat_ticks := 0
+	var deaths := 0
+	var first_contact := -1
+	while done < ticks:
+		if simulator.is_finished():
+			break
+		if Time.get_ticks_usec() - started >= budget_us:
+			break
+		ai.update(simulator, TICK)
+		var events := simulator.step(TICK)
+		var fought := false
+		for event in events:
+			var kind := str(event.get("type", ""))
+			if kind == "hit" or kind == "miss":
+				fought = true
+			elif kind == "death":
+				deaths += 1
+		if fought:
+			combat_ticks += 1
+			if first_contact < 0:
+				first_contact = done
+		done += 1
+	var total_us := Time.get_ticks_usec() - started
+
+	var alive := 0
+	for unit in simulator.units:
+		if unit.is_alive():
+			alive += 1
+
+	var per_tick_ms := 0.0 if done == 0 else (float(total_us) / 1000.0) / float(done)
+	return {
+		"units": count,
+		"field": field,
+		"density": float(count) / (field.x * field.y),
+		"ticks": done,
+		"total_ms": float(total_us) / 1000.0,
+		"per_tick_ms": per_tick_ms,
+		"ticks_per_second": 0.0 if total_us <= 0 else float(done) / (float(total_us) / 1000000.0),
+		"setup_ms": setup_ms,
+		"alive": alive,
+		"deaths": deaths,
+		"combat_ticks": combat_ticks,
+		"first_contact": first_contact,
+		"armies": simulator.formations.size(),
+		"checksum": checksum,
+		"simulator": simulator,
+	}
+
+
+## Each side's soldiers split into several line bodies rather than one enormous one, which
+## is what an army looks like and what makes a formed body a sensible size. Every soldier
+## is then stood on the place its body gave it, so the armies start dressed - which is the
+## state a battle actually begins in, and the state the separation pass is meant to be
+## cheap in.
+func _assign_armies(simulator: BattleSimulator, field: Vector2, group_size: int) -> void:
+	var catalog := FormationCatalog.load_from()
+	var config := GameManager.config()
+	for side in [BattleContext.SIDE_PLAYER, BattleContext.SIDE_ENEMY]:
+		var facing := 0.0 if side == BattleContext.SIDE_PLAYER else PI
+		var mine: Array[BattleUnit] = []
+		for unit in simulator.units:
+			if unit.side == side:
+				mine.append(unit)
+		# Front to back, so a body is a slice of the line rather than a random sample.
+		mine.sort_custom(func(a: BattleUnit, b: BattleUnit) -> bool:
+			if absf(a.position.x - b.position.x) > 0.001:
+				return a.position.x < b.position.x if side == BattleContext.SIDE_PLAYER else a.position.x > b.position.x
+			return a.position.y < b.position.y)
+		var index := 0
+		var ordinal := 0
+		while index < mine.size():
+			var slice: Array[BattleUnit] = []
+			var ids: Array[int] = []
+			var centroid := Vector2.ZERO
+			for i in mini(group_size, mine.size() - index):
+				slice.append(mine[index + i])
+				ids.append(mine[index + i].id)
+				centroid += mine[index + i].position
+			centroid /= float(slice.size())
+			var body := BattleFormation.create("%s_body_%d" % [side, ordinal], side, centroid, facing, "line", catalog, config)
+			simulator.add_formation(body)
+			simulator.assign_formation(body, ids)
+			ordinal += 1
+			index += group_size
+
+	for body in simulator.formations:
+		var opposing := field.x * 0.5
+		body.order_face_toward(Vector2(opposing, body.anchor.y))
+		body.set_facing(body.desired_facing)
+		body.order_engage()
+		body.ensure_slots()
+		for i in body.unit_ids.size():
+			var unit := simulator.find_unit(body.unit_ids[i])
+			if unit != null and i < body.slots.size():
+				unit.position = body.slots[i]
+				unit.position = Vector2(
+					clampf(unit.position.x, 0.5, field.x - 0.5),
+					clampf(unit.position.y, 0.5, field.y - 0.5))
+
+
+## Two blocks facing each other on a field sized for them. The blocks sit on the flanks of
+## the middle, separated by [param gap_fraction] of the field's width - so at 0.25 the
+## front ranks start a quarter of a battlefield apart and walk into each other.
+func _build_ranks_scaled(count: int, field: Vector2, gap_fraction: float) -> Array[BattleUnit]:
+	var per_side := maxi(1, count / 2)
+	var files := maxi(1, mini(int(field.y * 0.6), int(ceil(sqrt(float(per_side) * 1.6)))))
+	var ranks := maxi(1, int(ceil(float(per_side) / float(files))))
+	var lateral_step := (field.y * 0.8) / float(files)
+	var depth_step := (field.x * 0.2) / float(ranks)
+	var front := field.x * (0.5 - gap_fraction * 0.5)
+
+	var units: Array[BattleUnit] = []
+	var next_id := 0
+	for side_value in [BattleContext.SIDE_PLAYER, BattleContext.SIDE_ENEMY]:
+		var side := str(side_value)
+		var left := side == BattleContext.SIDE_PLAYER
+		for i in per_side:
+			var file := i % files
+			var rank := i / files
+			var unit := BattleUnit.new()
+			unit.id = next_id
+			next_id += 1
+			unit.side = side
+			unit.soldier_id = "s_scale_%d" % unit.id
+			unit.display_name = "Scale %d" % unit.id
+			unit.max_hp = 40
+			unit.hp = 40
+			unit.attack = 5
+			unit.defence = 2
+			unit.move_speed = 5.0
+			unit.attack_range = 1.8
+			unit.attack_cooldown = 1.2
+			unit.ranged = (rank % 5) == 4
+			unit.position = Vector2(
+				front - float(rank) * depth_step if left else front + float(rank) * depth_step,
+				field.y * 0.1 + float(file) * lateral_step)
+			units.append(unit)
+	return units
+
+
+func _print_scaled(options: Dictionary) -> void:
+	var counts: Array = options["battle_units"]
+	var ticks: int = options["ticks"]
+	var seed_value: int = options["seed"]
+	var budget: float = options["budget"]
+	var gap: float = options["gap"]
+	var group: int = options["group"]
+
+	print("")
+	print("=== BENCHMARK B: battlefield scaled with the army ===")
+	print("  Density held at %.4f soldiers per square unit - the 500-on-100x60 case - with" % REALISTIC_DENSITY)
+	print("  the standard %.2f aspect. Armies are formed bodies of %d that start standing on" % [FIELD_ASPECT, group])
+	print("  their slots, so the numbers below are a dressed battle rather than a crowd.")
+	print("  Front ranks start %.0f%% of a battlefield apart and walk into each other." % (gap * 100.0))
+	print("")
+	print("%7s | %13s | %8s | %10s | %10s | %9s | %8s | %9s | %8s | %s" % [
+		"units", "field", "density", "ms/tick", "ticks/sec", "ticks", "contact", "combat", "deaths", "armies"])
+	print("-".repeat(112))
+	var first_ms := 0.0
+	var last_ms := 0.0
+	var reports: Array[Dictionary] = []
+	for count_value in counts:
+		var count := int(count_value)
+		var effective := minf(MAX_BUDGET, budget * maxf(1.0, float(count) / 1000.0))
+		var run := _run_battle_scaled(count, ticks, seed_value, effective, gap, group)
+		reports.append(run)
+		var per_tick := float(run["per_tick_ms"])
+		if first_ms == 0.0:
+			first_ms = per_tick
+		last_ms = per_tick
+		print("%7d | %6.0fx%-6.0f | %8.4f | %7.3f ms | %10.0f | %9d | %8s | %8d | %8d | %d" % [
+			count, Vector2(run["field"]).x, Vector2(run["field"]).y, float(run["density"]),
+			per_tick, float(run["ticks_per_second"]), int(run["ticks"]),
+			"yes" if int(run["combat_ticks"]) > 0 else "no",
+			int(run["combat_ticks"]), int(run["deaths"]), int(run["armies"])])
+	print("-".repeat(112))
+	if reports.size() >= 2 and first_ms > 0.0:
+		var unit_ratio := float(int(reports[reports.size() - 1]["units"])) / maxf(1.0, float(int(reports[0]["units"])))
+		print("  %d -> %d soldiers is %.1fx the army and %.1fx the time per tick, at constant" % [
+			int(reports[0]["units"]), int(reports[reports.size() - 1]["units"]), unit_ratio,
+			last_ms / maxf(0.0001, first_ms)])
+		print("  density. A curve that tracks the army is the shape a real battlefield has; one")
+		print("  that climbs steeply is density, not size, and family A is where that shows.")
+	for run in reports:
+		if int(run["combat_ticks"]) == 0:
+			print("  NOTE: %d soldiers never reached contact inside the budget. The figure is an"
+				% int(run["units"]))
+			print("  approach measurement and is not offered as the cost of a fight.")
+		elif int(run["combat_ticks"]) < int(run["ticks"]) / 4:
+			print("  NOTE: %d soldiers reached contact but spent only %d of %d ticks fighting." % [
+				int(run["units"]), int(run["combat_ticks"]), int(run["ticks"])])
 
 
 ## The spatial layer measured on its own, at constant density.

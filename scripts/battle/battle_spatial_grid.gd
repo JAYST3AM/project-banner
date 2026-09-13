@@ -49,6 +49,14 @@ var query_margin: float = 0.0
 
 var _head: PackedInt32Array = PackedInt32Array()
 var _next: PackedInt32Array = PackedInt32Array()
+## Bucket tails, so a rebuild appends to the back of each bucket in one pass without
+## allocating anything. Sized and cleared alongside [_head], by the same fill, so there
+## is no second invariant to keep true.
+##
+## This used to be a local array created per rebuild, which quietly contradicted the
+## claim that the grid allocates nothing after [method configure] - and a claim that is
+## nearly true is worse than one that is not made. See D-070.
+var _tails: PackedInt32Array = PackedInt32Array()
 var _slot_units: Array[BattleUnit] = []
 var _count: int = 0
 var _living_count: int = 0
@@ -80,6 +88,8 @@ func configure(p_field_size: Vector2, p_cell_size: float) -> void:
 	rows = wanted_rows
 	_head.resize(cols * rows)
 	_head.fill(-1)
+	_tails.resize(cols * rows)
+	_tails.fill(-1)
 	_cell_mask.resize(cols * rows)
 	_cell_mask.fill(0)
 	_next.resize(0)
@@ -92,14 +102,21 @@ func configure(p_field_size: Vector2, p_cell_size: float) -> void:
 ## Rebuild membership from the living units in [param units], in the order given.
 ##
 ## Insertion appends to the back of each bucket rather than the front, so a bucket
-## yields its units in the order they appear in [param units]. That matters: the
-## overlap pass processes pairs in bucket order, and preserving the caller's order is
-## what makes the spatial version produce the same result as the loop it replaced
-## rather than merely an equally valid one. See D-062.
+## yields its units in the order they appear in [param units].
+##
+## [b]This method allocates nothing[/b] once [method configure] has been called for the
+## battlefield it is being used on, and neither does anything else here. Every array it
+## writes to is persistent grid storage sized on first use, and a rebuild is a sequence
+## of fills and pointer writes into them. That property is asserted by a test rather
+## than left as a comment, because it is the reason the cost of a rebuild is linear in
+## the army and independent of how many times it has run. See D-070.
 func rebuild(units: Array[BattleUnit]) -> void:
 	if _head.size() != cols * rows:
 		_head.resize(cols * rows)
 	_head.fill(-1)
+	if _tails.size() != _head.size():
+		_tails.resize(_head.size())
+	_tails.fill(-1)
 	if _cell_mask.size() != _head.size():
 		_cell_mask.resize(_head.size())
 	_cell_mask.fill(0)
@@ -114,12 +131,6 @@ func rebuild(units: Array[BattleUnit]) -> void:
 		_next.resize(units.size())
 	if _slot_units.size() != units.size():
 		_slot_units.resize(units.size())
-	# Tails, so buckets can be appended to. Kept local: one small array per rebuild
-	# rather than per query, and it is the only thing this method touches that is not
-	# already sized for the unit count.
-	var tails := PackedInt32Array()
-	tails.resize(_head.size())
-	tails.fill(-1)
 
 	for unit in units:
 		if not unit.is_alive():
@@ -129,12 +140,12 @@ func rebuild(units: Array[BattleUnit]) -> void:
 		_slot_units[slot] = unit
 		_next[slot] = -1
 		_cell_mask[cell] |= _side_bit_of(unit.side)
-		if tails[cell] < 0:
+		if _tails[cell] < 0:
 			_head[cell] = slot
 			_occupied.append(cell)
 		else:
-			_next[tails[cell]] = slot
-		tails[cell] = slot
+			_next[_tails[cell]] = slot
+		_tails[cell] = slot
 		_count += 1
 		_living_count += 1
 	if _occupied.size() > 1:

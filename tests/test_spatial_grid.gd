@@ -7,7 +7,10 @@ extends TestCase
 ##   findable from the other;
 ## [br]- dead soldiers are not in the index and are not returned from it either, even
 ##   when they fall after it was built;
-## [br]- nothing about the answer depends on how the buckets happen to be arranged.
+## [br]- nothing about the answer depends on how the buckets happen to be arranged;
+## [br]- and separating overlapping bodies is no longer this grid's job. Step 7.3 gave the
+##   separation pass its own index, sized for bodies rather than for eyesight; that lives
+##   in [code]test_overlap.gd[/code], and D-073 explains why one grid could not do both.
 ##
 ## The strongest test here is the brute-force comparison, which reproduces the loop the
 ## grid replaced and checks the grid never disagrees with it about who is nearby.
@@ -41,7 +44,6 @@ func run() -> void:
 	_test_target_selection_keeps_agreeing_as_soldiers_move()
 	_test_the_search_escalates_to_find_a_distant_enemy()
 	_test_the_search_bound_is_respected()
-	_test_overlap_resolution_matches_the_pairwise_loop()
 	_test_explicit_attack_orders_still_win()
 	_test_a_seeded_battle_repeats_exactly()
 	_complete()
@@ -704,102 +706,6 @@ func _test_the_search_bound_is_respected() -> void:
 	again.call("_refresh_focus")
 	equal(again.call("_choose_target", again.units[0]), again.units[1],
 		"the long-range answer is the same every time it is asked")
-
-
-## The overlap resolver's pair rule and processing order both exist to reproduce the
-## exhaustive loop, so it is checked against the exhaustive loop itself on the awkward
-## arrangements rather than on one comfortable one.
-func _test_overlap_resolution_matches_the_pairwise_loop() -> void:
-	section("overlap resolution agrees with the pairwise loop")
-	_overlap_matches([Vector2(30.0, 30.0), Vector2(30.5, 30.0)], "a pair shoved together")
-	_overlap_matches([Vector2(30.0, 30.0), Vector2(30.4, 30.0), Vector2(30.8, 30.0)], "three in a heap")
-	_overlap_matches([
-		Vector2(30.0, 30.0), Vector2(31.0, 30.0), Vector2(32.0, 30.0), Vector2(33.0, 30.0),
-		Vector2(34.0, 30.0), Vector2(35.0, 30.0), Vector2(36.0, 30.0), Vector2(37.0, 30.0),
-	], "a line standing too close together")
-	_overlap_matches([
-		Vector2(20.0, 20.0), Vector2(20.4, 20.0), Vector2(20.8, 20.0), Vector2(21.2, 20.0),
-		Vector2(22.0, 21.0), Vector2(22.0, 21.4), Vector2(22.0, 21.8), Vector2(22.0, 22.2),
-	], "two groups crossing at an angle")
-	_overlap_matches([Vector2(19.9, 30.0), Vector2(20.1, 30.0)], "a pair straddling a cell boundary")
-	_overlap_matches([Vector2(39.9, 39.9), Vector2(40.1, 40.1)], "a pair straddling a corner")
-	_overlap_matches([Vector2(50.0, 30.0), Vector2(50.0, 30.0)], "two soldiers in exactly the same place")
-	_overlap_matches([Vector2(50.0, 30.0)], "a soldier standing on their own")
-
-
-func _arrangement(spec: Array[Vector2]) -> Array[BattleUnit]:
-	var out: Array[BattleUnit] = []
-	var id := 0
-	for point in spec:
-		out.append(_make_unit(id, BattleContext.SIDE_PLAYER, point))
-		id += 1
-	return out
-
-
-## The old overlap loop, kept here as the reference. It walks every pair on the field in
-## unit order; the spatial version walks only the nearby ones and has to arrive at the
-## same positions anyway.
-func _pairwise_overlaps(units: Array[BattleUnit], minimum: float) -> void:
-	var alive: Array[BattleUnit] = []
-	for unit in units:
-		if unit.is_alive():
-			alive.append(unit)
-	for i in alive.size():
-		for j in range(i + 1, alive.size()):
-			var a := alive[i]
-			var b := alive[j]
-			var offset := b.position - a.position
-			var distance := offset.length()
-			if distance >= minimum:
-				continue
-			var push := (minimum - distance) * 0.5
-			var direction := offset.normalized() if distance > 0.0001 else Vector2.RIGHT
-			a.position -= direction * push
-			b.position += direction * push
-
-
-## The distance between the two soldiers standing closest together. Infinite when there
-## are fewer than two of them, which is a real answer here rather than a placeholder.
-func _closest_pair(units: Array[BattleUnit]) -> float:
-	var closest := INF
-	for i in units.size():
-		for j in range(i + 1, units.size()):
-			closest = minf(closest, units[i].position.distance_to(units[j].position))
-	return closest
-
-
-func _overlap_matches(spec: Array[Vector2], label: String) -> void:
-	var config := GameManager.config()
-	var spatial := _arrangement(spec)
-	var reference := _arrangement(spec)
-	var gap_before := _closest_pair(spatial)
-	var simulator := BattleSimulator.new(config, 5)
-	simulator.add_units(spatial)
-	simulator.call("_rebuild_spatial", 0.05)
-	simulator.call("_resolve_overlaps")
-	_pairwise_overlaps(reference, simulator.separation_radius * BattleSimulator.SEPARATION_FACTOR)
-
-	var worst := 0.0
-	for index in spatial.size():
-		worst = maxf(worst, spatial[index].position.distance_to(reference[index].position))
-	less(worst, 0.0001, "%s: every soldier ended up where the pairwise loop would have put them" % label)
-
-	# And the pass did something. Not "and everything is now separated": relaxation is
-	# not a solver, and shoving one pair apart can push a soldier towards a third - the
-	# exhaustive loop behaved exactly the same way, which is why the equivalence check
-	# above is the one that matters. The claim worth making is that a pass with
-	# something to resolve moved somebody, and a pass with nothing to resolve moved
-	# nobody.
-	var minimum := simulator.separation_radius * BattleSimulator.SEPARATION_FACTOR
-	var moved := 0.0
-	for index in spatial.size():
-		moved = maxf(moved, spec[index].distance_to(spatial[index].position))
-	if spec.size() < 2:
-		approx(moved, 0.0, 0.0001, "%s: a soldier standing alone is left standing" % label)
-	elif gap_before < minimum:
-		greater(moved, 0.0, "%s: the pass moved somebody" % label)
-	else:
-		approx(moved, 0.0, 0.0001, "%s: nothing to resolve, nobody moved" % label)
 
 
 ## An ordered target is a player instruction, and a faster search must not quietly

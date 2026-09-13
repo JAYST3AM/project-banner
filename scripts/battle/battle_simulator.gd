@@ -76,6 +76,36 @@ var target_search_max_radius: float = 60.0
 var _focus_by_formation: Dictionary = {}
 var _focus_by_side: Dictionary = {}
 
+## The separation pass's own index. A second grid rather than the targeting one because
+## the two ask different-sized questions: a target search reaches 8 units and a separation
+## happens at 1.35, and one cell size cannot be right for both. See [BattleOverlapGrid]
+## and D-073.
+var overlap_grid: BattleOverlapGrid = null
+## Cell size for the separation pass, in world units.
+##
+## One body's width - the separation distance itself, 1.35 - because that is the distance
+## the pass cares about and nothing else. It makes the neighbourhood exactly one cell, so
+## a cell is paired with the four cells in front of it and no further, which measured
+## fastest of five sizes tried (0.45, 0.7, 0.9, 1.35, 2.0) at both two and five thousand
+## soldiers on the fixed-area benchmark. See D-078.
+##
+## It is deliberately a separate number from [member cell_size] rather than a share of it.
+## The targeting grid has to cover eight units and the separation pass has to cover one
+## and a third; a single value cannot be right for both, and forcing one to be a multiple
+## of the other would tie two tuning decisions together that have nothing to do with each
+## other.
+var overlap_cell_size: float = 1.35
+## How close to its assigned place a soldier must be for its formation to be trusted to be
+## keeping it off its own neighbours. Zero switches that optimisation off entirely.
+var separation_settle_epsilon: float = 0.15
+## The furthest one separation pass may displace a soldier. See
+## [member BattleOverlapGrid.max_push].
+var max_separation_push: float = 1.35
+
+## The last pass's counters, copied out of the overlap grid so the report can be read
+## without reaching into it. Development only. See D-071.
+var overlap_stats: Dictionary = {}
+
 ## Development-only timing accumulators. Off by default and free when off: every read
 ## of them is behind a boolean, and nothing is measured unless the benchmark asks.
 ## Deliberately coarse - phase-level, plus one pair of clock reads per soldier for
@@ -109,6 +139,9 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		max_duration = config.get_float("battle.max_duration_seconds", 600.0)
 		contact_gap = config.get_float("formation.enemy_contact_gap", 1.5)
 		cell_size = maxf(0.25, config.get_float("battle.spatial_cell_size", 4.0))
+		overlap_cell_size = maxf(0.05, config.get_float("battle.overlap_cell_size", 1.35))
+		separation_settle_epsilon = maxf(0.0, config.get_float("battle.separation_settle_epsilon", 0.15))
+		max_separation_push = maxf(0.01, config.get_float("battle.max_separation_push", 1.35))
 		target_search_radius = maxf(0.5, config.get_float("battle.target_search_radius", 8.0))
 		target_search_escalation = maxf(1.05, config.get_float("battle.target_search_escalation", 4.0))
 		target_search_max_radius = config.get_float("battle.target_search_max_radius", 32.0)
@@ -119,6 +152,9 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 	target_search_max_radius = maxf(target_search_radius, target_search_max_radius)
 	grid = BattleSpatialGrid.new()
 	grid.configure(field_size, cell_size)
+	overlap_grid = BattleOverlapGrid.new()
+	overlap_grid.configure(field_size, overlap_cell_size)
+	overlap_grid.max_push = max_separation_push
 
 
 func add_units(p_units: Array[BattleUnit]) -> void:
@@ -475,25 +511,41 @@ func reset_profile() -> void:
 	profile = {}
 
 
+## ---------- overlap instrumentation helpers --------------------------------
+
+## Everything the separation pass counted last tick. Development-only data; nothing in
+## the game reads it.
+func overlap_report() -> Dictionary:
+	return overlap_stats
+
+
 func _update_unit(unit: BattleUnit, delta: float) -> void:
 	unit.cooldown_left = maxf(0.0, unit.cooldown_left - delta)
 
-	var target_probe := 0
-	if profile_enabled:
-		target_probe = Time.get_ticks_usec()
-	var target := _choose_target(unit)
-	if target_probe > 0:
-		_profile_accumulate("target", target_probe)
-	if target == null:
-		return
-	# An explicit attack order wins over automatic target selection, but only
-	# while the ordered target is still standing.
+	# An explicit attack order is a player instruction, so it is resolved [i]before[/i]
+	# the automatic search rather than after it. The order is authoritative whenever it
+	# is valid, which is most ticks of most ordered soldiers, so asking the battlefield
+	# for the nearest enemy and then discarding the answer is work done to be thrown
+	# away - and on a five-thousand-soldier field that work is not free. The semantics
+	# are identical either way: the order is honoured while its target is a living enemy
+	# and lapses the moment it is not.
+	var target: BattleUnit = null
 	if unit.attack_order_target_id >= 0:
 		var ordered := find_unit(unit.attack_order_target_id)
 		if ordered != null and ordered.is_alive() and ordered.side != unit.side:
 			target = ordered
 		else:
 			unit.attack_order_target_id = -1
+
+	if target == null:
+		var target_probe := 0
+		if profile_enabled:
+			target_probe = Time.get_ticks_usec()
+		target = _choose_target(unit)
+		if target_probe > 0:
+			_profile_accumulate("target", target_probe)
+	if target == null:
+		return
 
 	unit.facing = (target.position - unit.position).normalized()
 
@@ -752,47 +804,39 @@ func _effective_speed(unit: BattleUnit) -> float:
 	return unit.move_speed * terrain.move_multiplier_at(unit.position)
 
 
-## Push apart soldiers standing on top of each other, through the proximity index
-## rather than through every pair on the field.
+## Push apart soldiers standing on top of each other, through the separation pass's own
+## index rather than through the targeting grid.
 ##
-## [b]Each pair is resolved once[/b], by the rule that only the soldier with the lower id
-## handles it. Without that rule an overlapping pair would be pushed twice - once from
-## each side - and the second push would be a second independent event rather than the
-## same one, which doubles the work and makes the result depend on which soldier was
-## considered first. The rule is stated in ids rather than in array positions so that it
-## survives any future reordering of the unit list.
+## [b]What this replaced.[/b] Step 7.2 asked the targeting grid, once per soldier, for
+## everyone within a box twice as wide as the separation distance, then measured all of
+## them and acted on almost none. Measured on the fixed-area benchmark at five thousand
+## soldiers, that was 95.6 candidates per soldier to find 226 touching pairs army-wide,
+## and the broadphase alone was 62 to 66 per cent of the phase.
 ##
-## [b]The order is preserved deliberately.[/b] The outer loop walks the unit list and the
-## inner one walks a bucket, and insertion appends rather than prepends, so the pairs
-## come out in the same relative order the old pairwise loop used. Since a pair that is
-## out of range does nothing, skipping the far ones is a no-op - which is why this
-## produces the same positions the exhaustive version did rather than merely an equally
-## defensible set. A test checks that directly. See D-062.
+## [b]What it is now.[/b] [BattleOverlapGrid] pairs cells rather than asking soldiers
+## questions, with a cell sized for bodies instead of for eyesight, and every physical
+## pair is produced exactly once. The pushes are accumulated per soldier and applied once
+## at the end, so the outcome does not depend on the order pairs were visited in.
+##
+## [b]What has not changed.[/b] Every soldier is still simulated. Nothing is merged,
+## skipped, disabled or approximated: enemy contact is resolved by the same code as
+## friendly contact, a forming body is resolved by the same code as a broken one, and the
+## only pairs that are skipped at all are the ones a formation's own geometry has already
+## proved are not touching. See D-074.
 func _resolve_overlaps() -> void:
-	var minimum := separation_radius * SEPARATION_FACTOR
-	if grid == null:
+	if overlap_grid == null:
 		return
-	# Its own rebuild rather than the tick's earlier one. Every soldier has walked since
-	# that snapshot, and the overlap pass is the phase where being a body's-width behind
-	# actually matters. The margin on top covers the pushes this very pass is making:
-	# a pair nudged together by a third soldier's shove should still be seen.
-	grid.query_margin = minimum
-	grid.rebuild(units)
-	for unit in units:
-		if not unit.is_alive():
-			continue
-		grid.collect_within(unit.position, minimum, "", _query_scratch)
-		for other in _query_scratch:
-			if other.id <= unit.id:
-				continue
-			var offset := other.position - unit.position
-			var distance := offset.length()
-			if distance >= minimum:
-				continue
-			var push := (minimum - distance) * 0.5
-			var direction := offset.normalized() if distance > 0.0001 else Vector2.RIGHT
-			unit.position -= direction * push
-			other.position += direction * push
+	overlap_grid.stats_enabled = profile_enabled
+	overlap_grid.max_push = max_separation_push
+	overlap_grid.resolve(units, separation_radius * SEPARATION_FACTOR, separation_settle_epsilon)
+	if profile_enabled:
+		_pull_overlap_stats()
+
+
+## Copy the separation pass's counters and density picture into one dictionary. Called
+## once per tick and only while profiling, so a normal battle pays nothing for it.
+func _pull_overlap_stats() -> void:
+	overlap_stats = overlap_grid.report()
 
 
 func _check_victory() -> void:
