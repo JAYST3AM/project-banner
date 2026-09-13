@@ -10,6 +10,18 @@
     "default_campaign_name": "A New Banner"
   },
 
+  "world": {
+    "map_width": 1600.0,
+    "map_height": 900.0,
+    "settlement_interact_radius": 30.0,
+    "restock_days": 4,
+    "start_settlement_id": "greywatch",
+    "camera_min_zoom": 0.45,
+    "camera_max_zoom": 2.2,
+    "camera_pan_speed": 700.0,
+    "label_font_size": 15
+  },
+
   "time": {
     "seconds_per_game_hour": 2.0,
     "hours_per_day": 24,

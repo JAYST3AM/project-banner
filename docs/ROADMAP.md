@@ -8,7 +8,7 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | --- | --- | --- |
 | 0 | Bootstrap Godot development environment | **DONE** |
 | 1 | Project architecture and campaign foundation | **DONE** |
-| 2 | Playable world map and settlement travel | TODO |
+| 2 | Playable world map and settlement travel | **DONE** |
 | 3 | Persistent soldiers, recruitment, party roster | TODO |
 | 4 | World encounters and tactical battle transition | TODO |
 | 5 | First functional tactical combat | TODO |
@@ -51,9 +51,14 @@ architecture documented. Verified by `tests/test_campaign_flow.gd`.
 - Campaign time advances during travel, with Paused / Normal / Fast speed states
 - World HUD: gold, party size, day/time, destination, game speed
 - Debug panel: teleport, add gold, change speed, show coordinates/destination/time
+- Camera pan (WASD/arrows/middle-drag) and zoom (wheel)
+- `DevFlags` command-line switches (`--autostart-campaign`, `--autotravel`) so the
+  real rendered world map can be driven without a mouse
 
 **Definition of done:** Main Menu -> New Campaign -> World Map -> select Brackenford
--> travel -> arrive -> Enter Settlement.
+-> travel -> arrive -> Enter Settlement. Verified headlessly (88 assertions in
+`tests/test_world_map.gd`) and in a windowed run that logs
+`arrived at Brackenford on Day 1 - 14:08`.
 
 ## Step 3 - Soldiers and recruitment (`milestone-03`)
 

@@ -1,0 +1,80 @@
+{
+  "_comment": "Settlement records for the Project Banner starting region. Positions are world-map pixels in a 1600x900 space. 'roads' lists the connections drawn between settlements; travel is not restricted to them, they are a visual/logistical hint.",
+
+  "settlements": [
+    {
+      "id": "greywatch",
+      "name": "Greywatch",
+      "type": "town",
+      "owner_faction_id": "house_caldreth",
+      "population": 1800,
+      "position": [300.0, 620.0],
+      "description": "A walled market town straddling the old north road. Its stone bridge is the only dry crossing of the Greywater for thirty miles, which is why the town has a wall at all.",
+      "recruit_pool": {
+        "peasant_recruit": 7,
+        "spearman": 3,
+        "archer": 2
+      },
+      "market": {
+        "status": "placeholder",
+        "goods": []
+      }
+    },
+    {
+      "id": "brackenford",
+      "name": "Brackenford",
+      "type": "town",
+      "owner_faction_id": "house_caldreth",
+      "population": 2400,
+      "position": [1180.0, 300.0],
+      "description": "The largest settlement in the march, built where the bracken gives way to worked fields. Its muster yard supplies most of the crown's levies in the region.",
+      "recruit_pool": {
+        "peasant_recruit": 9,
+        "spearman": 4,
+        "archer": 3
+      },
+      "market": {
+        "status": "placeholder",
+        "goods": []
+      }
+    },
+    {
+      "id": "redmoor",
+      "name": "Redmoor",
+      "type": "village",
+      "owner_faction_id": "house_varengard",
+      "population": 420,
+      "position": [620.0, 220.0],
+      "description": "A peat-cutting village on the northern moor. Poor, proud, and a long way from anyone who would defend it.",
+      "recruit_pool": {
+        "peasant_recruit": 4,
+        "archer": 2
+      },
+      "market": {
+        "status": "placeholder",
+        "goods": []
+      }
+    },
+    {
+      "id": "thornwood_hollow",
+      "name": "Thornwood Hollow",
+      "type": "wilderness",
+      "owner_faction_id": "",
+      "population": 0,
+      "position": [880.0, 700.0],
+      "description": "A choked ravine in the thorn wood. Charcoal burners work the edges by day; nobody camps here by night.",
+      "recruit_pool": {},
+      "market": {
+        "status": "placeholder",
+        "goods": []
+      }
+    }
+  ],
+
+  "roads": [
+    { "a": "greywatch", "b": "redmoor", "kind": "road" },
+    { "a": "redmoor", "b": "brackenford", "kind": "road" },
+    { "a": "greywatch", "b": "thornwood_hollow", "kind": "track" },
+    { "a": "brackenford", "b": "thornwood_hollow", "kind": "track" }
+  ]
+}

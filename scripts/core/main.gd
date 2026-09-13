@@ -27,6 +27,14 @@ func _ready() -> void:
 	var wait := 0.0 if _is_headless() else SPLASH_SECONDS
 	if wait > 0.0:
 		await get_tree().create_timer(wait).timeout
+
+	var autostart := DevFlags.autostart_campaign()
+	if bool(autostart.get("enabled", false)):
+		DebugLogger.info("dev flag: autostarting a campaign", "Main")
+		GameManager.new_campaign(str(autostart.get("name", "Dev Campaign")), int(autostart.get("seed", 0)))
+		SceneManager.change_scene("world_map")
+		return
+
 	SceneManager.change_scene("main_menu")
 
 

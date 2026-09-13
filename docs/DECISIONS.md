@@ -153,3 +153,60 @@ The trade-off is that a typo'd path returns the default instead of erroring - so
 `tests/test_core_services.gd` asserts every path the code reads exists in
 `game_config.json`. That test is the safety net for this decision; keep it
 updated when adding tunables.
+
+---
+
+## D-012: `WorldBuilder` is idempotent, and never overwrites a loaded world
+
+**Decision.** `build_if_needed()` builds settlements and roads only when the
+campaign has none. Loading a save never rebuilds.
+
+**Why.** Saved world state (visited flags, later: depleted recruit pools, faction
+ownership, destroyed parties) must survive a load. If the builder ran
+unconditionally, every load would silently reset the world to its authored
+starting state - a bug that looks like "my progress vanished" and is very hard to
+attribute. The tests assert both halves: a fresh campaign builds, and a loaded one
+does not.
+
+---
+
+## D-013: The world map scene is thin; the HUD builds its own controls
+
+**Decision.** `world_map.tscn` contains only the root, the view, the camera and a
+HUD `CanvasLayer`. The HUD, settlement panel and debug panel construct their
+widgets in script.
+
+**Why.** Hand-authored `.tscn` files are the highest-friction thing to edit
+programmatically: a single wrong property line fails the whole scene, and dynamic
+content (a teleport button per settlement, a stat row per value) has to be
+generated in code anyway. Keeping the layout in `.tscn` and the content in script
+splits one concern across two files for no gain.
+
+**Trade-off.** Less visual editing in the Godot editor. If UI work becomes the
+bottleneck, moving the HUD to a real `.tscn` is a contained change - only
+`world_hud.gd` reads those node paths.
+
+---
+
+## D-014: Travel is straight-line, and roads are decorative for now
+
+**Decision.** `TravelService` moves the party in a straight line to the selected
+settlement. Roads are drawn and stored, but pathfinding does not use them.
+
+**Why.** The milestone's definition of done is "select a destination, travel,
+arrive". Pathfinding requires a terrain graph that does not exist yet, and adding
+one now would be building future functionality (AI parties, terrain, supply) to
+satisfy a milestone that does not need it. `CampaignState.roads` exists so the
+graph is already recorded when pathfinding does arrive.
+
+---
+
+## D-015: Development switches live in `DevFlags`, not in scattered `OS.get_cmdline_args()` calls
+
+**Decision.** One class reads the command line and exposes named queries.
+
+**Why.** Automated verification of a *rendered* game needs a way in without a
+mouse: the Step 2 windowed check drives `--autostart-campaign` and `--autotravel`
+and reads the travel result out of the log. Centralising it means one place to
+audit for "does anything ship enabled by accident", and one place to disable it.
+Debug UI availability is gated separately by the `debug` config section.

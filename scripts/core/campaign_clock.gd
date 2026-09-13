@@ -15,6 +15,10 @@ var day: int = 1
 var hour: float = 8.0
 var speed: Speed = Speed.NORMAL
 
+## Speed to return to when unpausing, so the spacebar restores the pace the
+## player had chosen rather than silently dropping back to normal.
+var resume_speed: Speed = Speed.NORMAL
+
 var hours_per_day: float = 24.0
 var seconds_per_game_hour: float = 2.0
 var speed_multipliers: Dictionary = {"paused": 0.0, "normal": 1.0, "fast": 3.0}
@@ -49,6 +53,8 @@ func is_paused() -> bool:
 
 
 func set_speed(new_speed: Speed) -> void:
+	if new_speed != Speed.PAUSED:
+		resume_speed = new_speed
 	speed = new_speed
 
 
@@ -56,7 +62,7 @@ func set_speed_by_name(speed_name: String) -> bool:
 	var wanted := speed_name.strip_edges().to_lower()
 	for i in SPEED_NAMES.size():
 		if SPEED_NAMES[i].to_lower() == wanted:
-			speed = i as Speed
+			set_speed(i as Speed)
 			return true
 	return false
 
@@ -66,7 +72,7 @@ func speed_name() -> String:
 
 
 func toggle_pause() -> void:
-	speed = Speed.NORMAL if speed == Speed.PAUSED else Speed.PAUSED
+	set_speed(resume_speed if speed == Speed.PAUSED else Speed.PAUSED)
 
 
 ## Add game hours directly (used when a system knows the duration exactly).
@@ -118,6 +124,7 @@ func to_dict() -> Dictionary:
 		"day": day,
 		"hour": hour,
 		"speed": int(speed),
+		"resume_speed": int(resume_speed),
 	}
 
 
@@ -125,9 +132,13 @@ func from_dict(data: Dictionary) -> void:
 	day = int(data.get("day", 1))
 	hour = float(data.get("hour", 8.0))
 	speed = int(data.get("speed", int(Speed.NORMAL))) as Speed
+	resume_speed = int(data.get("resume_speed", int(Speed.NORMAL))) as Speed
+	if resume_speed == Speed.PAUSED:
+		resume_speed = Speed.NORMAL
 
 
 func copy_from(other: CampaignClock) -> void:
 	day = other.day
 	hour = other.hour
 	speed = other.speed
+	resume_speed = other.resume_speed

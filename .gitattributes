@@ -1,0 +1,13 @@
+# Godot projects are line-ending sensitive for .tscn/.gd diff noise; keep everything LF.
+* text=auto eol=lf
+
+# Binary assets git must not touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ogg binary
+*.wav binary
+*.ttf binary
+*.otf binary
+*.res binary
+*.scn binary

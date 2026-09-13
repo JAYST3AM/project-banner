@@ -132,6 +132,22 @@ drive real scene transitions without freeing itself mid-test.
 | `RngService` | `scripts/core/rng_service.gd` | named, deterministic RNG streams |
 | `DataUtils` | `scripts/core/data_utils.gd` | JSON <-> Godot type helpers (no dependencies) |
 
+### Overworld layer (Step 2)
+
+| Class | File | Notes |
+| --- | --- | --- |
+| `WorldBuilder` | `scripts/world/world_builder.gd` | builds settlements/roads from `data/settlements/`; idempotent |
+| `TravelService` | `scripts/world/travel_service.gd` | pure travel logic: destination, pace, per-step movement, arrival |
+| `WorldMapView` | `scripts/world/world_map_view.gd` | Node2D that draws the overworld; reads state, never mutates it |
+| `WorldHud` | `scripts/ui/world_hud.gd` | status panel, speed controls, action bar; emits intent |
+| `SettlementPanel` | `scripts/ui/settlement_panel.gd` | inspect a settlement; Travel / Enter |
+| `DebugPanel` | `scripts/ui/debug_panel.gd` | F1 dev tools; emits signals rather than mutating state |
+| `UiTheme` | `scripts/ui/ui_theme.gd` | shared colours and widget factories |
+| `DevFlags` | `scripts/core/dev_flags.gd` | command-line dev switches for automated runs |
+
+`world_map.tscn` is deliberately tiny (root + `View` + `Camera2D` + `HUD`); the HUD
+builds its own controls. See D-013 in `DECISIONS.md` for why.
+
 ### Why parties store ids
 
 If a `Party` held `Array[Soldier]`, then a save would serialise each soldier twice
@@ -208,12 +224,24 @@ that changes meaning after an engine upgrade would silently rewrite a saved worl
 | From | To | Mechanism |
 | --- | --- | --- |
 | UI | gameplay | direct method calls / signals on the scene's script |
+| UI panel | scene controller | signals only (`SettlementPanel.travel_requested`, `WorldHud.speed_requested`, ...) |
 | scene | scene | `SceneManager.change_scene(key, payload)` |
 | gameplay | campaign data | mutate `GameManager.campaign` through the data classes |
 | any | any (one-off notification) | signals (`GameManager.campaign_started`, `SceneManager.scene_changed`) |
 
 Signals are used for notifications, not for state. If a system needs state, it
 reads the object; if it needs to know something *happened*, it connects to a signal.
+
+**Overworld update order**, once per frame in `world_map.gd`:
+
+```
+clock.advance_real_seconds(delta)  ->  game_hours
+travel.step(game_hours)            ->  report {moved, arrived, settlement_id}
+on arrival: select the settlement, refresh the HUD
+view.queue_redraw()                (presentation only)
+```
+
+Only the controller mutates; the view and the HUD are read-only consumers.
 
 ---
 

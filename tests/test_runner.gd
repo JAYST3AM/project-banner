@@ -14,6 +14,7 @@ extends Node
 const SUITES: Array[String] = [
 	"res://tests/test_core_services.gd",
 	"res://tests/test_campaign_flow.gd",
+	"res://tests/test_world_map.gd",
 ]
 
 var _failures: int = 0

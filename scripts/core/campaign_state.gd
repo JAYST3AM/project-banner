@@ -35,6 +35,8 @@ var destination_id: String = ""
 var soldiers: Dictionary = {}
 ## settlement_id -> Settlement
 var settlements: Dictionary = {}
+## Connections between settlements: [{"a": id, "b": id, "kind": "road"|"track"}]
+var roads: Array[Dictionary] = []
 ## party_id -> WorldParty (overworld representation of every non-player party)
 var parties: Dictionary = {}
 ## party_id -> Party (enemy/other parties' soldier rosters, keyed like [member parties])
@@ -211,6 +213,7 @@ func to_dict() -> Dictionary:
 		"destination_id": destination_id,
 		"soldiers": soldier_data,
 		"settlements": settlement_data,
+		"roads": roads.duplicate(true),
 		"parties": world_party_data,
 		"enemy_parties": enemy_party_data,
 		"flags": flags.duplicate(true),
@@ -252,6 +255,11 @@ static func from_dict(data: Dictionary, config: GameConfig) -> CampaignState:
 		var raw_settlement: Variant = (data["settlements"] as Dictionary)[key]
 		if typeof(raw_settlement) == TYPE_DICTIONARY:
 			state.settlements[str(key)] = Settlement.from_dict(raw_settlement as Dictionary)
+
+	state.roads.clear()
+	for raw_road in data.get("roads", []) as Array:
+		if typeof(raw_road) == TYPE_DICTIONARY:
+			state.roads.append((raw_road as Dictionary).duplicate(true))
 
 	state.parties.clear()
 	for key in (data.get("parties", {}) as Dictionary).keys():
