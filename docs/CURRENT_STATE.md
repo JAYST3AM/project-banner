@@ -2,9 +2,10 @@
 
 What is actually playable and verified **right now**. Update after every milestone.
 
-**Last updated:** end of Step 2 (`milestone-02`)
+**Last updated:** end of Step 3 (`milestone-03`)
 **Engine:** Godot 4.7.2-stable
-**Test status:** `212 assertions, 0 failures` - `godotc --headless --path "<project>" res://scenes/dev/tests.tscn`
+**Test status:** `400 assertions, 0 failures, 4 of 4 suites` -
+`godotc --headless --path "<project>" res://scenes/dev/tests.tscn`
 
 ---
 
@@ -14,93 +15,92 @@ What is actually playable and verified **right now**. Update after every milesto
 | --- | --- | --- |
 | Launch the game | Yes | Boot splash -> main menu |
 | Create a campaign | Yes | Name + optional reproducible world seed |
-| Continue a campaign | Yes | Enabled only when a save exists; shows day, gold, party size |
-| Travel the world map | Yes | Select a settlement, click Travel Here, watch the party set out |
-| Watch campaign time pass | Yes | Advances during travel; Paused / Normal / Fast |
-| Inspect a settlement | Yes | Click it: owner, population, recruits, description, distance |
-| Enter a settlement | Yes | Enabled once the party arrives |
-| Pan / zoom the map | Yes | WASD or arrows or middle-drag; mouse wheel zooms |
-| Save the campaign | Yes | "Save Game" (or F5); `user://saves/slot_1.save` |
-| Debug panel | Yes | F1: teleport, +100/+1000 gold, speed, live coordinates |
-| Recruit soldiers | No | Step 3 (recruit pools already load from data) |
+| Continue a campaign | Yes | Enabled only when a save exists |
+| Travel the world map | Yes | Select a settlement, click Travel Here |
+| Watch campaign time pass | Yes | Paused / Normal / Fast |
+| Enter a settlement | Yes | Once the party arrives |
+| Inspect a settlement | Yes | Owner, population, recruits, date, gold, party size |
+| **Recruit soldiers** | **Yes** | Named individuals with cost, traits, morale, loyalty |
+| **Inspect a soldier** | **Yes** | Full record incl. traits and personal history |
+| **See the party roster** | **Yes** | Live list with level, class, health |
+| Save the campaign | Yes | "Save Game" or F5 |
+| Debug panel | Yes | F1: teleport, gold, speed, coordinates |
+| Encounter bandits | No | Step 4 |
 | Fight a battle | No | Steps 4-5 |
 
-### World map controls
+### Recruiting
 
-| Input | Action |
-| --- | --- |
-| Left click settlement | Select and inspect it |
-| Left click empty land / Esc | Deselect |
-| WASD / arrows / middle-drag | Pan the camera |
-| Mouse wheel | Zoom |
-| `1` `2` `3` | Paused / Normal / Fast |
-| Space | Toggle pause (resumes at the pace you had chosen) |
-| F5 | Save |
-| R | Cancel travel |
-| F1 | Toggle the debug panel |
+Walk into Greywatch or Brackenford. The middle column lists what is available
+today, with the cost, the archetype's stats and - if you cannot afford one or the
+town has none - a plain-English reason instead of a dead button. Recruit one, or
+recruit five at a time. The right column is your party; click anyone to read their
+full record: age, class, level, health, experience, kills, battles fought and
+survived, morale, loyalty, traits, and a personal history log that already records
+where and when they swore service.
 
-### The starting region
-
-| Settlement | Type | Owner | Population | Position |
-| --- | --- | --- | --- | --- |
-| Greywatch | town | House Caldreth | 1800 | (300, 620) - start |
-| Brackenford | town | House Caldreth | 2400 | (1180, 300) |
-| Redmoor | village | House Varengard | 420 | (620, 220) |
-| Thornwood Hollow | wilderness | unclaimed | 0 | (880, 700) |
-
-Four roads connect them: Greywatch-Redmoor-Brackenford, plus tracks from Greywatch
-and Brackenford to Thornwood Hollow. Travel is not restricted to the roads; they
-are a distance hint and a hook for later logistics.
+Recruit pools deplete as you buy from them and restock every few days.
 
 ## What is verified, and how
 
 All of the following are asserted by the headless suites or by a real windowed run,
 not claimed by hand.
 
-**`tests/test_core_services.gd` (83 assertions)** - config loads and every tunable
-the code reads exists; clock maths (2 real seconds = 1 game hour at normal, 3x at
-fast, nothing while paused, midnight rollover); RNG determinism per named stream;
-save/load round-trip of a soldier with level, XP, HP, kills, traits and history.
+**`test_core_services.gd` (83)** - config loads and every tunable the code reads
+exists; clock maths; RNG determinism per named stream; save/load round-trip.
 
-**`tests/test_campaign_flow.gd` (41 assertions)** - new campaign defaults, campaign
-replacement, real scene transitions preserving one `CampaignState`, exactly one of
-each singleton after transitions, continue-restores-everything.
+**`test_campaign_flow.gd` (41)** - campaign creation, replacement, real scene
+transitions preserving one `CampaignState`, one of each singleton, continue.
 
-**`tests/test_world_map.gd` (88 assertions)** - world built from data (4 settlements,
-4 roads, all road endpoints resolve); the party starts at the configured settlement;
-`build_if_needed` never rebuilds over saved state; travel sets the destination,
-leaves the settlement, clears `current settlement`, covers exactly one hour of pace
-per game hour, does not drift when stopped or given zero hours; a no-op travel order
-does not cancel a journey in progress; wilderness is not a valid destination; party
-size slows travel with a configured floor; arrival lands exactly on the settlement,
-marks it visited, and enables entry; teleport sets exact coordinates; full scene flow
-main menu -> world map -> settlement -> world map -> main menu with the world intact.
+**`test_world_map.gd` (88)** - world built from data; party starts at the configured
+town; `build_if_needed` never rebuilds over saved state; travel pace, arrival,
+visited flags, speed states, wilderness rejection, party-size slowdown, no-op
+orders; world survives save/load; full scene flow.
 
-**Windowed run (real rendering, real frame loop)**
+**`test_recruitment.gd` (188)** - unit and trait data load and validate; archetypes
+are differentiated (recruits frailer and cheaper than spearmen, archers outrange
+spearmen) and the progression curve raises HP and attack with level; names are
+unique, deterministic per seed, different across seeds, and ages stay in band;
+the factory fills every field and refuses unknown archetypes; trait modifiers
+demonstrably shift starting morale and hit points; recruitment refuses when away
+from the town, when the pool is empty, when gold is short and when the party is
+full - each with a readable reason - and a refused recruit changes nothing;
+a successful recruit deducts exactly once, decrements the pool, registers the
+soldier, and adds them to the party; batch recruiting stops at the pool and at the
+party cap across all three towns; soldiers survive travel and a save/load with
+traits and history intact. Plus the milestone's own end-to-end path: enter town ->
+recruit 3 -> inspect -> leave -> travel to another town -> come back -> the same
+soldiers are still there.
+
+**Windowed run (real rendering, real buttons)**
 
 ```
-godotc --path "<project>" -- --autostart-campaign=4321 --autotravel=brackenford
-[WorldMap] world map loading
-[WorldBuilder] player party placed at Greywatch
-[WorldBuilder] world built: 4 settlements, 4 roads
-[Travel] travelling to Brackenford (936 units, ~6.2 game hours)
-[Travel] arrived at Brackenford on Day 1 - 14:08     <- 13 s of real time later
+godotc --path "<project>" -- --autostart-campaign=4321 --autostart-town=greywatch --autorecruit=4
+[Settlement] entered Greywatch
+[Recruitment] recruited Selwin Eastmere (Peasant Recruit, 20 gold) at Greywatch - 230 gold remaining, 1/24 party
+[Recruitment] recruited Wilkin Woolmer ... 2/24 party
+[Recruitment] recruited Herrick Bexley ... 3/24 party
+[Recruitment] recruited Jarl Carrow   ... 4/24 party
 ```
+with no script errors. `--autorecruit` calls the same handler the Recruit button
+does, so the UI rebuild path is exercised too.
 
 ## Known limitations
 
-1. Combat, recruitment and encounters do not exist yet (Steps 3-5).
-2. A settlement screen is a functional placeholder: it shows the town and lets you
-   leave. Recruitment and the roster arrive in Step 3.
-3. The world map is drawn procedurally (land, grid, roads, markers) - no terrain
-   artwork, no rivers, no fog of war.
-4. Travel is a straight line; the party is not obstructed and there are no
-   overworld parties to meet yet.
-5. Only the single default save slot is used.
-6. `Settlement.market` and `Soldier.equipment` remain empty placeholders.
-7. No export templates installed - the project runs from source only.
+1. Combat and encounters do not exist yet (Steps 4-5). A recruited soldier cannot
+   yet be taken into a fight.
+2. Trait modifiers for attack and movement are stored in `data/traits/traits.json`
+   but only the morale/loyalty/hit-point ones are applied so far; the combat ones
+   are consumed when a fighting unit is built from a soldier in Step 5.
+3. Recruit pools restock on entry to a settlement once `world.restock_days` have
+   passed; there is no notification that a pool has restocked.
+4. The world map is drawn procedurally - no terrain artwork, no fog of war.
+5. Travel is a straight line; no overworld parties to meet yet.
+6. Only the single default save slot is used.
+7. `Settlement.market` and `Soldier.equipment` remain empty placeholders.
+8. No export templates installed - the project runs from source only.
 
 ## Next milestone
 
-**Step 3 - Soldiers and recruitment.** Unit archetypes from data, procedural names,
-recruit pools that deplete, the party roster, and the soldier detail panel.
+**Step 4 - World encounters and the battle transition.** Bandit parties on the
+overworld, the encounter prompt with both sides' strength, and a `BattleContext`
+that carries everything the battle scene needs.

@@ -63,9 +63,24 @@
     "victory": 25,
     "level_curve_base": 100,
     "level_curve_growth": 1.35,
-    "max_level": 40,
+    "max_level": 40
+  },
+
+  "progression": {
     "hp_per_level": 3,
-    "attack_per_level": 1
+    "attack_per_level": 1,
+    "trait_rolls_min": 1,
+    "trait_rolls_max": 2,
+    "negative_trait_chance": 0.35
+  },
+
+  "recruitment": {
+    "min_age": 17,
+    "max_age": 33,
+    "base_morale": 60,
+    "base_loyalty": 50,
+    "max_recruit_batch": 20,
+    "starting_equipment_note": "equipment arrives with the inventory system"
   },
 
   "rewards": {

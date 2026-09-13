@@ -9,7 +9,7 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | 0 | Bootstrap Godot development environment | **DONE** |
 | 1 | Project architecture and campaign foundation | **DONE** |
 | 2 | Playable world map and settlement travel | **DONE** |
-| 3 | Persistent soldiers, recruitment, party roster | TODO |
+| 3 | Persistent soldiers, recruitment, party roster | **DONE** |
 | 4 | World encounters and tactical battle transition | TODO |
 | 5 | First functional tactical combat | TODO |
 | 6 | Persistent campaign save/load validation | TODO |
@@ -74,7 +74,9 @@ architecture documented. Verified by `tests/test_campaign_flow.gd`.
 - Soldiers persist everywhere: world map, settlement, battle, save/load
 
 **Definition of done:** enter town -> recruit -> inspect -> leave -> travel ->
-return -> the same soldiers are still there.
+return -> the same soldiers are still there. Verified by 188 assertions in
+`tests/test_recruitment.gd`, including that exact path end to end, and in a
+windowed run that recruits four soldiers through the real button handler.
 
 ## Step 4 - Encounters and battle transition (`milestone-04`)
 

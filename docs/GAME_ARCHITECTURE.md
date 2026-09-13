@@ -148,6 +148,23 @@ drive real scene transitions without freeing itself mid-test.
 `world_map.tscn` is deliberately tiny (root + `View` + `Camera2D` + `HUD`); the HUD
 builds its own controls. See D-013 in `DECISIONS.md` for why.
 
+### Units and soldiers (Step 3)
+
+| Class | File | Notes |
+| --- | --- | --- |
+| `UnitDefinition` | `scripts/units/unit_definition.gd` | one archetype; owns the HP/attack progression curves |
+| `UnitCatalog` | `scripts/units/unit_catalog.gd` | loads and validates `data/units/unit_types.json` |
+| `TraitCatalog` | `scripts/units/trait_catalog.gd` | loads `data/traits/traits.json`; sums modifiers |
+| `NameGenerator` | `scripts/units/name_generator.gd` | deterministic names from seed + soldier index |
+| `SoldierFactory` | `scripts/units/soldier_factory.gd` | rolls one new `Soldier`; touches no campaign state |
+| `RecruitmentService` | `scripts/units/recruitment_service.gd` | the recruitment transaction and its refusals |
+
+The split is deliberate: the **factory** decides what a person is (name, age,
+traits, health) and the **service** decides whether the player may have them
+(gold, pool, party cap, presence). The service registers the soldier through
+`CampaignState.register_soldier`, which is what guarantees a soldier has exactly
+one owner.
+
 ### Why parties store ids
 
 If a `Party` held `Array[Soldier]`, then a save would serialise each soldier twice
@@ -164,13 +181,14 @@ Helper accessors on `CampaignState`: `party_members()`, `active_members()`,
 Everything tunable lives in `data/`, loaded once by `GameData`:
 
 ```
-data/config/game_config.json      time scaling, travel speeds, XP curve, rewards, encounters
-data/units/                       unit archetypes (Step 3)
+data/config/game_config.json      time scaling, travel speeds, XP curve, progression,
+                                  recruitment, rewards, encounters, camera, debug
+data/units/unit_types.json        soldier archetypes
 data/items/                       loot/equipment definitions
-data/settlements/                 the world's settlements
-data/encounters/                  enemy party templates
-data/names/                       procedural name pools
-data/traits/                      soldier trait definitions
+data/settlements/settlements.json the world's settlements and roads
+data/encounters/                  enemy party templates (Step 4)
+data/names/name_pools.json        procedural name pools
+data/traits/traits.json           soldier traits and their modifiers
 ```
 
 `GameConfig` is read by **dotted path with an explicit default**:
@@ -269,3 +287,9 @@ godotc --headless --path "<project>" res://scenes/dev/tests.tscn
 * Exit code 0 = pass, 1 = failure. Milestones gate on this.
 * Suites may `await` - they can drive real scene transitions and real save files.
 * Suites must not leave saves behind (`SaveManager.delete_all_saves()`).
+
+**A suite that cannot load, cannot compile, or runs zero assertions is a FAILURE,
+not a pass.** GDScript aborts a function on a runtime error and has no try/catch,
+so without that guard a broken suite would look identical to a passing one - a
+silent false green. The runner also counts how many suites reported and fails the
+run if any never did. See D-018.

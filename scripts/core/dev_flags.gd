@@ -15,6 +15,8 @@ extends RefCounted
 
 const AUTOSTART_PREFIX := "--autostart-campaign"
 const AUTOTRAVEL_PREFIX := "--autotravel="
+const AUTOTOWN_PREFIX := "--autostart-town="
+const AUTORECRUIT_PREFIX := "--autorecruit="
 
 
 static func _user_args() -> PackedStringArray:
@@ -51,3 +53,21 @@ static func autotravel_destination() -> String:
 		if arg.begins_with(AUTOTRAVEL_PREFIX):
 			return arg.trim_prefix(AUTOTRAVEL_PREFIX)
 	return ""
+
+
+## Settlement id to jump straight into on world-map load, or "".
+static func autostart_town() -> String:
+	for arg in _user_args():
+		if arg.begins_with(AUTOTOWN_PREFIX):
+			return arg.trim_prefix(AUTOTOWN_PREFIX)
+	return ""
+
+
+## How many soldiers to recruit automatically (through the real UI handler) the
+## moment a settlement screen opens. 0 = off.
+static func autorecruit_count() -> int:
+	for arg in _user_args():
+		if arg.begins_with(AUTORECRUIT_PREFIX):
+			var raw := arg.trim_prefix(AUTORECRUIT_PREFIX)
+			return int(raw) if raw.is_valid_int() else 0
+	return 0

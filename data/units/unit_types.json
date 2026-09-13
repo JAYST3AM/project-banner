@@ -1,0 +1,51 @@
+{
+  "_comment": "Unit archetypes. A UnitDefinition describes a class of soldier; a Soldier instance is a specific person of that class. Balance is deliberately rough - these numbers exist to make the loop work, and are expected to move. Costs are in gold.",
+
+  "units": [
+    {
+      "id": "peasant_recruit",
+      "name": "Peasant Recruit",
+      "description": "A farmer handed a spear and a leather cap. Cheap, willing, and unlikely to see next spring.",
+      "hp": 30,
+      "attack": 4,
+      "defence": 1,
+      "move_speed": 5.6,
+      "attack_range": 1.0,
+      "attack_cooldown": 1.3,
+      "ranged": false,
+      "recruit_cost": 20,
+      "upgrade_to": "spearman",
+      "recruit_weight": 10
+    },
+    {
+      "id": "spearman",
+      "name": "Spearman",
+      "description": "A trained levy with a long spear and a shield. Nothing special in a brawl, but nothing gives ground either.",
+      "hp": 42,
+      "attack": 7,
+      "defence": 4,
+      "move_speed": 5.0,
+      "attack_range": 1.6,
+      "attack_cooldown": 1.5,
+      "ranged": false,
+      "recruit_cost": 55,
+      "upgrade_to": "",
+      "recruit_weight": 5
+    },
+    {
+      "id": "archer",
+      "name": "Archer",
+      "description": "Kills from a distance and dies up close. Needs a line in front of him, and knows it.",
+      "hp": 28,
+      "attack": 6,
+      "defence": 1,
+      "move_speed": 5.4,
+      "attack_range": 9.0,
+      "attack_cooldown": 2.0,
+      "ranged": true,
+      "recruit_cost": 45,
+      "upgrade_to": "",
+      "recruit_weight": 4
+    }
+  ]
+}

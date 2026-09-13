@@ -65,6 +65,12 @@ func _ready() -> void:
 ## Dev-only: begin travelling immediately (see DevFlags). Used by automated runs
 ## to exercise the real rendered world map without a mouse.
 func _apply_dev_autotravel() -> void:
+	var town := DevFlags.autostart_town()
+	if not town.is_empty():
+		DebugLogger.info("dev flag: entering %s directly" % town, "WorldMap")
+		_travel.teleport_to(town)
+		_on_enter_settlement(town)
+		return
 	var destination := DevFlags.autotravel_destination()
 	if destination.is_empty():
 		return

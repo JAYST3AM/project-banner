@@ -1,0 +1,76 @@
+{
+  "_comment": "Soldier traits. 'modifiers' is applied when the soldier is created: morale/loyalty are flat deltas, hp_pct scales starting hit points. attack_pct and move_speed_pct are read by the battle system when a fighting unit is built from a soldier (Step 5), not at recruitment.",
+
+  "traits": [
+    {
+      "id": "cowardly",
+      "name": "Cowardly",
+      "description": "Breaks early when the line falters.",
+      "polarity": "negative",
+      "modifiers": { "morale": -18 }
+    },
+    {
+      "id": "brave",
+      "name": "Brave",
+      "description": "Steps forward when others step back.",
+      "polarity": "positive",
+      "modifiers": { "morale": 14 }
+    },
+    {
+      "id": "steady",
+      "name": "Steady",
+      "description": "Does the same thing well, every time.",
+      "polarity": "neutral",
+      "modifiers": {}
+    },
+    {
+      "id": "loyal",
+      "name": "Loyal",
+      "description": "Stays when staying costs something.",
+      "polarity": "positive",
+      "modifiers": { "loyalty": 18 }
+    },
+    {
+      "id": "greedy",
+      "name": "Greedy",
+      "description": "Counts the pay before the fight.",
+      "polarity": "negative",
+      "modifiers": { "loyalty": -14 }
+    },
+    {
+      "id": "tough",
+      "name": "Tough",
+      "description": "Takes a beating and keeps standing.",
+      "polarity": "positive",
+      "modifiers": { "hp_pct": 12 }
+    },
+    {
+      "id": "frail",
+      "name": "Frail",
+      "description": "A bad winter would finish him.",
+      "polarity": "negative",
+      "modifiers": { "hp_pct": -12 }
+    },
+    {
+      "id": "keen_eyed",
+      "name": "Keen-Eyed",
+      "description": "Sees the gap before it closes.",
+      "polarity": "positive",
+      "modifiers": { "attack_pct": 8 }
+    },
+    {
+      "id": "clumsy",
+      "name": "Clumsy",
+      "description": "Dangerous mostly to himself.",
+      "polarity": "negative",
+      "modifiers": { "attack_pct": -8 }
+    },
+    {
+      "id": "quick",
+      "name": "Quick",
+      "description": "Gets there first.",
+      "polarity": "positive",
+      "modifiers": { "move_speed_pct": 8 }
+    }
+  ]
+}

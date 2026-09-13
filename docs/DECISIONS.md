@@ -210,3 +210,50 @@ mouse: the Step 2 windowed check drives `--autostart-campaign` and `--autotravel
 and reads the travel result out of the log. Centralising it means one place to
 audit for "does anything ship enabled by accident", and one place to disable it.
 Debug UI availability is gated separately by the `debug` config section.
+
+---
+
+## D-016: Names are derived from the seed plus a soldier index, not from a stored generator
+
+**Decision.** `NameGenerator.name_for(index, taken)` derives its randomness from
+`seed :: name:<index>:<attempt>` instead of holding a live `RandomNumberGenerator`.
+
+**Why.** A live generator would have to have its state saved to keep names stable
+across a load, and generating a name would consume randomness that other systems
+also draw from. Deriving from an index means: the same seed always produces the
+same soldiers, a name never disturbs another system's stream, and there is no
+generator state in the save file at all. It also makes names reproducible in a
+test, which is how "unique, deterministic, different across seeds" is asserted.
+
+---
+
+## D-017: Trait modifiers are applied where they belong, not all at once
+
+**Decision.** At recruitment, `SoldierFactory` applies the `morale`, `loyalty` and
+`hp_pct` modifiers. The `attack_pct` and `move_speed_pct` modifiers stay in the
+data and are applied when a fighting unit is built from a soldier (Step 5).
+
+**Why.** Morale, loyalty and hit points *are* soldier fields, so they are settled
+when the person is created and persist. Attack and movement are properties of a
+unit *in a battle*, affected by the soldier's equipment and the situation; folding
+them into the soldier record now would bake a battle-time concern into permanent
+character data. The test suite asserts that the modifiers which are supposed to
+apply demonstrably change the starting numbers, so the trait data is never
+decoration.
+
+---
+
+## D-018: A test suite that cannot run counts as a failure
+
+**Decision.** The runner refuses to pass a suite that fails to load, fails to
+compile, or records zero assertions, and it fails the run if fewer suites reported
+than were expected.
+
+**Why.** This is a real bug that happened. GDScript has no exceptions: when
+`script.new()` was called on a suite that had failed to compile, the runtime error
+aborted `_run_suite` *before* it could record a failure, and the run printed
+`RESULT: PASS` with 212 green assertions while a 188-assertion suite had not run at
+all. A test harness that can report a silent false green is worse than no harness,
+because it converts "I did not check" into "I checked and it is fine". The guards
+are: `GDScript.can_instantiate()`, a `checks == 0` post-condition, and a
+reported-versus-expected suite count.

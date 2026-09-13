@@ -84,6 +84,13 @@ func next_soldier_id() -> String:
 	return candidate
 
 
+## The index the next generated soldier id will use, without consuming it.
+## Name generation keys off this so a soldier's name is deterministic and needs
+## no stored generator state.
+func peek_soldier_index() -> int:
+	return _next_soldier_index
+
+
 func register_soldier(soldier: Soldier) -> void:
 	if soldier == null:
 		return

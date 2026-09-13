@@ -1,0 +1,31 @@
+{
+  "_comment": "Procedural name pools. Data only - swapping this file changes every soldier name in the game. Names are period-flavoured and original; 'bynames' are reserved for the future promoted/veteran display (e.g. 'Aldric the Ashen').",
+
+  "first_names": [
+    "Aldric", "Rowan", "Edric", "Hugh", "Cedric", "Thomas", "Osric", "Wat", "Godwin",
+    "Aethel", "Bran", "Corin", "Dunstan", "Eadric", "Falk", "Gareth", "Halvard",
+    "Ivor", "Joss", "Kenric", "Lowell", "Merek", "Nyle", "Oswin", "Piers", "Quill",
+    "Roderick", "Selwin", "Torvin", "Ulric", "Vaskar", "Wilkin", "Yarrow", "Anselm",
+    "Bertram", "Cael", "Doran", "Emrick", "Faramund", "Gunther", "Herrick", "Ingram",
+    "Joram", "Kester", "Lambert", "Merrick", "Norwin", "Odo", "Percival", "Randel",
+    "Sigurd", "Tancred", "Vance", "Wendel", "Yorick", "Alaric", "Bramwell", "Colwyn",
+    "Delwyn", "Ewan", "Fenwick", "Gervase", "Hale", "Isembard", "Jarl", "Kendrick"
+  ],
+
+  "surnames": [
+    "Harrow", "Ashdown", "Whitfell", "Barrowman", "Carrow", "Dunmoor", "Eastmere",
+    "Fenwick", "Grimsby", "Halloran", "Ironwell", "Jarrow", "Kettleworth", "Loxley",
+    "Marlowe", "Netherby", "Oakhurst", "Pellam", "Quarry", "Redmayne", "Stonebrook",
+    "Thorne", "Underhill", "Vale", "Westerly", "Yarrowby", "Bexley", "Coldwater",
+    "Draycott", "Evenwood", "Fairholt", "Gainsford", "Hartwell", "Ingleby", "Kayford",
+    "Langmere", "Millbrook", "Northgate", "Overton", "Pennyworth", "Rushford",
+    "Saltmarsh", "Tatterford", "Woolmer", "Yewdale", "Bramcote", "Chetwood",
+    "Dunhollow", "Elsdon", "Foxley"
+  ],
+
+  "bynames": [
+    "the Ashen", "the Steadfast", "the Unbroken", "the Grey", "the Younger",
+    "the Quiet", "of the Ford", "of Greywatch", "the Tall", "the Grim",
+    "the Patient", "Longshanks", "Ironhand", "the Lucky", "the Sullen"
+  ]
+}
