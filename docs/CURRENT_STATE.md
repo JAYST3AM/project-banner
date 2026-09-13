@@ -2,17 +2,17 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 6.6 - final foundation lock
+**Last updated:** end of Step 7.1 - formation hardening
 **Engine:** Godot 4.7.2-stable
-**Test status:** `1708 assertions, 0 failures, 13 of 13 suites` headless, plus
+**Test status:** `2207 assertions, 0 failures, 16 of 16 suites` headless, plus
 `95 checks, 0 failures` in a genuine two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
-every pull request against it, pinned to Godot 4.7.2-stable. Green on the foundation
-lock commit —
-[run 34741699176](https://github.com/JAYST3AM/project-banner/actions/runs/34741699176).
+every pull request against it, pinned to Godot 4.7.2-stable.
 
-**Note:** Steps 6.5 and 6.6 were hardening passes over Steps 0-6, not new gameplay.
-See [Step 6.6 - final foundation lock](#step-66---final-foundation-lock) below.
+**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, not new gameplay. Step 7 added
+terrain and formations. See [Step 7 - terrain and formation
+foundation](#step-7---terrain-and-formation-foundation) and [Step 7.1 - formation
+hardening](#step-71---formation-hardening) below.
 
 ---
 
@@ -45,7 +45,7 @@ NEW CAMPAIGN -> WORLD MAP -> TRAVEL -> TOWN -> RECRUIT -> INDIVIDUAL SOLDIERS
 
 Everything below is asserted by an automated run, not claimed by hand.
 
-**Thirteen headless suites, 1708 assertions, 0 failures**
+**Sixteen headless suites, 2207 assertions, 0 failures**
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -57,6 +57,9 @@ Everything below is asserted by an automated run, not claimed by hand.
 | `test_encounters` | 282 | spawning, movement, aggro, detection, `BattleContext`, deployment, simulator |
 | `test_combat` | 266 | damage, death, attribution, victory conditions, results, resolver, balance |
 | `test_battle_outcomes` | 224 | **victory / defeat / draw / withdrawal**, the retreat farming loop, timeout freezing the field, results-screen wording |
+| `test_terrain` | 72 | **deterministic ground**: same seed same field, different seed different field, bounds, movement modifiers, terrain actually changing movement, the slope contract at the field's edge, independence from rendering |
+| `test_formation` | 328 | **formations as physical objects**: geometry across seven facings, distinct slots, ownership and partial detachment, repeated transfers, movement without teleporting, turning, reformation, cohesion, casualties leaving gaps, rotated debug bounds |
+| `test_formation_battle` | 99 | **both systems together**: both armies formed, the enemy on the same engine, the AI ignoring wiped-out bodies, contact belonging to a body rather than a side, terrain slowing a body, a formed battle resolving and being reproducible, the architecture guardrails, a 500-unit scale smoke |
 | `test_enemy_persistence` | 121 | **the same enemy fought twice**: battle → campaign → save/load → second battle, enemy survivors and enemy dead |
 | `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path, through the real scenes** - including the real `BattleResult` reaching the real results screen |
 | `test_persistence` | 154 | every field the milestone lists, migration, refusal, corrupt files, metadata for every save shape |
@@ -312,10 +315,10 @@ contact, so the per-tick cost is representative - but it is an approach, not a b
 
 | Check | Result |
 | --- | --- |
-| Headless suites | **16 of 16 reported, 2058 assertions, 0 failures** |
-| New suites this milestone | `test_terrain` (69), `test_formation` (203), `test_formation_battle` (78) |
+| Headless suites | **16 of 16 reported, 2207 assertions, 0 failures** |
+| New suites this milestone | `test_terrain` (72), `test_formation` (328), `test_formation_battle` (99) |
 | Two-process restart | 95 checks, 0 failures - unchanged, and now with formations and terrain in the flow |
-| Windowed smoke | campaign → settlement → recruit → battle → results → campaign |
+| Windowed smoke | campaign → settlement → recruit → battle → **formation drill** → results |
 | Bogus `--suite=` | exit 1 |
 | CI | **green** on `c4c2bd2` — [run 34744677802](https://github.com/JAYST3AM/project-banner/actions/runs/34744677802), read from the raw log: 16 of 16 suites, 2058 assertions, both persistence phases |
 
@@ -330,6 +333,106 @@ a restart, a real reformation that drops cohesion and recovers it, a line ordere
 column with a one-frame "nobody moved" assertion, an arbitrary-facing geometry sweep,
 terrain that measurably slows a body in proportion to its own data, and a stalled battle
 that is required to reach a winner inside its step budget.
+
+## Step 7.1 - formation hardening
+
+A corrective pass over Step 7's edge cases. No new gameplay, no redesign: the six items
+below are all cases of a formation being able to say something untrue about itself.
+
+### 1. Membership changes now invalidate geometry, by construction
+
+`BattleFormation` owns its own membership. `set_units()`, `remove_units()`,
+`add_unit()` and `remove_unit()` are the only ways to change it, and every one of them
+marks the geometry dirty, flags the body as reforming, and **rebuilds the slots before
+returning**.
+
+The bug this closes: `BattleSimulator.assign_formation()` used to edit a donor
+formation's `unit_ids` directly and then call `ensure_slots()`, which rebuilt only if
+something had already marked the geometry dirty - and nothing had. A player could
+detach four men from a dressed twelve-man line and the line would go on reporting ten
+files, two ranks and the frontage of a body four men larger, until some unrelated
+operation happened to dirty it. The failure was not "the slots were stale for one
+frame"; it was that they were stale indefinitely. See D-054.
+
+The related fix: `set_type()` had the same shape of problem one layer over. It marked
+the geometry dirty and left `file_count`, `rank_count`, `frontage()` and `depth()`
+answering for the shape the body was walking *out of*. It now rebuilds immediately too,
+which is why the HUD reports "Line: 7 files by 1 ranks" the instant the order is given.
+A shape change or a transfer is a rare, deliberate act; the per-tick path stays lazy.
+
+### 2. The AI no longer takes orders against corpses
+
+`BattleAI` rejected candidates with `is_empty()`. A formation is never empty - casualties
+are kept on the roll on purpose, so that a gap in a line stays a gap - so a wiped-out
+body still held every id it had ever been given. An AI choosing by distance alone would
+pick the body it had just finished destroying and order its soldiers to face dead men.
+It now asks the same `has_living_units()` question the battlefield asks, so there is one
+definition of an active body rather than two that can drift apart. See D-055.
+
+### 3. Contact belongs to a body, not to a side
+
+Contact is now tracked per formation (`BattleFormation.in_contact`) instead of as one
+flag per side. The Step 7 version meant that *any* player soldier being in reach of
+*any* enemy marked the whole player side as engaged, which suppressed the "press
+forward" behaviour for a detached wing that had not reached anybody yet - it would sit
+exactly where it was, forever, while the centre fought. A wing can now close on its own
+opponent while the centre is engaged, and its contact turns on and off independently.
+See D-056.
+
+The flag is still set inside the per-soldier reach test that already had to be made, so
+it costs a boolean rather than another battlefield-wide pass.
+
+### 4. Debug bounds describe a rotated body
+
+`bounds()` is derived from the actual slot positions instead of from frontage and depth
+around the anchor. Those two are the body's size *along its own axes*, so at forty-five
+degrees the slots rotated and the rectangle did not, and the overlay drew a thin
+horizontal strip containing almost none of the men. See D-058.
+
+### 5. The terrain slope contract is honoured
+
+`slope_between()` documented "zero when either point is off the field" and only did so
+when *both* were. Off-field ground reads as zero height, so one point inside and one
+outside produced a fake slope - the edge of the field appearing to fall away into
+nothing. The contract is now checked first. See D-057.
+
+### 6. Verification
+
+| Check | Result |
+| --- | --- |
+| Headless suites | **16 of 16 reported, 2207 assertions, 0 failures** (was 2058) |
+| `test_formation` | 328, up from 203 - ownership, partial detachment, repeated transfers, rotated bounds, immediate shape reporting |
+| `test_formation_battle` | 99, up from 78 - the AI ignoring wiped-out bodies, contact belonging to a body |
+| `test_terrain` | 72, up from 69 - the slope contract at the field's edge |
+| Two-process restart | **95 checks, 0 failures** - unchanged; no save-format change |
+| Windowed smoke | campaign → settlement → recruit → battle → **scripted formation drill** → results, zero script errors |
+| Bogus `--suite=` | exit 1 |
+| CI | green on the pushed tip |
+
+The windowed run now includes a **formation drill** (`--autoformations`) that drives the
+scene's real order methods - select all, form line, detach three as a column, move them
+separately, merge back, go loose, turn left, turn right, toggle the overlay, reform as a
+line - and then reports whether any player body's geometry disagrees with the soldiers
+it holds. It reported **3 player bodies, 0 inconsistencies**.
+
+The same drill is what exposed fix 1's second half: the log said "ordered into Line: 6
+files by 2 ranks", which is loose order's geometry, not a line's.
+
+### Bugs found while making these fixes
+
+- **Contact was cleared in the wrong place.** The first implementation cleared it at the
+  *end* of a step, which wiped it before the formation orders - which run at the *top* of
+  the next step - could read it. Every body would have believed itself unengaged
+  forever, and the stalled-battle fix from Step 7 would have silently stopped working.
+  Caught by the contact test on its first run.
+- **`set_type()` did not rebuild geometry.** Described above; found by reading the
+  drill's own log rather than by reading the code.
+- **A Step 7 test was asserting against a default.** `_test_reformation_is_physical`
+  checked that a line had "settled" and was "dressed" without ever starting the
+  simulator. A battle in `DEPLOYING` does not step at all, so the body still held its
+  creation-time cohesion of 1.0 and the assertions passed without measuring anything.
+  Marking membership changes as reforming is what exposed it: the body was correctly
+  reported as un-dressed, and the test had never actually dressed it.
 
 ## Known limitations
 

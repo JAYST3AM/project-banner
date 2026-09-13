@@ -15,6 +15,8 @@ func run() -> void:
 	_test_enemy_uses_the_same_engine()
 	_test_orders_work_the_same_for_both_sides()
 	_test_enemy_formation_advances()
+	_test_ai_ignores_wiped_out_bodies()
+	_test_contact_is_formation_local()
 	_test_terrain_slows_a_formation()
 	_test_formations_still_converge_on_slots()
 	_test_a_formed_battle_resolves()
@@ -244,7 +246,170 @@ func _test_enemy_formation_advances() -> void:
 	equal(stragglers, 0, "and no soldier was left behind by its own formation")
 
 
+## ---------- the AI's idea of a body ---------------------------------------
+
+## "Is this formation empty" and "does this formation have anybody left standing" are
+## two different questions, and Step 7's AI asked the wrong one.
+##
+## A wiped-out body is not empty: casualties are kept on the roll on purpose, so that a
+## gap in a line stays a gap. An AI choosing its target by distance alone would therefore
+## pick the corpse of the body it had just finished killing, and order its soldiers to
+## face men who are already dead. See D-055.
+func _test_ai_ignores_wiped_out_bodies() -> void:
+	section("the AI does not take orders against a corpse")
+	var config := _config()
+	var simulator := BattleSimulator.new(config, 5150)
+
+	var ours := _add_body(simulator, "ours", BattleContext.SIDE_PLAYER, Vector2(30.0, 30.0), 0.0, 3, 0, 5.0)
+	# Placed off the axis deliberately, so "faced the living body" and "faced the corpse"
+	# are different directions and the assertion can tell them apart.
+	var wiped := _add_body(simulator, "wiped", BattleContext.SIDE_ENEMY, Vector2(38.0, 12.0), PI, 3, 10, 0.0)
+	var living := _add_body(simulator, "living", BattleContext.SIDE_ENEMY, Vector2(80.0, 48.0), PI, 3, 20, 0.0)
+
+	for unit_id in wiped.unit_ids:
+		simulator.find_unit(unit_id).take_damage(999999, -1)
+
+	equal(wiped.has_living_units(simulator.units_by_id()), false, "the near enemy body is wiped out")
+	equal(wiped.is_empty(), false,
+		"but it is not empty - every id it ever held is still on its roll, which is why the two questions are not one question")
+	less(wiped.anchor.distance_to(ours.anchor), living.anchor.distance_to(ours.anchor),
+		"and it is the nearer of the two, so choosing by distance alone would pick it")
+
+	var ai := BattleAI.create(config, BattleContext.SIDE_PLAYER)
+	ai.issue_orders(simulator)
+	greater(float(ai.orders_issued), 0.0, "the AI issued an order")
+
+	# Facing is the observable half of the decision: the AI tells a body what to face.
+	var to_living := (living.anchor - ours.anchor).angle()
+	var to_wiped := (wiped.anchor - ours.anchor).angle()
+	approx(ours.desired_facing, to_living, 0.01, "it faced the living body")
+	greater(absf(angle_difference(ours.desired_facing, to_wiped)), 0.1, "and not the corpse")
+	equal(ours.order, BattleFormation.ORDER_ENGAGE, "with a real order, not a token one")
+
+	# And it keeps choosing the living one, not merely avoiding the dead one by accident.
+	ai.issue_orders(simulator)
+	approx(ours.desired_facing, to_living, 0.01, "and it still faces the living body on a second look")
+
+
+## ---------- contact belongs to a body -------------------------------------
+
+## A wing that has not reached the enemy must be free to close even while the centre is
+## fighting. Under Step 7's side-wide contact flag it was not: some player soldier being
+## in contact marked the whole side as engaged, and the detached wing sat where it was.
+##
+## Four bodies, deliberately arranged so the centres are in reach of each other and the
+## wings are not - and so that each wing's nearest opposing body is the other wing, which
+## is what lets the test tell "closed on its own opposite number" from "wandered off at
+## whatever was closest". See D-056.
+func _test_contact_is_formation_local() -> void:
+	section("contact belongs to a body, not to a side")
+	var simulator := BattleSimulator.new(_config(), 7717)
+
+	var centre_ours := _add_body(simulator, "centre_ours", BattleContext.SIDE_PLAYER, Vector2(20.0, 20.0), 0.0, 3, 0, 5.0)
+	var centre_theirs := _add_body(simulator, "centre_theirs", BattleContext.SIDE_ENEMY, Vector2(21.5, 20.0), PI, 3, 10, 5.0)
+	var wing_ours := _add_body(simulator, "wing_ours", BattleContext.SIDE_PLAYER, Vector2(60.0, 15.0), 0.0, 3, 20, 5.0)
+	var wing_theirs := _add_body(simulator, "wing_theirs", BattleContext.SIDE_ENEMY, Vector2(90.0, 15.0), PI, 3, 30, 5.0)
+
+	# Everybody holds at first, so contact is a fact about where the bodies were put.
+	for formation in [centre_ours, centre_theirs, wing_ours, wing_theirs]:
+		formation.order_hold()
+
+	simulator.start()
+	for i in 10:
+		simulator.step(0.05)
+
+	equal(centre_ours.in_contact, true, "the player's centre is fighting")
+	equal(centre_theirs.in_contact, true, "and so is the enemy's")
+	equal(wing_ours.in_contact, false,
+		"the player's wing is not in contact - the centre being engaged does not make it so")
+	equal(wing_theirs.in_contact, false, "and neither is the enemy's")
+	greater(centre_ours.cohesion, 0.9, "the engaged centre is still a dressed formation")
+
+	# The behaviour the side-wide flag used to suppress.
+	var before := wing_ours.anchor.distance_to(wing_theirs.anchor)
+	wing_ours.order_engage()
+	for i in 100:
+		simulator.step(0.05)
+	var after := wing_ours.anchor.distance_to(wing_theirs.anchor)
+	less(after, before - 1.0,
+		"the wing closed on its opposite number while the centre was engaged (%.1f -> %.1f)" % [before, after])
+	equal(centre_ours.in_contact, true, "and the centre is still fighting")
+	equal(wing_ours.in_contact, false, "the wing has not reached anybody yet")
+
+	# Let it arrive. Its contact must turn on by itself, from its own soldiers.
+	for i in 300:
+		simulator.step(0.05)
+	equal(wing_ours.in_contact, true, "the wing reached contact on its own")
+	equal(centre_ours.in_contact, true, "independently of the centre")
+	greater(wing_ours.cohesion, 0.0, "and it is a body rather than a scatter")
+
+	# Destroy its opponent. Contact must clear - and only for the body that lost one.
+	for unit_id in wing_theirs.unit_ids:
+		var unit := simulator.find_unit(unit_id)
+		if unit != null:
+			unit.take_damage(999999, -1)
+	for i in 5:
+		simulator.step(0.05)
+	equal(wing_ours.in_contact, false, "destroying the enemy wing clears the player wing's contact")
+	equal(centre_ours.in_contact, true, "and leaves the centre's untouched")
+
+
 ## ---------- terrain and formations together ------------------------------
+
+## A soldier on the field, for the tests that need exact geometry rather than a whole
+## campaign behind them.
+func _probe_unit(id: int, side: String, position: Vector2, speed: float, health: int = 1000) -> BattleUnit:
+	var unit := BattleUnit.new()
+	unit.id = id
+	unit.side = side
+	unit.soldier_id = "s_probe_%d" % id
+	unit.display_name = "Probe %d" % id
+	unit.max_hp = health
+	unit.hp = health
+	unit.attack = 1
+	unit.defence = 0
+	unit.move_speed = speed
+	unit.attack_range = 1.8
+	unit.attack_cooldown = 5.0
+	unit.position = position
+	return unit
+
+
+## Stand a body's soldiers exactly on the places it has given them, so a test starts
+## from a dressed formation rather than from everybody piled on the anchor.
+func _dress(simulator: BattleSimulator, formation: BattleFormation) -> void:
+	for i in formation.unit_ids.size():
+		var unit := simulator.find_unit(formation.unit_ids[i])
+		if unit != null:
+			unit.position = formation.slots[i]
+
+
+## Add a body of [param count] soldiers to the field and return it.
+func _add_body(
+	simulator: BattleSimulator,
+	id: String,
+	side: String,
+	anchor: Vector2,
+	facing: float,
+	count: int,
+	first_unit_id: int,
+	speed: float
+) -> BattleFormation:
+	var units: Array[BattleUnit] = []
+	var ids: Array[int] = []
+	for i in count:
+		var unit_id := first_unit_id + i
+		units.append(_probe_unit(unit_id, side, anchor, speed))
+		ids.append(unit_id)
+	var existing := simulator.units
+	existing.append_array(units)
+	simulator.add_units(existing)
+
+	var formation := BattleFormation.create(id, side, anchor, facing, "line", FormationCatalog.load_from(), _config())
+	simulator.add_formation(formation)
+	simulator.assign_formation(formation, ids)
+	_dress(simulator, formation)
+	return formation
 
 func _test_terrain_slows_a_formation() -> void:
 	section("terrain slows a body of men, not just one of them")

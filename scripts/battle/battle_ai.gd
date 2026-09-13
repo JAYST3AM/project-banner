@@ -61,8 +61,14 @@ func update(simulator: BattleSimulator, delta: float) -> void:
 func issue_orders(simulator: BattleSimulator) -> void:
 	if simulator == null:
 		return
+	var units_by_id := simulator.units_by_id()
 	for formation in simulator.formations:
-		if formation.side != side or formation.is_empty():
+		if formation.side != side:
+			continue
+		# A body with nobody left standing is not a body. Ordering one is at best
+		# pointless and at worst makes the AI look like it is doing something while its
+		# army is already gone.
+		if not formation.has_living_units(units_by_id):
 			continue
 		var target := _nearest_enemy_formation(simulator, formation)
 		if target == null:
@@ -86,10 +92,18 @@ func _order_against(formation: BattleFormation, target: BattleFormation) -> void
 ## Closest opposing formation by centre. A linear scan: there are a handful of
 ## formations, never thousands, so there is nothing here worth indexing.
 func _nearest_enemy_formation(simulator: BattleSimulator, formation: BattleFormation) -> BattleFormation:
+	var units_by_id := simulator.units_by_id()
 	var best: BattleFormation = null
 	var best_distance := INF
 	for candidate in simulator.formations:
-		if candidate.side == formation.side or candidate.is_empty():
+		# Two different questions that look like one. "Is this body empty" asks whether
+		# it has ever been given anybody; a body that has been wiped out still holds
+		# every id it ever had, because casualties are kept on the roll on purpose so
+		# that a gap in the line stays a gap. "Does this body have anybody left
+		# standing" is the question that matters here, and it is asked through the same
+		# method the battlefield uses, so there is one definition of an active body
+		# rather than two that can drift apart. See D-055.
+		if candidate.side == formation.side or not candidate.has_living_units(units_by_id):
 			continue
 		var distance := formation.anchor.distance_to(candidate.anchor)
 		if distance < best_distance:

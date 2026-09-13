@@ -17,6 +17,7 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | 6.6 | Final foundation lock (enemy persistence, legacy menu, CI) | **DONE** |
 | — | **First major checkpoint: the full vertical slice** | **DONE** |
 | 7 | Tactical Combat 2.0: terrain and formation foundation | **DONE** |
+| 7.1 | Formation hardening (membership, contact, bounds, slope) | **DONE** |
 | 7+ | Post-checkpoint systems (see below) | TODO |
 
 ---
@@ -296,6 +297,45 @@ move, turn, reform physically and measure their own cohesion; the same engine us
 both sides; player formation orders; **2058 assertions across 16 suites, 0 failures**;
 the two-process restart check unchanged; the windowed flow clean; CI green. See D-043
 through D-053.
+
+---
+
+## Step 7.1 - Formation hardening (`milestone-07.1`)
+
+**Goal:** close the edge cases an external audit found in Step 7 before it is locked. No
+new gameplay, no redesign, and nothing from Step 8.
+
+Five fixes and one piece of test tooling:
+
+- **Formation membership invalidates its own geometry.** `set_units()`, `remove_units()`,
+  `add_unit()` and `remove_unit()` are the only ways to change a body's roster, and each
+  one rebuilds the slots before returning. Step 7 let the simulator edit a donor's
+  `unit_ids` directly and then call `ensure_slots()`, which rebuilds only if something
+  has already marked the geometry dirty - and nothing had. A player detaching four men
+  from a dressed twelve-man line left that line reporting ten files, two ranks and the
+  frontage of a body four men larger, indefinitely. `set_type()` had the same defect one
+  layer over and is fixed the same way. See D-054.
+- **The AI stops taking orders against corpses.** `is_empty()` and `has_living_units()`
+  are different questions: a wiped-out body is not empty, because casualties stay on the
+  roll so a gap in a line stays a gap. The AI now asks the same question the battlefield
+  asks. See D-055.
+- **Contact belongs to a body, not to a side.** A wing that has not reached the enemy can
+  close while the centre is fighting, instead of being told it is engaged because
+  somebody else is. See D-056.
+- **Debug bounds describe a rotated body**, derived from the slots rather than from the
+  body's own axes. See D-058.
+- **`slope_between()` honours its contract** and returns zero when *either* endpoint is
+  off the field, not only when both are. See D-057.
+- **A formation drill for automated runs** (`--autoformations`) drives the battle scene's
+  real order methods - select, detach, move, merge, turn, reshape, toggle the overlay -
+  and reports whether any body's geometry disagrees with the soldiers it holds.
+
+**Definition of done:** membership cannot change without invalidating geometry; a partial
+detachment rebuilds the donor correctly and leaves every soldier on exactly one roll;
+repeated transfers stay correct; the AI ignores all-dead bodies; contact is per
+formation; rotated bounds contain every slot; **2207 assertions across 16 suites, 0
+failures**; 95 restart checks, 0 failures; the windowed flow clean with the drill; CI
+green. See D-054 through D-058.
 
 ---
 

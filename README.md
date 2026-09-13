@@ -81,7 +81,7 @@ standing constraints in `docs/GAME_ARCHITECTURE.md`.
 
 Verification is the point of this repository. If you change something, the claim to
 check is not "it compiles" but that
-`tests/` still reports `2058 assertions, 0 failures, 16 of 16 suites` and that the
+`tests/` still reports `2207 assertions, 0 failures, 16 of 16 suites` and that the
 two-process restart check still passes. Both run automatically in CI on every push and
 pull request, pinned to Godot 4.7.2-stable.
 

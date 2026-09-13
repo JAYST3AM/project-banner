@@ -60,6 +60,15 @@ var spacing: float = 2.6
 ## How closely the body is holding its shape: 1.0 dressed and steady, 0.0 scattered.
 var cohesion: float = 1.0
 
+## Whether any soldier of this body is currently within reach of an enemy.
+##
+## Contact belongs to a body, not to a side. A wing that has not reached the enemy is
+## not "in contact" merely because the centre is fighting, and a body's own orders are
+## judged against its own state. Maintained by the battlefield inside the per-soldier
+## reach test it already performs, so it costs a boolean rather than a search, and
+## cleared at the end of each step. See D-056.
+var in_contact: bool = false
+
 var move_factor: float = 1.0
 var turn_rate_deg: float = 120.0
 
@@ -122,6 +131,13 @@ func set_type(p_type_id: String) -> bool:
 	if changed:
 		# A shape change puts the body out of order until it has dressed again.
 		_reforming = true
+	# Rebuild now rather than leaving it to the next step. A shape change is a rare,
+	# deliberate act, and asking a body what shape it is in should answer for the shape
+	# it has just been given rather than the one it is walking out of - `file_count`,
+	# `rank_count`, `frontage()` and `depth()` all read from the rebuilt geometry. The
+	# per-step path deliberately stays lazy, because that one runs every tick for every
+	# body and this one runs when somebody gives an order.
+	ensure_slots()
 	return changed
 
 
@@ -135,15 +151,31 @@ func display_name() -> String:
 
 
 ## ---------- membership ---------------------------------------------------
+##
+## Membership is owned here and nowhere else.
+##
+## Every method below marks the slot geometry dirty before returning, and that is the
+## entire reason these methods exist. A formation's files, ranks, frontage, depth and
+## slot positions are all derived from how many soldiers it holds, so a membership
+## change that does not invalidate the geometry leaves the body believing it is a shape
+## it is no longer. Step 7 shipped with [BattleSimulator] editing [member unit_ids]
+## directly, which is exactly the mistake this API makes impossible: a player could
+## detach a group from a steady line and the line would keep reporting the frontage,
+## the rank count and the slot positions of a body four men larger, until something
+## unrelated happened to dirty it. See D-054.
+##
+## Callers must never edit [member unit_ids] from outside. The invariant is not
+## "remember to call `_invalidate()`" but "there is no way to change membership without
+## doing so".
 
-## Add a soldier to the body. Slot order is assignment order, which keeps a
-## reformation stable: nobody is reshuffled, they simply walk to the new place their
-## index now points at.
+## Add a soldier to the body. Slot order is assignment order, which keeps a reformation
+## stable: nobody is reshuffled, they simply walk to the new place their index now
+## points at.
 func add_unit(unit_id: int) -> bool:
 	if unit_ids.has(unit_id):
 		return false
 	unit_ids.append(unit_id)
-	_slots_dirty = true
+	_invalidate()
 	return true
 
 
@@ -154,9 +186,80 @@ func remove_unit(unit_id: int) -> bool:
 	if index < 0:
 		return false
 	unit_ids.remove_at(index)
+	_invalidate()
+	return true
+
+
+## Remove several soldiers in one rebuild rather than one rebuild each. Returns how many
+## were actually in the body.
+func remove_units(leaving: Array[int]) -> int:
+	if leaving.is_empty() or unit_ids.is_empty():
+		return 0
+	var going := {}
+	for unit_id in leaving:
+		going[unit_id] = true
+	var kept: Array[int] = []
+	var removed := 0
+	for existing in unit_ids:
+		if going.has(existing):
+			removed += 1
+		else:
+			kept.append(existing)
+	if removed > 0:
+		unit_ids = kept
+		_invalidate()
+	return removed
+
+
+## Replace the membership wholesale, in the order given, and rebuild the geometry for
+## the body that results.
+##
+## Duplicates are dropped rather than accepted: a soldier belongs to one body, and
+## holding the same id twice would give it two places and put it on the rolls twice.
+##
+## An unchanged list does nothing at all - not even marking the body as reforming - so
+## re-issuing the same assignment is free and does not disturb a dressed formation.
+func set_units(new_ids: Array[int]) -> void:
+	var ordered: Array[int] = []
+	var seen := {}
+	for unit_id in new_ids:
+		if seen.has(unit_id):
+			continue
+		seen[unit_id] = true
+		ordered.append(unit_id)
+	if _same_membership(ordered):
+		return
+	unit_ids = ordered
+	_invalidate()
+
+
+func _same_membership(candidate: Array[int]) -> bool:
+	if candidate.size() != unit_ids.size():
+		return false
+	for i in candidate.size():
+		if candidate[i] != unit_ids[i]:
+			return false
+	return true
+
+
+## The one place a membership change becomes a geometry change.
+##
+## Both halves matter, and the rebuild is done here rather than left to the caller. A
+## formation's files and ranks are derived from how many soldiers it holds, so slots
+## that are merely marked dirty are still wrong until somebody remembers to ask - and
+## the whole failure this API exists to prevent is a caller not remembering. After this
+## returns, [member slots] describes the body that [member unit_ids] describes. There
+## is no window in which a formation can be asked its frontage and answer with the
+## frontage of a body it is no longer.
+##
+## The second half is the reformation flag. A body whose membership just changed has
+## not yet dressed into the shape that change produced - true of a detachment, of a
+## casualty, and of a body being formed for the first time. Without it a formation can
+## report itself steady while standing in a shape it has not yet walked into.
+func _invalidate() -> void:
 	_reforming = true
 	_slots_dirty = true
-	return true
+	ensure_slots()
 
 
 func has_unit(unit_id: int) -> bool:
@@ -185,6 +288,21 @@ func has_living_units(units_by_id: Dictionary) -> bool:
 
 func is_empty() -> bool:
 	return unit_ids.is_empty()
+
+
+## ---------- contact ------------------------------------------------------
+
+## Note that one of this body's soldiers has an enemy within reach. Called from the
+## battlefield's per-soldier reach test, which has already made the comparison.
+func mark_in_contact() -> void:
+	in_contact = true
+
+
+## Forget last step's contact. Called once per step for every body, after the soldiers
+## have been updated, so that the orders read at the top of the next step see the state
+## the fight actually ended the previous one in.
+func clear_contact() -> void:
+	in_contact = false
 
 
 ## ---------- geometry -----------------------------------------------------
@@ -219,12 +337,29 @@ func depth() -> float:
 	return float(maxi(0, rank_count - 1)) * spacing
 
 
-## The corners of the dressed shape, for debug drawing and bounds tests.
+## An axis-aligned box that genuinely contains the body.
+##
+## Derived from the slot positions rather than from frontage and depth around the
+## anchor. Those two are the body's size [i]along its own axes[/i], so a formation at
+## forty-five degrees has slots running diagonally and a box built from its width and
+## depth would not contain them - the slots would rotate and the rectangle would not,
+## which is a lie told by a debug overlay.
+##
+## Axis-aligned on purpose. An oriented rectangle would be a second geometry system to
+## keep correct, and the only job here is to tell the truth about where the soldiers
+## are. An empty body reports a zero-size box at its anchor.
 func bounds() -> Rect2:
+	ensure_slots()
 	if slots.is_empty():
 		return Rect2(anchor, Vector2.ZERO)
-	var half := Vector2(frontage(), depth()) * 0.5
-	return Rect2(anchor - half, half * 2.0)
+	var min_point := slots[0]
+	var max_point := slots[0]
+	for slot in slots:
+		min_point.x = minf(min_point.x, slot.x)
+		min_point.y = minf(min_point.y, slot.y)
+		max_point.x = maxf(max_point.x, slot.x)
+		max_point.y = maxf(max_point.y, slot.y)
+	return Rect2(min_point, max_point - min_point)
 
 
 ## Recompute the places to stand. Cheap and linear, and only runs when something has
@@ -434,6 +569,7 @@ func to_dict() -> Dictionary:
 		"depth": depth(),
 		"units": unit_ids.duplicate(),
 		"cohesion": cohesion,
+		"in_contact": in_contact,
 		"state": state_name(),
 		"order": order,
 	}

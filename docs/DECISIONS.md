@@ -907,3 +907,108 @@ soldiers, and the per-soldier cost of standing in a formation is a reference and
 read. A test asserts the type of that access, so the property is checked rather than
 claimed.
 
+---
+
+## D-054: Membership belongs to the formation, and invalidates geometry on the way through
+
+**Decision.** `unit_ids` is changed only through `BattleFormation.set_units()`,
+`remove_units()`, `add_unit()` and `remove_unit()`. Every one of them marks the slot
+geometry dirty, flags the body as reforming, and **rebuilds the slots before returning**.
+No caller edits the list, and no caller has to remember to invalidate anything.
+
+**Why.** Step 7 had `BattleSimulator.assign_formation()` remove departing soldiers from a
+donor formation's `unit_ids` directly, then call `ensure_slots()` - which rebuilds only
+when something has already marked the geometry dirty, and nothing had. The donor went on
+reporting the files, ranks, frontage, depth and slot positions of the body it had been
+before the detachment, and nothing was ever going to correct it. A player could detach
+four men from a dressed twelve-man line and watch the line keep the frontage of a body it
+no longer was, indefinitely.
+
+Two properties make this a design decision rather than a bug fix. The first is that the
+rule is enforced rather than remembered: the failure mode is "somebody forgot to call
+`_invalidate()`", and the fix is to make forgetting impossible, not to try harder. The
+second is that the rebuild is eager. A merely-dirty formation is still wrong until
+somebody asks, and the whole point is that nobody reliably asks.
+
+The per-tick path deliberately keeps the opposite trade: `advance()` marks the slots
+dirty and lets the step's own `ensure_slots()` do the work, because that runs every tick
+for every body. A shape change or a transfer happens when somebody gives an order.
+
+`set_type()` had the same defect one layer over - marking dirty and leaving `file_count`,
+`rank_count`, `frontage()` and `depth()` describing the shape the body was walking out of
+- and is fixed the same way. That one was found by reading a windowed run's own log,
+which reported a seven-man line as "6 files by 2 ranks": loose order's geometry, printed
+under the line order that had just replaced it.
+
+## D-055: The AI asks whether a body is alive, not whether it is empty
+
+**Decision.** `BattleAI` skips any candidate formation for which `has_living_units()` is
+false - the same method the simulator uses to choose its own targets. `is_empty()` is not
+used to mean "combat-capable".
+
+**Why.** They are different questions that look like one. "Is this formation empty" asks
+whether it was ever given anybody; a wiped-out body is not empty, because casualties are
+kept on its roll on purpose so that a gap in a line stays a gap (D-048). So an AI picking
+the nearest enemy body would pick the corpse of the body it had just destroyed - it was
+still nearer than the survivors - and order its soldiers to face men who were already
+dead.
+
+The fix is small; the reason it is worth a decision is the second half. There is now one
+definition of an active body, asked in the same way from both places, rather than two
+that happen to agree until somebody changes one.
+
+## D-056: Contact is a property of a formation, not of a side
+
+**Decision.** `BattleFormation.in_contact` records whether any soldier of that body
+currently has an enemy within reach. It replaces the side-wide flag Step 7 used. The
+stalemate-breaking rule from D-050 - a stopped, engaged body whose side has nobody in
+contact lets its soldiers press forward - now reads the body's own state.
+
+**Why.** With one flag per side, *any* player soldier being in reach of *any* enemy
+marked the entire player side as engaged. Step 7 only had one body a side, so it never
+showed. The moment an army can be split - and detaching a group is a player command in
+the HUD right now - a wing that has not reached anybody is told it is in contact, its
+soldiers hold their dressing instead of closing, and it stands where it is while the
+centre fights. That is the stalled battle from D-050 again, one formation over: the rule
+that fixes a stalled fight was itself being suppressed by an unrelated fight elsewhere.
+
+The cost is unchanged. The flag is set inside the per-soldier reach test that already had
+to be made, so it is a boolean write rather than a second battlefield-wide pass - which
+matters, because the loops that are already quadratic are documented and waiting (D-053).
+
+Cleared between the formation orders and the soldier updates in each step, which is the
+only place it can be: the orders read it, the soldiers write it, and clearing it on
+either side of that boundary loses one of the two.
+
+## D-057: `slope_between()` returns zero when either point is off the field
+
+**Decision.** The off-field check happens before the height lookup, and covers either
+endpoint. This is what the method always documented and did not always do.
+
+**Why.** Off-field ground reads as zero height, which is the forgiving answer for a
+single query (D-043). Reading two heights independently therefore made two off-field
+points happen to return zero - so the existing test passed - while one point inside and
+one outside returned a real-looking number that meant nothing. The edge of the field
+appeared to fall away into nothing, and a caller could not tell that from a hill.
+
+A slope to somewhere that does not exist is not a small number. It is not a slope, and
+zero is the honest answer - the same answer the method already promised.
+
+## D-058: Debug bounds are derived from the slots, not from the body's own axes
+
+**Decision.** `BattleFormation.bounds()` returns the axis-aligned box containing the
+actual slot positions. It is not an oriented rectangle, and it is not computed from
+frontage and depth.
+
+**Why.** Frontage and depth are the body's size *along its own axes*. A formation at
+forty-five degrees has slots running diagonally, so a box built from its width and depth
+around the anchor drew a thin horizontal strip containing almost none of the men - the
+slots rotated with the formation and the rectangle did not. A debug overlay whose whole
+job is to make behaviour observable cannot lie about where the soldiers are, and this one
+lied most at exactly the facings the later directional mechanics will care about.
+
+Axis-aligned rather than oriented on purpose: an oriented rectangle would be a second
+geometry system to keep correct, and the requirement is only that the box truthfully
+contains the body. The cost is a linear pass over the slots, on a method that is called
+by the debug overlay and by tests rather than by the simulation.
+

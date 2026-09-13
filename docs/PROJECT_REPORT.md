@@ -5,13 +5,13 @@ reader (human or AI) who needs to understand, review, or advise on Project Banne
 without access to the repository.
 
 **Repository state:** `github.com/JAYST3AM/project-banner` (public)
-**Revision:** `main` at the Step 7 terrain and formation foundation — 15 commits, working
-tree clean
+**Revision:** `main` at the Step 7.1 formation hardening — 16 commits, working tree clean
 **Engine:** Godot 4.7.2-stable, GDScript only
 **Status:** Steps 0–6 of the brief are complete and independently foundation-locked
-(6.5 audit remediation, 6.6 lock), and **Step 7 — Tactical Combat 2.0: terrain and
-formation foundation** is complete. **The first major checkpoint (the full vertical
-slice) is reached and verified**, on a clean CI runner as well as locally.
+(6.5 audit remediation, 6.6 lock), **Step 7 — Tactical Combat 2.0: terrain and formation
+foundation** is complete, and **Step 7.1** has hardened its edge cases. **The first major
+checkpoint (the full vertical slice) is reached and verified**, on a clean CI runner as
+well as locally.
 
 > This is a snapshot. `docs/CURRENT_STATE.md` in the repository is the living version
 > and is updated every milestone.
@@ -418,7 +418,7 @@ size of the band, which is the right behaviour and not evidence of a systematic 
 
 The working rule is: **never claim something works unless it has been run.**
 
-### 9.1 Headless suites — 16 suites, 2,058 assertions, 0 failures
+### 9.1 Headless suites — 16 suites, 2,207 assertions, 0 failures
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -430,9 +430,9 @@ The working rule is: **never claim something works unless it has been run.**
 | `test_encounters` | 282 | spawning, movement, aggro, detection, `BattleContext`, deployment, simulator |
 | `test_combat` | 266 | damage, death, attribution, victory conditions, results, resolver, balance |
 | `test_battle_outcomes` | 224 | **victory / defeat / draw / withdrawal**, the retreat farming loop, timeout freezing the field, results-screen wording |
-| `test_terrain` | 69 | **deterministic ground** — same seed same field, different seed different field, bounds, movement modifiers, terrain actually changing movement, independence from rendering |
-| `test_formation` | 203 | **formations as physical objects** — geometry across seven facings, distinct slots, assignment, movement without teleporting, turning, reformation, cohesion, casualties leaving gaps |
-| `test_formation_battle` | 78 | **both systems together** — both armies formed, the enemy on the same engine, terrain slowing a body, a formed battle resolving and being reproducible, the architecture guardrails, a 500-unit scale smoke |
+| `test_terrain` | 72 | **deterministic ground** — same seed same field, different seed different field, bounds, movement modifiers, terrain actually changing movement, the slope contract at the edge of the field, independence from rendering |
+| `test_formation` | 328 | **formations as physical objects** — geometry across seven facings, distinct slots, ownership and partial detachment, repeated transfers, movement without teleporting, turning, reformation, cohesion, casualties leaving gaps, rotated debug bounds |
+| `test_formation_battle` | 99 | **both systems together** — both armies formed, the enemy on the same engine, the AI ignoring wiped-out bodies, contact belonging to a body rather than a side, terrain slowing a body, a formed battle resolving and being reproducible, the architecture guardrails, a 500-unit scale smoke |
 | `test_enemy_persistence` | 121 | **the same enemy fought twice** — battle → campaign → save/load → second battle |
 | `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path**, through the real scenes — including the real `BattleResult` reaching the real results screen |
 | `test_persistence` | 154 | every persisted field, migration, refusal, corrupt files, metadata for every save shape |
@@ -809,6 +809,38 @@ The second-order lesson is about measurement: this was caught because a test ass
 that a battle *reaches a conclusion*, rather than asserting things about the formations
 in it. A suite full of correct per-system assertions would have passed for four hundred
 simulated seconds while the game sat there doing nothing.
+
+### 10.7 The Step 7.1 pass — a formation that could not tell the truth about itself
+
+Step 7.1 was an external audit of Step 7, and the five defects it found have a single
+shape in common: **a formation could report something untrue about itself.**
+
+| # | Defect | Why it was invisible | Caught by |
+| --- | --- | --- | --- |
+| 1 | **A detached-from formation kept the geometry of its old self.** `assign_formation()` edited a donor's roster directly and then called `ensure_slots()`, which rebuilds only if something has already marked the geometry dirty — and nothing had. A dressed twelve-man line that lost four men went on reporting ten files, two ranks and the frontage of a body four men larger, *indefinitely*. | Nothing looked wrong. The line still existed, still had soldiers in it, still fought. It was simply standing in a shape it no longer was, and no operation in the game would correct it. | `test_formation.gd` — a twelve-man line, four men detached, the donor's geometry compared against a fresh eight-man line |
+| 2 | **`set_type()` had the same defect one layer over.** It marked the geometry dirty and left `file_count`, `rank_count`, `frontage()` and `depth()` describing the shape the body was walking *out of*. | It corrected itself on the next simulation step, so nothing was ever permanently wrong — but every read between the order and the next tick was a lie, including the one the HUD prints. | The `--autoformations` drill's own log: a seven-man line reported as "6 files by 2 ranks", which is loose order's geometry |
+| 3 | **The AI took orders against corpses.** It rejected candidates with `is_empty()`, but a wiped-out formation is never empty — casualties stay on the roll on purpose. An AI choosing by distance would pick the body it had just destroyed. | The AI appears to be working. It issues orders, its soldiers face *something*, and the something is usually in roughly the right direction. | `test_formation_battle.gd` — a wiped-out body nearer than a living one |
+| 4 | **Contact was tracked per side rather than per formation.** Any player soldier in reach marked the whole side engaged, so a detached wing that had reached nobody held its dressing and stood still while the centre fought. | Step 7 only ever had one body per side, so the distinction never came up. It became reachable the moment detaching a group became a player command. | `test_formation_battle.gd` — a centre in contact and a wing that is not |
+| 5 | **Debug bounds ignored facing.** Built from frontage and depth around the anchor, they drew a thin horizontal strip at forty-five degrees while the slots ran diagonally through it. | It is a debug overlay. The units are drawn from their real positions, so the battle behaves correctly and only the box is wrong. | `test_formation.gd` — bounds contain every slot at six facings |
+
+**The generalisable lesson** is the one from 10.6 restated from the other direction. Step
+7's bug was that individually-correct rules could be collectively wrong. Step 7.1's bugs
+are that an object can be *individually* wrong about itself: the formation kept existing,
+kept fighting, kept being drawn, and simply described a body that was not there.
+
+Both come from the same source, which is that a derived quantity has to be *re-derived*
+whenever its inputs change. Three of the five are exactly that — geometry derived from
+membership, geometry derived from type, contact derived from positions — and the fix in
+each case was to make the re-derivation part of the mutation rather than a step the
+caller has to remember. The remaining two are the same thing with a stale *definition*
+rather than a stale *value*: `is_empty()` standing in for `has_living_units()`, and
+frontage-and-depth standing in for "where are the soldiers".
+
+**One of the five was found by the fix for another.** Defect 2 surfaced in the drill log
+while checking defect 1. That is worth recording, because it is the argument for the
+windowed drill existing at all: the ownership fix made formations report themselves as
+un-dressed, which made a Step 7 test that had been passing on an un-updated default start
+failing, which led to reading the log, which showed the shape being misreported.
 
 ---
 

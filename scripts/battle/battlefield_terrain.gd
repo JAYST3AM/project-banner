@@ -213,7 +213,16 @@ func move_multiplier_at(point: Vector2) -> float:
 
 ## Height difference per unit travelled. Zero when either point is off the field, so
 ## callers never have to check first.
+##
+## That zero is the contract, and it was not always honoured. Off-field ground reads as
+## zero height, so taking the two heights independently made two off-field points happen
+## to give zero while a point inside and a point outside gave a fake slope - the edge of
+## the field appearing to fall away into nothing. The contract is now checked first,
+## because a slope from here to somewhere that does not exist is not a small number, it
+## is not a slope. See D-057.
 func slope_between(from: Vector2, to: Vector2) -> float:
+	if not inside(from) or not inside(to):
+		return 0.0
 	var run := from.distance_to(to)
 	if run <= 0.0001:
 		return 0.0

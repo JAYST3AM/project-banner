@@ -307,6 +307,17 @@ func _test_height_and_slope() -> void:
 	approx(terrain.slope_between(Vector2(-5.0, -5.0), Vector2(-25.0, -5.0)), 0.0, 0.0001,
 		"and none between two points that are both off the field")
 
+	# The contract is "zero when EITHER point is off the field", and one-in-one-out was
+	# the case Step 7 got wrong: off-field ground reads as zero height, so taking the
+	# two heights independently made the edge of the field look like a cliff. See D-057.
+	var known_high := Vector2(12.0, 12.0)
+	approx(terrain.slope_between(known_high, Vector2(140.0, 12.0)), 0.0, 0.0001,
+		"a point inside to a point off the field is not a slope")
+	approx(terrain.slope_between(Vector2(-40.0, 12.0), known_high), 0.0, 0.0001,
+		"nor is a point off the field to a point inside")
+	approx(terrain.slope_between(Vector2(-40.0, -12.0), Vector2(120.0, 12.0)), 0.0, 0.0001,
+		"nor one that crosses the whole field and out the other side")
+
 	var sample_slope := terrain.slope_between(Vector2(12.0, 12.0), Vector2(28.0, 12.0))
 	check(absf(sample_slope) >= 0.0, "a slope between two real points is a real number")
 

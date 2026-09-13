@@ -34,6 +34,9 @@ var _ai: BattleAI = null
 var _formations_built := 0
 ## Counter for formations the player detaches, so their ids stay readable and unique.
 var _formation_counter := 0
+## Scripted formation drill for automated runs (DevFlags.autoformations()).
+var _drill_enabled := false
+var _drill_step := 0
 
 
 func _ready() -> void:
@@ -76,6 +79,9 @@ func _ready() -> void:
 	set_process(true)
 
 	_battle_speed = DevFlags.battle_speed()
+	_drill_enabled = DevFlags.autoformations()
+	if _drill_enabled:
+		DebugLogger.info("dev flag: a scripted formation drill will run during this battle", "Battle")
 	if DevFlags.autostart_battle():
 		DebugLogger.info("dev flag: starting the battle automatically", "Battle")
 		call_deferred("_on_start_battle")
@@ -270,6 +276,7 @@ func _process(delta: float) -> void:
 		_ai.update(_simulator, delta * _battle_speed)
 		var events := _simulator.step(delta * _battle_speed)
 		_view.add_events(events)
+		_update_formation_drill()
 		_view.queue_redraw()
 		_info_timer += delta
 		if _info_timer >= 0.25:
@@ -534,6 +541,115 @@ func _toggle_overlay() -> void:
 	_hint.text = "Formation overlay %s (anchors, facing, target slots, cohesion)." % (
 		"on" if _view.show_formation_debug else "off")
 	_view.queue_redraw()
+
+
+## ---------- scripted formation drill (development only) ------------------
+
+## A timed sequence of the commands a player would give, run against the real order
+## methods rather than a parallel test path. Enabled with `--autoformations`; the
+## windowed smoke run uses it so that the controls a headless suite can only reason
+## about are actually executed through the scene once.
+const DRILL := [
+	{"at": 0.0, "do": "select_all"},
+	{"at": 0.2, "do": "line"},
+	{"at": 1.0, "do": "select_three"},
+	{"at": 1.2, "do": "column"},
+	{"at": 1.4, "do": "move_detached"},
+	{"at": 2.2, "do": "select_all"},
+	{"at": 2.4, "do": "loose"},
+	{"at": 3.0, "do": "turn_left"},
+	{"at": 3.6, "do": "turn_right"},
+	{"at": 4.2, "do": "overlay_on"},
+	{"at": 4.6, "do": "select_all"},
+	{"at": 4.8, "do": "line"},
+	{"at": 5.2, "do": "report"},
+	{"at": 5.6, "do": "overlay_off"},
+]
+
+
+## Run any drill steps that have come due. Called once per frame while the battle runs.
+func _update_formation_drill() -> void:
+	if not _drill_enabled or _simulator == null:
+		return
+	var elapsed := _simulator.elapsed
+	while _drill_step < DRILL.size() and elapsed >= float(DRILL[_drill_step]["at"]):
+		_drill_apply(str(DRILL[_drill_step]["do"]))
+		_drill_step += 1
+
+
+func _drill_apply(action: String) -> void:
+	match action:
+		"select_all":
+			_view.selected_ids = _living_player_ids()
+			DebugLogger.info("drill select_all: %d soldiers selected" % _view.selected_ids.size(), "Battle")
+		"select_three":
+			_view.selected_ids = _living_player_ids().slice(0, 3)
+			DebugLogger.info("drill select_three: %d soldiers selected" % _view.selected_ids.size(), "Battle")
+		"line":
+			_drill_order("line")
+		"column":
+			_drill_order("column")
+		"loose":
+			_drill_order("loose")
+		"turn_left":
+			_turn_selection(-PI * 0.25)
+			DebugLogger.info("drill turn_left: %s" % _hint.text, "Battle")
+		"turn_right":
+			_turn_selection(PI * 0.25)
+			DebugLogger.info("drill turn_right: %s" % _hint.text, "Battle")
+		"move_detached":
+			var point := Vector2(_simulator.field_size.x * 0.35, _simulator.field_size.y * 0.5)
+			_move_selection_to(point)
+			DebugLogger.info("drill move_detached: %s" % _hint.text, "Battle")
+		"overlay_on":
+			_view.show_formation_debug = true
+			_view.queue_redraw()
+			DebugLogger.info("drill overlay_on", "Battle")
+		"overlay_off":
+			_view.show_formation_debug = false
+			_view.queue_redraw()
+			DebugLogger.info("drill overlay_off", "Battle")
+		"report":
+			_report_formation_consistency()
+		_:
+			DebugLogger.error("drill: unknown action '%s'" % action, "Battle")
+	_view.queue_redraw()
+
+
+func _drill_order(type_id: String) -> void:
+	_order_formation_type(type_id)
+	DebugLogger.info("drill %s: %s" % [type_id, _hint.text], "Battle")
+
+
+func _living_player_ids() -> Array[int]:
+	var ids: Array[int] = []
+	for unit in _simulator.units:
+		if unit.side == BattleContext.SIDE_PLAYER and unit.is_alive():
+			ids.append(unit.id)
+	return ids
+
+
+## A blunt internal consistency check, logged rather than asserted: every player body's
+## geometry must describe the soldiers it actually holds. This is the thing a stale
+## formation looks like from the outside, and it is checked here in a running battle
+## rather than only in a unit test.
+func _report_formation_consistency() -> void:
+	var problems := 0
+	for formation in _simulator.formations:
+		var men := formation.unit_ids.size()
+		var places := formation.slots.size()
+		var mismatched := 0
+		for i in men:
+			var unit := _simulator.find_unit(formation.unit_ids[i])
+			if unit == null or unit.formation_ref != formation or unit.slot_index != i:
+				mismatched += 1
+		if men != places or mismatched > 0:
+			problems += 1
+			DebugLogger.error("formation %s inconsistent: %d men, %d places, %d soldiers misassigned" % [
+				formation.id, men, places, mismatched], "Battle")
+	DebugLogger.info("drill report: %d player bodies, %d inconsistencies%s" % [
+		_simulator.formations_of(BattleContext.SIDE_PLAYER).size(), problems,
+		"" if problems == 0 else " - SEE ERRORS ABOVE"], "Battle")
 
 
 func _zoom_by(factor: float) -> void:

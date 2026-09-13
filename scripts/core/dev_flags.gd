@@ -21,6 +21,8 @@ const AUTOENGAGE_FLAG := "--autoengage"
 const AUTOATTACK_FLAG := "--autoattack"
 const AUTOLEAVE_FLAG := "--autoleave"
 const AUTOSTART_BATTLE_FLAG := "--autostart-battle"
+## Run a scripted formation drill through the battle scene's real order methods.
+const AUTOFORMATIONS_FLAG := "--autoformations"
 const BATTLESPEED_PREFIX := "--battlespeed="
 
 
@@ -105,6 +107,17 @@ static func autoleave_town() -> bool:
 ## Begin the battle the moment the battlefield loads.
 static func autostart_battle() -> bool:
 	return _has_flag(AUTOSTART_BATTLE_FLAG)
+
+
+## Exercise the player's formation commands automatically once the battle is running.
+##
+## This drives the same methods the keyboard and the HUD buttons drive - selecting,
+## re-shaping, detaching, moving, turning, and the debug overlay - because the point of
+## an automated run is to exercise the real control path rather than a parallel one
+## that only exists for testing. It exists so that a windowed smoke run can cover the
+## commands a player would give, which a headless suite cannot claim to have done.
+static func autoformations() -> bool:
+	return _has_flag(AUTOFORMATIONS_FLAG)
 
 
 ## Multiplier applied to battle time, so an automated run does not have to sit

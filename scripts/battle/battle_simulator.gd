@@ -42,12 +42,6 @@ var formations: Array[BattleFormation] = []
 var _unit_by_id: Dictionary = {}
 var _formations_by_id: Dictionary = {}
 
-## Side -> whether any soldier of that side currently has an enemy within reach.
-## Rebuilt every step inside the per-soldier loop that already makes that comparison,
-## so it costs a boolean rather than a search. The formation stances read it to decide
-## whether a body is fighting or merely standing near the enemy.
-var _in_contact: Dictionary = {}
-
 var field_size: Vector2 = Vector2(100.0, 60.0)
 var separation_radius: float = 1.5
 var base_hit_chance: float = 0.75
@@ -69,7 +63,6 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		defence_mitigation = config.get_float("battle.defence_mitigation", 0.05)
 		max_duration = config.get_float("battle.max_duration_seconds", 600.0)
 		contact_gap = config.get_float("formation.enemy_contact_gap", 1.5)
-	_in_contact = {BattleContext.SIDE_PLAYER: false, BattleContext.SIDE_ENEMY: false}
 
 
 func add_units(p_units: Array[BattleUnit]) -> void:
@@ -132,9 +125,11 @@ func formations_of(side: String) -> Array[BattleFormation]:
 ## and walks there itself.
 ##
 ## A soldier belongs to one body. Anyone in the list is taken out of whatever formation
-## held them first, so detaching a group never leaves its men standing in two places at
-## once - which is the sort of thing that only shows up as two formations both believing
-## they own a soldier, and then as a very strange battle.
+## held them first. Both the donor's membership and the receiving body's membership are
+## changed through [BattleFormation]'s own API and never by editing a list from out
+## here, so each affected body invalidates its own geometry. Step 7 edited the donor's
+## list directly, which left a formation that had just been detached from still
+## reporting the frontage and rank count of a body it no longer was. See D-054.
 func assign_formation(formation: BattleFormation, unit_ids: Array[int]) -> void:
 	if formation == null:
 		return
@@ -145,24 +140,25 @@ func assign_formation(formation: BattleFormation, unit_ids: Array[int]) -> void:
 	for other in formations:
 		if other == formation:
 			continue
-		var removed := false
-		for existing in other.unit_ids.duplicate():
-			if wanted.has(existing):
-				other.unit_ids.erase(existing)
-				removed = true
-		if removed:
-			other.ensure_slots()
+		if other.remove_units(unit_ids) > 0:
 			_sync_formation_slots(other)
 
+	# Anyone still on this body's roll who was not asked for is leaving it.
 	for existing in formation.unit_ids:
-		var unit: BattleUnit = _unit_by_id.get(existing)
-		if unit != null and not wanted.has(existing):
-			unit.formation_ref = null
-			unit.slot_index = -1
-	formation.unit_ids.clear()
-	formation.unit_ids.append_array(unit_ids)
-	formation.ensure_slots()
+		if not wanted.has(existing):
+			_release_unit(existing)
+	# No ensure_slots() here: the body rebuilds its own geometry when its membership
+	# changes, which is the whole point of routing membership through its API.
+	formation.set_units(unit_ids)
 	_sync_formation_slots(formation)
+
+
+## Detach a soldier from whatever body holds it, without putting it in another one.
+func _release_unit(unit_id: int) -> void:
+	var unit: BattleUnit = _unit_by_id.get(unit_id)
+	if unit != null:
+		unit.formation_ref = null
+		unit.slot_index = -1
 
 
 func _sync_formation_slots(formation: BattleFormation) -> void:
@@ -188,11 +184,17 @@ func _update_formations(delta: float) -> void:
 ## where the body stands, and whether that puts steel in reach is the soldiers'
 ## business.
 ##
-## The exception is the stalled battle. If the lines have stopped touching - the enemy
-## line broken, a survivor standing in a gap wider than a sword, nobody able to reach
-## anybody - then stopping short leaves both armies standing a few feet apart forever.
-## So a body whose side is not in contact at all closes the whole way. The check costs
-## one flag, because the per-soldier reach test already had to be made.
+## The exception is the stalled battle, and it is judged per body rather than per side.
+## If [i]this[/i] formation has nobody in contact - its line broken, a survivor standing
+## in a gap wider than a sword, nobody in it able to reach anybody - then stopping short
+## leaves it standing a few feet from an enemy it cannot touch, forever. So a body that
+## is not itself in contact closes the whole way. Whether the rest of the army is
+## fighting is not this body's business: a wing that has not reached the enemy must be
+## able to close even while the centre is engaged, which is why contact is a property of
+## a formation and not of a side. See D-056.
+##
+## The check costs one boolean, because the per-soldier reach test already had to be
+## made.
 func _engage_target_for(formation: BattleFormation) -> Vector2:
 	var target := _nearest_enemy_formation(formation)
 	if target == null:
@@ -201,7 +203,7 @@ func _engage_target_for(formation: BattleFormation) -> Vector2:
 	var distance := to_target.length()
 	if distance <= 0.0001:
 		return formation.anchor
-	if bool(_in_contact.get(formation.side, false)):
+	if formation.in_contact:
 		var stop := (formation.depth() + target.depth()) * 0.5 + contact_gap
 		return target.anchor - (to_target / distance) * stop
 	return target.anchor
@@ -227,9 +229,11 @@ func _nearest_enemy_formation(formation: BattleFormation) -> BattleFormation:
 ##
 ## Three conditions, all of them narrow. The body must have been told to engage - a
 ## body told to hold holds, whatever the enemy is doing. The body must have stopped -
-## a body still marching is dressing, not fighting. And nobody on this side may
-## currently be within reach of anybody, because if the line is fighting then the line
-## is what matters and a soldier leaving it is a hole opening in it.
+## a body still marching is dressing, not fighting. And [i]this body[/i] must have
+## nobody within reach: if the line is fighting then the line is what matters and a
+## soldier leaving it is a hole opening in it. A different formation on the same side
+## being fully engaged is not a reason to freeze this one - that is precisely the wing
+## that needs to be able to close.
 func _can_press_forward(unit: BattleUnit, body: BattleFormation) -> bool:
 	if body == null or unit.slot_index < 0:
 		return false
@@ -237,7 +241,7 @@ func _can_press_forward(unit: BattleUnit, body: BattleFormation) -> bool:
 		return false
 	if body.is_moving() or body.is_turning() or body.is_reforming():
 		return false
-	return not bool(_in_contact.get(unit.side, false))
+	return not body.in_contact
 
 
 ## The pace of the whole body: set by its slowest soldier, so a formation never walks
@@ -324,8 +328,14 @@ func step(delta: float) -> Array[Dictionary]:
 	# place that is still being computed.
 	_update_formations(delta)
 
-	_in_contact[BattleContext.SIDE_PLAYER] = false
-	_in_contact[BattleContext.SIDE_ENEMY] = false
+	# Contact is read by the formation orders immediately above, and set by the soldiers
+	# immediately below, so it is cleared in between. Clearing it at the end of the step
+	# instead would wipe it before anyone could read it and every body would believe
+	# itself unengaged forever; clearing it before the orders would do the same thing
+	# one line earlier. After this step returns, each body holds the contact state its
+	# own soldiers just established, which is what the view and the tests read.
+	_clear_contact()
+
 	for unit in units:
 		if unit.is_alive():
 			_update_unit(unit, delta)
@@ -334,6 +344,12 @@ func step(delta: float) -> Array[Dictionary]:
 	if not is_finished():
 		_check_victory()
 	return events
+
+
+## Forget every body's contact state. One pass over the formations, which are few.
+func _clear_contact() -> void:
+	for formation in formations:
+		formation.clear_contact()
 
 
 func _update_unit(unit: BattleUnit, delta: float) -> void:
@@ -356,8 +372,11 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 	if unit.position.distance_to(target.position) <= unit.attack_range:
 		# In reach: stand and strike rather than walk into the enemy. This is also the
 		# only place that decides what "in contact" means, which is why the flag is set
-		# here rather than being recomputed later by someone else.
-		_in_contact[unit.side] = true
+		# here rather than being recomputed later by someone else. It is set on the
+		# soldier's own body: contact is a fact about the formation that is fighting,
+		# not about its side of the field.
+		if unit.formation_ref != null:
+			unit.formation_ref.mark_in_contact()
 		if unit.cooldown_left <= 0.0:
 			_attack(unit, target)
 		return
