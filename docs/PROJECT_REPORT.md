@@ -5,7 +5,7 @@ reader (human or AI) who needs to understand, review, or advise on Project Banne
 without access to the repository.
 
 **Repository state:** `github.com/JAYST3AM/project-banner`
-**Revision:** `main` at the Step 6.5 remediation — 9 commits, working tree clean
+**Revision:** `main` at the Step 6.5 remediation — 10 commits, working tree clean
 **Engine:** Godot 4.7.2-stable, GDScript only
 **Status:** Steps 0–6 of the brief are complete, and the **Step 6.5 external audit
 remediation** is done. **The first major checkpoint (the full vertical slice) is
@@ -108,7 +108,7 @@ runner's `SUITES` list, since several are meant to fail.
 | `4770e6b` | milestone-05: complete first end-to-end combat gameplay loop |
 | `2b987d9` | milestone-06: validate persistent campaign save and load |
 | `a0bf817`, `cf9c69a` | the full project report, and a README for a public reader |
-| *(Step 6.5)* | milestone-06.5: harden vertical slice after external audit |
+| `24ae05d` | milestone-06.5: harden vertical slice after external audit |
 
 ---
 
