@@ -453,7 +453,8 @@ measurement rather than guessed: formation focus. See D-079 through D-087.
 
 **Goal:** remove the next measured bottleneck, and this time the measurement is
 unambiguous: at twenty thousand soldiers on a battle-sized field, **formation focus cost
-856 ms of a 1,940 ms tick**. Step 7.4 had just made target selection four times cheaper, and
+760 ms of a 1,786 ms tick**, with an earlier run of the same build putting it at 856 ms of a
+1,940 ms tick. Step 7.4 had just made target selection four times cheaper, and
 what that revealed was the same shape of work one level up - every body answering "where is
 the fighting" with a fresh walk of the whole army. An engineering milestone: no new
 gameplay, nothing from Step 8, no projectiles, no cavalry, no morale, no threads, no C++, no

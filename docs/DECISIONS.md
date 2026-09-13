@@ -1843,22 +1843,25 @@ bodies:
 | | per tick |
 | --- | ---: |
 | focus evaluations | 100.0 |
-| whole-army walks (`_nearest_enemy_to_point`) | 110.3 |
-| of those, made on behalf of a *soldier* | 10.3 |
-| soldiers walked by those walks | 2,205,806 |
-| soldiers answered straight from their body's focus | 12,366 |
-| focus answers that changed from the previous tick | 38.1 |
+| whole-army walks (`_nearest_enemy_to_point`) | 109.5 |
+| of those, made on behalf of a *soldier* | 9.5 |
+| soldiers walked by those walks | 2,189,412 |
+| soldiers answered straight from their body's focus | 12,318.9 |
+| focus answers that changed from the previous tick | 36.3 |
 
-The phase cost **856 ms a tick** in that run, which is the 881 ms of the Step 7.4 report
-re-measured with the counters in place on this machine - and **763 ms of a 1,786 ms tick** in
-the matched-window run that produced the Step 7.5 tables. The two are the same phase measured
-over different windows of the same battle; neither is the other's correction.
+The phase cost **760 ms of a 1,786 ms tick** in that run, which is the 881 ms of the Step 7.4
+report re-measured with the counters in place on this machine. An earlier run of the same build
+put the phase at **856 ms of a 1,940 ms tick**; it was measured into a temporary file that the
+machine has since cleaned up, so it is recorded here as corroboration rather than as the figure
+of record - a number that cannot be re-read is not evidence. The several runs agree to within a
+per cent on the counts and within about a tenth on the phase cost, which is the spread of the
+same battle measured over different windows; none of them is another's correction.
 
 **Why it was needed.** The phase clock could say that formation focus cost most of a second.
 It could not say whether to make the pass smaller or to stop the pass from happening so often,
 and those are different fixes. Reading the code said *one pass over the army per body per
 tick*, which is 100 x 20,000 = 2,000,000 soldier-visits, and the counters confirmed it to
-within the repairs at 2,205,806. They also found something reading the code had missed: **10.3
+within the repairs at 2,189,412. They also found something reading the code had missed: **9.5
 of those walks a tick were made from inside the soldier loop**, on behalf of a single soldier,
 because a body's answer that died mid-tick was recomputed by whoever noticed. That work was
 billed to the target phase, where Step 7.4 had just spent a milestone making things cheaper - a
@@ -1980,7 +1983,7 @@ behaviour is preserved rather than traded away.
 
 **The counter.** `foc_scans_from_soldiers` counts whole-army walks made by the focus logic on
 behalf of a soldier. In the measured battles it is **zero**, and its previous value is on
-record: 10.3 walks a tick at twenty thousand soldiers, 205,806 soldier-visits a tick, billed to
+record: 9.5 walks a tick at twenty thousand soldiers, 189,412 soldier-visits a tick, billed to
 the target phase where nobody was looking.
 
 **What it is like.** D-083's rule, one level up. That milestone decided a soldier whose
