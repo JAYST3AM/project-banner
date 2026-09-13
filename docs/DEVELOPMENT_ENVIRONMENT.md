@@ -110,6 +110,11 @@ godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --uni
 godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --battle-units=1000,2500,5000 --units=100
 #     Sweep the separation cell size without editing the config.
 godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=5000 --battle-units=100 --overlap-cell=0.9
+#     Family C: the formation layer alone, against the number of bodies rather than the number
+#     of soldiers. Says where comparing bodies against bodies stops being acceptable.
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100 --focus-scale=1 --reliable=0
+#     Family B's phase profile without re-running its unprofiled table, for a long run.
+godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100 --battle-units=5000 --profile=1 --scaled-table=0
 ```
 
 `--check-only` does **not** load autoloads, so "Identifier not found: GameData" or

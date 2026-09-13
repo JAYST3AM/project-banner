@@ -47,6 +47,13 @@ var has_move_order: bool = false
 ## Player-issued attack order: a unit id to hunt, or -1. Cleared when it dies.
 var attack_order_target_id: int = -1
 
+## The last simulation tick this soldier was counted into a formation's summary, used as a
+## claim stamp and nothing else. The summary pass counts a soldier into its body from the
+## body's own roll, then walks the army for the soldiers nobody counted - and this is how it
+## knows which are which. It exists so that a soldier detached from a body cannot become
+## invisible to the focus layer, and it is never read by gameplay. See D-089.
+var summary_tick: int = -1
+
 ## ---------- battle-transient target state (Step 7.4) ------------------------
 ##
 ## [b]None of this is saved, and none of it belongs to a soldier.[/b] A [BattleUnit]

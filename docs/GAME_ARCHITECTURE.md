@@ -546,6 +546,22 @@ at the fighting by its formation's or its side's focus - the answer the bodies h
 worked out for themselves once this tick (D-067), which is why a soldier far from the
 fighting does not need a private spatial query to know which way to march.
 
+**Formation battlefield awareness is calculated at the formation layer.** Soldiers consume
+cached formation-level focus information rather than independently scanning the battlefield
+for formation guidance. Each body keeps a transient summary of itself - how many of its
+soldiers are standing, where their centre is, and a box around them - rebuilt in one pass per
+tick, and each body's focus is chosen by comparing those summaries against each other rather
+than by walking the enemy army. A soldier reads its body's answer; it never searches for one.
+
+**Formation summaries are transient simulation data and are updated deterministically from
+current battle state.** Invalid or destroyed formation targets are repaired at the formation
+layer rather than triggering global soldier-level searches. A body whose answer dies mid-tick
+is corrected once, for the body, by the first soldier that asks; a body whose answer is that
+there is nobody left is not asked again inside the same tick, because nothing comes back to
+life inside one. The counter that proves it is `foc_scans_from_soldiers` - whole-army walks
+made by the focus logic on behalf of a soldier - and its value in every measured battle is
+zero. See D-088 through D-091.
+
 **Where the schedule lives.** `BattleUnit.next_search_tick` is an integer simulation tick,
 and the phase a soldier starts on is `unit.id % battle.target_reacquisition_ticks`. Three
 consequences, all deliberate:

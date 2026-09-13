@@ -60,6 +60,82 @@ var spacing: float = 2.6
 ## How closely the body is holding its shape: 1.0 dressed and steady, 0.0 scattered.
 var cohesion: float = 1.0
 
+## ---------- transient battle summary (Step 7.5) ---------------------------
+##
+## [b]What the body knows about itself, calculated once a tick.[/b] Everything above this
+## line is the body's own intent - where it is, where it is going, who is in it. Everything
+## here is a reading of the battlefield: how many of its soldiers are still standing, where
+## they actually are, and which hostile body this one is watching.
+##
+## It exists because the alternative was every soldier rediscovering it. Formation focus
+## used to be one pass over the whole army per body per tick, which is quadratic once an
+## army is deployed as many bodies, and the measurement said so: 881 ms a tick at twenty
+## thousand soldiers (D-088). A body answering a question about itself once, and its
+## soldiers reading the answer, is the same information for a fraction of the work.
+##
+## [b]It is battle-transient and it is not state.[/b] Nothing here is saved, nothing here
+## is authoritative, and nothing outside the simulation reads it. It is recomputed from the
+## soldiers themselves every tick by [BattleSimulator], so it cannot go stale: there is no
+## update path to forget to call, only a rebuild that either happened this tick or did not.
+## It is deliberately absent from [method to_dict] for that reason - a summary serialised
+## into a save would be a second source of truth about where the soldiers are.
+##
+## Living members only. A body of corpses has no centre worth steering toward, and the
+## nearest-enemy question is asked about bodies that can still be reached - so the dead are
+## excluded as the pass accumulates rather than filtered out again by every reader.
+var living_count: int = 0
+## The centroid of the living members, which is where the body actually is as opposed to
+## where it was told to be. Zero when nobody is left.
+var centre: Vector2 = Vector2.ZERO
+## An axis-aligned box around the living members. Its purpose is not display: the distance
+## from a point to this box is a lower bound on the distance from that point to any soldier
+## in the body, which is what lets focus selection rule a body out without looking inside
+## it. A rect rather than a radius because a line is wide and shallow and a circle around
+## its centre would claim ground it does not hold.
+var bounds_min: Vector2 = Vector2.ZERO
+var bounds_max: Vector2 = Vector2.ZERO
+## Whether [member living_count], [member centre] and the bounds describe this tick.
+var summary_ready: bool = false
+
+## The hostile body this one is watching, and how far away the soldier it is watching is.
+##
+## [b]A body, not a soldier, is the thing that is chosen.[/b] The nearest hostile soldier to a
+## body's centre belongs to the hostile body nearest to it, so choosing the body first and its
+## nearest member second is the same answer for a comparison between bodies rather than
+## between twenty thousand soldiers. See D-089.
+##
+## [b]The chosen soldier is referred to by nothing here.[/b] These are an index and two
+## numbers; the reference to the soldier itself lives in [BattleSimulator], because a soldier
+## already points at its own body and a body pointing back at a soldier would be a reference
+## cycle. Godot's reference counting has no collector to break one, so a battle that built it
+## would leak every body and every soldier in it. A body knows [i]which[/i] body it is watching
+## and how far away the fighting is; the battlefield knows which soldier that is.
+var focus_body_index: int = -1
+## How far the watched soldier is from [member anchor], or INF when there is nobody to be
+## pointed at. Read by [method BattleSimulator._focus_look_finds_nobody], which uses it to
+## prove that a look could not have found anybody.
+var focus_distance: float = INF
+## The tick this body's focus was found to be nobody at all, which is the one repair that
+## must not be repeated. Nothing comes back to life inside a tick, so a body that has already
+## been told there is nobody to be pointed at is not asked again until the next one - which
+## is what keeps a wiped-out enemy from becoming a focus selection per soldier (D-090).
+var focus_null_tick: int = -1
+## The [member membership_version] this body's focus was worked out against. A body whose
+## membership has changed since holds an answer about a shape it no longer has, and this is
+## what says so - one integer comparison in place of a stale-flag that somebody has to
+## remember to set. See [method is_focus_current].
+var focus_version: int = -1
+
+## Which body this is in [member BattleSimulator.formations], and the only way the focus
+## layer addresses one: a position in a list rather than a name, because a summary is looked
+## up per soldier and per body and a string key would be hashed every time. Set once, by
+## [method BattleSimulator.add_formation], and never changed - bodies are added to a battle
+## and never removed from it.
+var index: int = -1
+## Bumped whenever membership changes. The summary and the focus are both readings of a
+## particular set of soldiers, so both are invalidated by the same event, in the same place.
+var membership_version: int = 0
+
 ## Whether any soldier of this body is currently within reach of an enemy.
 ##
 ## Contact belongs to a body, not to a side. A wing that has not reached the enemy is
@@ -259,7 +335,84 @@ func _same_membership(candidate: Array[int]) -> bool:
 func _invalidate() -> void:
 	_reforming = true
 	_slots_dirty = true
+	# A body whose membership has just changed has no defensible reading of the
+	# battlefield: its living count, its centre, its bounds and its focus all described the
+	# body it was. Bumping the version is what discards them - the summary reports itself
+	# not ready and the focus stops matching, in one integer, so a caller cannot forget to
+	# invalidate one of the two. It is the same principle as routing membership through
+	# this method in the first place: the invariant is not "remember to call it" but "there
+	# is no way to change membership without doing so" (D-054).
+	membership_version += 1
+	summary_ready = false
+	living_count = 0
+	centre = Vector2.ZERO
+	bounds_min = Vector2.ZERO
+	bounds_max = Vector2.ZERO
+	focus_body_index = -1
+	focus_distance = INF
+	focus_null_tick = -1
 	ensure_slots()
+
+
+## ---------- transient battle summary -------------------------------------
+
+## Start rebuilding the summary. One of these per body per tick, from the simulator.
+func begin_summary() -> void:
+	living_count = 0
+	centre = Vector2.ZERO
+	bounds_min = Vector2.ZERO
+	bounds_max = Vector2.ZERO
+	summary_ready = false
+
+
+## Write down the summary the simulator has just accumulated.
+##
+## [b]One write per body per tick rather than one per soldier.[/b] The pass that counts a
+## body's soldiers keeps its running total in local variables and hands the answer over once,
+## because writing a [Vector2]'s components onto an object is a read, a modify and a write
+## each time in GDScript - and the pass does it once per soldier, which on the fixed-area
+## torture test is ten thousand times a body per tick. Measured, moving the accumulation out
+## of here and into the caller was worth a fifth of the focus phase at twenty thousand
+## soldiers.
+func write_summary(
+	count: int,
+	sum: Vector2,
+	low: Vector2,
+	high: Vector2
+) -> void:
+	living_count = count
+	centre = Vector2.ZERO if count == 0 else sum / float(count)
+	bounds_min = low
+	bounds_max = high
+	summary_ready = true
+
+
+## Whether this body has anybody left to steer. The same question
+## [method has_living_units] answers by walking the roll, answered from the summary that has
+## already been built - which is what lets focus selection rule a body out without looking
+## inside it. False before the first summary is built, and false for a body of corpses.
+func is_living() -> bool:
+	return summary_ready and living_count > 0
+
+
+## Whether the focus this body holds describes the body it is now. False after a membership
+## change and true again once the next tick has worked out a fresh answer, which is what
+## makes "no stale focus" a question with an answer rather than a hope.
+func is_focus_current() -> bool:
+	return focus_version == membership_version
+
+
+## Squared distance from a point to this body's box, which is a lower bound on the squared
+## distance from that point to any living soldier in it.
+##
+## Zero when the point is inside the box, and exact when it is outside: the nearest member
+## is at least as far away as the nearest edge, because every member is inside the box. A
+## bound, not an estimate - focus selection uses it to prove a body cannot hold the nearest
+## enemy rather than to guess where that enemy is.
+func bounds_distance_squared(point: Vector2) -> float:
+	var dx := maxf(maxf(bounds_min.x - point.x, point.x - bounds_max.x), 0.0)
+	var dy := maxf(maxf(bounds_min.y - point.y, point.y - bounds_max.y), 0.0)
+	return dx * dx + dy * dy
 
 
 func has_unit(unit_id: int) -> bool:

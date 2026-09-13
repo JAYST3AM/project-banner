@@ -130,17 +130,119 @@ var target_contact_loss_factor: float = 1.0
 ##
 ## So the search has a bound. Inside it, a soldier finds its own nearest enemy. Outside
 ## it, the soldier stops asking a question about itself and is pointed at the fighting
-## instead - by its body if it is formed, by its side if it is not. That is one pass over
-## the army per formation and per side, once per tick, rather than one pass per soldier
-## per tick. See D-067.
-var _focus_by_formation: Dictionary = {}
-var _focus_by_side: Dictionary = {}
+## instead - by its body if it is formed, by its side if it is not. See D-067.
+##
+## [b]Step 7.5 moved where that answer lives.[/b] It used to be a dictionary keyed by
+## formation id, rebuilt by a pass over the whole army per body per tick - the same shape of
+## work as the per-soldier scan it had replaced, one level up, and measured at 881 ms a tick
+## at twenty thousand soldiers (D-088). It is now a field on the body itself, filled once per
+## tick from a summary built in a single pass (see the scratch state below), so reading it
+## costs a field access rather than a hash lookup and computing it costs bodies rather than
+## soldiers. See D-089.
 
-## How far each body's focus enemy is from that body's anchor, in world units, INF when
-## there is nobody to be pointed at. Kept alongside [member _focus_by_formation] rather
-## than looked up on demand, and it is what lets a soldier prove that a look would find
-## nobody before paying for it. See [method _focus_look_finds_nobody].
-var _focus_distance_by_formation: Dictionary = {}
+## ---------- formation-focus scratch state (Step 7.5) ----------------------
+##
+## [b]Preallocated, and reused every tick.[/b] Focus selection runs once per body per tick,
+## so anything it builds fresh is built a thousand times a second in a large battle. These
+## buffers are allocated when the army is handed over and written into thereafter, which is
+## what lets the milestone claim a steady-state tick with no allocation in the focus path at
+## all - a claim the tests check rather than assume (D-091).
+##
+## They are plain arrays and packed arrays rather than objects because none of them is
+## state: each is emptied and refilled within one pass, and nothing outside the focus code
+## may read one.
+##
+## Candidate enemy buckets, both sides' runs in one buffer. A bucket names a place an enemy
+## can be found: a non-negative code is an index into [member formations], and a negative one
+## names a side's unformed soldiers (-1 the player's, -2 the enemy's). GDScript has no array
+## views, so the two runs share the buffer and are read through the bounds below.
+var _bucket_codes: PackedInt32Array = PackedInt32Array()
+## Which buckets a single focus query has already opened, as a query stamp rather than a
+## flag: a query writes its own id rather than clearing the array, so asking a question costs
+## nothing proportional to the number of bodies.
+var _bucket_taken: PackedInt32Array = PackedInt32Array()
+## Where each side's run starts in [member _bucket_codes], and how long it is.
+var _bucket_start: PackedInt32Array = PackedInt32Array([0, 0])
+var _bucket_count: PackedInt32Array = PackedInt32Array([0, 0])
+var _focus_query_id: int = 0
+## The bucket the last selection answered from, or -1 for none: how a caller learns which
+## body it was just pointed at without searching for it.
+var _focus_last_bucket: int = -1
+
+## The living soldiers of each side that belong to no body, in the order they were walked,
+## and how many of each array is in use. Preallocated to the size of the army: a soldier is
+## either in a body's summary or in its side's loose run, never both, so the two together can
+## never exceed the roster.
+var _loose_units: Array = []
+var _loose_count: PackedInt32Array = PackedInt32Array([0, 0])
+var _loose_sum: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]
+var _loose_min: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]
+var _loose_max: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]
+
+## Per-side totals from the summary pass: how many of a side are standing and where their
+## average is. The point a side with no bodies is pointed from.
+var _side_living: PackedInt32Array = PackedInt32Array([0, 0])
+var _side_sum: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]
+## The tick the summaries describe. Checked by anything that reads one, so a reader that runs
+## before the tick's focus pass gets a correct answer rather than last tick's.
+var _summary_tick: int = -1
+## Whether this tick's pass walked the army for the side totals and the unclaimed soldiers.
+## False when every living soldier belongs to a body, in which case there was nothing for that
+## walk to find and the side totals are worked out on demand by the one caller that wants them.
+var _sides_built: bool = false
+## The tick each side's centre was last worked out on, so a battle with no bodies pays for the
+## walk at most once per side per tick rather than once per soldier.
+var _side_centre_tick: PackedInt32Array = PackedInt32Array([-1, -1])
+## How many soldiers the battle believes are standing, kept up as soldiers fall rather than
+## counted. It is a hint and not a truth: if it is wrong it is wrong high, which makes the pass
+## do the walk it would otherwise skip. Nothing downstream can be wrong because of it.
+var _living_total: int = 0
+## The side fallback's answer and the tick it was worked out on. Per side rather than per
+## soldier: a soldier with no body to ask for it is asking its side, and its side is asked
+## once - refreshed every tick, so a side keeps pointing at whoever is nearest to it rather
+## than at whoever it met first and never noticed die, and re-asked inside a tick only when
+## the answer it holds has been killed since it was worked out.
+var _focus_by_side: Array = [null, null]
+var _side_focus_tick: PackedInt32Array = PackedInt32Array([-1, -1])
+
+## Development only: each body's focus answer on the previous tick, as a unit id, so the
+## counters can say how often the answer changed. Never read by the game and only written
+## behind [member profile_enabled].
+var _focus_previous_id: PackedInt32Array = PackedInt32Array()
+
+## The roster addressed by unit id, as an array rather than a dictionary.
+##
+## [member _unit_by_id] is the battle's index and stays the general one - orders, tooling and
+## tests resolve a handful of ids through it. This is the same mapping for the one caller that
+## resolves thousands of ids a tick: the summary pass reads a body's roll, and the hash lookup
+## it used to do per soldier was a visible share of the focus phase on the fixed-area torture
+## test. Built once when the roster is handed over, never written again, and null for an id
+## nobody holds.
+var _unit_slots: Array[BattleUnit] = []
+
+## Per body, references to its living soldiers, rebuilt each tick alongside the summary.
+##
+## The same shape as the spatial grid's own index: membership is owned by the body as a list
+## of ids, and anything that walks a body's soldiers repeatedly keeps references to them
+## rather than resolving an id through the battle's dictionary once per soldier per question.
+## Measured, the dictionary was the whole of the gap between this design and the one it
+## replaced on the fixed-area torture test, where a body is ten thousand soldiers: 40,000
+## lookups a tick, at something like three times the cost of an array read.
+##
+## Preallocated and reused, so a tick writes into it rather than building it.
+var _body_members: Array = []
+var _body_member_count: PackedInt32Array = PackedInt32Array()
+
+## [b]The one place a body's focus soldier is referred to.[/b] Everything else the focus
+## layer remembers about a body is a number, kept on the body; the soldier itself is kept
+## here, indexed by the body's position in [member formations], because a body must not hold
+## a soldier and a soldier holds its body. That reference would be a cycle, Godot's reference
+## counting has no collector, and a battle that built one would leak every body and every
+## soldier in it - which is exactly what a first attempt at this milestone did, and what the
+## suite's leak check caught. See D-089.
+##
+## Sized to the formations a battle has, and read with [member BattleFormation.index].
+var _focus_unit_by_body: Array[BattleUnit] = []
 
 ## The separation pass's own index. A second grid rather than the targeting one because
 ## the two ask different-sized questions: a target search reaches 8 units and a separation
@@ -263,6 +365,75 @@ var tgt_latency_over_cadence: int = 0
 ## one search to, one for one.
 var tgt_soldier_ticks: int = 0
 
+## ---------- development-only focus counters (Step 7.5) --------------------
+##
+## [b]Measurement before change, for the second milestone running.[/b] Step 7.4's counters
+## named the next bottleneck - formation focus, 881 ms a tick at twenty thousand soldiers -
+## and could not say what made it expensive. "The formation scan is expensive" and "the
+## formation scan happens once per soldier" are opposite diagnoses with opposite fixes, and
+## reading the code cannot tell them apart: the code says a scan is run per formation per
+## tick, and the question is whether that is what the battle actually does.
+##
+## So the focus path was counted before it was touched, in the three places a question can
+## originate: a formation asking, a soldier asking, and a side asking on behalf of soldiers
+## with no body to ask for them. Every counter is incremented behind
+## [member profile_enabled], and the per-unit figures are added once per scan rather than
+## once per unit examined, because a counter that costs as much as the thing it counts is
+## not a measurement. See D-088.
+var foc_passes: int = 0
+## Focus evaluations: one per formation per tick, which is what the pass intends. A figure
+## far above `formations x ticks` would mean the pass is running more than once a tick.
+var foc_evaluations: int = 0
+## Where the questions came from. A soldier-originated whole-army scan is the O(N^2) failure
+## mode this milestone exists to remove, so it is counted separately from a formation-
+## originated one rather than added together with it.
+##
+## [b]Since Step 7.5 the expected value of every one of these is zero[/b], because nothing in
+## the focus path walks the army any more: the counters are kept, and asserted, so that
+## "zero" is a measurement rather than a memory. See D-090.
+var foc_scans_from_formations: int = 0
+var foc_scans_from_soldiers: int = 0
+var foc_scans_direct: int = 0
+## Every call to [method _nearest_enemy_to_point], from anywhere. This is [b]the counter the
+## brief asks for[/b]: how many whole-army scans the formation-focus logic performs.
+var foc_global_scans: int = 0
+## Units walked by those scans, split the same way. This is the figure that says whether a
+## phase is expensive because it scans rarely and hugely or often and small.
+var foc_units_examined: int = 0
+var foc_units_from_formations: int = 0
+var foc_units_from_soldiers: int = 0
+## The bounded selection's own work: buckets whose box was measured, buckets actually opened,
+## and soldiers walked inside the ones that were opened. Together with the summary pass these
+## are the whole of the new cost, and `opened_per_evaluation` is the figure that says whether
+## the bounds are doing their job or the search is degenerating into "look inside everything".
+var foc_buckets_measured: int = 0
+var foc_buckets_opened: int = 0
+var foc_members_walked: int = 0
+## Calls into [method _focus_target], and how each one was answered: by the cached formation
+## answer, by repairing that answer, or by falling through to the side. They partition.
+var foc_target_calls: int = 0
+var foc_formation_hits: int = 0
+var foc_formation_repairs: int = 0
+var foc_side_uses: int = 0
+var foc_side_repairs: int = 0
+## How many times a side centre was asked for. A read of the summary pass now, where it used
+## to be a walk of the army per ask.
+var foc_side_centre_reads: int = 0
+## Focus answers that changed from the previous tick, which is the churn figure a retention
+## rule has to hold down.
+var foc_changes: int = 0
+## Arrays and dictionaries constructed on the focus path. Counted rather than assumed,
+## because "this allocates nothing" is a claim that has to be tested.
+var foc_allocations: int = 0
+## The worst single tick for scans, units examined and changes, so a phase that averages
+## well and spikes on one tick says so.
+var foc_scans_worst_tick: int = 0
+var foc_units_worst_tick: int = 0
+var foc_changes_worst_tick: int = 0
+var _foc_scans_this_tick: int = 0
+var _foc_units_this_tick: int = 0
+var _foc_changes_this_tick: int = 0
+
 ## Set for the duration of one soldier's target resolution when the invalidation that
 ## made the search necessary was an urgent one. Consumed by the search that follows it in
 ## the same call, and cleared before every resolution, so it never leaks between soldiers.
@@ -329,14 +500,22 @@ func add_units(p_units: Array[BattleUnit]) -> void:
 	units = p_units
 	_unit_by_id.clear()
 	_fastest_speed = 0.0
+	_prepare_focus_buffers()
+	_summary_tick = -1
+	_focus_by_side = [null, null]
+	_side_focus_tick = PackedInt32Array([-1, -1])
 	# A soldier's awareness slot is derived from its own id and nothing else, which is
 	# what makes the schedule deterministic: the same roster in the same order gives the
 	# same phases, and re-ordering the roster changes the order soldiers are updated in
 	# but not when any one of them looks around. See D-080.
 	var interval := maxi(1, target_reacquisition_ticks)
+	_living_total = 0
 	for unit in units:
 		_unit_by_id[unit.id] = unit
 		unit.auto_target_id = -1
+		unit.summary_tick = -1
+		if unit.is_alive():
+			_living_total += 1
 		unit.next_search_tick = posmod(unit.id, interval)
 		if unit.is_alive():
 			_fastest_speed = maxf(_fastest_speed, unit.move_speed)
@@ -370,8 +549,40 @@ func set_terrain(p_terrain: BattlefieldTerrain) -> void:
 func add_formation(formation: BattleFormation) -> void:
 	if formation == null:
 		return
+	# Position in the list is the body's address: the focus layer indexes summaries and
+	# answers by it, so it is assigned here, once, and never changes. Bodies are added to a
+	# battle and never taken out of it, which is what makes the position stable.
+	formation.index = formations.size()
 	formations.append(formation)
 	_formations_by_id[formation.id] = formation
+	if _focus_unit_by_body.size() < formations.size():
+		_ensure_focus_arrays()
+
+
+## Size the focus layer's per-body arrays to the formations the battle has, filling any new
+## slot with "no answer yet". Called when a body is added and when the development counters
+## are reset, because a per-body array that is shorter than the list of bodies is an index
+## error waiting for the first tick - and an index error inside the pass would end the pass
+## early, which is the one kind of bug a development counter must never be able to cause.
+func _ensure_focus_arrays() -> void:
+	var wanted := formations.size()
+	_focus_unit_by_body.resize(wanted)
+	var previous := _focus_previous_id.size()
+	_focus_previous_id.resize(wanted)
+	for i in range(previous, wanted):
+		_focus_previous_id[i] = -1
+	if _body_members.size() >= wanted and _body_member_count.size() >= wanted:
+		return
+	if profile_enabled:
+		# The buffers a body costs, counted where they are actually made rather than
+		# described in a comment (D-091).
+		foc_allocations += 2
+	_body_member_count.resize(wanted)
+	var had := _body_members.size()
+	_body_members.resize(wanted)
+	for i in range(had, wanted):
+		var bucket: Array[BattleUnit] = []
+		_body_members[i] = bucket
 
 
 func formation(formation_id: String) -> BattleFormation:
@@ -721,6 +932,33 @@ func reset_profile() -> void:
 	tgt_latency_samples = 0
 	tgt_latency_over_cadence = 0
 	tgt_soldier_ticks = 0
+	foc_passes = 0
+	foc_evaluations = 0
+	foc_scans_from_formations = 0
+	foc_scans_from_soldiers = 0
+	foc_scans_direct = 0
+	foc_global_scans = 0
+	foc_units_examined = 0
+	foc_units_from_formations = 0
+	foc_units_from_soldiers = 0
+	foc_buckets_measured = 0
+	foc_buckets_opened = 0
+	foc_members_walked = 0
+	foc_target_calls = 0
+	foc_formation_hits = 0
+	foc_formation_repairs = 0
+	foc_side_uses = 0
+	foc_side_repairs = 0
+	foc_side_centre_reads = 0
+	foc_changes = 0
+	foc_allocations = 0
+	foc_scans_worst_tick = 0
+	foc_units_worst_tick = 0
+	foc_changes_worst_tick = 0
+	_foc_scans_this_tick = 0
+	_foc_units_this_tick = 0
+	_foc_changes_this_tick = 0
+	_ensure_focus_arrays()
 
 
 ## ---------- development-only spike analysis --------------------------------
@@ -842,6 +1080,58 @@ func target_report() -> Dictionary:
 	for count in tgt_rung_hits:
 		rungs.append(count)
 	report["rung_hits"] = rungs
+	return report
+
+
+## Everything the focus path counted since the last reset, with the derived figures the
+## milestone is judged on. Development-only data; nothing in the game reads it.
+##
+## The headline figure is [code]scans_from_soldiers[/code]. It is the counter the brief asks
+## for by name: how many whole-army scans the formation-focus logic performs on behalf of
+## individual soldiers. Every one of them is a soldier doing work its formation has already
+## done, and the target is zero. The per-tick and per-evaluation figures are what make the
+## number actionable rather than merely small or large.
+func focus_report() -> Dictionary:
+	var ticks := maxi(1, int(profile.get("ticks", 0)))
+	var evaluations := maxi(1, foc_evaluations)
+	var report := {
+		"ticks": ticks,
+		"formations": formations.size(),
+		"passes": foc_passes,
+		"passes_per_tick": float(foc_passes) / float(ticks),
+		"evaluations": foc_evaluations,
+		"evaluations_per_tick": float(foc_evaluations) / float(ticks),
+		"global_scans": foc_global_scans,
+		"scans_per_tick": float(foc_global_scans) / float(ticks),
+		"scans_from_formations": foc_scans_from_formations,
+		"scans_from_soldiers": foc_scans_from_soldiers,
+		"scans_direct": foc_scans_direct,
+		"soldier_scans_per_tick": float(foc_scans_from_soldiers) / float(ticks),
+		"units_examined": foc_units_examined,
+		"units_per_tick": float(foc_units_examined) / float(ticks),
+		"units_from_formations": foc_units_from_formations,
+		"units_from_soldiers": foc_units_from_soldiers,
+		"units_per_evaluation": float(foc_units_examined) / float(evaluations),
+		"target_calls": foc_target_calls,
+		"target_calls_per_tick": float(foc_target_calls) / float(ticks),
+		"formation_hits": foc_formation_hits,
+		"formation_repairs": foc_formation_repairs,
+		"side_uses": foc_side_uses,
+		"side_repairs": foc_side_repairs,
+		"side_centre_reads": foc_side_centre_reads,
+		"buckets_measured": foc_buckets_measured,
+		"buckets_measured_per_evaluation": float(foc_buckets_measured) / float(evaluations),
+		"buckets_opened": foc_buckets_opened,
+		"buckets_opened_per_evaluation": float(foc_buckets_opened) / float(evaluations),
+		"members_walked": foc_members_walked,
+		"members_per_opened": float(foc_members_walked) / maxf(1.0, float(foc_buckets_opened)),
+		"changes": foc_changes,
+		"changes_per_tick": float(foc_changes) / float(ticks),
+		"allocations": foc_allocations,
+		"scans_worst_tick": foc_scans_worst_tick,
+		"units_worst_tick": foc_units_worst_tick,
+		"changes_worst_tick": foc_changes_worst_tick,
+	}
 	return report
 
 
@@ -982,6 +1272,7 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 
 	if killed:
 		attacker.kills += 1
+		_living_total = maxi(0, _living_total - 1)
 		events.append({
 			"type": "death",
 			"unit": target.id,
@@ -1229,7 +1520,11 @@ func _focus_look_finds_nobody(unit: BattleUnit) -> bool:
 	if unit.formation_ref == null:
 		return false
 	var body := unit.formation_ref
-	var reachable: float = float(_focus_distance_by_formation.get(body.id, INF))
+	# A body whose focus predates a membership change has no distance to reason from, and
+	# neither does one the battlefield does not address. Both mean the same thing here.
+	if body.index < 0 or not body.is_focus_current():
+		return false
+	var reachable: float = body.focus_distance
 	if reachable == INF:
 		# Nobody on the other side at all: nothing to find and nothing to be pointed at.
 		return true
@@ -1289,63 +1584,518 @@ func _choose_target(unit: BattleUnit) -> BattleUnit:
 	return _focus_target(unit)
 
 
-## Recompute every body's long-range focus. Linear in the army, and run once per tick,
-## which is the whole point: the expensive question is asked a handful of times rather
-## than once per soldier. A battle with no formations pays nothing at all.
-func _refresh_focus() -> void:
-	_focus_by_formation.clear()
-	_focus_by_side.clear()
-	_focus_distance_by_formation.clear()
+## Size the focus path's per-side buffers for the roster the battle has. Called when the army
+## is handed over, and again from the summary pass if the roster has grown since - a battle
+## that adds soldiers after `add_units` should be described correctly rather than indexed out
+## of bounds. A soldier is in its body's summary or in its side's loose run and never both, so
+## one array per side is always more than enough, and sizing them here rather than growing them
+## as they fill is what keeps a tick from allocating (D-091).
+func _prepare_focus_buffers() -> void:
+	var loose_player: Array[BattleUnit] = []
+	var loose_enemy: Array[BattleUnit] = []
+	loose_player.resize(units.size())
+	loose_enemy.resize(units.size())
+	_loose_units = [loose_player, loose_enemy]
+	_loose_count = PackedInt32Array([0, 0])
+	var highest := -1
+	for unit in units:
+		highest = maxi(highest, unit.id)
+	_unit_slots = []
+	_unit_slots.resize(highest + 1)
+	for unit in units:
+		if unit.id >= 0:
+			_unit_slots[unit.id] = unit
+
+
+## Rebuild every body's transient battlefield summary, and the per-side totals that go with
+## it.
+##
+## [b]Two passes, and the order is the point.[/b] The first counts each body's own roll: the
+## list of soldiers a body holds is the authority on who is in it, so the summary is derived
+## from it rather than from each soldier's back-reference. A soldier detached through
+## [method BattleFormation.remove_units] therefore stops being counted immediately, without
+## the body having to know the soldier - which is the whole reason membership lives in a list
+## of ids. The second pass walks the army once for the totals, and for the soldiers no body
+## claimed: anyone who belongs to no body, and anyone whose body is not on their side, is
+## counted as a loose soldier of their own side so that the focus layer can still find them.
+## A soldier is counted exactly once, which is what the claim stamp on the soldier is for.
+##
+## [b]It is the only place in the focus path whose cost is proportional to the army, and it
+## is proportional to it twice per tick rather than once per body per tick.[/b] Measured, the
+## pass it replaced was 2,205,806 soldier-visits a tick at twenty thousand soldiers; this is
+## 40,000 plus a body's worth per question (D-088).
+##
+## The summaries are rebuilt rather than updated. There is no delta to get wrong, no order the
+## caller has to respect, and a body that was given soldiers or had them taken away since the
+## last tick is described correctly by construction.
+func _refresh_summaries() -> void:
+	_ensure_focus_arrays()
+	if _loose_units.size() < 2 or (_loose_units[0] as Array).size() < units.size():
+		_prepare_focus_buffers()
+	for i in 2:
+		_loose_count[i] = 0
+		_loose_sum[i] = Vector2.ZERO
+		_side_sum[i] = Vector2.ZERO
+		_side_living[i] = 0
 	for formation in formations:
-		var directed := _nearest_enemy_to_point(formation.side, formation.anchor)
-		_focus_by_formation[formation.id] = directed
-		_focus_distance_by_formation[formation.id] = (
-			INF if directed == null else formation.anchor.distance_to(directed.position))
+		formation.begin_summary()
+		var ids := formation.unit_ids
+		var bucket: Array[BattleUnit] = _body_members[formation.index]
+		if bucket.size() < ids.size():
+			bucket.resize(ids.size())
+			if profile_enabled:
+				foc_allocations += 1
+		var keeping := 0
+		var slots := _unit_slots.size()
+		# The running total lives in locals rather than on the body: a Vector2 component
+		# written onto an object is three property operations, and this loop runs once per
+		# soldier per tick. See [method BattleFormation.write_summary].
+		var sum := Vector2.ZERO
+		var low := Vector2.ZERO
+		var high := Vector2.ZERO
+		for i in ids.size():
+			var unit_id := ids[i]
+			var unit: BattleUnit = _unit_slots[unit_id] if (unit_id >= 0 and unit_id < slots) else null
+			if unit == null or not unit.is_alive() or unit.side != formation.side:
+				continue
+			var position := unit.position
+			if keeping == 0:
+				low = position
+				high = position
+			else:
+				low.x = minf(low.x, position.x)
+				low.y = minf(low.y, position.y)
+				high.x = maxf(high.x, position.x)
+				high.y = maxf(high.y, position.y)
+			sum += position
+			unit.summary_tick = tick_index
+			bucket[keeping] = unit
+			keeping += 1
+		_body_member_count[formation.index] = keeping
+		formation.write_summary(keeping, sum, low, high)
+	_sides_built = false
+	var claimed := 0
+	for formation in formations:
+		claimed += _body_member_count[formation.index]
+	if claimed != _living_total:
+		# Somebody is standing who belongs to no body, or to a body of the other side. Only
+		# then is the army walked, because only then is there anything for that walk to find:
+		# the side totals and the loose run exist for the soldier with no body to ask for it,
+		# and a battle where every soldier is formed - which is a deployed army, and both
+		# benchmark families - has none. See D-089.
+		_walk_unclaimed()
+		_sides_built = true
+	_summary_tick = tick_index
+	_build_buckets()
+
+
+## The second half of the summary: the side totals, and the living soldiers no body claimed.
+##
+## Reached only when the count of soldiers a body counted does not match the number the
+## battle believes are standing, which is the signal that there is somebody to collect. The
+## running totals are locals for the same reason the body summaries are: a write into a
+## [PackedInt32Array] or a typed array slot per soldier per tick was a measurable share of
+## this pass.
+func _walk_unclaimed() -> void:
+	var sum_player := Vector2.ZERO
+	var sum_enemy := Vector2.ZERO
+	var alive_player := 0
+	var alive_enemy := 0
+	for unit in units:
+		if not unit.is_alive():
+			continue
+		var index := _side_index(unit.side)
+		var position := unit.position
+		if index == 0:
+			sum_player += position
+			alive_player += 1
+		else:
+			sum_enemy += position
+			alive_enemy += 1
+		if unit.summary_tick == tick_index:
+			continue
+		var count := _loose_count[index]
+		if count == 0:
+			_loose_min[index] = position
+			_loose_max[index] = position
+		else:
+			var low: Vector2 = _loose_min[index]
+			var high: Vector2 = _loose_max[index]
+			_loose_min[index] = Vector2(minf(low.x, position.x), minf(low.y, position.y))
+			_loose_max[index] = Vector2(maxf(high.x, position.x), maxf(high.y, position.y))
+		_loose_sum[index] += position
+		_loose_units[index][count] = unit
+		_loose_count[index] = count + 1
+	_side_sum[0] = sum_player
+	_side_sum[1] = sum_enemy
+	_side_living[0] = alive_player
+	_side_living[1] = alive_enemy
+
+
+## The index a side is addressed by in the focus path's small per-side arrays. Two sides, two
+## slots; anything that is not the player is treated as the enemy, which is what
+## [method enemy_side_of] does with it as well.
+func _side_index(side: String) -> int:
+	return 0 if side == BattleContext.SIDE_PLAYER else 1
+
+
+## Collect this tick's candidate enemy buckets, one run per side, into one shared buffer.
+##
+## A bucket is a place an enemy can be found: a body with somebody still standing in it, or
+## a side's unformed soldiers. Two runs rather than one list because a body belongs to
+## exactly one side and is only a candidate for the other - so each soldier is indexed once
+## per tick and never twice.
+func _build_buckets() -> void:
+	var needed := formations.size() + 2
+	if _bucket_codes.size() < needed:
+		_bucket_codes.resize(needed)
+		_bucket_taken.resize(needed)
+		if profile_enabled:
+			# The only allocation the focus path can make after the army was handed over,
+			# and it happens once - when a body is added. Counted rather than described.
+			foc_allocations += 2
+	var cursor := 0
+	for querying in 2:
+		var owner := 1 - querying
+		_bucket_start[querying] = cursor
+		for i in formations.size():
+			var formation := formations[i]
+			if formation.is_living() and _side_index(formation.side) == owner:
+				_bucket_codes[cursor] = i
+				cursor += 1
+		if _loose_count[owner] > 0:
+			_bucket_codes[cursor] = -1 - owner
+			cursor += 1
+		_bucket_count[querying] = cursor - _bucket_start[querying]
+
+
+## The living enemy nearest to [param point], or null when that side has nobody left.
+##
+## [b]Bodies first, soldiers second.[/b] Instead of walking the enemy army, this walks the
+## enemy's [i]buckets[/i] and rules them out by their boxes: the distance from the point to a
+## bucket's box is a lower bound on the distance to any soldier inside it, so a bucket whose
+## box is already further away than the best soldier found cannot hold a nearer one and is
+## not opened. Buckets are opened nearest-bound-first, so the answer is usually found in the
+## first one or two and everything after them is dismissed by arithmetic on four numbers.
+##
+## [b]It is the same answer, not an approximation.[/b] The loop stops only when the closest
+## remaining bound is beyond the best candidate found, which proves nothing left can beat it.
+## What the bound buys is not a different answer but the right to stop early: a bucket that
+## is dismissed is one whose every soldier is strictly further away than the one already in
+## hand. A test drives live battles and compares the answer against the full scan of the
+## army, body by body and tick by tick, rather than trusting the reasoning. See D-089.
+##
+## Ties go to the lower unit id, in this and in [method _nearest_enemy_to_point]: the rule is
+## about the soldiers, not about the order they happened to be met in, which is what makes a
+## focus decision reproducible whatever order a roster is assembled in.
+func _nearest_enemy_via_buckets(side: String, point: Vector2) -> BattleUnit:
+	# The selection is always answered from this tick's summaries. A caller that reaches it
+	# before the tick's focus pass - the repair path when something asks very early, or a
+	# test driving the simulator by hand - gets a correct answer rather than an empty
+	# candidate list, and an empty candidate list is a body being told there is nobody on
+	# the field. The check is one integer against the tick the summaries describe.
+	if _summary_tick != tick_index:
+		_refresh_summaries()
+	var querying := _side_index(side)
+	var run := _bucket_count[querying]
+	_focus_last_bucket = -1
+	if run == 0:
+		return null
+	var enemy_side := enemy_side_of(side)
+	var start := _bucket_start[querying]
+	_focus_query_id += 1
+	var query := _focus_query_id
+	var best: BattleUnit = null
+	var best_distance := INF
+	while true:
+		# The unopened bucket whose box is nearest to the point. Ties go to the earliest
+		# bucket in the run, which is the order the bodies were built in.
+		var chosen := -1
+		var chosen_bound := INF
+		for k in run:
+			var slot := start + k
+			if _bucket_taken[slot] == query:
+				continue
+			if profile_enabled:
+				foc_buckets_measured += 1
+			var bound := _bucket_bound_squared(_bucket_codes[slot], point)
+			if bound < chosen_bound:
+				chosen_bound = bound
+				chosen = slot
+		if chosen < 0 or chosen_bound > best_distance:
+			break
+		_bucket_taken[chosen] = query
+		var code := _bucket_codes[chosen]
+		if profile_enabled:
+			foc_buckets_opened += 1
+		var found := _nearest_in_bucket(code, enemy_side, point)
+		if found != null:
+			var distance := point.distance_squared_to(found.position)
+			if distance < best_distance or (distance == best_distance and best != null and found.id < best.id):
+				best_distance = distance
+				best = found
+				_focus_last_bucket = code
+	return best
+
+
+## Lower bound on the squared distance from [param point] to any living soldier in the
+## bucket named by [param code]. Zero when the point is inside the bucket's box.
+func _bucket_bound_squared(code: int, point: Vector2) -> float:
+	if code >= 0:
+		return formations[code].bounds_distance_squared(point)
+	var index := -1 - code
+	if _loose_count[index] == 0:
+		return INF
+	var low: Vector2 = _loose_min[index]
+	var high: Vector2 = _loose_max[index]
+	var dx := maxf(maxf(low.x - point.x, point.x - high.x), 0.0)
+	var dy := maxf(maxf(low.y - point.y, point.y - high.y), 0.0)
+	return dx * dx + dy * dy
+
+
+## The living enemy in one bucket nearest to [param point], or null when the bucket has
+## nobody left in it.
+##
+## The side test is not redundant even though a bucket is collected by side: a soldier's
+## membership can be changed by an order and a body is not the authority on which side a
+## soldier fights for. Cheap insurance, and the sort that costs one comparison rather than
+## one bug.
+func _nearest_in_bucket(code: int, enemy_side: String, point: Vector2) -> BattleUnit:
+	var best: BattleUnit = null
+	var best_distance := INF
+	if code >= 0:
+		var members: Array[BattleUnit] = _body_members[code]
+		var count := _body_member_count[code]
+		for i in count:
+			var unit := members[i]
+			if not unit.is_alive() or unit.side != enemy_side:
+				continue
+			if profile_enabled:
+				foc_members_walked += 1
+			var distance := point.distance_squared_to(unit.position)
+			if distance < best_distance or (distance == best_distance and best != null and unit.id < best.id):
+				best_distance = distance
+				best = unit
+		return best
+	var index := -1 - code
+	var loose: Array = _loose_units[index]
+	var count := _loose_count[index]
+	for i in count:
+		var unit: BattleUnit = loose[i]
+		if unit == null or not unit.is_alive() or unit.side != enemy_side:
+			continue
+		if profile_enabled:
+			foc_members_walked += 1
+		var distance := point.distance_squared_to(unit.position)
+		if distance < best_distance or (distance == best_distance and best != null and unit.id < best.id):
+			best_distance = distance
+			best = unit
+	return best
+
+
+## Recompute every body's formation focus for this tick, once, from the summaries just
+## rebuilt.
+##
+## The pass costs one bounded selection per body - and a selection looks at one body's
+## soldiers in the ordinary case, not the army's. Before Step 7.5 this was one pass over the
+## whole army per body per tick, which is what made it 881 ms a tick at twenty thousand
+## soldiers (D-088).
+##
+## A body with nobody left standing is not evaluated at all. There is no answer worth keeping
+## for a corpse: nobody in it can ask, and if it is given soldiers again the next tick
+## answers for the body it has become.
+func _refresh_focus() -> void:
+	if profile_enabled:
+		foc_passes += 1
+	_refresh_summaries()
+	for formation in formations:
+		if formation.living_count == 0:
+			# A body with nobody standing has no focus to hold: not a stale one from the
+			# tick it died on, and not a fresh one, because there is nobody in it for a
+			# focus to be for. Writing the empty answer down is what makes that a fact
+			# rather than an accident of nobody having asked.
+			_apply_focus(formation, null, formation.anchor)
+			formation.focus_null_tick = tick_index
+			continue
+		if profile_enabled:
+			foc_evaluations += 1
+		var directed := _nearest_enemy_via_buckets(formation.side, formation.anchor)
+		_apply_focus(formation, directed, formation.anchor)
+		if directed == null:
+			# The pass itself found nobody. Nothing can change that inside this tick, so
+			# no soldier in this body needs to repair it: the question has already been
+			# answered, once, for everybody.
+			formation.focus_null_tick = tick_index
+		if profile_enabled:
+			var previous_id := _focus_previous_id[formation.index]
+			if previous_id != (directed.id if directed != null else -1):
+				foc_changes += 1
+				_foc_changes_this_tick += 1
+			_focus_previous_id[formation.index] = directed.id if directed != null else -1
+	if profile_enabled:
+		_foc_end_tick()
+
+
+## Write one body's focus answer down, in both halves: the numbers on the body and the
+## reference in the one place references are allowed to live.
+##
+## Kept in one place because the two must agree - a body whose [member
+## BattleFormation.focus_distance] described a soldier the battlefield is no longer holding
+## would be a body proving that a look finds nobody using a soldier that is not there. The
+## version stamp is what makes the pair current.
+##
+## The focus body is only named when the answer came out of a body at all: an army with no
+## bodies has no formation to watch, and saying it watched body -1 would be a lie told by an
+## integer. The soldier is still the answer; only the strategic name for it is missing.
+func _apply_focus(body: BattleFormation, target: BattleUnit, from_point: Vector2) -> void:
+	_focus_unit_by_body[body.index] = target
+	body.focus_body_index = _focus_last_bucket if (target != null and _focus_last_bucket >= 0) else -1
+	body.focus_distance = INF if target == null else from_point.distance_to(target.position)
+	body.focus_version = body.membership_version
+
+
+## The soldier this body's focus points at, or null when there is nobody - and null for a body
+## whose answer was made before its membership changed, because that answer was about a
+## different set of soldiers. The single reading path for every consumer.
+func _focus_unit_of(body: BattleFormation) -> BattleUnit:
+	if body.index < 0 or not body.is_focus_current():
+		return null
+	return _focus_unit_by_body[body.index]
+
+
+## The hostile body this one is watching, or null when there is nobody, when the enemy has no
+## bodies, or when the answer predates a membership change. The formation-level half of the
+## focus: what a body knows strategically, as opposed to the soldier it is pointed at.
+func _focus_formation_of(body: BattleFormation) -> BattleFormation:
+	if body.index < 0 or not body.is_focus_current():
+		return null
+	var index := body.focus_body_index
+	if index < 0 or index >= formations.size():
+		return null
+	return formations[index]
+
+
+## Roll the focus counters' per-tick figures forward. Called at the end of the pass that
+## opens a tick's focus work, so "worst tick" means one tick rather than one whole battle.
+func _foc_end_tick() -> void:
+	foc_scans_worst_tick = maxi(foc_scans_worst_tick, _foc_scans_this_tick)
+	foc_units_worst_tick = maxi(foc_units_worst_tick, _foc_units_this_tick)
+	foc_changes_worst_tick = maxi(foc_changes_worst_tick, _foc_changes_this_tick)
+	_foc_scans_this_tick = 0
+	_foc_units_this_tick = 0
+	_foc_changes_this_tick = 0
 
 
 ## Who this soldier faces when there is nobody inside its own search bound.
 ##
-## The side fallback is computed on demand rather than every tick because a battle with
-## formations never asks for it, and a battle without them is a small one where a single
-## extra pass costs nothing.
+## [b]Its body's answer, read rather than worked out.[/b] This is the whole of soldier
+## consumption, and it is a field read on the formation: the same cost as reading the
+## soldier's own position, and no question asked of anybody else. There is no scan here and,
+## since Step 7.5, no path that reaches one - a soldier whose body was answered this tick
+## reads that answer.
+##
+## The two repairs below are the only work anyone does here, and both are bounded.
+## [b]A body's answer that died mid-tick[/b] is worked out again at the body's layer - one
+## bounded selection, not one walk of the army - and only until the body's answer is a
+## soldier again; a body whose focus was found to be nobody at all is not asked a second
+## time this tick, because nothing can come back to life inside a tick and the second answer
+## would be the first one. [b]A side with no bodies to ask for it[/b] is answered once per
+## tick on the same terms. A death therefore becomes one correction at the level that owns
+## it, rather than a search per soldier standing near it. See D-090.
 func _focus_target(unit: BattleUnit) -> BattleUnit:
+	if profile_enabled:
+		foc_target_calls += 1
+	var index := _side_index(unit.side)
 	if unit.formation_ref != null:
 		var body := unit.formation_ref
-		var directed: BattleUnit = _focus_by_formation.get(body.id)
-		if directed == null or not directed.is_alive():
-			# It fell this tick, after the focus was taken. Recomputing costs one pass
-			# over the army - once for the body, not once for every soldier in it.
-			directed = _nearest_enemy_to_point(unit.side, body.anchor)
-			_focus_by_formation[body.id] = directed
-			_focus_distance_by_formation[body.id] = (
-				INF if directed == null else body.anchor.distance_to(directed.position))
-		if directed != null:
+		var directed := _focus_unit_of(body)
+		if directed != null and directed.is_alive():
+			if profile_enabled:
+				foc_formation_hits += 1
 			return directed
-	var by_side: BattleUnit = _focus_by_side.get(unit.side)
-	if by_side != null and by_side.is_alive():
-		return by_side
-	by_side = _nearest_enemy_to_point(unit.side, _side_centre(unit.side))
-	_focus_by_side[unit.side] = by_side
+		if body.index >= 0 and body.focus_null_tick != tick_index:
+			if profile_enabled:
+				foc_formation_repairs += 1
+			directed = _nearest_enemy_via_buckets(unit.side, body.anchor)
+			_apply_focus(body, directed, body.anchor)
+			if directed == null:
+				# There is nobody to be pointed at, and that cannot change inside a tick.
+				body.focus_null_tick = tick_index
+			else:
+				if profile_enabled:
+					foc_formation_hits += 1
+				return directed
+	if _side_focus_tick[index] == tick_index:
+		# This side has already been asked, and by the side's own answer: a soldier still
+		# standing, or nobody at all.
+		var cached: BattleUnit = _focus_by_side[index]
+		if cached == null:
+			if profile_enabled:
+				foc_side_uses += 1
+			return null
+		if cached.is_alive():
+			if profile_enabled:
+				foc_side_uses += 1
+			return cached
+	if profile_enabled:
+		foc_side_repairs += 1
+	var by_side := _nearest_enemy_via_buckets(unit.side, _side_centre(unit.side))
+	_focus_by_side[index] = by_side
+	_side_focus_tick[index] = tick_index
 	return by_side
 
 
-## The average position of a side's living soldiers, or the middle of the field when it
-## has none left to average.
+## The average position of a side's living soldiers, or the middle of the field when it has
+## none left to average.
+##
+## Read out of the summary pass rather than recalculated. This used to walk the whole army
+## every time a soldier with no body to ask for it wanted to know where its side was
+## standing - the same per-soldier scan the milestone removes - and the figure is now the one
+## the tick began with rather than one taken midway through the soldiers' own movement. That
+## makes it a fact about the tick instead of a fact about how far down the roster the caller
+## happens to be, which is what the summary layer is for. See D-089.
+##
+## The summary is refreshed here if this tick has not built one, so the question has a
+## correct answer whenever it is asked rather than only after the focus pass has run.
 func _side_centre(side: String) -> Vector2:
-	var total := Vector2.ZERO
-	var count := 0
-	for unit in units:
-		if unit.is_alive() and unit.side == side:
-			total += unit.position
-			count += 1
+	if _summary_tick != tick_index:
+		_refresh_summaries()
+	var index := _side_index(side)
+	if profile_enabled:
+		foc_side_centre_reads += 1
+	if not _sides_built and _side_centre_tick[index] != tick_index:
+		# Every soldier is in a body, so the pass did not walk the army - and this is the one
+		# caller that wants to know where a side is standing. Walked here, once for the side,
+		# for the battle that has soldiers with no body to ask for it.
+		_side_centre_tick[index] = tick_index
+		var total := Vector2.ZERO
+		var standing := 0
+		for unit in units:
+			if unit.is_alive() and _side_index(unit.side) == index:
+				total += unit.position
+				standing += 1
+		_side_sum[index] = total
+		_side_living[index] = standing
+	var count := _side_living[index]
 	if count == 0:
 		return field_size * 0.5
-	return total / float(count)
+	return _side_sum[index] / float(count)
 
 
 ## The living enemy nearest to a point, ties to the lower id, or null when that side has
-## nobody left. A plain scan, called once per formation per tick and never per soldier.
-func _nearest_enemy_to_point(side: String, point: Vector2) -> BattleUnit:
+## nobody left. A plain scan of the whole army.
+##
+## [b]This is the reference implementation, and the battle no longer calls it.[/b] It is what
+## the bounded selection in [method _nearest_enemy_via_buckets] is proved against: the tests
+## drive live battles and compare the two answers body by body and tick by tick, which is a
+## stronger statement than any argument about bounds (D-089). It is kept in the simulator
+## rather than in a test file because a reference that lives beside what it checks stays
+## honest, and because [member foc_global_scans] counts its callers - a counter whose expected
+## value is zero is only worth having if the thing it counts can still happen.
+##
+## [param source] names where the question came from and is development-only. It has no effect
+## on the answer. See D-088.
+func _nearest_enemy_to_point(side: String, point: Vector2, source: String = "") -> BattleUnit:
 	var enemy_side := enemy_side_of(side)
 	var best: BattleUnit = null
 	var best_distance := INF
@@ -1356,6 +2106,23 @@ func _nearest_enemy_to_point(side: String, point: Vector2) -> BattleUnit:
 		if distance < best_distance or (distance == best_distance and best != null and unit.id < best.id):
 			best_distance = distance
 			best = unit
+	if profile_enabled:
+		# Counted once per scan rather than once per unit: a per-iteration counter would
+		# cost a noticeable share of the thing it is measuring, and the walks are what the
+		# phase clock already prices.
+		foc_global_scans += 1
+		foc_units_examined += units.size()
+		_foc_scans_this_tick += 1
+		_foc_units_this_tick += units.size()
+		match source:
+			"formation":
+				foc_scans_from_formations += 1
+				foc_units_from_formations += units.size()
+			"soldier":
+				foc_scans_from_soldiers += 1
+				foc_units_from_soldiers += units.size()
+			_:
+				foc_scans_direct += 1
 	return best
 
 

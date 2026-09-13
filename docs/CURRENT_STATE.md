@@ -2,21 +2,22 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 7.4 - target acquisition scaling
+**Last updated:** end of Step 7.5 - formation battlefield focus scaling
 **Engine:** Godot 4.7.2-stable
-**Test status:** `2732 assertions, 0 failures, 19 of 19 suites` headless, plus
-`95 checks, 0 failures` in a genuine two-process restart check.
+**Test status:** `2831 assertions, 0 failures, 20 of 20 suites` headless, plus
+`95 checks + 6 checks, 0 failures` in a genuine two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
 every pull request against it, pinned to Godot 4.7.2-stable.
 
-**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, and Steps 7.2, 7.3 and 7.4 were
+**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, and Steps 7.2, 7.3, 7.4 and 7.5 were
 engineering milestones; none of them added gameplay. Step 7 added terrain and formations.
 See [Step 7 - terrain and formation
 foundation](#step-7---terrain-and-formation-foundation), [Step 7.1 - formation
 hardening](#step-71---formation-hardening), [Step 7.2 - battle simulation scaling
 foundation](#step-72---battle-simulation-scaling-foundation), [Step 7.3 - dense battle /
-overlap scaling](#step-73---dense-battle--overlap-scaling) and [Step 7.4 - target acquisition
-scaling](#step-74---target-acquisition-scaling) below.
+overlap scaling](#step-73---dense-battle--overlap-scaling), [Step 7.4 - target acquisition
+scaling](#step-74---target-acquisition-scaling) and [Step 7.5 - formation battlefield focus
+scaling](#step-75---formation-battlefield-focus-scaling) below.
 
 ---
 
@@ -49,7 +50,7 @@ NEW CAMPAIGN -> WORLD MAP -> TRAVEL -> TOWN -> RECRUIT -> INDIVIDUAL SOLDIERS
 
 Everything below is asserted by an automated run, not claimed by hand.
 
-**Eighteen headless suites, 2490 assertions, 0 failures**
+**Twenty headless suites, 2831 assertions, 0 failures**
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -59,11 +60,15 @@ Everything below is asserted by an automated run, not claimed by hand.
 | `test_recruitment` | 191 | unit/trait data, names, factory, recruitment rules, party limits |
 | `test_party_semantics` | 51 | **roster membership vs active force**: travel pace, HUD wording, capacity, the dead kept on the record |
 | `test_encounters` | 282 | spawning, movement, aggro, detection, `BattleContext`, deployment, simulator |
-| `test_combat` | 266 | damage, death, attribution, victory conditions, results, resolver, balance |
+| `test_combat` | 276 | damage, death, attribution, victory conditions, results, resolver, balance |
 | `test_battle_outcomes` | 224 | **victory / defeat / draw / withdrawal**, the retreat farming loop, timeout freezing the field, results-screen wording |
 | `test_terrain` | 72 | **deterministic ground**: same seed same field, different seed different field, bounds, movement modifiers, terrain actually changing movement, the slope contract at the field's edge, independence from rendering |
 | `test_formation` | 328 | **formations as physical objects**: geometry across seven facings, distinct slots, ownership and partial detachment, repeated transfers, movement without teleporting, turning, reformation, cohesion, casualties leaving gaps, rotated debug bounds |
-| `test_formation_battle` | 99 | **both systems together**: both armies formed, the enemy on the same engine, the AI ignoring wiped-out bodies, contact belonging to a body rather than a side, terrain slowing a body, a formed battle resolving and being reproducible, the architecture guardrails, a 500-unit scale smoke |
+| `test_formation_battle` | 132 | **both systems together**: both armies formed, the enemy on the same engine, the AI ignoring wiped-out bodies, contact belonging to a body rather than a side, terrain slowing a body, a formed battle resolving and being reproducible, the architecture guardrails, a 500-unit scale smoke |
+| `test_spatial_grid` | 111 | **the proximity index**: cell boundaries, side filtering, equivalence against a brute-force scan, the snapshot contract, rebuild behaviour |
+| `test_overlap` | 140 | **the separation pass**: exact separation, no launch, no permanent stacking, settled-interior skips, reverse-roster independence, cell-size sweeps |
+| `test_target_acquisition` | 231 | **Step 7.4**: retention, invalidation by death and by distance, explicit orders, the cadence at every interval, staggered phases, roster-order independence, hysteresis, cell boundaries, the death storm, the provable skip, the counter partition, determinism |
+| `test_formation_focus` | 99 | **Step 7.5**: the bounded selection proved against a full scan in live battles, summaries after movement and casualties, membership changes through the Step 7.1 APIs, empty bodies, deterministic ties, one pass per body per tick, zero soldier-originated scans, the repair path, the allocation audit, determinism, explicit orders |
 | `test_enemy_persistence` | 121 | **the same enemy fought twice**: battle → campaign → save/load → second battle, enemy survivors and enemy dead |
 | `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path, through the real scenes** - including the real `BattleResult` reaching the real results screen |
 | `test_persistence` | 154 | every field the milestone lists, migration, refusal, corrupt files, metadata for every save shape |
@@ -1068,6 +1073,223 @@ number is guessing.
 | Windowed smoke | campaign -> settlement -> recruit -> battle -> **formation drill** -> results, zero script errors |
 | CI | **green** on the milestone tip - run id, head SHA and the raw job log's suite and assertion counts are in the milestone report |
 
+## Step 7.5 - Formation battlefield focus scaling
+
+Step 7.4's own measurement named the next bottleneck, and this milestone attacked it. It added
+**no gameplay**: no projectiles, no cavalry, no morale, no new orders, no changes to how a
+soldier fights. Formation focus used to be one pass over the whole army per body per tick; it
+is now one summary pass over the bodies, a comparison of bodies against bodies, and a field
+read by every soldier.
+
+### 1. The measurement that chose the milestone
+
+Before anything was changed, the focus path was instrumented. At twenty thousand soldiers on
+the scaled battlefield - one hundred bodies, which is the realistic case - the counters said:
+
+| | per tick |
+| --- | ---: |
+| focus evaluations (one per body) | 100.0 |
+| whole-army walks (`_nearest_enemy_to_point`) | 109.5 |
+| **of those, made on behalf of a single soldier** | **9.5** |
+| soldiers walked by those walks | 2,189,412 |
+| soldiers answered straight from their body's focus | 12,318.9 |
+| focus answers that changed since the previous tick | 36.29 |
+
+The phase cost **760 ms** of a 1,786 ms tick in that run. The arithmetic is exact and
+uninteresting - **100 bodies x 20,000 soldiers = 2,000,000 soldier-visits a tick** - but the
+second figure is the one worth naming: 9.5 of those walks a tick were made *on behalf of one
+soldier*, because a body's answer that died mid-tick was recomputed by whoever noticed. That
+work was billed to the target phase, where Step 7.4 had just spent a milestone making things
+cheaper. See D-088.
+
+### 2. What changed
+
+- **A transient formation summary.** `BattleFormation` gains `living_count`, `centre`,
+  `bounds_min`, `bounds_max` and a version stamp, rebuilt once a tick from the body's own roll
+  of soldiers, plus `focus_body_index`/`focus_distance`/`focus_null_tick` for its answer. No
+  nodes, no per-soldier objects, nothing in `to_dict()`, nothing in a save.
+- **One summary pass over the army, and only when it is needed.** Bodies are counted from
+  `unit_ids` - the list that is the authority on membership - and the walk over the whole army
+  that collects the unformed soldiers and the side totals runs **only when the number the
+  bodies counted does not match the number the battle believes are standing**. A deployed army
+  has nobody unformed, so it pays one integer comparison instead of twenty thousand visits.
+  That single change was 22 ms of the 55 ms focus phase at twenty thousand soldiers.
+- **Formation-level enemy selection.** `_nearest_enemy_via_buckets` opens the candidate body
+  whose box is nearest to the asking body's anchor, measures the soldiers inside it, and stops
+  as soon as no remaining box could hold a nearer soldier. That stopping rule is a proof, so
+  the answer is **the same soldier a full scan would have named** - not an approximation of it.
+- **Soldier consumption is a field read.** `_focus_target` reads its body's answer. A body
+  whose answer died mid-tick is repaired once, for the body; a body whose answer is "nobody" is
+  not asked again inside the tick. `foc_scans_from_soldiers` - whole-army walks made on behalf
+  of a soldier - went from 9.5 a tick to **zero**.
+- **No retention rule, deliberately.** A body's answer changes 38 times a tick across a hundred
+  bodies, and the pass now costs a fraction of what it did, so a hysteresis rule would be new
+  behaviour bought with no measurable saving. See D-089.
+- **Allocation audited.** Every buffer is sized when the army is handed over and reused; a test
+  drives sixty ticks and asserts the focus path's allocation count does not move. See D-091.
+
+### 3. Benchmark A - the fixed-area torture test
+
+Unchanged from Step 7: same seed (70707), dimensions, layouts, rules and budget, so the
+comparison holds across four milestones.
+
+The Step 7.4 column is a **probe build**: the tip of Step 7.4 with the Step 7.5 counters added
+and nothing else changed, run on this machine with this harness, one run at a time.
+
+| Soldiers | Step 7.4 ms/tick | **Step 7.5 ms/tick** | change | 7.5 ticks/sec | contact |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 100 | 2.014 | **2.025** | 0.99x | 494 | yes |
+| 500 | 12.900 | **12.808** | 1.01x | 78 | yes |
+| 1,000 | 30.136 | **29.659** | 1.02x | 34 | yes |
+| 2,500 | 89.261 | **89.383** | 1.00x | 11 | yes |
+| 5,000 | 233.479 | **231.812** | 1.01x | 4 | yes |
+| 10,000 | 618.000 | **518.008** | **1.19x** | 2 | yes |
+| 20,000 | 1,099.764 | **1,092.018** | 1.01x | 1 | no |
+
+Matched-window runs, twenty ticks each, both builds, so no wall-clock budget can shorten a
+slower run's window:
+
+| Soldiers | Step 7.4 ms/tick | **Step 7.5 ms/tick** | change | 7.4 focus ms | **7.5 focus ms** | focus change |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 1.576 | **1.682** | 0.94x | 0.143 | **0.196** | 0.73x |
+| 500 | 8.354 | **8.782** | 0.95x | 0.667 | **0.843** | 0.79x |
+| 1,000 | 18.464 | **19.180** | 0.96x | 1.348 | **1.606** | 0.84x |
+| 2,500 | 55.013 | **55.800** | 0.99x | 3.382 | **2.633** | **1.28x** |
+| 5,000 | 136.179 | **135.985** | 1.00x | 7.095 | **5.454** | **1.30x** |
+| 10,000 | 361.919 | **360.324** | 1.00x | 14.472 | **16.338** | 0.89x |
+| 20,000 | 1,094.797 | **1,098.303** | 1.00x | 33.066 | **35.010** | 0.94x |
+
+**The torture test is flat, and that is the honest result.** It was never what this milestone
+was for: it crams every army into a 100x60 field, so a side is a *single body of ten thousand*
+and formation focus was already a small part of its tick. What the matched runs show is that
+the new pass costs about what the old one did there - and the small sizes are 4-6% slower,
+because the layer now has a fixed per-tick cost (about 0.1 ms: four bodies' summaries and four
+selections) where the old code had nothing to do at all. At 20,000 the two are within 0.3% of
+each other. Family B is where the milestone was aimed and where it lands.
+
+### 4. Benchmark B - the battlefield scaled with the army
+
+Same seed, layouts, rules and budget as Step 7.4's run.
+
+| Soldiers | field | density | 7.4 ms/tick | **7.5 ms/tick** | speedup | 7.5 ticks/sec | ticks | contact | combat ticks | deaths | bodies |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
+| 1,000 | 141x85 | 0.0833 | 28.484 | **26.629** | 1.07x | 38 | 451 | yes | 236 | 328 | 6 |
+| 2,500 | 224x134 | 0.0833 | 135.335 | **126.656** | 1.07x | 8 | 238 | yes | 209 | 389 | 14 |
+| 5,000 | 316x190 | 0.0833 | 323.154 | **290.426** | 1.11x | 3 | 207 | yes | 193 | 524 | 26 |
+| 10,000 | 447x268 | 0.0833 | 1,165.812 | **544.414** | **2.14x** | 2 | 111 | yes | 108 | 386 | 50 |
+| 20,000 | 633x380 | 0.0833 | 1,821.832 | **967.866** | **1.88x** | 1 | 62 | yes | 58 | 222 | 100 |
+
+**Every size reached sustained contact and fought.** At the larger sizes the new build fits so
+many more ticks into the same budget that the two runs are measuring different windows, which
+is why the matched runs below are the ones to read for cost.
+
+Matched-window runs, twenty ticks each, both builds:
+
+| Soldiers | 7.4 ms/tick | **7.5 ms/tick** | speedup | 7.4 focus ms | **7.5 focus ms** | **focus speedup** |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 30.160 | **29.779** | 1.01x | 5.306 | **1.778** | **2.98x** |
+| 2,500 | 105.459 | **97.875** | 1.08x | 54.161 | **4.593** | **11.79x** |
+| 5,000 | 298.261 | **255.588** | 1.17x | 79.151 | **8.889** | **8.90x** |
+| 10,000 | 742.119 | **563.960** | 1.32x | 177.232 | **20.198** | **8.77x** |
+| 20,000 | 2,256.538 | **965.486** | **2.34x** | 763.172 | **41.603** | **18.34x** |
+
+The milestone's target was three times better on the focus phase at twenty thousand soldiers.
+**Measured, it is 18.3 times better**, and the total simulation cost of that battle is
+**2.3 times smaller**. What that means in the units this project does not confuse with
+rendering: **twenty thousand soldiers now simulate at about 1.04 ticks a second**, which is
+1,003 milliseconds a tick and still nowhere near playable. Twenty thousand soldiers remain a
+goal, not a result.
+
+### 5. The focus phase, measured on its own
+
+Family C is a synthetic harness that measures the formation layer against the *number of
+bodies* rather than the number of soldiers, with the reference implementation run over the
+same state so the two are compared like for like:
+
+| bodies/side | soldiers | summaries | selection | layer total | reference | speedup | boxes/sel | soldiers/sel | agree |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 20 | 400 | 0.389 ms | 0.468 ms | **0.857 ms** | 2.620 ms | 3.1x | 19.0 | 20.0 | yes |
+| 50 | 1,000 | 0.975 ms | 2.116 ms | **3.091 ms** | 16.425 ms | 5.3x | 49.0 | 20.0 | yes |
+| 100 | 2,000 | 1.958 ms | 11.205 ms | **13.163 ms** | 66.229 ms | 5.0x | 146.0 | 39.6 | yes |
+| 200 | 4,000 | 3.953 ms | 54.381 ms | **58.334 ms** | 268.304 ms | 4.6x | 391.1 | 59.4 | yes |
+| 400 | 8,000 | 8.454 ms | 232.547 ms | **241.001 ms** | not measured | - | 885.6 | 69.5 | not measured |
+| 1,000 | 20,000 | 21.066 ms | 2,334.553 ms | **2,355.619 ms** | not measured | - | 3,678.1 | 128.7 | not measured |
+| 2,000 | 40,000 | 42.292 ms | 39,032.041 ms | **39,074.333 ms** | not measured | - | 31,104.4 | 612.3 | not measured |
+
+**Where comparing bodies against bodies stops being acceptable: somewhere past two hundred
+bodies a side.** The selection is quadratic in bodies - each body compares itself against the
+others - so 400 bodies a side costs 233 ms and 1,000 costs 2.3 seconds. A real battle fields
+**fifty a side**. The reference column is deliberately not measured above 200: at 1,000 bodies
+a side it is eighty million soldier-visits a pass, which is exactly why it was replaced.
+
+This is the honest answer to "should there be a formation-level spatial index": not yet, and
+the curve says when. If a future milestone fields five hundred bodies a side, the index becomes
+worth its complexity; at a hundred it would be a structure, an invariant and a constant bought
+to make a 0.4% share of the tick smaller.
+
+### 6. What is now the most expensive phase
+
+By phase, ms per tick, matched twenty-tick windows, clock on:
+
+| units | grid | focus | formations | soldiers | of which target | overlap | accounted | total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 1.463 | **1.778** | 1.244 | 20.468 | **17.090** | 5.205 | 30.158 | 31.496 |
+| 2,500 | 3.668 | **4.593** | 3.200 | 71.530 | **61.741** | 17.250 | 100.241 | 103.709 |
+| 5,000 | 7.193 | **8.889** | 6.442 | 192.063 | **169.444** | 43.602 | 258.189 | 265.243 |
+| 10,000 | 14.684 | **20.198** | 13.739 | 421.682 | **371.642** | 100.659 | 570.961 | 585.676 |
+| 20,000 | 30.682 | **41.603** | 32.100 | 677.963 | **575.052** | 190.307 | 972.654 | 1,003.413 |
+
+**The next bottleneck is named by the measurement rather than chosen in advance: automatic
+soldier target acquisition**, at 575.1 ms of a 1,003.4 ms tick at twenty thousand soldiers -
+57% of it, and 85% of the soldier loop. Step 7.4 made looking cheaper and less frequent; the
+looks that remain are the expensive ones, because they are the soldiers with nobody near them
+widening their search. Formation focus, which was 44% of this tick a milestone ago, is now
+**4.1%**. See the entry in Known limitations.
+
+### 7. Spikes
+
+Every tick was sampled rather than averaged, on both the total and the phase this milestone
+touched. At twenty thousand soldiers, milliseconds:
+
+| phase | average | p50 | p95 | p99 | worst | worst/average |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **total (7.5)** | 984.066 | 960.628 | 1,108.113 | 1,113.522 | 1,113.522 | **1.13x** |
+| **total (7.4)** | 1,759.026 | 1,660.225 | 2,135.630 | 2,207.572 | 2,207.572 | 1.26x |
+| **focus (7.5)** | 41.603 | 41.479 | 43.694 | 43.863 | 43.863 | **1.05x** |
+| target (7.5) | 575.052 | 551.723 | 678.228 | 681.844 | 681.844 | 1.19x |
+| overlap (7.5) | 190.307 | 189.882 | 193.234 | 198.055 | 198.055 | 1.04x |
+
+**A formation dying does not create a synchronised spike**, which was the risk of moving the
+work to the formation layer: the focus phase's 99th percentile is 5% above its average, and the
+counters say why - 136 repairs across the whole twenty-tick window at twenty thousand soldiers,
+each one a bounded selection for one body rather than a search per soldier. The total's tail is
+also healthier than Step 7.4's (1.13x against 1.26x).
+
+### 8. What the focus path actually did
+
+| Soldiers | bodies | evals/tick | **whole-army walks/tick** | **of those, per soldier** | soldiers walked/tick | soldiers answered/tick | repairs | changes/tick |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 6 | 6.0 | **0.0** | **0.0** | **0** | 78.0 | 0 | 0.90 |
+| 2,500 | 14 | 14.0 | **0.0** | **0.0** | **0** | 320.6 | 0 | 3.80 |
+| 5,000 | 26 | 26.0 | **0.0** | **0.0** | **0** | 1,425.8 | 29 | 10.20 |
+| 10,000 | 50 | 50.0 | **0.0** | **0.0** | **0** | 4,630.1 | 80 | 21.70 |
+| 20,000 | 100 | 100.0 | **0.0** | **0.0** | **0** | 12,356.4 | 136 | 38.85 |
+
+One evaluation per body per tick, **no whole-army walks anywhere**, and none at all on behalf
+of a soldier - against 109.5 walks and 2,189,412 soldier-visits a tick before. The counter the
+brief asked for by name reads zero in every battle the suite drives.
+
+### 9. Verification
+
+| | |
+| --- | --- |
+| Headless suites | **20 of 20 reported, 2,831 assertions, 0 failures** (was 2,732 across 19) |
+| New suite | `test_formation_focus` (99) - the equivalence of the bounded selection against a full scan in live battles, summaries after movement and after casualties, membership changes through the Step 7.1 APIs, an empty body holding no focus, deterministic tie-breaking, the pass running once per body per tick, zero soldier-originated scans, the repair path, the wiped-out case, the allocation audit, determinism, and explicit orders staying authoritative |
+| Two-process restart | **95 checks + 6 checks, 0 failures** - unchanged; no save-format change |
+| Windowed smoke | campaign -> settlement -> recruit -> battle -> **formation drill (3 bodies, 0 inconsistencies)** -> contact -> DEFEAT -> results, no script errors. Step 7.4's build was run the same way for comparison: identical outcome, identical log shape |
+| CI | **green on the milestone tip** - run id, head SHA and the raw job log's suite and assertion counts are in the milestone report |
+| Leak check | 110 leaked objects found and fixed during development (a formation must not hold a reference to a soldier); the suite now exits with no `ObjectDB` leak warning |
+
 ## Known limitations
 
 The honest list. None of these blocks the checkpoint; all of them are the natural
@@ -1114,26 +1336,44 @@ next work.
     ten thousand soldiers now reach contact inside the same benchmark budget where Step 7.3
     ran out of it mid-march. What remains is stated in the entry below rather than claimed
     as solved.
-18. **Target selection is still the largest single phase in the realistic range**, at
-    137.6 of 253.9 ms a tick at five thousand soldiers on the fixed-area field, and overlap
-    takes over only in the twenty-thousand-soldier crush. The cadence is a floor, not a
-    solution: soldiers still look once every four ticks, and a soldier's look is still a
-    spatial query over an escalating radius. Further reductions want a cheaper answer to
-    "is anybody near me" rather than a cheaper schedule - which is a design question, not a
-    tuning one.
-19. **The awareness cadence is a behaviour change, and it is a deliberate one.** A soldier
+18. ~~**Target selection is the largest phase.**~~ **Step 7.5 closed this in the way the
+    measurement suggested: by making the phase above it cheap.** Formation focus was 44% of
+    the realistic twenty-thousand-soldier tick and is now **4.1%** of it, which promotes target
+    acquisition to the top of the profile at **575.1 ms of 1,003.4 ms**. It is not solved,
+    only named. The cadence is a floor, not a solution: soldiers still look once every four
+    ticks, and a soldier's look is still a spatial query over an escalating radius. Further
+    reductions want a cheaper answer to "is anybody near me" rather than a cheaper schedule -
+    which is a design question, not a tuning one, and it is the next milestone's question.
+19. **The formation layer compares bodies against bodies, which is quadratic in bodies.** At
+    fifty bodies a side - a real battle - the whole layer is a few milliseconds a tick. The
+    synthetic family C harness puts the first uncomfortable figure at **400 bodies a side
+    (233 ms a tick)** and impossibility at 1,000 (2.3 seconds). A formation-level spatial
+    index is not built because nothing in the game is within an order of magnitude of needing
+    one, and the curve in the Step 7.5 section says exactly where that changes.
+20. **There is no retention rule on formation focus.** A body's answer is recomputed every
+    tick, exactly as it was before this milestone, and changes 38 times a tick across a hundred
+    bodies as soldiers jostle within the enemy line. A hysteresis rule was considered and
+    declined: the pass is now cheap enough that the change would buy no measurable saving, and
+    a rule about when a body changes its mind is a tactical change rather than a scaling one.
+    See D-089.
+21. **The fixed-area torture test pays about 0.1 ms a tick for the layer, and is 4-6% slower
+    at a hundred to a thousand soldiers because of it.** That benchmark fields four bodies, so
+    it had almost no formation-focus work to remove and now carries the fixed cost of
+    summaries and selections that a deployed army needs. At 20,000 soldiers the two builds are
+    within 0.3% of each other, and on the realistic family every size improved.
+22. **The awareness cadence is a behaviour change, and it is a deliberate one.** A soldier
     faces the enemy it was dealing with rather than re-deriving the nearest one every tick,
     switches only when a new candidate is a quarter closer, and can be up to three ticks
     (150 ms) late to notice an enemy that has arrived. All three are documented in D-085 and
     covered by tests; they are listed here because "the battle got cheaper" is not the whole
     story of a milestone that changed when soldiers think.
-20. **The fixed-area benchmark stops being a battle past a few hundred soldiers.** It
+23. **The fixed-area benchmark stops being a battle past a few hundred soldiers.** It
     crams every army into the same 100x60 field, so at twenty thousand the soldiers do not
     fit in it dressed and the measurement describes a crowd. It is kept because it is a
     useful torture test and because it is the only way to compare against earlier
     milestones; the scaled family is where a real twenty-thousand-soldier battle is
     measured. Both say whether contact was reached.
-21. **Rendering is not in any of these measurements.** Both benchmark families step the
+24. **Rendering is not in any of these measurements.** Both benchmark families step the
     simulation directly. Drawing twenty thousand soldiers on a 633x380 battlefield is a
     separate problem the large-battle milestone will also have to pay for, and nothing
     here claims otherwise.

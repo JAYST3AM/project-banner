@@ -43,6 +43,14 @@ extends Node
 ## --spikes=1         sample every tick and report average, p50, p95, p99 and worst
 ## --storm=1          kill an entire front rank on one tick and measure the tick it lands on
 ## [/codeblock]
+##
+## Step 7.5 added two more: the formation layer measured on its own, against the number of
+## bodies rather than the number of soldiers, and a switch for skipping family B's unprofiled
+## table when only the profile is being read.
+## [codeblock]
+## --focus-scale=1    where the formation layer stops being free, by body count
+## --scaled-table=0   family B without the clock, off when only the profile is wanted
+## [/codeblock]
 
 const DEFAULT_UNITS := [100, 500, 1000, 2500, 5000]
 const DEFAULT_TICKS := 600
@@ -186,7 +194,7 @@ func _ready() -> void:
 	if bool(options["profile"]):
 		_print_profile(counts, ticks, seed_value, budget)
 
-	if bool(options["reliable"]):
+	if bool(options["reliable"]) and bool(options["scaled_table"]):
 		_print_scaled(options)
 
 	if bool(options["profile"]):
@@ -196,6 +204,8 @@ func _ready() -> void:
 		_print_storm(options)
 	if bool(options["grid_scale"]):
 		_print_grid_scale(cell_size)
+	if bool(options["focus_scale"]):
+		_print_focus_scale()
 
 	print("")
 	print("=== SCALE NOTES ===")
@@ -226,6 +236,8 @@ func _parse_args() -> Dictionary:
 		"immediate": -1,
 		"spikes": false,
 		"storm": false,
+		"scaled_table": true,
+		"focus_scale": false,
 	}
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--units="):
@@ -278,6 +290,13 @@ func _parse_args() -> Dictionary:
 			options["spikes"] = arg.substr(9).to_int() != 0
 		elif arg.begins_with("--storm="):
 			options["storm"] = arg.substr(8).to_int() != 0
+		elif arg.begins_with("--focus-scale="):
+			options["focus_scale"] = arg.substr(14).to_int() != 0
+		elif arg.begins_with("--scaled-table="):
+			# Family B without the clock is a second full sweep of the same battles. It is
+			# on by default because the two tables together are the evidence; it is off when
+			# only the profile is being read, to halve a long run.
+			options["scaled_table"] = arg.substr(15).to_int() != 0
 	return options
 
 
@@ -426,7 +445,9 @@ func _run_battle(
 		out["target_report"] = simulator.target_report()
 		if _spikes:
 			var stats := {}
-			for key in ["total", "target", "overlap", "soldiers"]:
+			# "focus" and "grid" are sampled by the tick mark already; naming them here is what
+			# puts the two phases this milestone is judged on into the tail table.
+			for key in ["total", "focus", "grid", "target", "overlap", "soldiers"]:
 				stats[key] = simulator.phase_stats(key)
 			out["spike_stats"] = stats
 	return out
@@ -768,9 +789,12 @@ func _run_battle_scaled(
 	if profile:
 		out["profile"] = simulator.profile.duplicate()
 		out["target_report"] = simulator.target_report()
+		out["focus_report"] = simulator.focus_report()
 		if _spikes:
 			var stats := {}
-			for key in ["total", "target", "overlap", "soldiers"]:
+			# "focus" and "grid" are sampled by the tick mark already; naming them here is what
+			# puts the two phases this milestone is judged on into the tail table.
+			for key in ["total", "focus", "grid", "target", "overlap", "soldiers"]:
 				stats[key] = simulator.phase_stats(key)
 			out["spike_stats"] = stats
 	return out
@@ -1123,7 +1147,7 @@ func _print_spike_table(rows: Array[Dictionary]) -> void:
 	print("-".repeat(96))
 	for row in rows:
 		var stats: Dictionary = row["stats"]
-		for key in ["total", "target", "overlap", "soldiers"]:
+		for key in ["total", "focus", "grid", "target", "overlap", "soldiers"]:
 			if not stats.has(key) or stats[key].is_empty():
 				continue
 			var phase: Dictionary = stats[key]
@@ -1158,6 +1182,7 @@ func _print_scaled_profile(options: Dictionary) -> void:
 		"units", "grid", "focus", "formations", "soldiers", "of which target", "overlap", "accounted", "total"])
 	print("-".repeat(114))
 	var targets: Array[Dictionary] = []
+	var focuses: Array[Dictionary] = []
 	var spikes: Array[Dictionary] = []
 	for count_value in counts:
 		var count := int(count_value)
@@ -1178,17 +1203,210 @@ func _print_scaled_profile(options: Dictionary) -> void:
 		report["units"] = count
 		report["ticks"] = int(run["ticks"])
 		targets.append(report)
+		var focus_stats: Dictionary = run.get("focus_report", {})
+		if not focus_stats.is_empty():
+			focus_stats["units"] = count
+			focuses.append(focus_stats)
 		var stats: Dictionary = run.get("spike_stats", {})
 		if not stats.is_empty():
 			spikes.append({"units": count, "stats": stats})
 	print("-".repeat(114))
 	print("  Combat ticks for each size are reported in the table above; a size that never")
 	print("  reached contact is an approach measurement and its profile says so.")
+	_print_focus_table(focuses)
 	_print_target_table(targets)
 	_print_spike_table(spikes)
 
 
-## ---------- the death storm ------------------------------------------------
+## What the formation-focus path did, per size. The column that matters is 'soldier scans':
+## whole-army walks made by the focus logic on behalf of one soldier, which is a formation's
+## work being repeated N times and the O(N^2) failure this milestone exists to remove.
+func _print_focus_table(focuses: Array[Dictionary]) -> void:
+	if focuses.is_empty():
+		return
+	print("")
+	print("=== FORMATION FOCUS: what the path actually did ===")
+	print("%7s | %9s | %11s | %12s | %12s | %13s | %9s | %8s | %s" % [
+		"units", "bodies", "evals/tick", "scans/tick", "soldier scans", "units/tick",
+		"hits/tick", "repairs", "changes/tick"])
+	print("-".repeat(118))
+	for report in focuses:
+		print("%7d | %9d | %11.1f | %12.1f | %12.1f | %13.0f | %9.1f | %8d | %.2f" % [
+			int(report["units"]), int(report["formations"]),
+			float(report["evaluations_per_tick"]), float(report["scans_per_tick"]),
+			float(report["soldier_scans_per_tick"]), float(report["units_per_tick"]),
+			float(report["formation_hits"]) / maxf(1.0, float(report["ticks"])),
+			int(report["formation_repairs"]), float(report["changes_per_tick"])])
+	print("-".repeat(118))
+	print("  'evals/tick' is one focus evaluation per body per tick, which is the intent. 'scans/tick'")
+	print("  is whole-army walks; 'soldier scans' is the share of them made on behalf of one soldier.")
+	print("  'hits/tick' is soldiers answered straight out of their body's cached focus. 'changes/tick'")
+	print("  is focus churn - how often a body's answer is a different soldier than last tick.")
+	for report in focuses:
+		print("  %d units: worst tick %d scans / %.0f units walked, against %.1f / %.0f on average" % [
+			int(report["units"]), int(report["scans_worst_tick"]), float(report["units_worst_tick"]),
+			float(report["scans_per_tick"]), float(report["units_per_tick"])])
+
+
+## ---------- family C: the formation layer on its own ----------------------
+
+## A synthetic formation-layer benchmark, independent of soldier combat.
+##
+## Bodies a side, soldiers to a body, two lines facing each other, and the only thing
+## measured is the focus layer: the summary pass, the candidate collection, the selection,
+## and - over the same state, in the same tick - the reference implementation, so that the
+## two can be compared on identical work rather than across two runs.
+##
+## It exists to answer the question the battle benchmarks cannot. They measure the army the
+## game actually fields, where the number of bodies is set by how the armies deployed; this
+## measures the layer against the number of bodies alone, so that "where does comparing
+## bodies against bodies stop being acceptable" has a curve rather than an opinion. The
+## interesting figure is not the largest one that still runs: it is the count at which the
+## layer stops being a rounding error, which is far beyond anything a battle fields.
+const SCALE_BODIES := [10, 25, 50, 100, 200, 500, 1000]
+const SCALE_PER_BODY := 20
+const SCALE_TICKS := 20
+
+func _print_focus_scale() -> void:
+	print("")
+	print("=== FAMILY C: the formation layer against the number of bodies ===")
+	print("  Two lines of bodies, %d soldiers each, held still. Every figure is milliseconds" % SCALE_PER_BODY)
+	print("  per tick, averaged over %d identical passes, with the reference implementation run" % SCALE_TICKS)
+	print("  over the same state so the comparison is like for like.")
+	print("")
+	print("%8s | %9s | %11s | %12s | %13s | %12s | %9s | %9s | %10s | %s" % [
+		"bodies", "soldiers", "summaries", "selection", "layer total", "reference",
+		"speedup", "boxes/sel", "members/sel", "agree"])
+	print("-".repeat(126))
+	for bodies in SCALE_BODIES:
+		var row := _focus_scale_row(bodies)
+		if row.is_empty():
+			continue
+		var reference := "%9.3f ms" % float(row["reference_ms"]) if bool(row["measured"]) else "        -"
+		print("%8d | %9d | %10.3f ms | %9.3f ms | %10.3f ms | %s | %8.1fx | %9.2f | %10.1f | %s" % [
+			int(row["bodies"]), int(row["soldiers"]), float(row["summary_ms"]),
+			float(row["select_ms"]), float(row["layer_ms"]), reference,
+			float(row["speedup"]), float(row["measured_per_selection"]),
+			float(row["members_per_selection"]),
+			("yes" if bool(row["agree"]) else "NO") if bool(row["measured"]) else "not measured"])
+	print("-".repeat(120))
+	print("  'selection' is the work of choosing a focus for every body, summaries excluded;")
+	print("  'reference' is one pass over the whole army per body, which is what Step 7.4 did and")
+	print("  what the bounds are proved against. 'boxes/sel' is how many bodies' boxes were")
+	print("  measured per selection, 'members/sel' how many soldiers were walked inside them, and")
+	print("  'agree' says every selection matched the reference on every body of every pass.")
+
+
+## One row of family C: build the battle, then time the three things - summaries, the
+## bounded selection, and the reference the selection is proved against.
+##
+## The armies are built the way the battle benchmark builds them: every soldier is created
+## first, then handed to the simulator, then assigned to a body. Nothing here is a special
+## case for the measurement, which is what makes the row comparable with a real battle.
+func _focus_scale_row(bodies: int) -> Dictionary:
+	var config := GameManager.config()
+	var catalog := FormationCatalog.load_from()
+	var field := Vector2(float(bodies) * 12.0 + 60.0, 220.0)
+	var units: Array[BattleUnit] = []
+	var plan: Array = []
+	var next_id := 0
+	for side_value in [BattleContext.SIDE_PLAYER, BattleContext.SIDE_ENEMY]:
+		var side := str(side_value)
+		var left := side == BattleContext.SIDE_PLAYER
+		for body_index in bodies:
+			var anchor := Vector2(
+				field.x * 0.25 if left else field.x * 0.75,
+				20.0 + float(body_index) * (field.y - 40.0) / float(maxi(1, bodies - 1)))
+			var ids: Array[int] = []
+			for i in SCALE_PER_BODY:
+				var unit := BattleUnit.new()
+				unit.id = next_id
+				next_id += 1
+				unit.side = side
+				unit.soldier_id = "s_focus_scale_%d" % unit.id
+				unit.display_name = "Scale %d" % unit.id
+				unit.max_hp = 40
+				unit.hp = 40
+				unit.attack = 5
+				unit.defence = 2
+				unit.move_speed = 5.0
+				unit.attack_range = 1.8
+				unit.attack_cooldown = 1.2
+				unit.position = anchor + Vector2(float(i % 5) * 1.4, float(i / 5) * 1.4)
+				units.append(unit)
+				ids.append(unit.id)
+			plan.append({"id": "%s_%d" % [side, body_index], "side": side, "anchor": anchor, "facing": 0.0 if left else PI, "ids": ids})
+
+	var simulator := BattleSimulator.new(config, DEFAULT_SEED)
+	simulator.field_size = field
+	simulator.grid.configure(field, simulator.cell_size)
+	simulator.overlap_grid.configure(field, simulator.overlap_cell_size)
+	simulator.add_units(units)
+	for entry in plan:
+		var body := BattleFormation.create(str(entry["id"]), str(entry["side"]),
+			Vector2(entry["anchor"]), float(entry["facing"]), "line", catalog, config)
+		simulator.add_formation(body)
+		simulator.assign_formation(body, entry["ids"])
+	simulator.start()
+
+	# Warm up, so the buffers that are going to be built are built before anything is timed,
+	# and switch the counters on for the measured passes only.
+	simulator.call("_refresh_focus")
+	simulator.profile_enabled = true
+	simulator.reset_profile()
+
+	# The reference is O(bodies x army) by construction, which is the whole point of the
+	# family: at a thousand bodies a side it is eighty million soldier-visits a pass, and
+	# measuring it would take longer than measuring everything else put together. It is
+	# measured where it is affordable and reported as not measured where it is not - the
+	# layer's own figures carry on.
+	var measure_reference := bodies <= 100
+	var passes := SCALE_TICKS if bodies <= 200 else 4
+	var summary_ms := 0.0
+	var select_ms := 0.0
+	var reference_ms := 0.0
+	var comparisons := 0
+	var disagreements := 0
+	for pass_index in passes:
+		var start := Time.get_ticks_usec()
+		simulator.call("_refresh_summaries")
+		summary_ms += float(Time.get_ticks_usec() - start) / 1000.0
+
+		start = Time.get_ticks_usec()
+		simulator.call("_refresh_focus")
+		select_ms += float(Time.get_ticks_usec() - start) / 1000.0
+
+		if measure_reference:
+			start = Time.get_ticks_usec()
+			for body in simulator.formations:
+				simulator.call("_nearest_enemy_to_point", body.side, body.anchor)
+			reference_ms += float(Time.get_ticks_usec() - start) / 1000.0
+			for body in simulator.formations:
+				var mine: BattleUnit = simulator.call("_focus_unit_of", body)
+				var expected: BattleUnit = simulator.call("_nearest_enemy_to_point", body.side, body.anchor)
+				comparisons += 1
+				if mine != expected:
+					disagreements += 1
+	var ticks := float(passes)
+	var layer := select_ms / ticks
+	var reference := reference_ms / ticks
+	var selections := float(maxi(1, simulator.formations.size())) * ticks
+	var report: Dictionary = simulator.focus_report()
+	return {
+		"bodies": bodies * 2,
+		"soldiers": units.size(),
+		"summary_ms": summary_ms / ticks,
+		"select_ms": layer - (summary_ms / ticks),
+		"layer_ms": layer,
+		"reference_ms": reference,
+		"speedup": reference / maxf(0.0001, layer),
+		"opened_per_selection": float(report.get("buckets_opened", 0)) / selections,
+		"measured_per_selection": float(report.get("buckets_measured", 0)) / selections,
+		"members_per_selection": float(report.get("members_walked", 0)) / selections,
+		"agree": disagreements == 0 if measure_reference else true,
+		"measured": measure_reference,
+		"comparisons": comparisons,
+	}
 
 ## The worst case a staggered schedule has to survive: a great many soldiers losing the
 ## opponent they were fighting, all on the same tick.

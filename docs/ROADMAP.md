@@ -449,6 +449,47 @@ measurement rather than guessed: formation focus. See D-079 through D-087.
 
 ---
 
+## Step 7.5 - Formation battlefield focus scaling (`milestone-07.5`)
+
+**Goal:** remove the next measured bottleneck, and this time the measurement is
+unambiguous: at twenty thousand soldiers on a battle-sized field, **formation focus cost
+856 ms of a 1,940 ms tick**. Step 7.4 had just made target selection four times cheaper, and
+what that revealed was the same shape of work one level up - every body answering "where is
+the fighting" with a fresh walk of the whole army. An engineering milestone: no new
+gameplay, nothing from Step 8, no projectiles, no cavalry, no morale, no threads, no C++, no
+GDExtension, no ECS, no second multi-rate system.
+
+- **The counters came first, again.** The focus path was instrumented before it was changed,
+  and what the counters said chose the architecture: 100 whole-army walks a tick for 100
+  bodies, 2,205,806 soldier-visits, and ten of those walks made on behalf of a single soldier
+  from inside the target loop. See D-088.
+- **A transient formation summary.** Living count, centre and a box, rebuilt once per tick
+  from each body's own roll, with the soldiers no body claimed collected as each side's loose
+  run. No nodes, no per-soldier objects, no persistence. See D-089.
+- **Formation-level enemy selection.** Bodies are compared against bodies, nearest box first,
+  and the search stops as soon as no remaining body could hold a nearer soldier - which makes
+  it the *same answer* a full scan gives rather than a cheaper approximation of it. See
+  D-089.
+- **Soldiers consume the cached answer.** A soldier reads its body's focus: a field read, not
+  a search. Its body's answer dying mid-tick is corrected once for the body, and a body with
+  nobody left to watch is not asked again inside the same tick. See D-090.
+- **No global soldier fallback, and a counter that proves it.**
+  `foc_scans_from_soldiers` counts whole-army walks made by the focus logic on behalf of a
+  soldier. It was 10.3 per tick at twenty thousand soldiers; it is now zero, in every battle
+  the suite drives.
+- **Allocation audited rather than asserted.** Every buffer is sized when the army is handed
+  over and reused; a test drives sixty ticks and asserts the allocation count does not move.
+  See D-091.
+- **No retention rule, deliberately.** A body's answer changes 38 times a tick across a
+  hundred bodies, and the pass is now cheap enough that a hysteresis rule would be new
+  behaviour bought with no measurable saving. Declining it is a decision with a reason rather
+  than an omission. See D-089.
+
+**Definition of done:** measured; **20 suites, 2826 assertions, 0 failures**; 95 restart
+checks, 0 failures; the windowed flow clean; CI green. See D-088 through D-091.
+
+---
+
 ## Standing design principle
 
 Individual soldiers should feel like people rather than numbers. `Soldier`

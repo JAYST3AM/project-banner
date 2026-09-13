@@ -1828,3 +1828,192 @@ inside the soldier's own bound.
 "prove there is nothing there, then decline to look" shape, taken on arithmetic rather than
 on a guess, and asserted by a test rather than described in a comment. The two together are
 the pattern to reach for when a phase is dominated by work that cannot change an answer.
+
+
+## D-088: The formation-focus path was counted before it was changed
+
+**Decision.** Before a line of Step 7.5 was written, the focus path was instrumented with
+counters - where each question came from, how many whole-army walks it cost, and what each
+answer was - and the milestone was chosen from what they said rather than from reading the
+code.
+
+**What the counters said**, at twenty thousand soldiers on the scaled battlefield, one hundred
+bodies:
+
+| | per tick |
+| --- | ---: |
+| focus evaluations | 100.0 |
+| whole-army walks (`_nearest_enemy_to_point`) | 110.3 |
+| of those, made on behalf of a *soldier* | 10.3 |
+| soldiers walked by those walks | 2,205,806 |
+| soldiers answered straight from their body's focus | 12,366 |
+| focus answers that changed from the previous tick | 38.1 |
+
+The phase cost **856 ms a tick** in that run, which is the 881 ms of the Step 7.4 report
+re-measured with the counters in place on this machine.
+
+**Why it was needed.** The phase clock could say that formation focus cost most of a second.
+It could not say whether to make the pass smaller or to stop the pass from happening so often,
+and those are different fixes. Reading the code said *one pass over the army per body per
+tick*, which is 100 x 20,000 = 2,000,000 soldier-visits, and the counters confirmed it to
+within the repairs at 2,205,806. They also found something reading the code had missed: **10.3
+of those walks a tick were made from inside the soldier loop**, on behalf of a single soldier,
+because a body's answer that died mid-tick was recomputed by whoever noticed. That work was
+billed to the target phase, where Step 7.4 had just spent a milestone making things cheaper - a
+hidden cost of the previous milestone's own optimisation.
+
+**What it settled.** The architecture follows from the measurement, not from taste: the
+expensive pattern is *one whole-army walk per question*, so the fix is to ask one question per
+body and answer every soldier from it. It also set the ceiling for the fix - the new selection
+may not contain a path that walks the army, or the milestone would have moved the cost rather
+than removing it. `foc_scans_from_soldiers` is the counter that proves it, and its expected
+value is now zero.
+
+**What it is like.** D-079, one milestone earlier and one level up: the counters again chose
+the architecture, and again the honest figure was the count of questions rather than the cost
+of one. The difference is that this time the counter also found work the phase clock had been
+attributing to somebody else.
+
+
+## D-089: Formation battlefield awareness is calculated at the formation layer
+
+**Decision.** Every body keeps a transient battlefield summary - living count, centre, and an
+axis-aligned box around its living soldiers - rebuilt once per tick, and every body's focus is
+chosen by comparing *bodies* rather than soldiers:
+
+```
+one pass over the bodies   -> every body's summary from its own roll
+one pass over the army     -> the side totals, and the soldiers no body claimed
+per body                   -> the nearest unopened box, then the soldiers inside it
+```
+
+The focus is still the soldier a full scan would have named. What changed is the order of the
+questions: the nearest hostile soldier to a body's anchor belongs to a body whose box is
+nearer than any other body's, so the body is found first and its nearest member second.
+
+**Why it is exact rather than approximate.** The distance from a point to a body's box is a
+lower bound on the distance from that point to any soldier in it, so a body whose box is
+already further away than the best soldier found *cannot* hold a nearer one. Candidates are
+opened nearest-box-first and the loop stops the moment the closest remaining bound is beyond
+the best candidate, which proves nothing left can beat it. Ties go to the lower unit id in both
+implementations, so the answer does not depend on the order soldiers happen to be met in. It is
+asserted rather than argued: `tests/test_formation_focus.gd` drives live battles and compares
+the bounded selection against `_nearest_enemy_to_point` body by body and tick by tick,
+including with the lines in contact.
+
+**The second half of the pass is conditional.** The walk over the army exists for the soldiers
+nobody claimed - the ones with no body, and the side totals that a soldier with no body is
+pointed from. A deployed army has none: every soldier is in a body, so the walk had nothing to
+find and was pure cost. It now runs only when the number of soldiers the bodies counted does
+not match the number the battle believes are standing, and a battle with no unformed soldiers
+pays one comparison instead. Measured at twenty thousand soldiers, that single change was
+22 ms of the 55 ms focus phase on the scaled battlefield and 15 ms of 49 on the fixed-area
+one - the largest single saving of the milestone after the architecture itself, and it came
+from asking what the walk was for rather than from making the walk faster.
+
+The count it compares against is kept up as soldiers fall rather than counted, which makes it
+a hint: if it is ever wrong it is wrong high, and a hint that is wrong high makes the pass do
+the walk it would otherwise skip. Nothing downstream can be wrong because of it.
+
+**Why bodies and not a formation-level spatial grid.** With about a hundred bodies in the
+realistic benchmark, comparing bodies against bodies is a few thousand cheap comparisons a
+tick - a small fraction of the pass it replaced - and the measured cost is dominated by the
+summary pass rather than by the comparisons. A grid would add a structure, an invariant and a
+tuning constant to make something cheaper that is already a per-cent-level share of the tick.
+Family C measures where that stops being true: the layer is still small at a thousand bodies a
+side, and the game fields a hundred.
+
+**Why there is no retention rule.** The brief allows one and the measurement declines it. A
+body's answer changes 38 times a tick across a hundred bodies, which is the answer changing
+rather than the pass being wasteful, and the pass now costs a fraction of what it did - so a
+hysteresis rule would be new behaviour bought with no measurable saving. The honest statement
+is that recomputing is cheap now, and a rule that changes when a body changes its mind is a
+tactical change, which this milestone is not.
+
+**What it is not.** No nodes, no per-soldier objects, no ECS, no GDExtension, no threads. The
+summary is a handful of numbers on the body and one array of soldier references on the
+battlefield, rebuilt from the soldiers every tick rather than being state that can go stale.
+
+**The reference-cycle trap, recorded because it was hit.** The first version kept the focus
+soldier *on the body*. A soldier already points at its body, so a body pointing back at a
+soldier is a reference cycle, and Godot's reference counting has no collector to break one: the
+test run ended with 110 leaked objects and the engine saying so at exit. The focus soldier now
+lives in one array on the battlefield, indexed by the body's position in the formation list,
+and the body holds only numbers - an index, a distance, a tick. The suite's leak check is part
+of what a milestone has to pass, and it caught this one.
+
+**Membership is read from the body's own roll, not from the soldier.** The summary pass counts
+a body's soldiers from `unit_ids` - the list that is the authority on who is in a body - and
+then walks the army once for anyone no body claimed. That is what makes
+`remove_units`/`remove_unit`/`set_units` safe to call directly: a detached soldier stops being
+counted by the body it left immediately, and is counted as a loose soldier of its own side
+rather than becoming invisible to the focus layer. Membership changed by an API the body owns
+cannot leave a stale summary, whichever API a caller reaches for.
+
+
+## D-090: A death is corrected at the level that owns it, and nowhere else
+
+**Decision.** When a body's focus soldier dies after the pass has been made, the next soldier
+in that body to ask causes one correction for the whole body. The correction is the same
+bounded selection, not a walk of the army. A body whose focus was found to be *nobody* is not
+asked a second time in the same tick, and neither is a side.
+
+**Why the second half is not an optimisation but a necessity.** Nothing comes back to life
+inside a tick, so a second answer to "is there anybody left" is the first answer, and the cost
+of asking again is proportional to the army. Without the guard, a side wiped out at the top of
+a tick becomes a selection per soldier for the rest of it - the O(N x bodies) shape the
+milestone exists to remove, wearing a different hat. It is the one place where Step 7.5 is
+stricter than Step 7.4, and it is stricter only in work that cannot change an answer.
+
+**Why the first half is kept as eager as it was.** A repair that succeeds is what keeps a body
+pointing at a living enemy, and the old code did it per soldier because it was expensive either
+way. It is not expensive any more - one selection over bodies, and one body's soldiers - so the
+behaviour is preserved rather than traded away.
+
+**The counter.** `foc_scans_from_soldiers` counts whole-army walks made by the focus logic on
+behalf of a soldier. In the measured battles it is **zero**, and its previous value is on
+record: 10.3 walks a tick at twenty thousand soldiers, 205,806 soldier-visits a tick, billed to
+the target phase where nobody was looking.
+
+**What it is like.** D-083's rule, one level up. That milestone decided a soldier whose
+opponent was taken away mid-swing may look off its schedule; this one decides that the same
+event is dealt with once for the body. Contact urgency stays a soldier-level fact and the
+correction stays a body-level one, which is the hierarchy working as intended rather than as a
+diagram.
+
+
+## D-091: The hot path allocates nothing, and says so with a number
+
+**Decision.** Every buffer the focus path needs is allocated when the army is handed over and
+reused. The candidate list, the taken stamps, the per-side loose-soldier arrays, the per-body
+focus arrays and the per-body member arrays are sized once - in `add_units` and
+`add_formation` - and a tick writes into them rather than building them. `foc_allocations` counts every allocation the path can
+make; a test drives sixty ticks after the army is built and asserts the count does not move,
+then adds a body and asserts that the one thing which does allocate is counted.
+
+**Why it needed measuring rather than asserting.** "This allocates nothing in the hot path" is
+the sort of claim that is true until somebody adds a `duplicate()` to a loop, and GDScript
+gives no cheap way to see it from outside. Reading the code and believing it has already been
+wrong once in this milestone: an early version of the counters kept a `PackedInt32Array` per
+body that `reset_profile` emptied without re-sizing, and the resulting index error ended the
+focus pass early rather than failing loudly. The counters are now sized by the same helper as
+the arrays they belong to, so a reset cannot leave the pass shorter than its data.
+
+**Local accumulation, not object state.** The summaries are accumulated in local variables and
+handed to the body once per tick. Writing a `Vector2` component onto an object in GDScript is a
+read, a modify and a write, and the pass does it per soldier - ten thousand times a body per
+tick on the torture test. Measured, that was worth about a fifth of the focus phase.
+
+**The member arrays, and why they exist.** The first version of the selection walked a body's
+soldiers by resolving each id through the battle's unit dictionary. That is correct and it is
+the wrong shape for a hot path: on the fixed-area torture test, where a body is ten thousand
+soldiers, it was 40,000 dictionary lookups a tick, and the milestone's focus phase measured
+*more* expensive there than the pass it replaced. Keeping references to each body's living
+soldiers in a reused array - the same shape as the spatial grid's own snapshot index - removed
+the lookups and with them the regression. Recorded because "read the ids from the body" is the
+obvious implementation and it was measurably worse than the thing being replaced.
+
+**What was deliberately not done.** No scratch pooling framework, no allocator, no
+`PackedVector2Array` rewrite of the summaries. The largest remaining per-tick allocation in a
+battle is the events array every attack appends to, which is not this milestone's cost; the
+focus path's own figure being zero is as much as this milestone should claim.
