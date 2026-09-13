@@ -263,14 +263,34 @@ that changes meaning after an engine upgrade would silently rewrite a saved worl
 ## 8. Saving
 
 * Format: indented JSON at `user://saves/slot_N.save` (readable, hand-editable).
-* Version: `save_version` (currently 1, `SaveManager.SAVE_VERSION`).
-* Migration: `SaveManager.MIGRATIONS` maps *from-version* -> `Callable`. Any
-  document older than the current version is walked forward one step at a time.
+* Version: `save_version` (currently 1, `SaveManager.SAVE_VERSION`), plus the
+  writing build's `app_version` for diagnostics.
+* Migration: `SaveManager.migrations` maps *from-version* -> `Callable`, populated
+  in `_ready()`. Any document older than the current version is walked forward one
+  step at a time. A real v0 -> v1 step exists (an unversioned document, whose party
+  membership may be a bare array).
+* A save from a **newer** build is refused rather than misread, and the main menu
+  says so instead of offering a Continue that cannot work.
 * `CampaignState.from_dict()` reads every field with `.get(key, default)`, so
   additive changes never need a migration - only removals/renames do.
 
 `SaveManager.peek_metadata()` reads the header fields without building a
 `CampaignState`, which is how the main menu can enable "Continue" cheaply.
+
+### Proving a restart
+
+`scenes/dev/persistence_check.tscn` runs in two **separate processes**:
+
+```
+phase=write    play a campaign, fight a battle, record the world, save, exit
+phase=verify   a brand-new process loads it via continue_campaign() and checks
+               every recorded fact against the save
+```
+
+A same-process save/load only proves the serialiser round-trips; it cannot prove
+the game survives being closed. The witness file is what makes the second phase
+meaningful - it has no memory of the first except the save and the recorded
+expectations. See D-030.
 
 ---
 

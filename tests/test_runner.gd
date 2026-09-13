@@ -24,6 +24,7 @@ const SUITES: Array[String] = [
 	"res://tests/test_encounters.gd",
 	"res://tests/test_combat.gd",
 	"res://tests/test_e2e_loop.gd",
+	"res://tests/test_persistence.gd",
 ]
 
 var _failures: int = 0

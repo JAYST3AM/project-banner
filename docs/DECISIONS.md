@@ -421,3 +421,48 @@ must equal the enemies put down (5 dead enemies, 4 recorded kills). A soldier wh
 killed someone before they fell did so; losing that quietly rewrites the record of
 a fight that actually happened, which is precisely the kind of detail the design
 principle says should make the player care.
+
+---
+
+## D-030: Persistence is proven across two processes, not one
+
+**Decision.** The Step 6 check runs as two separate Godot processes
+(`--phase=write`, `--phase=verify`) that communicate only through the save file and
+a witness file of recorded expectations.
+
+**Why.** A save/load test inside one process proves the serialiser round-trips; it
+can accidentally pass while the game cannot actually be reopened (a field that is
+held in a live object rather than the save, an autoload that is not reinitialised,
+a world that gets rebuilt over loaded state). Two processes make those failure
+modes impossible to hide, and the witness file means the verifying process is
+genuinely ignorant of what the first one did.
+
+The same reasoning is why the milestone's wording is "survives a complete
+application restart": it is a statement about the game, not about the serialiser.
+
+---
+
+## D-031: A save from a newer build is refused, not read
+
+**Decision.** `load_campaign()` returns null for a document whose `save_version`
+exceeds this build's, logs why, and the main menu disables Continue and explains.
+
+**Why.** The alternative - reading it anyway and taking whatever fields happen to
+match - silently discards everything it does not understand. That is the worst
+outcome for a player: their campaign appears to load and has quietly lost
+soldiers. Refusing is loud, safe, and recoverable (the save is untouched).
+
+---
+
+## D-032: Migration entries are runtime Callables, with a real v0 step
+
+**Decision.** `SaveManager.migrations` is populated in `_ready()` with
+`Callable(self, "...")` rather than being a `const` dictionary, and it ships with a
+working v0 -> v1 step.
+
+**Why.** A *const* table would have meant shipping an empty, untested mechanism with
+a comment promising it works. A real, exercised step is what proves the migration
+path actually runs: "an unversioned save migrates" is an assertion, not an
+intention. Beyond that, additive schema changes never need a migration at all,
+because `from_dict` reads every field with a default - so migrations exist only for
+the removals and renames that genuinely need them.

@@ -18,7 +18,7 @@ func _ready() -> void:
 	_new_button.grab_focus()
 
 
-## Continue is only offered when a save actually exists and parses.
+## Continue is only offered when a save actually exists and this build can read it.
 func _refresh_continue_state() -> void:
 	var summary := GameManager.continue_summary()
 	var available := not summary.is_empty()
@@ -27,12 +27,18 @@ func _refresh_continue_state() -> void:
 		_status.text = "Saved campaign: %s - Day %d %s - %d gold - %d soldiers" % [
 			summary.get("campaign_name", "?"),
 			int(summary.get("day", 1)),
-			CampaignClock.new(null).time_string_from_hour(float(summary.get("hour", 8.0))),
+			CampaignClock.time_string_from_hour(float(summary.get("hour", 8.0))),
 			int(summary.get("player_gold", 0)),
 			int(summary.get("party_size", 0)),
 		]
+		if SaveManager.is_save_too_new():
+			_continue_button.disabled = true
+			_status.text = "That save was written by a newer version of the game (save v%d) and cannot be opened." % int(
+				summary.get("save_version", 0))
 	else:
 		_status.text = "No saved campaign found."
+	DebugLogger.info("main menu: continue %s" % ("offered" if available and not _continue_button.disabled else "not available"),
+		"MainMenu")
 
 
 func _on_new_campaign() -> void:

@@ -14,8 +14,27 @@ const SLOT_DEFAULT := 1
 const SAVE_VERSION := 1
 
 ## Migration hooks, keyed by the version they upgrade FROM.
-## e.g. MIGRATIONS[1] upgrades a v1 document to v2.
-const MIGRATIONS := {}
+## e.g. MIGRATIONS[1] would upgrade a v1 document to v2.
+## Populated in [method _ready] so the entries can be Callables.
+var migrations: Dictionary = {}
+
+
+func _ready() -> void:
+	# Version 0 means "a document written before saves carried a version field".
+	# It is a real case worth handling: it is the shape any save made by an early
+	# build has, and normalising it costs nothing.
+	migrations[0] = Callable(self, "_migrate_0_to_1")
+
+
+## v0 -> v1: no version field, and party membership may be a bare array.
+func _migrate_0_to_1(data: Dictionary) -> Dictionary:
+	var migrated := data
+	var player_party: Variant = migrated.get("player_party", {})
+	if typeof(player_party) == TYPE_ARRAY:
+		migrated["player_party"] = {"member_ids": player_party}
+	migrated["save_version"] = 1
+	DebugLogger.info("save migrated from an unversioned document", "SaveManager")
+	return migrated
 
 
 func slot_path(slot: int = SLOT_DEFAULT) -> String:
@@ -49,6 +68,7 @@ func peek_metadata(slot: int = SLOT_DEFAULT) -> Dictionary:
 		"player_gold": int(data.get("player_gold", 0)),
 		"party_size": ((data.get("player_party", {}) as Dictionary).get("member_ids", []) as Array).size(),
 		"save_version": int(data.get("save_version", 0)),
+		"app_version": str(data.get("app_version", "unknown")),
 		"saved_at": str(data.get("last_saved_at", "")),
 	}
 
@@ -64,7 +84,8 @@ func save_campaign(state: CampaignState, slot: int = SLOT_DEFAULT) -> bool:
 	state.last_saved_at = Time.get_datetime_string_from_system(false, true)
 	var payload := state.to_dict()
 	payload["save_version"] = SAVE_VERSION
-	var text := JSON.stringify(payload, "\t")
+	payload["app_version"] = ProjectSettings.get_setting("application/config/version", "0.0.0")
+	var text := JSON.stringify(payload, "	")
 
 	var path := slot_path(slot)
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -92,25 +113,37 @@ func load_campaign(slot: int = SLOT_DEFAULT, config: GameConfig = null) -> Campa
 		DebugLogger.error("save at %s is not a JSON object" % path, "SaveManager")
 		return null
 
-	var data := _migrate(parsed as Dictionary)
+	var raw := parsed as Dictionary
+	var version := int(raw.get("save_version", 0))
+	if version > SAVE_VERSION:
+		# Refusing is the safe move: an older build cannot know what a newer
+		# document means, and loading it anyway would quietly discard fields.
+		DebugLogger.error("save at %s was written by a newer version (%d > %d) - not loading" % [
+			path, version, SAVE_VERSION,
+		], "SaveManager")
+		return null
+
+	var data := _migrate(raw)
 	var state := CampaignState.from_dict(data, config)
 	if state.settlements.is_empty():
 		DebugLogger.warn("loaded save has no settlements; the world builder will repopulate", "SaveManager")
-	DebugLogger.info("campaign '%s' loaded from %s" % [state.campaign_name, path], "SaveManager")
+	DebugLogger.info("campaign '%s' loaded from %s (save v%d)" % [
+		state.campaign_name, path, int(data.get("save_version", SAVE_VERSION)),
+	], "SaveManager")
 	return state
 
 
 ## Applies any migration steps needed to bring an older document up to date.
 func _migrate(data: Dictionary) -> Dictionary:
 	var version := int(data.get("save_version", 0))
-	if version == SAVE_VERSION:
+	if version >= SAVE_VERSION:
 		return data
 	var migrated := data
 	var guard := 0
 	while version < SAVE_VERSION and guard < 64:
 		guard += 1
-		if MIGRATIONS.has(version):
-			var fn: Callable = MIGRATIONS[version]
+		if migrations.has(version):
+			var fn: Callable = migrations[version]
 			migrated = fn.call(migrated) as Dictionary
 		version += 1
 		migrated["save_version"] = version
@@ -119,6 +152,17 @@ func _migrate(data: Dictionary) -> Dictionary:
 			int(migrated.get("save_version", 0)), SAVE_VERSION,
 		], "SaveManager")
 	return migrated
+
+
+## True when a save exists but was written by a newer build than this one.
+func is_save_too_new(slot: int = SLOT_DEFAULT) -> bool:
+	if not has_save(slot):
+		return false
+	var text := FileAccess.get_file_as_string(slot_path(slot))
+	var parsed: Variant = JSON.parse_string(text)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return false
+	return int((parsed as Dictionary).get("save_version", 0)) > SAVE_VERSION
 
 
 func delete_save(slot: int = SLOT_DEFAULT) -> bool:

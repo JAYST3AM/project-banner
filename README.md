@@ -14,8 +14,13 @@ All assets, names, factions, lore, UI and code in this repository are original.
 
 ## Status
 
-Early vertical slice. See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for what is
-actually playable right now, and [`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next.
+**The first vertical slice is complete and verified.** You can start a campaign,
+travel, recruit individual named soldiers, take them into a tactical battle, watch
+some of them die, earn experience and gold, and find all of it intact after closing
+and reopening the game.
+
+See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for exactly what is playable
+and how it is verified, and [`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next.
 
 ## Documentation
 
@@ -30,14 +35,21 @@ actually playable right now, and [`docs/ROADMAP.md`](docs/ROADMAP.md) for what c
 ## Quick start
 
 ```bash
-# Play the game
-godot --path "F:/VSC Projects/Project Banner"
+PROJ="F:/VSC Projects/Project Banner"
 
-# Headless validation (loads every scene, runs the test suites)
-godot --headless --path "F:/VSC Projects/Project Banner" res://scenes/dev/tests.tscn
+# Play the game
+godot --path "$PROJ"
+
+# Headless validation: run every test suite
+godotc --headless --path "$PROJ" res://scenes/dev/tests.tscn
+
+# Prove a campaign survives closing the game (two processes, on purpose)
+godotc --headless --path "$PROJ" res://scenes/dev/persistence_check.tscn -- --phase=write
+godotc --headless --path "$PROJ" res://scenes/dev/persistence_check.tscn -- --phase=verify
 ```
 
-See `docs/DEVELOPMENT_ENVIRONMENT.md` for the full command reference.
+See `docs/DEVELOPMENT_ENVIRONMENT.md` for the full command reference, including the
+development switches that let the real game be driven without a mouse.
 
 ## Repository layout
 

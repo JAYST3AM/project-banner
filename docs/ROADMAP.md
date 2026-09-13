@@ -12,8 +12,8 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | 3 | Persistent soldiers, recruitment, party roster | **DONE** |
 | 4 | World encounters and tactical battle transition | **DONE** |
 | 5 | First functional tactical combat | **DONE** |
-| 6 | Persistent campaign save/load validation | TODO |
-| — | **First major checkpoint: the full vertical slice** | TODO |
+| 6 | Persistent campaign save/load validation | **DONE** |
+| — | **First major checkpoint: the full vertical slice** | **DONE** |
 | 7+ | Post-checkpoint systems (see below) | TODO |
 
 ---
@@ -117,26 +117,35 @@ weakest bandit band, 3/24 against the strongest.
 
 ## Step 6 - Save/load validation (`milestone-06`)
 
-**Goal:** the vertical slice survives a full application restart.
+**Goal:** the vertical slice survives a complete application restart.
 
 - Persist campaign metadata, seed, time, position, destination, gold, party,
-  soldiers, XP, kills, level, alive/dead, settlements, recruit pools, enemy parties
-- Versioned save + migration path
+  soldiers, XP, kills, level, alive/dead, settlements, recruit pools and enemy parties
+- Versioned saves with a migration path, and a refusal for saves from a newer build
+- `tests/test_persistence.gd` (129 assertions) covering every listed field
+- `scenes/dev/persistence_check.tscn`: a **two-process** restart check, because a
+  same-process save/load does not prove the game can be closed and reopened
 
 **Definition of done:** New Campaign -> recruit -> fight -> earn XP -> save -> quit
--> relaunch -> Continue, with every value intact.
+-> relaunch -> Continue, with every value intact. Verified by 75 cross-process
+assertions (`26 soldiers restored, 9 of them dead`, every field identical) and by a
+real windowed launch logging `main menu: continue offered`.
 
 ---
 
-# First major checkpoint
+# First major checkpoint - REACHED
 
-Do **not** significantly expand the game until this loop is stable:
+The loop the brief calls the game's first real vertical slice:
 
 ```
 NEW CAMPAIGN -> WORLD MAP -> TRAVEL -> TOWN -> RECRUIT -> INDIVIDUAL SOLDIERS
 -> WORLD MAP -> BANDITS -> TACTICAL BATTLE -> CASUALTIES -> XP -> LOOT
 -> WORLD MAP -> SAVE -> CLOSE GAME -> LOAD -> CONTINUE CAMPAIGN
 ```
+
+Every step is implemented, verified by automated runs, and documented. The
+consequences of a fight - who died, who earned what, what was taken - are written
+to individual soldiers and survive closing and reopening the game.
 
 ---
 

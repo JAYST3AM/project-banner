@@ -76,9 +76,25 @@ godotc --headless --path "$PROJ" --quit-after 120
 # --- Run the headless test suites (see tests/) ---
 godotc --headless --path "$PROJ" res://scenes/dev/tests.tscn
 
+# --- Run one suite only ---
+godotc --headless --path "$PROJ" res://scenes/dev/tests.tscn -- --suite=combat
+
+# --- Prove a campaign survives closing and reopening the game ---
+#     Must be two separate processes; that is the point. See docs/GAME_ARCHITECTURE.md.
+godotc --headless --path "$PROJ" res://scenes/dev/persistence_check.tscn -- --phase=write
+godotc --headless --path "$PROJ" res://scenes/dev/persistence_check.tscn -- --phase=verify
+
+# --- Drive the real game without a mouse (see scripts/core/dev_flags.gd) ---
+#     Recruit in town, leave, meet the smallest bandit band, attack, fight it out.
+godotc --path "$PROJ" -- --autostart-campaign=2026 --autostart-town=greywatch \
+        --autorecruit=5 --autoleave --autoengage --autoattack --autostart-battle --battlespeed=8
+
 # --- Check a single script parses ---
 godotc --headless --path "$PROJ" --check-only --script res://scripts/core/main.gd
 ```
+
+`--check-only` does **not** load autoloads, so "Identifier not found: GameData" or
+`DebugLogger` from that command is a false positive, not a real error.
 
 Notes:
 
