@@ -1463,11 +1463,17 @@ on every query point and reports disagreements, and reported none.
 
 | implementation | shape | micro-benchmark | live battle, 20K target phase |
 | --- | --- | ---: | ---: |
-| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 2.6x | **2.64x** |
+| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 1.5x - 2.6x | **2.64x** |
+| row walk, index order | rectangle pass with per-row reach windows | 1.9x | **3.20x** |
+| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.8x - 2.1x | **2.82x** |
 | rectangle walk with a cell bound | one distance test per cell before its bucket | 2.3x | not run |
-| row walk, index order | rectangle pass with a per-row reach window | 1.9x | not run |
-| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.8x - 2.1x | **2.92x** |
-| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.3x | **3.87x** |
+| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.3x | **3.73x** |
+
+The battle column is quoted against one reference - the ladder's 621.1 ms target phase at twenty
+thousand soldiers, same session, same build, matched windows - and a second ladder run that
+session measured 598.5 ms, so any row could be quoted 3-4% higher with the other reference. The
+benchmark column spans a range where two placements were measured, because a uniform scatter
+flatters a pruning walk and packed ranks are what a battle looks like.
 
 Every one of them inspects *fewer* cells and fewer candidates than the ladder - the best of them
 read 122 cells and measured 45 candidates per look against the ladder's 260 and 171 - and every

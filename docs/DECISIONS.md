@@ -2055,23 +2055,31 @@ live battles:
 
 Each was measured twice: once in the micro-benchmark, on the same twenty thousand queries at
 the same density, and once in a live battle, by running the whole realistic sweep on that
-implementation and comparing the target phase against the locked build's. The two do not agree,
-and the reason is worth stating rather than averaging: the benchmark is one query at a time on
-a warm index, while a battle runs two and a half thousand of them a tick against an index
-rebuilt every tick, so a per-query ratio is a floor rather than the whole story.
+implementation and reading the target phase out of the profile. Four of the five were run in
+battle; all five were run in the benchmark.
 
 | implementation | shape | micro-benchmark | live battle, 20K target phase |
 | --- | --- | ---: | ---: |
-| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 2.6x | **2.64x** (1,638.1 vs 621.1 ms) |
-| row walk, index order | rectangle pass with a per-row reach window | 1.9x | not run |
-| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.8x - 2.1x | **2.92x** (1,749.2 vs 598.5 ms) |
-| rectangle walk with a cell bound | one distance test per cell before its bucket | **2.3x** | not run |
-| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.3x | **3.87x** (2,318.4 vs 598.5 ms) |
+| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 1.5x - 2.6x | **2.64x** (1,638.1 ms) |
+| row walk, index order | rectangle pass with per-row reach windows | 1.9x | **3.20x** (1,988.0 ms) |
+| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.8x - 2.1x | **2.82x** (1,749.2 ms) |
+| rectangle walk with a cell bound | one distance test per cell before its bucket | 2.3x | not run |
+| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.3x | **3.73x** (2,318.4 ms) |
 
-The two battle figures are quoted against slightly different "before" runs of the locked build -
-621.1 ms and 598.5 ms - because each implementation was compared with a sweep taken beside it
-rather than with one stored reference. Both are the same code on the same machine within the
-same session; the spread between them is the spread of the benchmark, not of the search.
+**The battle column is quoted against one reference**: the ladder's 621.1 ms target phase at
+twenty thousand soldiers, measured in the same session, on the same build, with the same matched
+windows. A second ladder run in that session measured 598.5 ms, so any row above could be
+quoted 3-4% higher by choosing the other reference - the spread is the machine's, not the
+search's, and it is why every ratio here is stated with the figure it came from rather than as a
+bare multiple. The benchmark column spans a range where two placements were measured, because
+the ratio moves with packing: a uniform scatter leaves whole blocks empty and flatters a
+pruning walk, while packed ranks are what a battle actually looks like.
+
+The benchmark and battle columns disagree, and the reason is worth stating rather than
+averaging: the benchmark times one query against a warm index, while a battle times two and a
+half thousand a tick against an index that is rebuilt every tick. The per-query ratio is a
+floor, not the whole story, which is why the battle figures are the ones the milestone was
+decided on.
 
 Every one of them inspects *fewer* cells and fewer candidates than the ladder - the best of them
 read 122 cells and measured 45 candidates per look against the ladder's 260 and 171 - and every
