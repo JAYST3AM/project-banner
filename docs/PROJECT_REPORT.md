@@ -129,7 +129,7 @@ runner's `SUITES` list, since several are meant to fail.
 | `17afd2b` | docs: the CI gate was proven able to go red, not only green |
 | `c4c2bd2` | milestone-07: establish terrain and formation warfare foundation |
 | `ccf9cff` | milestone-07.1: harden formation ownership and contact semantics |
-| `MILESTONE_72` | milestone-07.2: replace quadratic battlefield proximity scans |
+| `b35d868` | milestone-07.2: replace quadratic battlefield proximity scans |
 
 ---
 
@@ -605,6 +605,23 @@ engine: 4.7.2.stable.official.ed1daf0bf
 
 Same shape as the run above: every step green, only the on-failure upload skipped, and
 the new assertion counts visible in the log rather than inferred from a badge.
+
+**Observed result after Step 7.2** ([run 34749443509](https://github.com/JAYST3AM/project-banner/actions/runs/34749443509),
+commit `b35d868`), again read from the runner's raw log:
+
+```
+engine: 4.7.2.stable.official.ed1daf0bf
+  PASS  (132 assertions, 0 failures)    <- test_formation_battle
+  PASS  (127 assertions, 0 failures)    <- test_spatial_grid
+  suites: 17 of 17 reported   assertions: 2364   failures: 0
+  RESULT: PASS
+--------- persistence write: PASS (6 checks, 0 failures) ---------
+--------- persistence verify: PASS (95 checks, 0 failures) ---------
+```
+
+The seventeen suites and 2364 assertions on the CI runner are identical to the local run,
+which is the check that matters for a change of this size: the engine on the runner is the
+pinned one, and the numbers there are the numbers here.
 
 **The gate was also proven to go red**, on a throwaway branch and a pull request that
 was closed without merging, so `main` was never affected. Two separate failures were

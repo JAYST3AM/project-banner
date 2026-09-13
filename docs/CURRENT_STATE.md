@@ -590,7 +590,7 @@ GDScript (D-069).
 | Two-process restart | **95 checks, 0 failures** - unchanged; no save-format change |
 | Windowed smoke | campaign -> settlement -> recruit -> battle -> **formation drill** -> results, zero script errors, drill reported 3 player bodies and 0 inconsistencies |
 | Bogus `--suite=` | exit 1 |
-| CI | **green on the tip** - 17 of 17 suites, 2364 assertions, both persistence phases, read from the raw job log |
+| CI | **green** on `b35d868` — [run 34749443509](https://github.com/JAYST3AM/project-banner/actions/runs/34749443509), read from the raw job log: 17 of 17 suites, 2364 assertions, both persistence phases |
 
 ## Known limitations
 
