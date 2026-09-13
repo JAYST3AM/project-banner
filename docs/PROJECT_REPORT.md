@@ -794,10 +794,10 @@ size.
 
 | Soldiers | Step 7.2 overlap ms | Step 7.3 overlap ms | speedup |
 | ---: | ---: | ---: | ---: |
-| 500 | 12.845 | 6.968 | 1.8x |
-| 2,500 | 104.753 | 37.619 | 2.8x |
-| 5,000 | 387.150 | 65.972 | 5.9x |
-| 20,000 | not separately recorded | 845.582 | — |
+| 500 | 12.845 | **2.789** | 4.6x |
+| 2,500 | 104.753 | **21.841** | 4.8x |
+| 5,000 | 387.150 | **60.912** | 6.4x |
+| 20,000 | not separately recorded | **845.582** | — |
 
 Total simulation time improved at **every** size. A milestone that merely moved time from
 one function to another would not have been one, and the requirement was stated that way
@@ -824,15 +824,17 @@ one.
 
 **What is now dominant**, by phase, ms per tick:
 
-| units | grid | focus | formations | soldiers | of which target | overlap |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 5,000 | 9.237 | 10.297 | 8.353 | 247.726 | **211.057** | 65.972 |
-| 20,000 | 38.155 | 44.436 | 39.539 | 569.973 | **429.207** | 845.582 |
+| units | grid | focus | formations | soldiers | of which target | overlap | total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 0.749 | 0.674 | 0.670 | 15.523 | **12.684** | 2.789 | 21.103 |
+| 2,500 | 3.962 | 3.864 | 3.343 | 112.968 | **97.195** | 21.841 | 150.169 |
+| 5,000 | 8.560 | 9.043 | 7.499 | 282.044 | **248.542** | 60.912 | 377.448 |
+| 20,000 | 38.155 | 44.436 | 39.539 | 569.973 | **429.207** | 845.582 | 1,579.954 |
 
-Target selection is the dominant phase across the realistic range. Overlap has fallen from
-66% of a tick to 19% at five thousand soldiers, and becomes dominant again only at twenty
-thousand on the fixed-area field, where the army is several times denser than the field can
-hold and the pass is fighting a crush rather than a battle.
+Target selection is the dominant phase across the realistic range — 66% of a tick at five
+thousand soldiers. Overlap has fallen from 66% of a tick to **16%**, and becomes dominant
+again only at twenty thousand on the fixed-area field, where the army is several times
+denser than the field can hold and the pass is fighting a crush rather than a battle.
 
 **The measure of the improvement that is not a time.** Before this milestone the pass was
 handed 95.6 candidates per soldier to find 226 touching pairs. It now measures 3.3 pairs

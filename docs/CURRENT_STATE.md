@@ -700,12 +700,15 @@ comparison holds across three milestones.
 
 Overlap alone, the phase this milestone attacked, at the same sizes and settings:
 
-| Soldiers | Step 7.2 overlap | Step 7.3 overlap | speedup |
+| Soldiers | Step 7.2 overlap ms | Step 7.3 overlap ms | speedup |
 | ---: | ---: | ---: | ---: |
-| 500 | 12.845 | 6.968 | 1.8x |
-| 2,500 | 104.753 | 37.619 | 2.8x |
-| 5,000 | 387.150 | 65.972 | 5.9x |
-| 20,000 | (not separately recorded) | 845.582 | - |
+| 500 | 12.845 | **2.789** | 4.6x |
+| 2,500 | 104.753 | **21.841** | 4.8x |
+| 5,000 | 387.150 | **60.912** | 6.4x |
+| 20,000 | not separately recorded | **845.582** | - |
+
+The overlap figures are the phase clock's own measurement, taken on a separate run from
+the table above because the clock costs two reads per soldier.
 
 Total simulation time improves at **every** size, which is the requirement: a milestone that
 merely moved time between functions would not have been one.
@@ -744,14 +747,16 @@ the time per tick at constant density - superlinear, but nothing like the fixed-
 
 By phase, ms per tick, clock on:
 
-| units | grid | focus | formations | soldiers | of which target | overlap |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 5,000 | 9.237 | 10.297 | 8.353 | 247.726 | **211.057** | 65.972 |
-| 20,000 | 38.155 | 44.436 | 39.539 | 569.973 | **429.207** | 845.582 |
+| units | grid | focus | formations | soldiers | of which target | overlap | total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 0.749 | 0.674 | 0.670 | 15.523 | **12.684** | 2.789 | 21.103 |
+| 2,500 | 3.962 | 3.864 | 3.343 | 112.968 | **97.195** | 21.841 | 150.169 |
+| 5,000 | 8.560 | 9.043 | 7.499 | 282.044 | **248.542** | 60.912 | 377.448 |
+| 20,000 | 38.155 | 44.436 | 39.539 | 569.973 | **429.207** | 845.582 | 1,579.954 |
 
-**Target selection is now the dominant phase across the realistic range** - 60% of a tick
-at five thousand soldiers, having been 60% of a *different* total before. Overlap is down
-from 66% of a tick to 19%.
+**Target selection is now the dominant phase across the realistic range** - 66% of a tick
+at five thousand soldiers, having been about the same share of a *much larger* total
+before. Overlap is down from 66% of a tick to **16%**.
 
 Overlap becomes dominant again only at twenty thousand on the fixed-area field, where the
 army is several times denser than the field can physically hold and the separation pass is
