@@ -1461,16 +1461,19 @@ Each was designed to inspect less than the ladder and stop as soon as no unopene
 hold a better answer. Each is exact - the micro-benchmark checks the answer against the ladder's
 on every query point and reports disagreements, and reported none.
 
-| implementation | shape | measured against the ladder |
-| --- | --- | --- |
-| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 2.6x slower |
-| rectangle walk with a cell bound | one distance test per cell before its bucket | 2.3x slower |
-| row walk | rectangle pass with a per-row reach window | 1.9x slower |
-| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.9x slower |
-| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.9x slower |
+| implementation | shape | micro-benchmark | live battle, 20K target phase |
+| --- | --- | ---: | ---: |
+| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 2.6x | **2.64x** |
+| rectangle walk with a cell bound | one distance test per cell before its bucket | 2.3x | not run |
+| row walk, index order | rectangle pass with a per-row reach window | 1.9x | not run |
+| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.8x - 2.1x | **2.92x** |
+| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.3x | **3.87x** |
 
-The best of them read 122 cells and measured 45 candidates per look - **half the ladder's work**
-- and was still nearly twice as slow. The isolation run says why: **one radius-32 box costs
+Every one of them inspects *fewer* cells and fewer candidates than the ladder - the best of them
+read 122 cells and measured 45 candidates per look against the ladder's 260 and 171 - and every
+one of them is slower, by more in a real battle than in the micro-benchmark: a benchmark times
+one query against a warm index, a battle times two and a half thousand a tick against an index
+that is rebuilt every tick. The isolation run says why: **one radius-32 box costs
 about 300 us however it is walked.** In an interpreted loop a bound test costs about 0.3 us and
 the empty cell it skips costs about 0.12 us to open and dismiss, so pruning inside the loop
 cannot pay for itself. The ladder is cheap because its *first* rung is small and answers most

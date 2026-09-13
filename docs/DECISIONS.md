@@ -2053,13 +2053,25 @@ would be several times cheaper. Five exact implementations of that idea were wri
 measured, in a micro-benchmark built for the purpose (`scripts/dev/search_bench.gd`) and in
 live battles:
 
-| implementation | shape | measured against the ladder |
-| --- | --- | --- |
-| Chebyshev ring walk | cells opened ring by ring outward from the soldier | **2.6x slower** |
-| row walk, index order | rectangle pass with a per-row reach window | **1.9x slower** |
-| row walk, outward order | the same, rows and columns nearest-first | 2.1x slower |
-| rectangle walk with a cell bound | one distance test per cell before its bucket | **2.3x slower** |
-| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | **3.9x slower in battle** |
+Each was measured twice: once in the micro-benchmark, on the same twenty thousand queries at
+the same density, and once in a live battle, by running the whole realistic sweep on that
+implementation and comparing the target phase against the locked build's. The two do not agree,
+and the reason is worth stating rather than averaging: the benchmark is one query at a time on
+a warm index, while a battle runs two and a half thousand of them a tick against an index
+rebuilt every tick, so a per-query ratio is a floor rather than the whole story.
+
+| implementation | shape | micro-benchmark | live battle, 20K target phase |
+| --- | --- | ---: | ---: |
+| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 2.6x | **2.64x** (1,638.1 vs 621.1 ms) |
+| row walk, index order | rectangle pass with a per-row reach window | 1.9x | not run |
+| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.8x - 2.1x | **2.92x** (1,749.2 vs 598.5 ms) |
+| rectangle walk with a cell bound | one distance test per cell before its bucket | **2.3x** | not run |
+| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.3x | **3.87x** (2,318.4 vs 598.5 ms) |
+
+The two battle figures are quoted against slightly different "before" runs of the locked build -
+621.1 ms and 598.5 ms - because each implementation was compared with a sweep taken beside it
+rather than with one stored reference. Both are the same code on the same machine within the
+same session; the spread between them is the spread of the benchmark, not of the search.
 
 Every one of them inspects *fewer* cells and fewer candidates than the ladder - the best of them
 read 122 cells and measured 45 candidates per look against the ladder's 260 and 171 - and every
