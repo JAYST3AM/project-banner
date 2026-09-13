@@ -520,6 +520,21 @@ Every required step ran; the only skipped step was the failure-artifact upload, 
 is correct on a passing run. The engine the runner used is the pinned one, not whatever
 `latest` resolved to on the day.
 
+**The gate was also proven to go red**, on a throwaway branch and a pull request that
+was closed without merging, so `main` was never affected. Two separate failures were
+induced deliberately:
+
+| Induced failure | Result |
+| --- | --- |
+| A failing assertion in one suite | suite step **failed**, later steps skipped, job red, logs uploaded |
+| A failing `--phase=verify` (suite and write phase both green) | verify step **failed**, job red, logs uploaded |
+
+Both matter. The first proves a failing test cannot be swallowed; the second proves a
+failure in a *later* step still reddens the job rather than being lost behind an
+earlier green one. Neither run used `continue-on-error`, and in both cases the
+failure-artifact upload step ran successfully, so logs exist exactly when they are
+needed.
+
 **CI does not fail on the runner self-test's deliberate runtime error.** That fixture
 provokes a real engine error on purpose (see §9.3) and the engine still exits 0 because
 the suite handles it. The workflow carries a comment saying so, so that nobody removes

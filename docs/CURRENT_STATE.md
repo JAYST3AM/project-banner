@@ -206,6 +206,12 @@ explicit release URL - and asserts the installed engine actually reports that ve
 No `continue-on-error` on any verification step, and `set -o pipefail` keeps the
 engine's exit code through the log `tee`. See D-042.
 
+It was also **proven to go red**, twice, on a throwaway branch and a pull request that
+was closed without merging: once by a failing assertion (suite step fails, later steps
+skipped) and once by a failing verify phase with the suite and write phase both green
+(later step fails, job red). A gate that has only ever been seen to pass is not evidence
+of anything.
+
 ## Known limitations
 
 The honest list. None of these blocks the checkpoint; all of them are the natural
