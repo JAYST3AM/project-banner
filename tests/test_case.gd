@@ -14,15 +14,38 @@ extends RefCounted
 ## [/codeblock]
 
 var suite_name: String = "unnamed suite"
-var runner: Node = null
+
+## The runner driving this suite.
+##
+## Deliberately untyped: the runner self-tests call runner.evaluate() on it, and a
+## static Node type would make that a parse error rather than a dynamic call.
+var runner = null
 var failures: Array[String] = []
 var checks: int = 0
 
+## Set only by [method _complete], which every suite calls as the last thing its
+## [method run] does.
+##
+## This is the runner's proof that a suite ran to its end rather than aborting
+## part-way. GDScript aborts a function on a runtime error and has no try/catch, so
+## a suite that raised an error halfway through would otherwise still report
+## "3 assertions, 0 failures" and pass - the assertions that did run were fine, it
+## simply never finished. A suite that does not reach [method _complete] cannot
+## report PASS no matter how many assertions it recorded first.
+var completed: bool = false
+
 
 ## Override in every suite. Must contain at least one [code]await[/code] (use
-## [method _tick]) so the runner can always await it as a coroutine.
+## [method _tick]) so the runner can always await it as a coroutine, and must end
+## with [method _complete].
 func run() -> void:
 	pass
+
+
+## Declare that this suite ran to the end. Call once, as the last statement of
+## [method run]. See [member completed] for why this is not optional.
+func _complete() -> void:
+	completed = true
 
 
 func passed() -> bool:

@@ -16,6 +16,7 @@ func run() -> void:
 	await _test_full_flow()
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
+	_complete()
 
 
 func _fresh_campaign(name: String, seed_value: int) -> CampaignState:

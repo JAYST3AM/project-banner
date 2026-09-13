@@ -108,6 +108,9 @@ func _run_write() -> void:
 
 	# Fight a real battle and let it change the world.
 	var battle_facts := _fight_one_battle(state)
+	# Then break off from a second fight, so the withdrawal path - which writes its own
+	# progression rules into the campaign - also has to survive the restart.
+	var withdrawal_facts := _withdraw_from_one_battle(state, str(battle_facts.get("enemy_party_id", "")))
 	state.clock.day = 9
 	state.clock.hour = 16.5
 
@@ -122,12 +125,16 @@ func _run_write() -> void:
 		"world_position": [state.world_position.x, state.world_position.y],
 		"destination_id": state.destination_id,
 		"current_settlement_id": state.current_settlement_id,
-		"party_size": state.player_party.size(),
+		"party_size": state.roster_member_count(state.player_party),
+		"party_active": state.active_member_count(state.player_party),
+		"party_lost": state.fallen_member_count(state.player_party),
+		"battles_fought_flag": int(state.flags.get("battles_fought", 0)),
 		"recruited_names": _names_of(state.party_members(state.player_party)),
 		"soldiers": _soldier_facts(state),
 		"settlements": _settlement_facts(state),
 		"parties": _party_facts(state),
 		"battle": battle_facts,
+		"withdrawal": withdrawal_facts,
 		"save_version": SaveManager.SAVE_VERSION,
 	}
 	_check(GameManager.save_campaign(), "the campaign saved")
@@ -138,11 +145,80 @@ func _run_write() -> void:
 		file.store_string(JSON.stringify(witness, "\t"))
 		file.close()
 
-	print("    wrote: %d soldiers (%d dead), %d gold, %d enemy parties, save v%d" % [
-		witness["party_size"], int(battle_facts.get("player_dead", 0)), witness["gold"],
+	print("    wrote: %d soldiers (%d active, %d dead), %d gold, %d enemy parties, save v%d" % [
+		witness["party_size"], witness["party_active"], witness["party_lost"], witness["gold"],
 		(state.parties as Dictionary).size(), witness["save_version"],
 	])
 	print("    the game now exits; the verify phase runs in a new process")
+
+
+## Takes the field against a second bandit party and immediately breaks off.
+##
+## Its purpose in this file is to make the withdrawal rules produce state that has to
+## survive the restart: a battle fought but not survived, a run of experience paid for
+## kills only, and an enemy left standing on the map.
+func _withdraw_from_one_battle(state: CampaignState, avoid_party_id: String) -> Dictionary:
+	var config := GameManager.config()
+	var encounters := EncounterService.build(state, config)
+	var chosen: WorldParty = null
+	for key in state.parties.keys():
+		var candidate := state.parties[key] as WorldParty
+		if candidate == null or not candidate.is_available():
+			continue
+		# Prefer a party other than the one just fought, so the two outcomes stay
+		# distinguishable on the record.
+		if str(candidate.id) == avoid_party_id:
+			continue
+		chosen = candidate
+		break
+	if chosen == null:
+		_fail("no second bandit party was available to break off from")
+		return {}
+
+	var before := _party_battle_counters(state)
+	var enemy_active_before := state.active_member_count(state.party_of(chosen))
+
+	state.world_position = chosen.position
+	var context := encounters.build_context(chosen, true)
+	var simulator := BattleSimulator.new(config, context.battle_seed)
+	simulator.add_units(BattleSetup.build_units_prepared(context, config))
+	simulator.start()
+	# One step: on the field, but essentially unengaged. This is the retreat-before-
+	# fighting case, which is exactly the one that used to pay experience.
+	simulator.step(0.05)
+
+	var resolver := BattleResolver.build(state, config)
+	var result := resolver.build_result(context, simulator, "", simulator.elapsed, true)
+	resolver.apply(result, context)
+	var after := _party_battle_counters(state)
+
+	print("    broke off from %s: %s, %d xp, %d gold, enemy still present: %s" % [
+		chosen.display_name, result.title(), result.xp_awarded, result.gold_total(), str(chosen.is_available()),
+	])
+	return {
+		"battle_id": result.battle_id,
+		"enemy_party_id": chosen.id,
+		"is_withdrawal": result.withdrawal,
+		"title": result.title(),
+		"xp": result.xp_awarded,
+		"gold": result.gold_total(),
+		"fought_delta": int(after["fought"]) - int(before["fought"]),
+		"survived_delta": int(after["survived"]) - int(before["survived"]),
+		"survivors_taken_field": result.player_survivors.size(),
+		"enemy_still_available": chosen.is_available(),
+		"enemy_active": state.active_member_count(state.party_of(chosen)),
+		"enemy_active_before": enemy_active_before,
+	}
+
+
+## Total battles fought and survived across the player's party.
+func _party_battle_counters(state: CampaignState) -> Dictionary:
+	var fought := 0
+	var survived := 0
+	for soldier in state.party_members(state.player_party):
+		fought += soldier.battles_fought
+		survived += soldier.battles_survived
+	return {"fought": fought, "survived": survived}
 
 
 func _fight_one_battle(state: CampaignState) -> Dictionary:
@@ -293,7 +369,13 @@ func _run_verify() -> void:
 	_check(absf(state.world_position.y - float(position[1])) < 0.001, "world y")
 	_equal(state.destination_id, str(witness["destination_id"]), "destination in progress")
 	_equal(state.current_settlement_id, str(witness["current_settlement_id"]), "current settlement")
-	_equal(state.player_party.size(), int(witness["party_size"]), "party size")
+	_equal(state.roster_member_count(state.player_party), int(witness["party_size"]), "party size")
+	_equal(state.active_member_count(state.player_party), int(witness["party_active"]), "active force")
+	_equal(state.fallen_member_count(state.player_party), int(witness["party_lost"]), "casualties")
+	# The main menu's summary and the campaign must agree about the force, not just
+	# the roster - they are computed in completely different places.
+	_equal(SaveManager.peek_metadata().get("party_active"), int(witness["party_active"]),
+		"the menu's active count agrees with the campaign")
 
 	# --- the party, in the same order, with the same names -------------------
 	_equal(_names_of(state.party_members(state.player_party)), witness["recruited_names"], "party membership and order")
@@ -361,18 +443,50 @@ func _run_verify() -> void:
 	# --- the battle itself ----------------------------------------------------
 	var battle: Dictionary = witness["battle"]
 	if not battle.is_empty():
-		var summary := BattleResolver.build(state, GameManager.config()).last_battle_summary()
+		# Looked up by id, not taken as "the latest": the chronicle holds every fight in
+		# order, so once more than one battle has been fought the last entry is a
+		# different fight entirely.
+		var summary := _log_entry_for(state, str(battle["battle_id"]))
 		_check(not summary.is_empty(), "the battle chronicle survived the restart")
 		if not summary.is_empty():
-			_equal(str(summary.get("battle_id", "")), str(battle["battle_id"]), "the chronicle names the same battle")
 			_equal(str(summary.get("winner", "")), str(battle["winner"]), "the chronicle records the same outcome")
 			_equal(int(summary.get("gold", 0)), int(battle["gold"]), "the chronicle records the same gold")
 			_equal(int(summary.get("enemy_dead", 0)), int(battle["enemy_dead"]), "the chronicle records the same enemy losses")
 			_equal(int(summary.get("player_dead", 0)), int(battle["player_dead"]), "the chronicle records the same own losses")
-		_equal(int(state.flags.get("battles_fought", 0)), 1, "exactly one battle is on record")
+			_equal(bool(summary.get("withdrawal", true)), false, "and it is not recorded as a withdrawal")
+		_equal(int(state.flags.get("battles_fought", 0)), int(witness["battles_fought_flag"]),
+			"the battle count is unchanged by the restart")
 		var enemy_party := state.world_party(str(battle["enemy_party_id"]))
 		if enemy_party != null:
 			_equal(enemy_party.defeated, bool(battle["defeated"]), "the fought party's fate survived")
+
+	# --- the withdrawal, and the progression rules it applies -----------------
+	var withdrawal: Dictionary = witness.get("withdrawal", {})
+	if not withdrawal.is_empty():
+		var log: Array = state.flags.get("battle_log", [])
+		_check(log.size() >= 2, "both fights survived the restart in the chronicle")
+		var last: Dictionary = log[log.size() - 1] if not log.is_empty() else {}
+		_equal(str(last.get("battle_id", "")), str(withdrawal["battle_id"]),
+			"the withdrawal is the latest entry in the chronicle")
+		_equal(bool(last.get("withdrawal", false)), true, "and is recorded as a withdrawal")
+		_equal(str(last.get("winner", "")), BattleResult.WINNER_RETREAT, "with a withdrawal outcome")
+		_equal(int(last.get("xp", 0)), int(withdrawal["xp"]), "the experience paid is unchanged")
+		_equal(int(last.get("gold", 0)), int(withdrawal["gold"]), "the spoils are unchanged")
+		_equal(int(last.get("gold", 0)), 0, "and a withdrawal paid nothing at all")
+		# The rules themselves, re-asserted on the restored campaign.
+		_equal(int(withdrawal["survived_delta"]), 0,
+			"nothing was counted as having survived the withdrawal")
+		_equal(int(withdrawal["survivors_taken_field"]), int(withdrawal["fought_delta"]),
+			"every soldier who took the field was counted as having fought")
+		_equal(int(last.get("player_survivors", -1)), int(withdrawal["survivors_taken_field"]),
+			"and the chronicle agrees on how many were on the field")
+		var broken_off_from := state.world_party(str(withdrawal["enemy_party_id"]))
+		_check(broken_off_from != null, "the party they broke off from came back")
+		if broken_off_from != null:
+			_check(broken_off_from.is_available(),
+				"and is still on the map - breaking off did not destroy it")
+			_equal(state.active_member_count(state.party_of(broken_off_from)),
+				int(withdrawal["enemy_active"]), "with the same soldiers it had")
 
 	# --- the world must still be playable ------------------------------------
 	var world := await SceneManager.change_scene_and_wait("world_map")
@@ -392,6 +506,20 @@ func _run_verify() -> void:
 	# Leave the slot clean for the next run.
 	SaveManager.delete_all_saves()
 	FileAccess.open(WITNESS_PATH, FileAccess.WRITE).close()
+
+
+## The chronicle entry for one specific battle.
+##
+## The chronicle holds every fight in order, so "the last one" stops meaning "the one
+## we care about" as soon as more than one battle has been fought.
+func _log_entry_for(state: CampaignState, battle_id: String) -> Dictionary:
+	var log: Array = state.flags.get("battle_log", [])
+	for entry in log:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		if str((entry as Dictionary).get("battle_id", "")) == battle_id:
+			return entry as Dictionary
+	return {}
 
 
 func _read_witness() -> Dictionary:

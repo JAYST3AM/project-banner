@@ -17,6 +17,7 @@ func run() -> void:
 	_test_starting_fight_is_a_contest()
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
+	_complete()
 
 
 ## ---------- fixtures -----------------------------------------------------

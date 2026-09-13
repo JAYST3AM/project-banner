@@ -58,6 +58,11 @@ func build_result(
 	else:
 		result.winner = winner_side
 
+	# Withdrawal is carried as its own explicit flag rather than being inferred from
+	# the winner string downstream. Every progression rule below branches on it, so
+	# there is exactly one place where "we broke off" is decided.
+	result.withdrawal = result.winner == BattleResult.WINNER_RETREAT
+
 	var victory := result.player_won()
 	var location := _nearest_settlement_name(context.world_position)
 
@@ -65,7 +70,7 @@ func build_result(
 		if unit.side == BattleContext.SIDE_PLAYER:
 			result.player_total += 1
 			if unit.is_alive():
-				result.player_survivors.append(_survivor_entry(unit, victory))
+				result.player_survivors.append(_survivor_entry(unit, victory, result.withdrawal))
 			else:
 				result.player_dead.append(_fallen_entry(unit, simulator, context.enemy_display_name))
 		else:
@@ -76,6 +81,8 @@ func build_result(
 	for entry in result.player_survivors:
 		result.xp_awarded += int(entry.get("xp_gained", 0))
 
+	# Spoils come from holding the field. A withdrawal never pays them, because the
+	# field belonged to someone else when you left it.
 	if victory:
 		_award_spoils(result, context, location)
 
@@ -88,12 +95,27 @@ func build_result(
 	return result
 
 
-func _survivor_entry(unit: BattleUnit, victory: bool) -> Dictionary:
-	var xp := config.get_int("xp.participation", 10)
-	xp += config.get_int("xp.per_kill", 20) * unit.kills
-	xp += config.get_int("xp.survived_battle", 15)
-	if victory:
-		xp += config.get_int("xp.victory", 25)
+## XP and progression fields for one soldier who came through the fight.
+##
+## Withdrawal is deliberately the strictest outcome. A victory or a draw pays for
+## taking part, for each kill, and a bonus for coming through it; a victory adds its
+## own bonus on top. A withdrawal pays [b]only for kills actually made[/b].
+##
+## Without that distinction, walking onto a battlefield and immediately pressing
+## Retreat would pay participation and survival experience every time - for a fight
+## that never happened, at no cost, repeatable forever. Kills are exempt because
+## they are a fact about the world: a soldier who cut someone down before the line
+## broke really did that, and erasing it would rewrite the record.
+func _survivor_entry(unit: BattleUnit, victory: bool, withdrawal: bool) -> Dictionary:
+	var xp := 0
+	if withdrawal:
+		xp = config.get_int("xp.per_kill", 20) * unit.kills
+	else:
+		xp = config.get_int("xp.participation", 10)
+		xp += config.get_int("xp.per_kill", 20) * unit.kills
+		xp += config.get_int("xp.survived_battle", 15)
+		if victory:
+			xp += config.get_int("xp.victory", 25)
 	return {
 		"soldier_id": unit.soldier_id,
 		"name": unit.display_name,
@@ -105,6 +127,10 @@ func _survivor_entry(unit: BattleUnit, victory: bool) -> Dictionary:
 		"xp_gained": xp,
 		"levels_gained": 0,
 		"participated": true,
+		## Whether this soldier's battles_survived should advance for this fight.
+		## Explicit so [method apply] never has to infer it from the winner.
+		"survival_credited": not withdrawal,
+		"withdrawn": withdrawal,
 	}
 
 
@@ -193,12 +219,19 @@ func apply(result: BattleResult, context: BattleContext) -> void:
 	var day := result.campaign_day
 	var location := _nearest_settlement_name(context.world_position) if context != null else "the road"
 
+	var withdrew := result.is_withdrawal()
+
 	for entry in result.player_survivors:
 		var soldier := state.soldier(str(entry.get("soldier_id", "")))
 		if soldier == null:
 			continue
+		# Taking the field is a battle fought, whether or not it was seen through.
 		soldier.battles_fought += 1
-		soldier.battles_survived += 1
+		# ...but coming out of a fight you broke off from is not surviving it. This is
+		# the line that stops retreat being a progression loop; it is read from the
+		# entry rather than inferred here, so the rule lives in one place.
+		if bool(entry.get("survival_credited", not withdrew)):
+			soldier.battles_survived += 1
 		soldier.kills += int(entry.get("kills", 0))
 		soldier.hp = clampi(int(entry.get("hp", soldier.hp)), 1, soldier.max_hp)
 		var levels := soldier.add_xp(int(entry.get("xp_gained", 0)), config)
@@ -209,7 +242,16 @@ func apply(result: BattleResult, context: BattleContext) -> void:
 				soldier.level, location,
 			])
 		var kills := int(entry.get("kills", 0))
-		if kills > 0:
+		# The history is the soldier's own record, so it says what actually happened:
+		# a withdrawal is written as a withdrawal, not as a battle that was won.
+		if withdrew:
+			if kills > 0:
+				soldier.record_history(day, "battle", "Withdrew from the enemy at %s after killing %d." % [
+					location, kills,
+				])
+			else:
+				soldier.record_history(day, "battle", "Withdrew from the enemy at %s without engaging." % location)
+		elif kills > 0:
 			soldier.record_history(day, "battle", "Killed %d at %s and lived." % [
 				kills, location,
 			])
@@ -245,16 +287,17 @@ func apply(result: BattleResult, context: BattleContext) -> void:
 		var enemy_party := state.party_of(world_party)
 		var enemies_left := 0
 		if enemy_party != null:
-			enemies_left = state.active_members(enemy_party).size()
+			enemies_left = state.active_member_count(enemy_party)
+		# The enemy party is only removed if it was actually destroyed - beaten on the
+		# field, or left with nobody standing. Breaking off does not delete it.
 		if result.player_won() or enemies_left == 0:
 			world_party.defeated = true
 			DebugLogger.info("%s is destroyed and removed from the map" % world_party.display_name, "Resolver")
-		elif result.enemy_won():
-			_push_player_clear(world_party)
 		else:
-			# Draw or withdrawal: nobody holds the field, so give both sides space.
-			world_party.encounter_cooldown_until_hours = state.clock.total_hours() + 3.0
-			state.destination_id = ""
+			# Enemy win, draw or withdrawal: the enemy still holds the field, so give
+			# both sides room and a cooldown rather than letting the encounter re-fire
+			# the instant the player is back on the map.
+			_push_player_clear(world_party)
 
 	state.flags["battle_counter"] = maxi(1, int(state.flags.get("battle_counter", 1)))
 	state.flags["battles_fought"] = int(state.flags.get("battles_fought", 0)) + 1
@@ -276,6 +319,7 @@ func _append_battle_log(result: BattleResult) -> void:
 		"day": result.campaign_day,
 		"hour": result.campaign_hour,
 		"winner": result.winner,
+		"withdrawal": result.withdrawal,
 		"enemy": result.enemy_display_name,
 		"player_total": result.player_total,
 		"player_survivors": result.player_survivors.size(),

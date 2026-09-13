@@ -24,6 +24,13 @@ func is_player() -> bool:
 	return kind == KIND_PLAYER
 
 
+## Historical roster membership: everyone who has ever belonged to this party,
+## [b]including the dead[/b].
+##
+## This is deliberately [i]not[/i] a measure of strength. For the current fieldable
+## force use [method CampaignState.active_member_count]. The two diverge as soon as
+## anyone dies, and code that wants the force size but reads this will let a party
+## of corpses march at full speed and appear to be at capacity when it is not.
 func size() -> int:
 	return member_ids.size()
 

@@ -43,10 +43,17 @@ func _build_result() -> void:
 	var outcome_color := UiTheme.GOOD if _result.player_won() else UiTheme.BAD
 	if _result.winner == BattleResult.WINNER_DRAW:
 		outcome_color = UiTheme.GOLD
+	elif _result.is_withdrawal():
+		outcome_color = UiTheme.DIM
 
 	var title := UiTheme.label(_result.title(), 40, outcome_color)
 	_root.add_child(title)
 	_root.add_child(UiTheme.label(_result.headline(), 17, UiTheme.TEXT))
+	if _result.is_withdrawal():
+		_root.add_child(UiTheme.dim_label(
+			"Breaking off is not a battle survived, and the field was not yours to take. "
+			+ "Kills already made still stand, and the enemy is still out there."
+		))
 	_root.add_child(UiTheme.dim_label("Day %d, %s   |   lasted %s   |   battle %s" % [
 		_result.campaign_day,
 		CampaignClock.time_string_from_hour(_result.campaign_hour),
@@ -102,16 +109,24 @@ func _build_survivors_panel() -> Control:
 		box.add_child(UiTheme.dim_label(detail))
 
 	box.add_child(UiTheme.heading_rule())
-	box.add_child(UiTheme.label("%d of %d survived   |   %d XP earned" % [
-		_result.player_survivors.size(), _result.player_total, _result.xp_awarded,
-	], 14, UiTheme.TEXT))
+	if _result.is_withdrawal():
+		box.add_child(UiTheme.label("%d of %d came away   |   %d XP earned" % [
+			_result.player_survivors.size(), _result.player_total, _result.xp_awarded,
+		], 14, UiTheme.TEXT))
+	else:
+		box.add_child(UiTheme.label("%d of %d survived   |   %d XP earned" % [
+			_result.player_survivors.size(), _result.player_total, _result.xp_awarded,
+		], 14, UiTheme.TEXT))
 	return _wrap(box)
 
 
 func _build_spoils_panel() -> Control:
 	var box := _section("Loot")
 	if _result.gold_total() <= 0:
-		box.add_child(UiTheme.label("Nothing was taken.", 14, UiTheme.DIM))
+		box.add_child(UiTheme.label(
+			"You left the field. Nothing was taken." if _result.is_withdrawal() else "Nothing was taken.",
+			14, UiTheme.DIM,
+		))
 	else:
 		box.add_child(UiTheme.label("%d gold" % _result.gold_total(), 22, UiTheme.GOLD))
 		if _result.gold_from_enemies > 0:
@@ -157,10 +172,36 @@ func _add_continue_button() -> void:
 	_root.add_child(row)
 	var button := UiTheme.button("Continue", 200.0)
 	button.custom_minimum_size = Vector2(220.0, 42.0)
-	button.pressed.connect(_on_continue)
+	button.pressed.connect(continue_to_world_map)
 	row.add_child(button)
 	button.grab_focus()
 
 
-func _on_continue() -> void:
+## Public because it is the screen's one action, not a private detail of the button:
+## the tests drive the same entry point the player's click does.
+func continue_to_world_map() -> void:
 	SceneManager.change_scene(WORLD_MAP_KEY)
+
+
+## Read-only view of what this screen was handed. Nothing here changes behaviour;
+## it exists so the end-to-end test can assert that the real [BattleResult] reached
+## this screen, rather than confirming only that the screen exists.
+func displayed_result() -> BattleResult:
+	return _result
+
+
+## Every piece of text the screen is actually showing, in tree order. Lets a test
+## check the UI represents the real fight without depending on node paths or layout.
+func displayed_text() -> String:
+	var parts: Array[String] = []
+	_collect_text(self, parts)
+	return "\n".join(parts)
+
+
+func _collect_text(node: Node, into: Array[String]) -> void:
+	if node is Label:
+		into.append((node as Label).text)
+	elif node is Button:
+		into.append((node as Button).text)
+	for child in node.get_children():
+		_collect_text(child, into)

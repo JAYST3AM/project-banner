@@ -8,6 +8,7 @@ func run() -> void:
 	_test_clock()
 	_test_rng_determinism()
 	await _test_save_round_trip()
+	_complete()
 
 
 func _test_config() -> void:

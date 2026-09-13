@@ -11,6 +11,7 @@ func run() -> void:
 	await _test_continue_restores_the_campaign()
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
+	_complete()
 
 
 func _test_new_campaign() -> void:
@@ -53,7 +54,7 @@ func _test_scene_transitions_keep_one_session() -> void:
 		"the same CampaignState object survives the transition back to the menu")
 
 	# Autoloads must exist exactly once no matter how many transitions happened.
-	var root := runner.get_tree().root
+	var root: Node = runner.get_tree().root
 	for autoload_name in ["GameManager", "SceneManager", "SaveManager", "GameData", "DebugLogger"]:
 		var count := 0
 		for child in root.get_children():

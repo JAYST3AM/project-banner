@@ -13,6 +13,7 @@ Status legend: `DONE` / `IN PROGRESS` / `TODO`
 | 4 | World encounters and tactical battle transition | **DONE** |
 | 5 | First functional tactical combat | **DONE** |
 | 6 | Persistent campaign save/load validation | **DONE** |
+| 6.5 | External audit remediation (hardening pass, no new gameplay) | **DONE** |
 | — | **First major checkpoint: the full vertical slice** | **DONE** |
 | 7+ | Post-checkpoint systems (see below) | TODO |
 
@@ -127,9 +128,47 @@ weakest bandit band, 3/24 against the strongest.
   same-process save/load does not prove the game can be closed and reopened
 
 **Definition of done:** New Campaign -> recruit -> fight -> earn XP -> save -> quit
--> relaunch -> Continue, with every value intact. Verified by 75 cross-process
+-> relaunch -> Continue, with every value intact. Verified by 91 cross-process
 assertions (`26 soldiers restored, 9 of them dead`, every field identical) and by a
-real windowed launch logging `main menu: continue offered`.
+real windowed launch driving the whole loop through the UI.
+
+---
+
+## Step 6.5 - External audit remediation (`milestone-06.5`)
+
+**Goal:** nothing new. Harden what Steps 0-6 built, after an external review found
+seven defects, and leave a regression test behind for every one.
+
+Not a milestone with a feature; a pass over work already thought finished. It was
+worth doing because six of the seven were **silent** - the game kept running and
+looked fine while behaving wrongly.
+
+- **Retreat was a progression loop.** Pressing Retreat on a battlefield still ran
+  the normal survivor path, so participation and survived-battle XP could be farmed
+  at no risk. Withdrawal is now its own outcome: `battles_fought` yes, XP for kills
+  only, no `battles_survived`, no spoils, enemy stays.
+- **A timeout did not stop the fight.** The finishing step carried on processing a
+  full delta of combat against a battle already declared over; units could still
+  move, strike and die. Now it returns immediately.
+- **Dead soldiers slowed the party.** Travel pace used the roster count rather than
+  the active force, so casualties made the column no faster; the HUD showed roster
+  against capacity while recruitment counted the living. Membership and force are
+  now separate, named quantities.
+- **Legacy saves could break the main menu.** `peek_metadata()` assumed the current
+  shape, so the exact save the v0 migration exists to handle errored before Continue
+  was pressed. Metadata extraction is now shape-tolerant and never writes.
+- **The Step 5 end-to-end test proved nothing about the results payload.** It queued
+  a second `battle_results` transition with no payload, replacing the real one, then
+  asserted the scene existed. It now waits rather than causes, and checks the real
+  result against the campaign chronicle and against what the screen renders.
+- **A typo in `--suite=` produced a green run with no tests.** Now a failure.
+- **A suite that aborted mid-run could pass.** Reaching a completion marker is now
+  required; verified against Godot 4.7.2 rather than assumed.
+
+**Definition of done:** all seven fixed, each with a test that fails without the
+fix; all suites green; the two-process restart check green; a windowed run of the
+whole loop clean. **1557 assertions, 0 failures, 11 of 11 suites** headless, and
+**91 checks, 0 failures** across the restart. See D-033 to D-040.
 
 ---
 

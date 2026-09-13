@@ -141,3 +141,26 @@ func change_scene_and_wait(key: String, payload: Dictionary = {}) -> Node:
 		if str(result[0]) == key:
 			return result[1] as Node
 	return null
+
+
+## Test helper: wait for a transition that has [b]already been requested[/b], without
+## requesting one. Returns the instantiated scene, or null if it never arrives.
+##
+## This exists because calling [method change_scene_and_wait] on a scene the code
+## under test already transitions to starts a [i]second[/i] transition. That second
+## transition carries no payload, so it silently overwrites the first one and the
+## scene ends up empty - the test then confirms the scene exists while proving
+## nothing about what actually reached it. Waiting is not the same as causing.
+##
+## Safe to call either before or after the transition lands.
+func await_scene(key: String, max_frames: int = 900) -> Node:
+	if current_key == key and is_instance_valid(current_scene):
+		return current_scene
+	var frames := 0
+	while frames < max_frames:
+		frames += 1
+		await get_tree().process_frame
+		if current_key == key and is_instance_valid(current_scene):
+			return current_scene
+	DebugLogger.error("await_scene('%s') timed out after %d frames" % [key, max_frames], "SceneManager")
+	return null

@@ -200,7 +200,10 @@ func _refresh() -> void:
 	]
 	_stats_label.text = "\n".join([
 		"Gold:        %d" % _state.player_gold,
-		"Party:       %d / %d" % [_state.player_party.size(), _recruitment.max_party_size()],
+		"Party:       %d / %d active" % [
+			_state.active_member_count(_state.player_party), _recruitment.max_party_size(),
+		],
+		"Lost:        %d" % _state.fallen_member_count(_state.player_party),
 		"Date:        %s" % _state.clock.full_string(),
 		"Recruits:    %d here today" % _settlement.total_recruits_available(),
 	])
@@ -286,13 +289,19 @@ func _build_recruit_row(unit_type_id: String, stock: int) -> Control:
 	return panel
 
 
+## The roster deliberately lists the dead too - they are the party's history - so
+## the header has to distinguish the record from the force you can actually field.
 func _rebuild_roster() -> void:
 	for child in _roster_list.get_children():
 		child.queue_free()
 
-	_roster_header.text = "Your Party  (%d / %d)" % [
-		_state.player_party.size(), _recruitment.max_party_size(),
-	]
+	var active := _state.active_member_count(_state.player_party)
+	var lost := _state.fallen_member_count(_state.player_party)
+	var header := "Your Party  (%d / %d active" % [active, _recruitment.max_party_size()]
+	if lost > 0:
+		header += ", %d lost" % lost
+	header += ")"
+	_roster_header.text = header
 
 	var members := _state.party_members(_state.player_party)
 	if members.is_empty():

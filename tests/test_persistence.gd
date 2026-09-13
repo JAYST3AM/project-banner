@@ -20,9 +20,11 @@ func run() -> void:
 	_test_a_fought_battle_round_trips()
 	_test_migration_from_an_unversioned_save()
 	_test_a_newer_save_is_refused()
+	_test_metadata_is_safe_for_every_shape()
 	_test_missing_and_corrupt_files()
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
+	_complete()
 
 
 func _fresh_campaign(name: String, recruits: int) -> CampaignState:
@@ -314,6 +316,101 @@ func _test_a_newer_save_is_refused() -> void:
 	greater(float(meta.get("save_version", 0)), float(SaveManager.SAVE_VERSION),
 		"and the version it needs")
 	equal(GameManager.continue_campaign(), false, "Continue refuses it")
+
+
+## Every shape a save can be in must be safe for the main menu to look at.
+##
+## Companion to _test_migration_from_an_unversioned_save. Migration made the legacy
+## shape [i]loadable[/i], but the menu calls peek_metadata() before any of that runs -
+## so a save the game could happily migrate was still able to error the moment the
+## player opened the menu, or report a party of zero.
+func _test_metadata_is_safe_for_every_shape() -> void:
+	section("save metadata is safe for every save shape")
+
+	# --- a normal, current save.
+	var state := _fresh_campaign("Metadata Shape", 5)
+	state.player_gold = 777
+	_kill_two(state)
+	check(GameManager.save_campaign(), "a current-format save was written")
+	var current := SaveManager.peek_metadata()
+	not_null(current, "the current save has metadata")
+	equal(current.get("campaign_name"), "Metadata Shape", "the current save names itself")
+	equal(current.get("player_gold"), 777, "the current save reports its gold")
+	equal(current.get("save_version"), SaveManager.SAVE_VERSION, "and its version")
+	equal(current.get("party_lost"), 2, "and its casualties")
+
+	# --- the legacy shape: no version field, party stored as a bare array.
+	var legacy_members := _write_legacy_save("Legacy Shape", 12, 1234)
+	check(SaveManager.has_save(), "the legacy save exists")
+	var legacy := SaveManager.peek_metadata()
+	check(not legacy.is_empty(), "the legacy save has metadata rather than erroring")
+	equal(legacy.get("campaign_name"), "Legacy Shape", "the legacy save names itself")
+	equal(int(legacy.get("day", 0)), 12, "the legacy save reports its day")
+	equal(int(legacy.get("player_gold", 0)), 1234, "the legacy save reports its gold")
+	equal(int(legacy.get("save_version", -1)), 0, "an absent version reads as zero, not a crash")
+	equal(legacy.get("party_size"), legacy_members, "the legacy party's size is found in the bare array")
+	equal(legacy.get("party_active"), legacy_members,
+		"and its active force is counted from the soldier records")
+
+	# --- the menu must offer it, and Continue must actually migrate it.
+	equal(SaveManager.is_save_too_new(), false, "a legacy save is not 'too new'")
+	check(SaveManager.has_save() and not SaveManager.is_save_too_new(),
+		"so the menu's Continue condition is satisfied")
+	check(GameManager.continue_campaign(), "Continue migrates and opens the legacy save")
+	var continued: CampaignState = GameManager.campaign
+	not_null(continued, "the campaign is open")
+	if continued != null:
+		equal(continued.player_party.member_ids.size(), legacy_members, "with its party intact")
+		equal(continued.party_members(continued.player_party).size(), legacy_members,
+			"and every member resolvable")
+		equal(continued.player_gold, 1234, "with its gold intact")
+		GameManager.end_campaign()
+
+	# --- a corrupt file must describe safely, not crash.
+	_write_raw_save("{ this is not json at all ][")
+	var corrupt := SaveManager.peek_metadata()
+	check(corrupt.is_empty(), "a corrupt save reports no metadata rather than failing")
+
+	# --- a missing file likewise.
+	SaveManager.delete_all_saves()
+	check(SaveManager.peek_metadata().is_empty(), "a missing save reports no metadata")
+	equal(SaveManager.has_save(), false, "and is reported as absent")
+
+
+## Writes a save in the pre-versioning shape: no save_version, and player_party as a
+## bare array of soldier ids rather than an object. Returns the number of members, so
+## the caller can assert against the real figure instead of a guess.
+func _write_legacy_save(campaign_name: String, day: int, gold: int) -> int:
+	var state := _fresh_campaign(campaign_name, 6)
+	state.player_gold = gold
+	check(GameManager.save_campaign(), "a save was written to rewrite as legacy")
+
+	var path := SaveManager.slot_path()
+	var raw := JSON.parse_string(FileAccess.get_file_as_string(path)) as Dictionary
+	raw.erase("save_version")
+	raw["campaign_name"] = campaign_name
+	raw["player_gold"] = gold
+	raw["clock"]["day"] = day
+	var members: Array = ((raw.get("player_party", {}) as Dictionary).get("member_ids", []) as Array)
+	raw["player_party"] = members
+	_write_raw_save(JSON.stringify(raw, "	"))
+	return members.size()
+
+
+func _write_raw_save(text: String) -> void:
+	var file := FileAccess.open(SaveManager.slot_path(), FileAccess.WRITE)
+	file.store_string(text)
+	file.close()
+
+
+func _kill_two(state: CampaignState) -> void:
+	var killed := 0
+	for soldier in state.active_members(state.player_party):
+		if killed >= 2:
+			break
+		soldier.hp = 0
+		soldier.status = Soldier.STATUS_DEAD
+		killed += 1
 
 
 func _test_missing_and_corrupt_files() -> void:

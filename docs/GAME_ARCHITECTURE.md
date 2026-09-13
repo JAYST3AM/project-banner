@@ -202,6 +202,35 @@ the scene payload, and that context already contains both rosters as snapshots w
 resolved stats. Adding ambushes, sieges or scripted battles later means building a
 different context, not changing the battle scene. See D-019 and D-020.
 
+### Battle outcomes
+
+Every battle ends in exactly one of four outcomes, and `BattleResult.withdrawal` is
+set once in `build_result()` so the rules below are never re-derived from a string:
+
+| Outcome | Gold | XP | `battles_survived` | Enemy party |
+| --- | --- | --- | --- | --- |
+| **Victory** | spoils + victory bonus | participation + kills + survived + victory | +1 | removed from the map |
+| **Defeat** | none | participation + kills + survived | +1 | stays; player pushed clear, cooldown set |
+| **Draw** (timeout) | none | participation + kills + survived | +1 | stays; player pushed clear, cooldown set |
+| **Withdrawal** | none | **kills only** | **unchanged** | stays unless actually destroyed |
+
+`battles_fought` increments for everyone who took the field in all four cases,
+casualties on both sides persist in every case, and the survivors' hit points are
+written back in every case.
+
+**Withdrawal is deliberately the strictest.** Anything else hands a player a
+risk-free progression loop: walk onto a battlefield, press Retreat, collect
+participation and survived-battle experience, repeat. Kills are the one exception,
+because a soldier who cut someone down before the line broke really did that and
+erasing it would rewrite the record. The behaviour is pinned down by
+`tests/test_battle_outcomes.gd`, including a six-cycle attempt to farm the loop.
+See D-033.
+
+**A timeout ends the battle where it stands.** `BattleSimulator.step()` returns
+immediately after finishing on timeout - no unit updates, no attacks, no overlap
+resolution, no victory check - so nothing can move, strike, take damage or die after
+the fight is over. See D-035.
+
 ### Why parties store ids
 
 If a `Party` held `Array[Soldier]`, then a save would serialise each soldier twice
@@ -209,7 +238,28 @@ once, and a load could produce two live objects for one person. Storing ids and
 resolving through `CampaignState.soldier(id)` makes that class of bug impossible.
 
 Helper accessors on `CampaignState`: `party_members()`, `active_members()`,
+`active_member_count()`, `roster_member_count()`, `fallen_member_count()`,
 `fallen_members()`, `soldiers_with_status()`.
+
+### Roster membership versus active force
+
+A party keeps its dead, on purpose: casualties must stay inspectable, because the
+design principle is that soldiers are people rather than counters. That means **two
+different quantities describe one party**, and using the wrong one fails quietly.
+
+| Quantity | Accessor | Means |
+| --- | --- | --- |
+| Historical membership | `Party.size()`, `roster_member_count()` | everyone who ever belonged, the dead included |
+| Active force | `active_member_count()` | alive and fit to take the field |
+| Casualties | `fallen_member_count()` | members who have died |
+
+**Anything that measures strength uses the active force**: travel pace, party
+capacity, encounter strength, hostile-party markers on the map, and every
+"how strong is this" label. The roster screen lists the *membership* - it is a
+record - and states both, as `8 / 24 active, 4 lost`. See D-034.
+
+When adding code that sizes a party, decide which of the three you mean. Do not
+reach for `size()` because it is the shortest to type.
 
 ---
 
@@ -346,9 +396,34 @@ godotc --headless --path "<project>" res://scenes/dev/tests.tscn
 * Exit code 0 = pass, 1 = failure. Milestones gate on this.
 * Suites may `await` - they can drive real scene transitions and real save files.
 * Suites must not leave saves behind (`SaveManager.delete_all_saves()`).
+* **Every suite must end its `run()` with `_complete()`.**
 
-**A suite that cannot load, cannot compile, or runs zero assertions is a FAILURE,
-not a pass.** GDScript aborts a function on a runtime error and has no try/catch,
-so without that guard a broken suite would look identical to a passing one - a
-silent false green. The runner also counts how many suites reported and fails the
-run if any never did. See D-018.
+**A suite that cannot load, cannot compile, runs zero assertions, or never reaches
+its completion marker is a FAILURE, not a pass.** GDScript aborts a function on a
+runtime error and has no try/catch, so without those guards a broken suite would look
+identical to a passing one - a silent false green. See D-018 and D-036.
+
+The completion marker is not belt-and-braces. Measured against Godot 4.7.2: when a
+coroutine raises a runtime error, **control returns to the awaiting caller as though
+the function had simply ended**, and the suite comes back reporting
+`3 assertions, 0 failures`. A runner that checked only the failure count would call
+that a pass. `_complete()` is a statement the aborted function never reaches, so it
+is the one signal that survives.
+
+Beyond the suites, the runner itself is tested: `tests/test_runner_contract.gd`
+drives the runner's own `evaluate()` against deliberately malformed fixtures in
+`tests/fixtures/` - a suite that aborts mid-run, one that returns early, one that
+asserts nothing, a script that is not a suite at all, and a missing file. Those
+fixtures are deliberately **not** in the runner's `SUITES` list, since several of
+them are meant to fail.
+
+**A `--suite=` filter that matches nothing is also a failure.** With no suites
+selected every count is zero and the run looks immaculate, so a typo in a milestone
+command would silently disable the gate. See D-037.
+
+**Tests wait for transitions; they never cause them.** `SceneManager.await_scene(key)`
+waits for a transition that has already been requested and returns the instantiated
+scene. Calling `change_scene_and_wait()` on a scene the code under test already
+transitions to queues a *second* transition carrying no payload, which replaces the
+first - the scene ends up empty and the test proves nothing while looking thorough.
+See D-039.

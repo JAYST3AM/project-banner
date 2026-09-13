@@ -29,8 +29,11 @@ func _refresh_continue_state() -> void:
 			int(summary.get("day", 1)),
 			CampaignClock.time_string_from_hour(float(summary.get("hour", 8.0))),
 			int(summary.get("player_gold", 0)),
-			int(summary.get("party_size", 0)),
+			int(summary.get("party_active", summary.get("party_size", 0))),
 		]
+		var lost := int(summary.get("party_lost", 0))
+		if lost > 0:
+			_status.text += " (%d lost)" % lost
 		if SaveManager.is_save_too_new():
 			_continue_button.disabled = true
 			_status.text = "That save was written by a newer version of the game (save v%d) and cannot be opened." % int(

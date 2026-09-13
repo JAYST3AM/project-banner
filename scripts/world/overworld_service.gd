@@ -94,7 +94,7 @@ func _spawn_party(spawn: Dictionary, template: Dictionary) -> bool:
 	state.parties[world_party.id] = world_party
 	state.enemy_parties[party.id] = party
 	DebugLogger.info("spawned %s (%d soldiers) near %s" % [
-		world_party.display_name, party.size(), settlement.name,
+		world_party.display_name, state.active_member_count(party), settlement.name,
 	], "Overworld")
 	return true
 

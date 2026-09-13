@@ -124,7 +124,9 @@ func refresh() -> void:
 		"at          %s" % (here.name if here != null else "-"),
 		"time        %s" % _state.clock.full_string(),
 		"speed       %s" % _state.clock.speed_name(),
-		"party       %d" % _state.player_party.size(),
+		"party       %d active / %d roster" % [
+			_state.active_member_count(_state.player_party), _state.roster_member_count(_state.player_party),
+		],
 		"soldiers    %d total" % _state.soldiers.size(),
 		"settlements %d" % _state.settlements.size(),
 		"seed        %d" % _state.campaign_seed,

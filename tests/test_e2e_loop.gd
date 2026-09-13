@@ -34,6 +34,7 @@ func run() -> void:
 	await _verify_consequences(campaign, recruited, battle)
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
+	_complete()
 
 
 ## ---- 1. Start New Campaign ----------------------------------------------
@@ -211,18 +212,104 @@ func _fight_the_battle(battle: Dictionary) -> void:
 	check(simulator.is_finished(), "the battle reached a conclusion")
 	DebugLogger.info("--- battle over: winner %s after %.1fs ---" % [simulator.winner, simulator.elapsed], "E2E")
 
-	# The scene must have resolved and moved to the results screen.
-	var results := await SceneManager.change_scene_and_wait("battle_results")
-	not_null(results, "the battle results screen loaded")
+	# Hand the outcome to the next step so the results screen can be checked against
+	# what actually happened on the field.
+	battle["winner"] = simulator.winner
+	battle["elapsed"] = simulator.elapsed
+
+	await _verify_results_screen(GameManager.campaign, battle)
+
+
+## ---- 8. The results screen ----------------------------------------------
+
+## The results screen must have received the REAL [BattleResult].
+##
+## This step previously called change_scene_and_wait("battle_results") after the
+## battle scene had already transitioned there itself. That queued a second
+## transition carrying no payload, which replaced the first - so the screen fell back
+## to "No battle result was passed to this screen" while the test happily confirmed
+## that the scene existed. Waiting for the transition instead of causing it, and then
+## reading what the screen is actually displaying, is what makes these assertions
+## mean anything.
+func _verify_results_screen(state: CampaignState, battle: Dictionary) -> void:
+	section("8. the results screen received the real battle result")
+
+	var results := await SceneManager.await_scene("battle_results")
+	not_null(results, "the results screen loaded on its own")
+	if results == null:
+		return
 	equal(SceneManager.current_key, "battle_results", "the results screen is the current scene")
+
+	var shown: BattleResult = results.call("displayed_result")
+	not_null(shown, "the results screen is holding a BattleResult")
+	if shown == null:
+		return
+
+	var text := str(results.call("displayed_text"))
+	check(not text.contains("No battle result"),
+		"the screen is not showing the empty fallback")
+
+	var context := battle.get("context") as BattleContext
+	var summary := BattleResolver.build(state, GameManager.config()).last_battle_summary()
+	var field_winner := str(battle.get("winner", ""))
+
+	equal(shown.battle_id, context.battle_id, "it is the battle that was just fought")
+	equal(shown.winner, field_winner, "it reports the outcome the simulator reached")
+
+	# Compared against a fresh result rather than a hardcoded string, so a change to
+	# the wording cannot silently desynchronise this test from the screen.
+	var expected := BattleResult.new()
+	expected.winner = field_winner
+	equal(shown.title(), expected.title(), "the title matches the outcome")
+	contains(text, shown.title(), "the title is actually rendered on screen")
+
+	equal(shown.player_survivors.size(), int(summary.get("player_survivors", -1)),
+		"the survivor count matches the campaign record")
+	equal(shown.player_dead.size(), int(summary.get("player_dead", -1)),
+		"the casualty count matches the campaign record")
+	equal(shown.player_dead.size() + shown.player_survivors.size(), shown.player_total,
+		"every soldier is accounted for as either dead or alive")
+	equal(shown.player_total, RECRUITS, "all %d recruits were on the field" % RECRUITS)
+	equal(shown.xp_awarded, int(summary.get("xp", -1)), "the XP total matches the campaign record")
+	equal(shown.gold_total(), int(summary.get("gold", -1)), "the gold total matches the campaign record")
+	equal(shown.enemy_dead.size(), int(summary.get("enemy_dead", -1)),
+		"the enemy casualty count matches the campaign record")
+
+	# The screen must be showing the fight's real details, not just its headline.
+	for entry in shown.player_dead:
+		contains(text, str(entry.get("name", "")), "%s is named among the losses" % entry.get("name", "?"))
+	for entry in shown.player_survivors:
+		contains(text, str(entry.get("name", "")), "%s is named among the survivors" % entry.get("name", "?"))
+	if shown.gold_total() > 0:
+		contains(text, "%d gold" % shown.gold_total(), "the gold won is rendered on screen")
+
+	# And what the screen claims about each soldier must match what the campaign did.
+	for entry in shown.player_survivors:
+		var soldier := state.soldier(str(entry.get("soldier_id", "")))
+		not_null(soldier, "every survivor named on the screen exists in the campaign")
+		if soldier == null:
+			continue
+		equal(soldier.kills, int(entry.get("kills", -1)),
+			"%s's kills on screen match the campaign" % soldier.full_name())
+		equal(soldier.hp, int(entry.get("hp", -1)),
+			"%s's hit points on screen match the campaign" % soldier.full_name())
+
+	DebugLogger.info("--- results screen verified against the campaign record ---", "E2E")
+
+	# Continue is the screen's own action: press it and follow it back.
+	results.call("continue_to_world_map")
+	var world := await SceneManager.await_scene("world_map")
+	not_null(world, "pressing Continue returned to the world map")
 
 
 ## ---- 9-15. Verify the consequences --------------------------------------
 
 func _verify_consequences(state: CampaignState, recruited: Array[Soldier], battle: Dictionary) -> void:
-	section("8. return to the world map")
-	var world := await SceneManager.change_scene_and_wait("world_map")
-	not_null(world, "returned to the world map")
+	section("9. back on the world map")
+	# The results screen already drove this transition - see _verify_results_screen.
+	equal(SceneManager.current_key, "world_map", "the world map is current, reached via Continue")
+	var world := SceneManager.current_scene
+	not_null(world, "the world map is loaded")
 	check(GameManager.campaign == state, "the same campaign came back")
 
 	var summary := BattleResolver.build(state, GameManager.config()).last_battle_summary()

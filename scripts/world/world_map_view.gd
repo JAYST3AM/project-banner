@@ -187,7 +187,7 @@ func _draw_world_parties() -> void:
 		if world_party == null or not world_party.is_available():
 			continue
 		var party := state.party_of(world_party)
-		var soldiers := party.size() if party != null else 0
+		var soldiers := state.active_member_count(party)
 		var color := COLOR_ENEMY if world_party.kind == Party.KIND_BANDIT else COLOR_HOVERED
 		var position := world_party.position
 

@@ -466,3 +466,159 @@ path actually runs: "an unversioned save migrates" is an assertion, not an
 intention. Beyond that, additive schema changes never need a migration at all,
 because `from_dict` reads every field with a default - so migrations exist only for
 the removals and renames that genuinely need them.
+
+---
+
+## D-033: A withdrawal is its own battle outcome, with its own progression rules
+
+**Decision.** `BattleResult.withdrawal` is an explicit field, set from the winner
+once in `build_result()` and never inferred downstream. A withdrawal:
+
+- records `battles_fought` for everyone who took the field;
+- does **not** increment `battles_survived` for anyone;
+- pays experience **only** for kills actually made - no participation bonus, no
+  survived-battle bonus, no victory bonus;
+- pays no gold and takes no loot;
+- leaves the enemy party on the map unless it was genuinely destroyed;
+- pushes the player clear and sets an encounter cooldown, like any other
+  non-victory.
+
+**Why.** The behaviour it replaces was a farming loop. Entering a battlefield and
+pressing Retreat immediately still ran the ordinary survivor path, so a soldier
+could collect participation plus survived-battle experience for a fight that never
+happened - costing nothing, repeatable forever at two clicks a cycle. Progression
+that can be had without risk is not progression.
+
+Kills are the deliberate exception. A soldier who cut someone down before the line
+broke really did that, and erasing it would rewrite the record of something that
+happened - the same reasoning as D-029. `battles_fought` is likewise honest:
+taking the field is a fact, whatever came of it.
+
+Carrying the outcome as a flag rather than re-deriving it from the winner string
+means there is exactly one place where "we broke off" is decided, so the rules
+cannot drift apart from the label.
+
+---
+
+## D-034: Roster membership and active force are separate numbers
+
+**Decision.** `Party.size()` is historical membership - everyone who ever belonged,
+the dead included. `CampaignState.active_member_count()` is the force. Travel pace,
+party capacity, encounter strength, enemy markers and every "how strong is this"
+display use the **force**. The roster screen lists the **membership** and states
+both ("8 / 24 active, 4 lost").
+
+**Why.** Keeping the dead is a design commitment: casualties must stay inspectable,
+because the whole premise is that soldiers are people rather than counters. But it
+means two different quantities describe one party, and the wrong one fails quietly.
+The original code used the roster count for travel pace, so a company that had lost
+three quarters of its strength still marched at the speed of a full one - casualties
+made you no faster. The HUD made the same mistake in the opposite direction,
+showing `24 / 24` while the recruitment screen, which correctly counted the living,
+still offered replacements.
+
+Neither number is wrong on its own; using them interchangeably is. Hence two named
+accessors rather than one, and a doc comment on `Party.size()` saying which it is.
+
+---
+
+## D-035: A battle stops dead when it times out
+
+**Decision.** `BattleSimulator.step()` returns immediately after `_finish("")` on
+timeout. No unit updates, no attacks, no overlap resolution, no victory check.
+
+**Why.** The timeout check sat above the unit loop, so the step that ended the battle
+carried straight on and processed a full delta of combat against a battle that had
+already been declared over. Units could move, strike, take damage and die after the
+end. The fix is one `return`, and the regression test asserts something stronger
+than "it finished": that no hit point and no position changed on the finishing step,
+that no hit or death event was emitted, and that later `step()` calls are inert.
+
+---
+
+## D-036: A suite must reach its completion marker to pass
+
+**Decision.** `TestCase.completed` is set only by `_complete()`, which every suite
+calls as the last statement of `run()`. A suite that recorded assertions but never
+reached the marker is reported **BROKEN**, not passed.
+
+**Why.** Verified against Godot 4.7.2 rather than assumed, with a throwaway probe: a
+runtime error aborts the function, control **does** return to the awaiting caller as
+if the function had ended normally, and the suite comes back reporting
+`3 assertions, 0 failures`. A runner checking only the failure count calls that a
+pass. The completion marker is the only signal that distinguishes "finished
+cleanly" from "died in the middle", and it survives the abort because it is a
+statement the aborted function never reaches.
+
+A suite that legitimately asserts nothing is also BROKEN: it cannot demonstrate
+anything, so passing it is a false green of a different kind.
+
+---
+
+## D-037: A `--suite=` filter that matches nothing is a failure
+
+**Decision.** `_run_all()` treats an empty selection as a failure, prints the filter
+and the list of available suites, and exits non-zero.
+
+**Why.** With no suites selected every count is zero, and zero failures reads as a
+clean run. A typo in a milestone command would silently disable the gate that is
+supposed to be protecting the milestone - the failure mode is a green build with no
+tests behind it. The selection logic was also split into a pure
+`select_suites(filter)` so the self-tests can check the matching rules directly
+instead of faking command-line arguments.
+
+---
+
+## D-038: `peek_metadata()` understands every shape the game claims to load
+
+**Decision.** Metadata extraction tolerates both save shapes (v0's bare-array
+`player_party` and v1's object), reads nested dictionaries defensively, and
+**does not** run the migration chain or write to the file.
+
+**Why.** Migration made the legacy shape loadable, but the menu peeks *before* any
+of that runs - so a save the game could happily migrate could still error the moment
+the player opened the menu, on the exact shape the v0 migration step exists to
+handle. A save the game claims is loadable must at least be *describable*.
+
+Not migrating during a peek is deliberate: reading a menu should never rewrite the
+player's save file, and the peek has to work on documents the game will go on to
+refuse (a save from a newer build, per D-031). Tolerance in the reader, not mutation
+of the artefact.
+
+The same pass added `party_active` and `party_lost` (D-034), because the menu was
+listing the roster count as though it were the force.
+
+---
+
+## D-039: Tests wait for transitions; they never cause them
+
+**Decision.** `SceneManager.await_scene(key)` waits for a transition that has
+already been requested and returns the instantiated scene. The Step 5 end-to-end
+test uses it in place of a second `change_scene_and_wait`.
+
+**Why.** The battle scene already transitions itself to `battle_results` with the
+real `BattleResult`. The test then called `change_scene_and_wait("battle_results")`,
+which queued a **second** transition carrying no payload - replacing the first. The
+screen fell back to "No battle result was passed to this screen", and the test
+cheerfully confirmed that the scene existed. It had verified nothing about the
+payload while looking thorough.
+
+Waiting is not the same as causing, and the distinction needed an API. The test now
+also reads what the screen is actually displaying (`displayed_result()`,
+`displayed_text()`) and checks it against the campaign's own chronicle, so it proves
+the real fight reached the real screen.
+
+---
+
+## D-040: The battle chronicle is read by id, not as "the latest"
+
+**Decision.** `_log_entry_for(state, battle_id)` searches the chronicle. The
+persistence check no longer calls `last_battle_summary()` to find the battle it
+cares about.
+
+**Why.** Once the restart check fought a second battle (the withdrawal), "the latest
+entry" was a different fight, and five assertions compared the *first* battle's facts
+against the *second* battle's log entry. The failures were loud rather than silent,
+but the underlying assumption - that the entry you want is the last one - is simply
+false for any campaign that has fought more than once.
+

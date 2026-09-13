@@ -124,6 +124,43 @@ func active_members(party: Party) -> Array[Soldier]:
 	return out
 
 
+## How many soldiers are alive and fit to take the field.
+##
+## [b]This - not [method Party.size] - is what travel pace, encounter strength,
+## party capacity and every "how strong is this party" display must use.[/b] A
+## party keeps its dead for the historical record, so the two numbers diverge the
+## moment anyone dies, and using the roster count where the force count is meant
+## makes casualties free.
+func active_member_count(party: Party) -> int:
+	if party == null:
+		return 0
+	var count := 0
+	for soldier_id in party.member_ids:
+		var s := soldier(soldier_id)
+		if s != null and s.is_alive() and s.is_active():
+			count += 1
+	return count
+
+
+## Everyone who has ever belonged to this party, including the dead. This is the
+## historical record the roster screen lists; it is not a measure of strength.
+func roster_member_count(party: Party) -> int:
+	return party.size() if party != null else 0
+
+
+## How many of this party's members have died. Surfaced separately so the UI can
+## show casualties without conflating them with the active force.
+func fallen_member_count(party: Party) -> int:
+	if party == null:
+		return 0
+	var count := 0
+	for soldier_id in party.member_ids:
+		var s := soldier(soldier_id)
+		if s != null and not s.is_alive():
+			count += 1
+	return count
+
+
 func fallen_members(party: Party) -> Array[Soldier]:
 	var out: Array[Soldier] = []
 	for s in party_members(party):

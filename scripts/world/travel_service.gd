@@ -38,10 +38,16 @@ func current_settlement() -> Settlement:
 
 ## Party size slows the column down, with a floor so a large party is never
 ## immobilised. All three numbers come from the config.
+##
+## The size used is the [b]active fieldable[/b] count, not the roster count: dead
+## soldiers stay in the party for the historical record and must not keep slowing
+## the living down.
 func speed_multiplier() -> float:
 	var penalty := config.get_float("travel.party_size_speed_penalty", 0.012)
 	var floor_fraction := config.get_float("travel.min_speed_fraction", 0.55)
-	var size := state.player_party.size() if state != null and state.player_party != null else 0
+	var size := 0
+	if state != null and state.player_party != null:
+		size = state.active_member_count(state.player_party)
 	return maxf(floor_fraction, 1.0 - (float(size) * penalty))
 
 

@@ -19,6 +19,10 @@ var battle_id: String = ""
 var winner: String = WINNER_DRAW
 var enemy_display_name: String = "Enemies"
 
+## True when the player broke off from a battlefield. Withdrawal is its own
+## outcome with its own progression rules - see [method BattleResult.survival_credited].
+var withdrawal: bool = false
+
 var duration_seconds: float = 0.0
 var campaign_day: int = 1
 var campaign_hour: float = 8.0
@@ -50,6 +54,19 @@ func player_won() -> bool:
 
 func enemy_won() -> bool:
 	return winner == WINNER_ENEMY
+
+
+## True when the player broke off rather than the fight being decided.
+func is_withdrawal() -> bool:
+	return withdrawal
+
+
+## Whether soldiers who came through this battle count it as a battle survived.
+##
+## A withdrawal does not. Retreating is not surviving a fight, and counting it as
+## one would make "attack, immediately withdraw, repeat" a progression loop.
+func survival_credited() -> bool:
+	return not withdrawal
 
 
 func title() -> String:
@@ -108,6 +125,7 @@ func to_dict() -> Dictionary:
 	return {
 		"battle_id": battle_id,
 		"winner": winner,
+		"withdrawal": withdrawal,
 		"enemy_display_name": enemy_display_name,
 		"duration_seconds": duration_seconds,
 		"campaign_day": campaign_day,
@@ -129,6 +147,7 @@ static func from_dict(data: Dictionary) -> BattleResult:
 	var result := BattleResult.new()
 	result.battle_id = str(data.get("battle_id", ""))
 	result.winner = str(data.get("winner", WINNER_DRAW))
+	result.withdrawal = bool(data.get("withdrawal", result.winner == WINNER_RETREAT))
 	result.enemy_display_name = str(data.get("enemy_display_name", "Enemies"))
 	result.duration_seconds = float(data.get("duration_seconds", 0.0))
 	result.campaign_day = int(data.get("campaign_day", 1))

@@ -97,7 +97,11 @@ func step(delta: float) -> Array[Dictionary]:
 		return events
 	elapsed += delta
 	if config != null and elapsed >= max_duration:
+		# The battle is over the moment the clock runs out. Return immediately:
+		# units must not move, strike, take damage or die after the fight has
+		# officially ended, and no victory check may run either.
 		_finish("")
+		return events
 
 	for unit in units:
 		if unit.is_alive():

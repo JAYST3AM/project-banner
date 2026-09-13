@@ -51,6 +51,18 @@ func has_save(slot: int = SLOT_DEFAULT) -> bool:
 
 
 ## Lightweight read used by the main menu; never builds a CampaignState.
+##
+## [b]Deliberately shape-tolerant and deliberately non-mutating.[/b] Peeking must
+## not rewrite a save file, and it has to work on documents the game might still
+## refuse to load - a save from a newer build, say. So instead of running the
+## migration chain, this understands every shape the migration path understands and
+## falls back to defaults for anything it does not recognise. The authoritative
+## upgrade still happens in [method load_campaign].
+##
+## That matters because a save the game claims is loadable must at least be
+## [i]describable[/i]. Previously this assumed `player_party` was already a
+## dictionary, so the exact legacy shape the v0 migration exists to handle would
+## error here before the player ever pressed Continue.
 func peek_metadata(slot: int = SLOT_DEFAULT) -> Dictionary:
 	if not has_save(slot):
 		return {}
@@ -59,18 +71,67 @@ func peek_metadata(slot: int = SLOT_DEFAULT) -> Dictionary:
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return {}
 	var data := parsed as Dictionary
-	var clock_data := data.get("clock", {}) as Dictionary
+
+	var clock_data := _dictionary_at(data, "clock")
+	var member_ids := _party_member_ids(data)
+	var active := _count_fieldable(data, member_ids)
+
 	return {
 		"campaign_name": str(data.get("campaign_name", "Unnamed Campaign")),
 		"campaign_seed": int(data.get("campaign_seed", 0)),
 		"day": int(clock_data.get("day", 1)),
 		"hour": float(clock_data.get("hour", 8.0)),
 		"player_gold": int(data.get("player_gold", 0)),
-		"party_size": ((data.get("player_party", {}) as Dictionary).get("member_ids", []) as Array).size(),
+		## Historical roster membership, the dead included.
+		"party_size": member_ids.size(),
+		## Soldiers still fit to take the field. This is what the menu shows.
+		"party_active": active,
+		"party_lost": maxi(0, member_ids.size() - active),
 		"save_version": int(data.get("save_version", 0)),
 		"app_version": str(data.get("app_version", "unknown")),
 		"saved_at": str(data.get("last_saved_at", "")),
 	}
+
+
+## Safe nested-dictionary read: returns {} for anything that is not a dictionary.
+func _dictionary_at(data: Dictionary, key: String) -> Dictionary:
+	var raw: Variant = data.get(key, null)
+	if typeof(raw) == TYPE_DICTIONARY:
+		return raw as Dictionary
+	return {}
+
+
+## The player's party member ids, in whichever shape the document stores them.
+## v0 stored a bare array; v1 stores an object with a member_ids field.
+func _party_member_ids(data: Dictionary) -> Array:
+	var raw: Variant = data.get("player_party", null)
+	if typeof(raw) == TYPE_ARRAY:
+		return raw as Array
+	if typeof(raw) == TYPE_DICTIONARY:
+		var ids: Variant = (raw as Dictionary).get("member_ids", null)
+		if typeof(ids) == TYPE_ARRAY:
+			return ids as Array
+	return []
+
+
+## How many of those members are alive and fieldable, read straight from the saved
+## soldier records. Mirrors CampaignState.active_member_count() exactly, without
+## needing the campaign to be built.
+func _count_fieldable(data: Dictionary, member_ids: Array) -> int:
+	var lookup := _dictionary_at(data, "soldiers")
+	if lookup.is_empty():
+		# No soldier records to inspect. Assume the whole roster is standing rather
+		# than reporting a phantom force of zero.
+		return member_ids.size()
+	var count := 0
+	for soldier_id in member_ids:
+		var raw: Variant = lookup.get(str(soldier_id), null)
+		if typeof(raw) != TYPE_DICTIONARY:
+			continue
+		var status := str((raw as Dictionary).get("status", Soldier.STATUS_ACTIVE))
+		if status == Soldier.STATUS_ACTIVE or status == Soldier.STATUS_WOUNDED:
+			count += 1
+	return count
 
 
 func save_campaign(state: CampaignState, slot: int = SLOT_DEFAULT) -> bool:

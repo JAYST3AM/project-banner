@@ -4,14 +4,22 @@
 reader (human or AI) who needs to understand, review, or advise on Project Banner
 without access to the repository.
 
-**Repository state:** `github.com/JAYST3AM/project-banner` (private)
-**Revision:** `2b987d9` on `main` — 7 commits, working tree clean
+**Repository state:** `github.com/JAYST3AM/project-banner`
+**Revision:** `main` at the Step 6.5 remediation — 9 commits, working tree clean
 **Engine:** Godot 4.7.2-stable, GDScript only
-**Status:** Steps 0–6 of the brief are complete; **the first major checkpoint (the
-full vertical slice) is reached and verified.**
+**Status:** Steps 0–6 of the brief are complete, and the **Step 6.5 external audit
+remediation** is done. **The first major checkpoint (the full vertical slice) is
+reached and verified.**
 
 > This is a snapshot. `docs/CURRENT_STATE.md` in the repository is the living version
 > and is updated every milestone.
+
+**Read this first if you are reviewing:** section 10 is the most useful part. Step 6.5
+was a hardening pass over work already thought finished, triggered by an external
+review that found seven defects, and **six of the seven were silent** — the game ran
+and looked correct while behaving wrongly. Section 10.4 covers them, including which
+one was found only by asking "could a broken test suite still pass?" and measuring the
+answer instead of assuming it.
 
 ---
 
@@ -72,16 +80,21 @@ Every step in that chain runs. Concretely, a player can:
 
 | Area | Files | Lines |
 | --- | --- | --- |
-| `scripts/` | 44 GDScript (+49 Godot-generated `.uid` sidecars) | 6,725 |
-| `tests/` | 11 GDScript | 3,301 |
+| `scripts/` | 44 GDScript (+49 Godot-generated `.uid` sidecars) | 6,995 |
+| `tests/` | 14 GDScript (8 suites, 5 support files, 1 runner) + 6 fixtures | 4,600 |
 | `data/` | 7 JSON | 496 |
 | `scenes/` | 8 `.tscn` | 197 |
-| `docs/` | 6 Markdown (including this file) | 1,330 |
-| **total tracked** | **157** | — |
+| `docs/` | 6 Markdown (including this file) | 2,207 |
+| **total tracked** | **167** | — |
 
-GDScript is roughly two-thirds production code and one-third tests. The `.uid` files
-are Godot-generated resource identifiers and are committed deliberately (Godot
+GDScript is roughly three-fifths production code and two-fifths tests. The `.uid`
+files are Godot-generated resource identifiers and are committed deliberately (Godot
 rewrites them otherwise).
+
+The fixtures under `tests/fixtures/` are deliberately malformed suites — one aborts
+mid-run, one returns early, one asserts nothing, one is not a suite at all — used by
+`test_runner_contract.gd` to prove the runner detects them. They are kept out of the
+runner's `SUITES` list, since several are meant to fail.
 
 ### Commit history
 
@@ -94,6 +107,8 @@ rewrites them otherwise).
 | `85bc3df` | milestone-04: connect world encounters to tactical battle scenes |
 | `4770e6b` | milestone-05: complete first end-to-end combat gameplay loop |
 | `2b987d9` | milestone-06: validate persistent campaign save and load |
+| `a0bf817`, `cf9c69a` | the full project report, and a README for a public reader |
+| *(Step 6.5)* | milestone-06.5: harden vertical slice after external audit |
 
 ---
 
@@ -364,7 +379,7 @@ survivors, 5 of 5 enemies down, 88 gold, 280 XP).
 
 The working rule is: **never claim something works unless it has been run.**
 
-### 9.1 Headless suites — 8 suites, 1,207 assertions, 0 failures
+### 9.1 Headless suites — 11 suites, 1,557 assertions, 0 failures
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -372,49 +387,101 @@ The working rule is: **never claim something works unless it has been run.**
 | `test_campaign_flow` | 41 | campaign lifecycle, scene transitions, singletons, Continue |
 | `test_world_map` | 88 | world from data, travel, arrival, speed states, persistence |
 | `test_recruitment` | 191 | unit/trait data, names, factory, recruitment rules, party limits |
+| `test_party_semantics` | 51 | **roster membership vs active force** — travel pace, HUD wording, capacity, the dead kept on the record |
 | `test_encounters` | 282 | spawning, movement, aggro, detection, `BattleContext`, deployment, simulator |
 | `test_combat` | 266 | damage, death, attribution, victory conditions, results, resolver, balance |
-| `test_e2e_loop` | 127 | **the Step 5 critical end-to-end path, through the real scenes** |
-| `test_persistence` | 129 | every persisted field, migration, refusal, corrupt files |
+| `test_battle_outcomes` | 224 | **victory / defeat / draw / withdrawal**, the retreat farming loop, timeout freezing the field, results-screen wording |
+| `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path**, through the real scenes — including the real `BattleResult` reaching the real results screen |
+| `test_persistence` | 154 | every persisted field, migration, refusal, corrupt files, metadata for every save shape |
+| `test_runner_contract` | 30 | **the runner itself** — aborts, early returns, empty suites, non-suites, missing files, filter selection |
 
 Suites may `await`, so they drive real scene transitions and real save files. The
 end-to-end suite loads the actual battlefield scene and drives its `_process` the way
 the engine would.
 
-### 9.2 The restart check — 75 checks, 0 failures
+### 9.2 The restart check — 91 checks, 0 failures
 
 A genuine **two-process** test, because a same-process save/load only proves the
 serialiser round-trips and not that the game can be closed and reopened:
 
 ```
-phase=write    play a campaign, fight a battle to a conclusion, record every fact
-               about the resulting world, save, exit
+phase=write    play a campaign, fight a battle to a conclusion, break off from a
+               second fight, record every fact about the resulting world, save, exit
 phase=verify   a brand-new process calls the same continue_campaign() the Continue
                button calls, and checks every recorded fact
 ```
 
 It asserts, among other things, that the loaded world was **not** rebuilt over the
-save, and that re-saving is stable. Result: `26 soldiers restored, 9 of them dead`,
-every field identical.
+save, that the withdrawal and the progression rules it applied survived, and that
+re-saving is stable. Result:
+
+```
+broke off from Road Bandits: WITHDREW, 0 xp, 0 gold, enemy still present: true
+wrote: 5 soldiers (3 active, 2 dead), 269 gold, 3 enemy parties, save v1
+--------- persistence write: PASS (6 checks, 0 failures) ---------
+26 soldiers restored, 9 of them dead
+--------- persistence verify: PASS (91 checks, 0 failures) ---------
+```
+
+The second process sees the withdrawal the first one made — 0 experience, 0 gold,
+`battles_survived` untouched, and the bandits still on the map — without any shared
+memory beyond the save file.
 
 ### 9.3 The test harness guards against false greens
 
-This is worth stating plainly, because it happened. GDScript has no exceptions: when
-`script.new()` was called on a suite that had failed to compile, the runtime error
-aborted the runner *before* it could record a failure, and the run printed
-`RESULT: PASS` with 212 green assertions while a 188-assertion suite had not run at
-all. The runner now refuses to pass a suite that fails to load, fails to compile, or
-records zero assertions, and fails the run if fewer suites reported than expected.
+This is worth stating plainly, because it happened twice.
+
+**First:** GDScript has no exceptions. When `script.new()` was called on a suite that
+had failed to compile, the runtime error aborted the runner *before* it could record a
+failure, and the run printed `RESULT: PASS` with 212 green assertions while a
+188-assertion suite had not run at all.
+
+**Second, found by the Step 6.5 audit:** the same class of hole one level deeper. A
+suite that compiles, starts running, records some assertions, and *then* hits a runtime
+error was still reported as passing — because the assertions it managed to run all
+passed. The runner now refuses to pass a suite that fails to load, fails to compile,
+records zero assertions, or never reaches its completion marker, and fails the run if
+fewer suites reported than expected. A `--suite=` filter matching nothing is also a
+failure rather than a zero-suite green.
 
 **A test harness that can report a silent false green is worse than no harness,
 because it converts "I did not check" into "I checked and it is fine."**
 
 ### 9.4 Windowed verification
 
-Development switches let the real, rendered game be driven without a mouse
-(`--autostart-campaign`, `--autostart-town`, `--autorecruit`, `--autoleave`,
-`--autoengage`, `--autoattack`, `--autostart-battle`, `--battlespeed`). They exercise
-the real button handlers, and the log records the outcome so it can be read back.
+The whole loop runs through the actual UI, driven only by development flags:
+
+```
+godot --path "<project>" -- \
+  --autostart-campaign=24680 --autotravel=greywatch --autostart-town=greywatch \
+  --autorecruit=5 --autoleave --autoengage --autoattack --autostart-battle
+```
+
+```
+scene -> world_map
+scene -> settlement
+scene -> world_map
+scene -> battle
+[Encounter] battle battle_0001 at 880,551: player (5) vs enemy (5), clear
+[Resolver]  battle_0001: VICTORY - 4 of 5 survived, 5 of 5 enemies down, 97 gold, 280 xp
+[Resolver]  Road Bandits is destroyed and removed from the map
+scene -> battle_results
+```
+
+with **zero script errors or warnings**. (The engine prints some shutdown noise under
+`--quit-after`; that is teardown, not gameplay.)
+
+### 9.5 Other verification
+
+The development switches above exercise the real button handlers, so a flag-driven run
+is not a simulation of the UI - it is the UI, driven by something other than a mouse.
+
+The same pass also had to prove the **negative** cases, which is where the value is:
+
+- `--suite=this_does_not_exist` → exit 1, with the filter and the available suites named.
+- `--suite=battle_outcomes` → exit 0, 224 assertions, 1 of 1 suite.
+- A windowed run with no save present logs `main menu: continue offered` as unavailable.
+- The two-process restart check was re-run from scratch after the withdrawal changes.
 
 ---
 
@@ -457,11 +524,63 @@ keyword; adding a `class_name` script requires re-running `--import` to refresh 
 global class cache; and a function containing `await` must be awaited by its caller
 even when it returns a value.
 
+### 10.4 The Step 6.5 external audit — seven defects
+
+An external review of Steps 0–6 reported seven defects. All are fixed with regression
+coverage. They are listed together because the pattern matters more than any one of
+them: **six of the seven were silent.** Nothing crashed, nothing logged an error, and
+the game looked like it was working. They were only visible by asking what the numbers
+in the campaign *should* have been and comparing.
+
+| # | What was wrong | Why it was silent | Now guarded by |
+| --- | --- | --- | --- |
+| 1 | Retreating from a battlefield still ran the survivor path: participation XP, survived-battle XP, `battles_survived`, survivor history. Enter, Retreat, repeat — a risk-free farming loop. | The screen said `WITHDREW`, which is what the player expects to see. The progression was invisible. | `test_battle_outcomes.gd` — including a deliberate six-cycle attempt to farm the loop |
+| 2 | `step()` finished the battle on timeout and then processed the rest of the same step, so units could still move, strike, take damage and die after the end. | Only the *last* step of an undecided battle, so it looked like ordinary end-of-fight noise. | `test_battle_outcomes.gd` — HP and positions frozen, no hit/death events, later steps inert |
+| 3 | Travel pace used the roster size, so a party that had lost most of its strength still marched at full-company speed. The HUD showed roster-vs-capacity while recruitment counted the living — `24 / 24` while replacements were still offered. | Slower travel is not "wrong" in any way the player can see; they just never arrive faster after a disaster. | `test_party_semantics.gd` — including "same active force, more graves, same pace" |
+| 4 | `peek_metadata()` assumed `player_party` was already a dictionary, so the exact legacy save the v0 migration exists to handle errored in the main menu before Continue was pressed. | Nobody had a legacy save to test with. The migration was correct and unreachable. | `test_persistence.gd` — current, legacy, corrupt, missing and too-new saves |
+| 5 | The Step 5 end-to-end test queued a **second** `battle_results` transition with no payload, replacing the real one. The screen fell back to "No battle result was passed to this screen". | The test passed. It confirmed the scene existed, which is all it actually checked. | `test_e2e_loop.gd` — real payload against the campaign chronicle and the rendered text |
+| 6 | A `--suite=` filter matching nothing produced a zero-suite run that passed. | Zero failures reads as a clean run. | `test_runner_contract.gd`, plus a direct run of a bogus filter |
+| 7 | A suite that aborted mid-run still reported `N assertions, 0 failures` and passed. | The assertions it managed to run genuinely did pass. | `test_runner_contract.gd` against deliberately malformed fixtures |
+
+**Also found during the pass, not on the audit list:** the restart check looked up its
+battle with `last_battle_summary()`, which stopped meaning "the battle we care about"
+as soon as a second fight was on the record. The failures were loud, but the
+assumption — that the entry you want is the last one — is false for any campaign that
+has fought more than once.
+
+**The one worth dwelling on is #7**, because the audit explicitly said not to assume
+the answer. It was measured instead, with a throwaway probe that recorded three
+assertions and then read past the end of an empty array:
+
+```
+SCRIPT ERROR: Out of bounds get index '3' (on base: 'Array')
+PROBE: await run() RETURNED
+PROBE: checks=3  failures=0  completed=false
+```
+
+So: control **does** return to the awaiting caller, the suite comes back looking
+perfectly healthy, and a runner checking only the failure count calls it a pass. The
+completion marker survived the abort because it is a statement the aborted function
+never reaches. That is now the completion contract, and `test_runner_contract.gd`
+keeps it honest.
+
+Two lessons worth carrying forward:
+
+1. **A test that only proves a scene loaded is not a test of what reached it.** #5 is
+   the general shape of #7: both were tests that passed while verifying nothing, and
+   both were worse than no test, because they converted "I did not check" into "I
+   checked and it is fine."
+2. **Ask what the number should be, not whether the number looks reasonable.** Bugs 1
+   and 3 were both a wrong quantity used consistently, and the only way to see either
+   was to compute the correct value independently and compare.
+
 ---
 
 ## 11. What is *not* implemented
 
-The honest list of gaps.
+The honest list of gaps. **Step 6.5 did not close any of these** — it was a hardening
+pass over what already existed, and it deliberately added no gameplay. The list below
+is unchanged from the end of Step 6, plus one clarifying note.
 
 **Combat depth**
 
@@ -524,8 +643,13 @@ The honest list of gaps.
 | D-027 | Balance is asserted as a range at both ends, and printed | A test that reports what the game currently *feels like*, not just whether the code runs |
 | D-030 | Persistence is proven across two processes | A same-process round-trip can pass while the game cannot actually be reopened |
 | D-031 | A save from a newer build is refused, not read | Reading it anyway silently discards what it does not understand, which is the worst player outcome |
+| D-033 | A withdrawal is its own outcome, with its own progression rules | Anything less is a risk-free XP loop; the rules live in one place so they cannot drift from the label |
+| D-034 | Roster membership and active force are separate quantities | Two numbers describe one party once anyone dies, and using the wrong one fails quietly |
+| D-036 | A suite must reach its completion marker to pass | Verified, not assumed: an aborted suite returns looking healthy with `N assertions, 0 failures` |
+| D-039 | Tests wait for transitions; they never cause them | A second transition replaces the first payload, so the test proves nothing while looking thorough |
 
-Decisions D-006 to D-032 are recorded in full in `docs/DECISIONS.md`.
+Decisions D-006 to D-032 are recorded in full in `docs/DECISIONS.md`, along with
+D-033 to D-040 from the Step 6.5 remediation.
 
 ---
 
@@ -570,6 +694,19 @@ already exists:
    it drive fleeing, or affect combat rolls, or both?
 5. **Where the prototype's seams show.** Which of §11's gaps are load-bearing for the
    game's identity and which are genuinely deferrable?
+6. **Withdrawal is now strict, but is it strict enough — or too strict?** It pays
+   nothing but kills, and does not count as a battle survived. That closes the farming
+   loop. It also means a player who makes a genuinely sensible tactical decision — pull
+   out of a fight going badly, keep the army alive — gains nothing at all for it. Should
+   there be *some* reward for a withdrawal that preserved the force, that is not
+   farmable? The tension is real and unresolved.
+7. **Does the party-capacity rule want a maximum, or a soft cost?** Only the living
+   count against `max_party_size`, so losses free slots. The alternative is that a
+   roster has a hard ceiling regardless, which makes deaths permanent in a second way.
+
+These were written before the Step 6.5 audit, which addressed none of them directly.
+Item 6 is new, and is a direct consequence of that pass: closing the farming exploit
+also removed a reward that a careful player might reasonably have expected.
 
 ---
 

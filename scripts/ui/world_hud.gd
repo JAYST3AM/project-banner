@@ -161,9 +161,13 @@ func refresh() -> void:
 	_subtitle.text = "World seed %d  |  %s" % [_state.campaign_seed, _state.player_party.display_name]
 	_set_stat("Gold", "%d" % _state.player_gold)
 
-	var party_size := _state.player_party.size()
+	var active := _state.active_member_count(_state.player_party)
 	var max_party := _config.get_int("campaign.max_party_size", 24)
-	_set_stat("Party", "%d / %d" % [party_size, max_party])
+	var lost := _state.fallen_member_count(_state.player_party)
+	var party_text := "%d / %d active" % [active, max_party]
+	if lost > 0:
+		party_text += "   (%d lost)" % lost
+	_set_stat("Party", party_text)
 	_set_stat("Date", _state.clock.full_string())
 	_set_stat("Speed", _state.clock.speed_name())
 
@@ -201,6 +205,16 @@ func _set_stat(stat_name: String, text: String) -> void:
 	var value: Label = _stat_values.get(stat_name, null)
 	if value != null:
 		value.text = text
+
+
+## The text currently shown for one statistic, or "" if there is no such statistic.
+##
+## Read-only accessor for the tests: it lets the party-capacity wording be asserted
+## directly rather than inferred from a screenshot, and it cannot change what the HUD
+## displays.
+func stat_text(stat_name: String) -> String:
+	var value: Label = _stat_values.get(stat_name, null)
+	return value.text if value != null else ""
 
 
 func _on_speed_pressed(speed_name: String) -> void:

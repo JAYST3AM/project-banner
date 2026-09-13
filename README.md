@@ -49,10 +49,21 @@ Where the risk actually lives, and where the interesting reading is:
 | `scripts/core/campaign_state.gd` | the persistence root; ownership rules live here |
 | `scripts/units/recruitment_service.gd` | the one transaction that adds a soldier to the party |
 | `tests/test_combat.gd` | includes the balance assertion that caught a silently broken melee system |
+| `tests/test_battle_outcomes.gd` | the four battle outcomes, and a deliberate attempt to farm the retreat loop |
+| `tests/test_runner_contract.gd` | the runner testing itself against deliberately broken suites |
+
+Two distinctions are easy to get wrong, and both fail quietly:
+
+- **`Party.size()` is the historical roster; `active_member_count()` is the force.**
+  The dead are kept on purpose, so the two diverge the moment anyone dies. Travel
+  pace, party capacity, encounter strength and every strength display use the force.
+- **A withdrawal is not a battle.** It records `battles_fought`, pays XP for kills
+  actually made and nothing else, and does not touch `battles_survived`. Otherwise
+  enter-fight-press-Retreat is a risk-free progression loop.
 
 Verification is the point of this repository. If you change something, the claim to
 check is not "it compiles" but that
-`tests/` still reports `1207 assertions, 0 failures, 8 of 8 suites` and that the
+`tests/` still reports `1557 assertions, 0 failures, 11 of 11 suites` and that the
 two-process restart check still passes.
 
 ## Documentation
