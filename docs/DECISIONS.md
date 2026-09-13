@@ -2062,18 +2062,36 @@ would be several times cheaper. Five exact implementations of that idea were wri
 measured, in a micro-benchmark built for the purpose (`scripts/dev/search_bench.gd`) and in
 live battles:
 
-Each was measured twice: once in the micro-benchmark, on the same twenty thousand queries at
-the same density, and once in a live battle, by running the whole realistic sweep on that
-implementation and reading the target phase out of the profile. Four of the five were run in
-battle; all five were run in the benchmark.
+Four of the five were run in a live battle, by running the whole realistic sweep on that
+implementation and reading the target phase out of the profile. The benchmark was used
+differently and more narrowly: to isolate *why* the shipped path is cheap, not to score each
+candidate - the in-grid method kept the name `nearest_hostile` through every rewrite, so no saved
+benchmark log attributes a figure to a named candidate, and the earlier forms were measured in
+console runs that were not saved. What the saved logs do contain is the shipped path and its
+isolates:
 
-| implementation | shape | micro-benchmark | live battle, 20K target phase |
-| --- | --- | ---: | ---: |
-| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 1.5x - 2.6x | **2.64x** (1,638.1 ms) |
-| row walk, index order | rectangle pass with per-row reach windows | 1.9x | **3.20x** (1,988.0 ms) |
-| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.8x - 2.1x | **2.82x** (1,749.2 ms) |
-| rectangle walk with a cell bound | one distance test per cell before its bucket | 2.3x | not run |
-| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.3x | **3.73x** (2,318.4 ms) |
+| saved benchmark figure | log |
+| --- | ---: |
+| the whole ladder's look, at approach and in contact | **46 - 64 us** (`bench_iso.txt`, `bench_final_contact.txt`) |
+| one radius-32 box walked with no candidate list | **226 - 235 us** |
+| one box of the new walk, alone | **277 - 308 us** |
+| the ladder's second rung collected and scanned flat | **314 - 344 us** |
+
+**The battle column is what the milestone decided on, and every figure in it is in a saved log:**
+
+| implementation | shape | live battle, 20K target phase |
+| --- | --- | ---: |
+| Chebyshev ring walk | cells opened ring by ring outward from the soldier | **2.64x** (1,638.1 ms) |
+| row walk, index order | rectangle pass with per-row reach windows | **3.20x** (1,988.0 ms) |
+| row walk, nearest rows first | the same, rows and columns outward from the soldier | **2.82x** (1,749.2 ms) |
+| rectangle walk with a cell bound | one distance test per cell before its bucket | not run in battle |
+| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | **3.73x** (2,318.4 ms) |
+
+The per-candidate benchmark ratios quoted in this milestone's working notes (1.5x - 2.6x, 1.9x,
+1.8x - 2.1x, 2.3x, 3.3x) are **not restated here**: four of the five came from console runs whose
+output was not kept, and the fifth describes a walk whose isolate was timed under a different
+name. They pointed the milestone in the right direction and they agree with the battle column, but
+they cannot be re-read, and a figure that cannot be re-read is not evidence.
 
 **The battle column is quoted against one reference**: the ladder's 621.1 ms target phase at
 twenty thousand soldiers, measured in the same session, on the same build, with the same matched

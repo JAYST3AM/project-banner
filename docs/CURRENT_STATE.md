@@ -1476,13 +1476,22 @@ Each was designed to inspect less than the ladder and stop as soon as no unopene
 hold a better answer. Each is exact - the micro-benchmark checks the answer against the ladder's
 on every query point and reports disagreements, and reported none.
 
-| implementation | shape | micro-benchmark | live battle, 20K target phase |
-| --- | --- | ---: | ---: |
-| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 1.5x - 2.6x | **2.64x** |
-| row walk, index order | rectangle pass with per-row reach windows | 1.9x | **3.20x** |
-| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.8x - 2.1x | **2.82x** |
-| rectangle walk with a cell bound | one distance test per cell before its bucket | 2.3x | not run |
-| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.3x | **3.73x** |
+| implementation | shape | live battle, 20K target phase |
+| --- | --- | ---: |
+| Chebyshev ring walk | cells opened ring by ring outward from the soldier | **2.64x** |
+| row walk, index order | rectangle pass with per-row reach windows | **3.20x** |
+| row walk, nearest rows first | the same, rows and columns outward from the soldier | **2.82x** |
+| rectangle walk with a cell bound | one distance test per cell before its bucket | not run in battle |
+| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | **3.73x** |
+
+These are battle figures, quoted against one saved reference run, and they are the ones the
+milestone decided on. The benchmark was used to isolate *why* the shipped look is cheap rather
+than to score each candidate: the in-grid method kept one name through every rewrite, so no saved
+log attributes a benchmark figure to a named candidate, and the per-candidate ratios in the
+working notes came from console runs that were not kept. What the saved benchmark logs hold is
+the shipped path and its isolates - the whole look at 46-64 us, a radius-32 box with no list at
+226-235, one box of the new walk at 277-308, and the ladder's second rung collected and scanned
+flat at 314-344.
 
 The battle column is quoted against one reference - the ladder's 621.1 ms target phase at twenty
 thousand soldiers, same session, same build, matched windows - and a second ladder run that
