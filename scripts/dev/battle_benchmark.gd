@@ -629,6 +629,7 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 		var target_report: Dictionary = run.get("target_report", {})
 		target_report["units"] = count
 		target_report["ticks"] = int(run["ticks"])
+		target_report["phase_ms_per_tick"] = target
 		targets.append(target_report)
 		var stats: Dictionary = run.get("spike_stats", {})
 		if not stats.is_empty():
@@ -1144,6 +1145,123 @@ func _print_target_table(targets: Array[Dictionary]) -> void:
 				int(report["units"]), float(report["latency_avg_ticks"]),
 				int(report["latency_worst_ticks"]), samples, over,
 				100.0 * float(samples - over) / float(samples)])
+	_print_search_shape_table(targets)
+
+
+## Step 7.6. What one automatic search actually costs: how many grid queries a look makes,
+## how much ground those queries walk, how much of that ground one search walks twice, how
+## many candidates it measures, and how the cost splits between the first rung and the
+## widening. Development counters, printed only when the run was profiled.
+func _print_search_shape_table(targets: Array[Dictionary]) -> void:
+	var shaped: Array[Dictionary] = []
+	for report in targets:
+		if not Dictionary(report.get("search_shape", {})).is_empty():
+			shaped.append(report)
+	if shaped.is_empty():
+		return
+	print("")
+	print("=== SEARCH SHAPE: what one automatic look costs (Step 7.6) ===")
+	print("%7s | %7s | %10s | %9s | %9s | %8s | %10s | %8s | %7s | %7s | %7s" % [
+		"units", "queries", "cells/look", "unique", "repeated", "rep %", "cand/look", "escal %", "hit1 %", "deep %", "empty %"])
+	print("-".repeat(104))
+	for report in shaped:
+		var shape: Dictionary = report["search_shape"]
+		var cells: Dictionary = shape["cells"]
+		var cand: Dictionary = shape["candidates"]
+		var searches := maxf(1.0, float(report["searches"]))
+		var found_first := float(report["successful_searches"]) - float(shape["deep_hits"])
+		print("%7d | %7.2f | %10.1f | %9.1f | %9.1f | %7.1f%% | %10.2f | %7.1f%% | %6.1f%% | %6.1f%% | %6.1f%%" % [
+			int(report["units"]),
+			float(shape["grid_queries_per_search"]),
+			float(cells["avg"]),
+			float(shape["cells_unique_avg"]),
+			float(shape["cells_repeated_avg"]),
+			float(shape["cells_repeated_pct"]),
+			float(cand["avg"]),
+			100.0 * float(shape["searches_escalated"]) / searches,
+			100.0 * maxf(0.0, found_first) / searches,
+			100.0 * float(shape["deep_hits"]) / searches,
+			100.0 * float(report["empty_searches"]) / searches])
+		if int(shape["searches_mixed_walk"]) > 0:
+			print("        (%d of %d looks walked the occupied list rather than their box -" % [
+				int(shape["searches_mixed_walk"]), int(report["searches"])])
+			print("         a packed field, where that is the cheaper walk. Their cells are")
+			print("         counted in 'cells/look' and excluded from 'unique'/'repeated'.)")
+	print("-".repeat(104))
+	print("  'queries' is grid queries per look: one per rung of the escalation ladder, so")
+	print("  'hit1' is the looks answered by the first radius, 'deep' the looks answered only")
+	print("  after widening, and 'empty' the looks that found nobody at any radius. The three")
+	print("  partition the looks, and it is the empty one that a widening search cannot end")
+	print("  early: proving there is nobody out there costs the whole box, whichever way it")
+	print("  is traversed.")
+	print("  1.00 means the first radius found somebody and 2.00 means every look widened.")
+	print("  'unique' is the ground the widest rung covers; 'repeated' is ground one look")
+	print("  walked twice because the second rung is a superset of the first.")
+	print("")
+	print("%7s | %9s | %9s | %9s | %9s | %9s | %9s | %9s" % [
+		"units", "cells p50", "cells p95", "cells p99", "cells max", "cand p95", "cand p99", "dist p50"])
+	print("-".repeat(104))
+	for report in shaped:
+		var shape: Dictionary = report["search_shape"]
+		var cells: Dictionary = shape["cells"]
+		var cand: Dictionary = shape["candidates"]
+		var reached: Dictionary = shape["reached"]
+		print("%7d | %9.0f | %9.0f | %9.0f | %9.0f | %9.0f | %9.0f | %9.2f" % [
+			int(report["units"]), float(cells["p50"]), float(cells["p95"]), float(cells["p99"]),
+			float(cells["max"]), float(cand["p95"]), float(cand["p99"]), float(reached["p50"])])
+	print("-".repeat(104))
+	print("  'dist' is the distance to the opponent a look returned, in world units. The")
+	print("  radius it was found inside is the rung count; the distance says how much of the")
+	print("  ladder was needed rather than merely how far it was allowed to reach.")
+	print("")
+	print("%7s | %11s | %11s | %11s | %11s | %11s" % [
+		"units", "grid us/tick", "1st rung us", "deep us", "phase ms/tick", "grid share"])
+	print("-".repeat(104))
+	for report in shaped:
+		var shape: Dictionary = report["search_shape"]
+		var ticks := maxf(1.0, float(report.get("ticks", 1)))
+		var phase: float = float(report.get("phase_ms_per_tick", 0.0))
+		var per_tick_us := float(shape["total_usec_grid"]) / ticks
+		var share := 100.0 * (per_tick_us / 1000.0) / maxf(0.0001, phase) if phase > 0.0 else 0.0
+		print("%7d | %11.1f | %11.1f | %11.1f | %11.2f | %10.1f%%" % [
+			int(report["units"]), per_tick_us, float(shape["avg_usec_first_rung"]),
+			float(shape["avg_usec_deep_rungs"]), phase, share])
+	print("-".repeat(104))
+	print("  'grid us/tick' is time inside the grid query for one tick, summed over rungs and")
+	print("  looks; '1st rung' and 'deep' are per look. The share is of the measured target")
+	print("  phase, which says whether the search itself or the work around it is the cost.")
+	# Where the phase actually goes. The grid query is the part Step 7.6 changes; the rest is
+	# the target loop's own bookkeeping, and the size of the rest is what says whether a
+	# faster query can move the phase at all.
+	print("")
+	print("%7s | %10s | %10s | %10s | %10s | %10s | %11s" % [
+		"units", "retained", "proof", "grid", "improve", "focus", "phase ms/tick"])
+	print("-".repeat(96))
+	for report in shaped:
+		var shape: Dictionary = report["search_shape"]
+		var ticks_s := maxf(1.0, float(report.get("ticks", 1)))
+		var grid_us := float(shape.get("total_usec_grid", 0)) / ticks_s
+		var retained_us := float(shape.get("usec_retained", 0)) / ticks_s
+		var proof_us := float(shape.get("usec_proof", 0)) / ticks_s
+		var improve_us := float(shape.get("usec_improve", 0)) / ticks_s
+		var focus_us := float(shape.get("usec_focus", 0)) / ticks_s
+		print("%7d | %9.1fus | %9.1fus | %9.1fus | %9.1fus | %9.1fus | %10.2fms" % [
+			int(report["units"]), retained_us, proof_us, grid_us, improve_us, focus_us,
+			float(report.get("phase_ms_per_tick", 0.0))])
+		var accounted := (retained_us + proof_us + grid_us + improve_us + focus_us) / 1000.0
+		var phase := float(report.get("phase_ms_per_tick", 0.0))
+		print("          of %.2f ms: %.1f%% timed, %.2f ms in the target loop around them" % [
+			phase, 100.0 * accounted / maxf(0.0001, phase), maxf(0.0, phase - accounted)])
+	print("-".repeat(96))
+	print("  'retained' is deciding whether a remembered opponent is still worth keeping,")
+	print("  'proof' is deciding whether a look is worth making, 'improve' is the hysteresis")
+	print("  and the store, and 'focus' is answering with the formation when the look is over")
+	print("  or was never due. Only 'grid' is a query of the spatial index.")
+	for report in shaped:
+		var shape: Dictionary = report["search_shape"]
+		if bool(shape.get("samples_capped", false)):
+			print("  NOTE: %d soldiers - the per-search samples hit their cap, so the" % int(report["units"]))
+			print("        percentiles above describe the first %d searches only." % int(shape["samples"]))
 
 
 ## The frame-spike analysis: average, worst and tail for the phases that matter. A system
@@ -1213,6 +1331,9 @@ func _print_scaled_profile(options: Dictionary) -> void:
 		var report: Dictionary = run.get("target_report", {})
 		report["units"] = count
 		report["ticks"] = int(run["ticks"])
+		# The measured target phase, so the search-shape table can say what share of it the
+		# grid query itself is rather than leaving the reader to guess.
+		report["phase_ms_per_tick"] = target
 		targets.append(report)
 		var focus_stats: Dictionary = run.get("focus_report", {})
 		if not focus_stats.is_empty():

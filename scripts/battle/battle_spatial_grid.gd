@@ -47,6 +47,37 @@ var field_size: Vector2 = Vector2(100.0, 60.0)
 ## invisible wall, which is exactly the failure the boundary tests exist to catch.
 var query_margin: float = 0.0
 
+## ---------- development-only cell counters (Step 7.6) ----------------------
+##
+## [b]What a phase clock cannot say.[/b] Step 7.6's question is how a search costs what it
+## costs, and the only honest place to count the cells a search walked is here, where they
+## are walked. The counters separate the two things a widening search can waste: cells it
+## read at all, and cells it read again because a rung of the ladder had already been
+## through them.
+##
+## A single query visits each of its own cells once by construction, so nothing here counts
+## repeats inside one query - the repetition the milestone asks about happens *between* the
+## rungs of one ladder, and the caller derives it from the boxes it asked for (subtract the
+## widest box from the sum of the rungs' reads). The grid reports what it read; the
+## simulator says what that means.
+##
+## Every counter is incremented behind [member dev_profile], which the simulator sets from
+## its own profiling flag, so a real battle pays nothing for being explained.
+var dev_profile: bool = false
+## Cells read by the most recent query, and by every query since the counters were cleared.
+var dev_last_read: int = 0
+var dev_cells_read: int = 0
+## The box span of the most recent query: how many cells it would read if it walked its
+## box. Nested boxes make this the size of the union across the rungs of one ladder.
+var dev_last_span: int = 0
+## Queries that walked their box, and queries that walked the occupied list instead.
+var dev_box_walks: int = 0
+var dev_occupied_walks: int = 0
+## Units distance-tested by the most recent query, and by every query since the counters were
+## cleared. The figure that says whether a search is paying to measure soldiers it discards.
+var dev_last_candidates: int = 0
+var dev_candidates: int = 0
+
 var _head: PackedInt32Array = PackedInt32Array()
 var _next: PackedInt32Array = PackedInt32Array()
 ## Bucket tails, so a rebuild appends to the back of each bucket in one pass without
@@ -199,6 +230,9 @@ func collect_within(position: Vector2, radius: float, side: String, out: Array[B
 	var max_row := _clamp_row(int(floor((position.y + reach) / cell_size)))
 	var span := (max_col - min_col + 1) * (max_row - min_row + 1)
 	var wanted := _side_bit_of(side) if not side.is_empty() else 0
+	if dev_profile:
+		dev_last_span = span
+		dev_last_read = 0
 
 	# Two ways to walk the same set of cells, and whichever visits fewer of them wins.
 	# When a search covers most of a battlefield that is mostly empty - which is exactly
@@ -208,6 +242,8 @@ func collect_within(position: Vector2, radius: float, side: String, out: Array[B
 	# soldiers who exist. Both visit the same cells, in the same order, so this changes
 	# the cost and nothing else.
 	if span > _occupied.size():
+		if dev_profile:
+			dev_occupied_walks += 1
 		for cell in _occupied:
 			if wanted != 0 and (_cell_mask[cell] & wanted) == 0:
 				continue
@@ -215,6 +251,9 @@ func collect_within(position: Vector2, radius: float, side: String, out: Array[B
 			var col := cell - row * cols
 			if col < min_col or col > max_col or row < min_row or row > max_row:
 				continue
+			if dev_profile:
+				dev_last_read += 1
+				dev_cells_read += 1
 			var slot := _head[cell]
 			while slot >= 0:
 				var unit := _slot_units[slot]
@@ -223,6 +262,13 @@ func collect_within(position: Vector2, radius: float, side: String, out: Array[B
 				slot = _next[slot]
 		return
 
+	if dev_profile:
+		# The box branch reads every cell in the box, including the ones its own side
+		# mask skips: the mask is a read. Counted arithmetically rather than per cell,
+		# because a counter inside this loop would cost as much as the loop.
+		dev_box_walks += 1
+		dev_last_read = span
+		dev_cells_read += span
 	for row in range(min_row, max_row + 1):
 		var base := row * cols
 		for col in range(min_col, max_col + 1):

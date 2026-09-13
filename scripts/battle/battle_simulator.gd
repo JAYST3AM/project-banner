@@ -434,6 +434,78 @@ var _foc_scans_this_tick: int = 0
 var _foc_units_this_tick: int = 0
 var _foc_changes_this_tick: int = 0
 
+## ---------- development-only search-shape counters (Step 7.6) --------------
+##
+## [b]Measurement before change, for the third milestone running.[/b] Step 7.5's counters
+## said automatic target acquisition costs 575 ms a tick at twenty thousand soldiers. They
+## could not say what that money buys, and the phase is only asked on cadence - so the cost
+## is not how many questions are asked. It is what one question costs, and only the search
+## itself can answer that.
+##
+## Two figures decide the milestone. Cells inspected against cells *unique* to one search:
+## a search paying mostly for ground it has already covered is one problem. Candidates
+## measured against candidates found on the first rung: a search paying mostly to measure
+## soldiers it then discards is a different problem, with a different fix. The counters
+## exist to tell those apart before either is optimised. See D-092.
+##
+## Every counter is incremented behind [member profile_enabled], so a real battle pays
+## nothing for being explained.
+var tgt_grid_queries: int = 0
+## Cells read across every rung, cells that the widest rung's box covers (the union, since
+## the boxes are nested), and the difference - ground walked twice by one search.
+var tgt_cells_inspected: int = 0
+var tgt_cells_unique: int = 0
+var tgt_cells_repeated: int = 0
+## Searches that needed a second rung, searches that ended on the ceiling rung, and searches
+## whose rungs did not all walk their box (an occupied-list walk reads only the soldiers who
+## exist, so the union arithmetic does not describe it and those searches are counted out
+## rather than folded in).
+var tgt_searches_escalated: int = 0
+var tgt_searches_at_ceiling: int = 0
+## Searches whose rungs all walked their box, whose cells the union arithmetic describes,
+## and searches that walked the occupied list instead - on a packed field the occupied list
+## is the cheaper walk and the box is the wrong description of what was read.
+var tgt_searches_clean: int = 0
+var tgt_searches_mixed_walk: int = 0
+var tgt_cells_clean: int = 0
+var tgt_cells_mixed: int = 0
+## Candidates the broadphase handed over, by rung. The first rung is the look a soldier makes
+## when it expects to find somebody nearby; the deep rungs are the widening.
+## Looks that widened and then found somebody at the wider radius. With the first-rung hits
+## and the empty looks these partition the searches, which is what says whether the widening
+## pays for itself or mostly proves emptiness.
+var tgt_deep_hits: int = 0
+var tgt_candidates_first_rung: int = 0
+var tgt_candidates_deep_rungs: int = 0
+## Time inside the grid query by rung, so "the widening costs the phase" is a measurement
+## rather than an inference from the cell counts.
+var tgt_usec_first_rung: int = 0
+var tgt_usec_deep_rungs: int = 0
+## Where the rest of the target phase goes. The grid query is only part of it - the phase
+## also decides whether a remembered opponent is still worth keeping, proves whether a look
+## is worth making, and answers with the formation when the look is over - and a milestone
+## that optimised the query without knowing the size of those is a milestone that optimises
+## the wrong thing. Each is timed behind the profile flag.
+var tgt_us_retained: int = 0
+var tgt_us_proof: int = 0
+var tgt_us_improve: int = 0
+var tgt_us_focus: int = 0
+## Searches that found nobody locally and were answered by formation focus, split by where
+## that answer actually came from. These partition with [member tgt_searches].
+var tgt_empty_to_focus: int = 0
+var tgt_empty_to_formation_focus: int = 0
+var tgt_empty_to_side_focus: int = 0
+## One sample per search, so the percentiles are exact rather than bucketed. Collected once
+## per search rather than once per cell, which is why the collection costs a fraction of a
+## per cent of the phase it describes.
+var tgt_search_cells_samples: PackedInt32Array = PackedInt32Array()
+var tgt_search_cand_samples: PackedInt32Array = PackedInt32Array()
+var tgt_search_result_dist: PackedFloat32Array = PackedFloat32Array()
+## A ceiling on those samples, so a long battle cannot grow them without bound. Reached only
+## by runs far longer than any benchmark, and the report says when it was reached.
+const TGT_SAMPLE_CAP := 400000
+var tgt_samples_capped: bool = false
+
 ## Set for the duration of one soldier's target resolution when the invalidation that
 ## made the search necessary was an urgent one. Consumed by the search that follows it in
 ## the same call, and cleared before every resolution, so it never leaks between soldiers.
@@ -932,6 +1004,32 @@ func reset_profile() -> void:
 	tgt_latency_samples = 0
 	tgt_latency_over_cadence = 0
 	tgt_soldier_ticks = 0
+	tgt_grid_queries = 0
+	tgt_cells_inspected = 0
+	tgt_cells_unique = 0
+	tgt_cells_repeated = 0
+	tgt_searches_escalated = 0
+	tgt_searches_at_ceiling = 0
+	tgt_searches_clean = 0
+	tgt_searches_mixed_walk = 0
+	tgt_deep_hits = 0
+	tgt_cells_clean = 0
+	tgt_cells_mixed = 0
+	tgt_candidates_first_rung = 0
+	tgt_candidates_deep_rungs = 0
+	tgt_usec_first_rung = 0
+	tgt_usec_deep_rungs = 0
+	tgt_us_retained = 0
+	tgt_us_proof = 0
+	tgt_us_improve = 0
+	tgt_us_focus = 0
+	tgt_empty_to_focus = 0
+	tgt_empty_to_formation_focus = 0
+	tgt_empty_to_side_focus = 0
+	tgt_search_cells_samples = PackedInt32Array()
+	tgt_search_cand_samples = PackedInt32Array()
+	tgt_search_result_dist = PackedFloat32Array()
+	tgt_samples_capped = false
 	foc_passes = 0
 	foc_evaluations = 0
 	foc_scans_from_formations = 0
@@ -1080,7 +1178,84 @@ func target_report() -> Dictionary:
 	for count in tgt_rung_hits:
 		rungs.append(count)
 	report["rung_hits"] = rungs
+	report["search_shape"] = _search_shape_report()
 	return report
+
+
+## The shape of the searches a battle actually ran: how much ground each one walked, how
+## many candidates it measured, where the answers were found, and how much of the cost was
+## the widening rung rather than the first look.
+##
+## Development-only. The percentiles are exact rather than bucketed - one sample per search
+## is cheap enough to keep, and a mean over a million cheap looks and a few thousand wide
+## ones describes neither of them.
+func _search_shape_report() -> Dictionary:
+	var searches := maxf(1.0, float(tgt_searches))
+	var cells_sorted := Array(tgt_search_cells_samples)
+	cells_sorted.sort()
+	var cand_sorted := Array(tgt_search_cand_samples)
+	cand_sorted.sort()
+	var dist_sorted := Array(tgt_search_result_dist)
+	dist_sorted.sort()
+	var cells := {
+		"avg": float(tgt_cells_inspected) / searches,
+		"p50": _percentile(cells_sorted, 0.50) if not cells_sorted.is_empty() else 0.0,
+		"p95": _percentile(cells_sorted, 0.95) if not cells_sorted.is_empty() else 0.0,
+		"p99": _percentile(cells_sorted, 0.99) if not cells_sorted.is_empty() else 0.0,
+		"max": float(cells_sorted[cells_sorted.size() - 1]) if not cells_sorted.is_empty() else 0.0,
+	}
+	var candidates := {
+		"avg": float(tgt_candidates_first_rung + tgt_candidates_deep_rungs) / searches,
+		"p50": _percentile(cand_sorted, 0.50) if not cand_sorted.is_empty() else 0.0,
+		"p95": _percentile(cand_sorted, 0.95) if not cand_sorted.is_empty() else 0.0,
+		"p99": _percentile(cand_sorted, 0.99) if not cand_sorted.is_empty() else 0.0,
+		"max": float(cand_sorted[cand_sorted.size() - 1]) if not cand_sorted.is_empty() else 0.0,
+	}
+	var reached := {
+		"avg": float(tgt_search_result_dist.size()) / searches,
+		"p50": _percentile(dist_sorted, 0.50) if not dist_sorted.is_empty() else 0.0,
+		"p95": _percentile(dist_sorted, 0.95) if not dist_sorted.is_empty() else 0.0,
+		"p99": _percentile(dist_sorted, 0.99) if not dist_sorted.is_empty() else 0.0,
+		"max": float(dist_sorted[dist_sorted.size() - 1]) if not dist_sorted.is_empty() else 0.0,
+	}
+	return {
+		"grid_queries": tgt_grid_queries,
+		"grid_queries_per_search": float(tgt_grid_queries) / searches,
+		"cells_inspected": tgt_cells_inspected,
+		"cells_unique": tgt_cells_unique,
+		"cells_repeated": tgt_cells_repeated,
+		"cells_repeated_pct": 100.0 * float(tgt_cells_repeated) / maxf(1.0, float(tgt_cells_clean)),
+		"searches_clean": tgt_searches_clean,
+		"cells_clean": tgt_cells_clean,
+		"cells_mixed": tgt_cells_mixed,
+		"cells_clean_avg": float(tgt_cells_clean) / maxf(1.0, float(tgt_searches_clean)),
+		"cells_unique_avg": float(tgt_cells_unique) / maxf(1.0, float(tgt_searches_clean)),
+		"cells_repeated_avg": float(tgt_cells_repeated) / maxf(1.0, float(tgt_searches_clean)),
+		"cells": cells,
+		"candidates": candidates,
+		"candidates_first_rung": tgt_candidates_first_rung,
+		"candidates_deep_rungs": tgt_candidates_deep_rungs,
+		"reached": reached,
+		"searches_escalated": tgt_searches_escalated,
+		"deep_hits": tgt_deep_hits,
+		"searches_at_ceiling": tgt_searches_at_ceiling,
+		"searches_mixed_walk": tgt_searches_mixed_walk,
+		"empty_to_focus": tgt_empty_to_focus,
+		"empty_to_formation_focus": tgt_empty_to_formation_focus,
+		"empty_to_side_focus": tgt_empty_to_side_focus,
+		"avg_usec_first_rung": float(tgt_usec_first_rung) / searches,
+		"avg_usec_deep_rungs": float(tgt_usec_deep_rungs) / searches,
+		"total_usec_grid": tgt_usec_first_rung + tgt_usec_deep_rungs,
+		"usec_retained": tgt_us_retained,
+		"usec_proof": tgt_us_proof,
+		"usec_improve": tgt_us_improve,
+		"usec_focus": tgt_us_focus,
+		"samples": tgt_search_cells_samples.size(),
+		"samples_capped": tgt_samples_capped,
+		"search_radius": target_search_radius,
+		"escalation": target_search_escalation,
+		"ceiling": target_search_max_radius,
+	}
 
 
 ## Everything the focus path counted since the last reset, with the derived figures the
@@ -1314,7 +1489,10 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 ## fighting does not have to ask the battlefield a question every tick. See D-080, D-085.
 func _resolve_target(unit: BattleUnit) -> BattleUnit:
 	_search_is_immediate = false
+	var retained_mark := Time.get_ticks_usec() if profile_enabled else 0
 	var retained := _retained_target(unit)
+	if profile_enabled:
+		tgt_us_retained += Time.get_ticks_usec() - retained_mark
 	if retained != null:
 		var reach := unit.attack_range
 		if unit.position.distance_squared_to(retained.position) <= reach * reach:
@@ -1328,9 +1506,12 @@ func _resolve_target(unit: BattleUnit) -> BattleUnit:
 	elif tick_index < unit.next_search_tick:
 		# Nothing remembered, and it is not this soldier's turn to look. The cheap
 		# answer is the one its body already has.
+		var cheap_mark := Time.get_ticks_usec() if profile_enabled else 0
+		var cheap := _focus_target(unit)
 		if profile_enabled:
 			tgt_focus_fallbacks += 1
-		return _focus_target(unit)
+			tgt_us_focus += Time.get_ticks_usec() - cheap_mark
+		return cheap
 	return _search_for_target(unit, retained)
 
 
@@ -1396,7 +1577,11 @@ func _search_for_target(unit: BattleUnit, retained: BattleUnit) -> BattleUnit:
 	# The cheapest look of all is the one that is not worth making. A soldier whose body's
 	# nearest enemy is further away than this soldier could see cannot find anybody by
 	# looking, so it is pointed at the fighting instead and the battlefield is not asked.
-	if _focus_look_finds_nobody(unit):
+	var proof_mark := Time.get_ticks_usec() if profile_enabled else 0
+	var nothing_to_find := _focus_look_finds_nobody(unit)
+	if profile_enabled:
+		tgt_us_proof += Time.get_ticks_usec() - proof_mark
+	if nothing_to_find:
 		if profile_enabled:
 			tgt_focus_fallbacks += 1
 			tgt_focus_proven += 1
@@ -1415,9 +1600,12 @@ func _search_for_target(unit: BattleUnit, retained: BattleUnit) -> BattleUnit:
 
 	var local := _nearest_local_enemy(unit)
 	if local != null:
+		var improve_mark := Time.get_ticks_usec() if profile_enabled else 0
 		if retained != null and not _clear_improvement(unit, retained, local):
 			local = retained
 		_store_target(unit, local)
+		if profile_enabled:
+			tgt_us_improve += Time.get_ticks_usec() - improve_mark
 		if profile_enabled:
 			tgt_successful_searches += 1
 		return local
@@ -1435,7 +1623,20 @@ func _search_for_target(unit: BattleUnit, retained: BattleUnit) -> BattleUnit:
 	# a search - the two counters partition soldier-ticks between them, and a tick that
 	# looked is a tick that looked, whatever it found.
 	unit.auto_target_id = -1
-	return _focus_target(unit)
+	var focus_mark := Time.get_ticks_usec() if profile_enabled else 0
+	var pointed := _focus_target(unit)
+	if profile_enabled:
+		tgt_us_focus += Time.get_ticks_usec() - focus_mark
+		# Which layer answered the soldier that found nobody. Both are formation-level
+		# awareness; the split says whether a body's own focus was enough or whether the
+		# side had to be asked, which is the difference between the hierarchy working and
+		# it being bypassed by a loose soldier.
+		tgt_empty_to_focus += 1
+		if unit.formation_ref != null and _focus_unit_of(unit.formation_ref) == pointed:
+			tgt_empty_to_formation_focus += 1
+		else:
+			tgt_empty_to_side_focus += 1
+	return pointed
 
 
 ## Whether a freshly found enemy is enough of an improvement to be worth abandoning the
@@ -1534,8 +1735,20 @@ func _focus_look_finds_nobody(unit: BattleUnit) -> bool:
 
 
 ## The nearest living enemy inside this soldier's own awareness bound, or null when there
-## is nobody local.
+## is nobody local: a ladder of box queries outward from the soldier, stopping at the first
+## radius that holds anybody.
 ##
+## [b]Unchanged by Step 7.6, on measurement.[/b] That milestone set out to make this cheaper
+## and finished by leaving it alone: five exact re-implementations were written and every one
+## of them measured slower than this - a ring walk, an outward row walk, a row walk with an
+## exact reach, a rectangle walk with a cell-level bound, and a walk over a coarse block index
+## built for the purpose. The reason is in the interpreter rather than in the algorithms: a
+## bound test costs about 0.3 us and the empty cell it skips costs about 0.12 us to open and
+## dismiss, so pruning inside the loop loses to walking the rectangle. The ladder is cheap
+## because its first rung is small and answers most looks before the second rung is reached.
+## Its counters and the search-shape report below are what that conclusion rests on; the
+## micro-benchmark that measured the alternatives is scripts/dev/search_bench.gd and the
+## numbers are in D-094.
 ## Searched outward from the soldier rather than across the battlefield: a radius that
 ## comfortably exceeds anything anyone can currently reach, widening geometrically, and
 ## stopping the moment it finds anything at all. Because the search stops at the first
@@ -1554,15 +1767,39 @@ func _nearest_local_enemy(unit: BattleUnit) -> BattleUnit:
 	var ceiling := _search_ceiling_of(unit)
 	var radius := _search_radius_of(unit)
 	var rung := 0
+	# Step 7.6. One ladder's shape, accumulated per rung so that the first look and the
+	# widening can be told apart rather than averaged together. Every one of these is behind
+	# the profile flag, and the collection happens once per rung rather than once per cell.
+	var cells_here := 0
+	var union_span := 0
+	var candidates_first := 0
+	var candidates_deep := 0
+	var usec_first := 0
+	var usec_deep := 0
+	var mixed_walk := false
+	var best: BattleUnit = null
 	while true:
 		rung += 1
-		var best := _nearest_enemy_within(unit, enemy_side, radius)
+		var occupied_before := grid.dev_occupied_walks if profile_enabled else 0
+		var query_start := Time.get_ticks_usec() if profile_enabled else 0
+		best = _nearest_enemy_within(unit, enemy_side, radius)
 		if profile_enabled:
+			var spent := Time.get_ticks_usec() - query_start
+			if rung == 1:
+				candidates_first = _query_scratch.size()
+				usec_first = spent
+			else:
+				candidates_deep += _query_scratch.size()
+				usec_deep += spent
+			cells_here += grid.dev_last_read
+			union_span = grid.dev_last_span
+			if grid.dev_occupied_walks != occupied_before:
+				mixed_walk = true
 			if tgt_rung_hits.size() < rung:
 				tgt_rung_hits.resize(rung)
 			tgt_rung_hits[rung - 1] += 1
 		if best != null:
-			return best
+			break
 		var widened := minf(ceiling, radius * target_search_escalation)
 		# Two ways out, and both are needed: the ladder is done when it has reached its
 		# ceiling, and it is stuck when widening cannot widen any further. A ladder that
@@ -1570,9 +1807,60 @@ func _nearest_local_enemy(unit: BattleUnit) -> BattleUnit:
 		if radius >= ceiling or widened <= radius:
 			break
 		radius = widened
-	return null
+	if profile_enabled:
+		_record_search_shape(unit, best, rung, radius, ceiling, cells_here, union_span, candidates_first, candidates_deep, usec_first, usec_deep, mixed_walk)
+	return best
 
 
+## Record one ladder's shape. Called once per search, and only while profiling.
+##
+## The samples are appended rather than accumulated into a mean because the phase's shape is
+## the thing being investigated: a mean over a million cheap looks and a few thousand wide
+## ones describes neither, and the percentile is what says whether the widening is a rare
+## cost or the common case.
+func _record_search_shape(unit: BattleUnit, best: BattleUnit, rungs: int, last_radius: float, ceiling: float, cells: int, union_span: int, cand_first: int, cand_deep: int, usec_first: int, usec_deep: int, mixed_walk: bool) -> void:
+	tgt_grid_queries += rungs
+	tgt_cells_inspected += cells
+	if mixed_walk:
+		# A rung that walked the occupied list read only the cells that hold somebody, so
+		# the widest box is not the union of what the search read and the difference is not
+		# a repeat. Those searches are counted apart rather than folded in, because a
+		# repeated-cell figure that silently includes them would be wrong in the direction
+		# that flatters the milestone.
+		tgt_searches_mixed_walk += 1
+		tgt_cells_mixed += cells
+	else:
+		tgt_searches_clean += 1
+		tgt_cells_clean += cells
+		tgt_cells_unique += union_span
+		tgt_cells_repeated += maxi(0, cells - union_span)
+	tgt_candidates_first_rung += cand_first
+	tgt_candidates_deep_rungs += cand_deep
+	tgt_usec_first_rung += usec_first
+	tgt_usec_deep_rungs += usec_deep
+	if rungs > 1:
+		tgt_searches_escalated += 1
+		if best != null:
+			tgt_deep_hits += 1
+	if is_equal_approx(last_radius, ceiling):
+		tgt_searches_at_ceiling += 1
+	if tgt_search_cells_samples.size() >= TGT_SAMPLE_CAP or tgt_search_cand_samples.size() >= TGT_SAMPLE_CAP:
+		tgt_samples_capped = true
+	else:
+		tgt_search_cells_samples.append(cells)
+		tgt_search_cand_samples.append(cand_first + cand_deep)
+		if best != null:
+			tgt_search_result_dist.append(unit.position.distance_to(best.position))
+
+
+## The nearest living enemy inside this soldier's own awareness bound, or null when there
+## is nobody local.
+##
+## [b]One query, not a ladder.[/b] A ladder of radii computes the nearest enemy inside its
+## widest rung - the first rung that holds anybody contains the nearest, which is what makes
+## the old answer correct - and the grid can now be asked that question directly, once, with
+## each cell opened at most once and the walk stopping as soon as no unopened cell could hold
+## a better answer. Same answer, asked once. See D-094.
 ## The nearest living enemy to this soldier, or the enemy its body is pointed at when
 ## there is nobody within its own bound. This is the whole of the local search, and it is
 ## unchanged by Step 7.4: the milestone changed how often it is asked, never what it
@@ -2175,6 +2463,10 @@ func _nearest_enemy_within(unit: BattleUnit, enemy_side: String, radius: float) 
 func _rebuild_spatial(delta: float) -> void:
 	if grid == null:
 		return
+	# Step 7.6. The grid's own cell counters follow this simulator's profile flag, set once a
+	# tick rather than read per query, so a battle that is not being measured pays one
+	# comparison per tick for the counters it is not keeping.
+	grid.dev_profile = profile_enabled
 	# Terrain only ever slows a unit, so the fastest base speed bounds the step. The
 	# half-unit of slack absorbs the separation pushes that happen later in the tick.
 	grid.query_margin = _fastest_speed * absf(delta) + 0.5

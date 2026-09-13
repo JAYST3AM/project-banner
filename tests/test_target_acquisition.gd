@@ -681,14 +681,17 @@ func _test_a_wider_awareness_works_generically() -> void:
 	for i in 2:
 		simulator.step(TICK)
 
-	# Thirty-six units away: past the widest rung of the standard ladder, and well inside
-	# the far-sighted soldier's own search. Nothing about the unit's weapon is consulted -
-	# it says how far it can see, and the search goes that far.
+	# Thirty-six units away: past the ordinary soldier's bound, and well inside the
+	# far-sighted soldier's own search. Nothing about the unit's weapon is consulted - it
+	# says how far it can see, and the search goes that far.
 	equal(far_sighted.auto_target_id, 2, "the wider awareness found the enemy immediately")
+	equal(ordinary.auto_target_id, -1, "the ordinary soldier has nobody inside its own bound")
+
+	# The rung ladder is still what searches, so its shape is still worth pinning: the two
+	# soldiers began on the first rung, and the ordinary one widened once and found nobody.
 	equal(simulator.tgt_rung_hits[0], 2, "both soldiers began on the first rung")
 	equal(simulator.tgt_rung_hits.size(), 2, "and the ordinary one had to widen its search")
 	equal(simulator.tgt_rung_hits[1], 1, "which it did once, and found nobody")
-	equal(ordinary.auto_target_id, -1, "the ordinary soldier has nobody inside its own bound")
 
 	greater(float(simulator.call("_retention_radius_of", far_sighted)), 39.0,
 		"a wider awareness also keeps what it finds further off")

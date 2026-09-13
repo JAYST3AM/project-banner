@@ -2028,3 +2028,76 @@ obvious implementation and it was measurably worse than the thing being replaced
 `PackedVector2Array` rewrite of the summaries. The largest remaining per-tick allocation in a
 battle is the events array every attack appends to, which is not this milestone's cost; the
 focus path's own figure being zero is as much as this milestone should claim.
+
+## D-094: The target search was left alone, because every cheaper one measured slower
+
+**Context.** Step 7.5 ended with a profile that named the next bottleneck unambiguously: on the
+realistic twenty-thousand-soldier benchmark, automatic target acquisition cost 575.1 ms of a
+965.5 ms tick - 57% of the simulation and 85% of the soldier loop - while formation focus, the
+phase just fixed, had fallen to 41.6 ms. Step 7.6 set out to attack that 575 ms with an exact
+re-implementation of the local search, and a target of a three-fold cut.
+
+**What was measured before anything was changed.** The path was counted, not guessed at. At
+twenty thousand soldiers a tick ran 2,436 looks - not the 5,000 a cadence of four would imply,
+because the focus proof of D-087 skips half of them - and each look cost 219 us inside the grid
+query, which the phase timers put at 86% of the whole target phase. One look made **1.77 grid
+queries**: one per rung of the escalation ladder, 24% answered by the first rung, 44% answered
+after widening, 32% answered by nobody at all. Per look the ladder read **260 cells** and handed
+over **171 candidates** to be measured so that one of them could be kept. The second rung was
+78% of the query time.
+
+**The diagnosis the milestone started from, and the one it finished with.** The starting
+assumption was that the *traversal* was the problem: that a walk which opens each cell once,
+stops when no unopened cell can improve the answer, and never materialises a candidate list
+would be several times cheaper. Five exact implementations of that idea were written and
+measured, in a micro-benchmark built for the purpose (`scripts/dev/search_bench.gd`) and in
+live battles:
+
+| implementation | shape | measured against the ladder |
+| --- | --- | --- |
+| Chebyshev ring walk | cells opened ring by ring outward from the soldier | **2.6x slower** |
+| row walk, index order | rectangle pass with a per-row reach window | **1.9x slower** |
+| row walk, outward order | the same, rows and columns nearest-first | 2.1x slower |
+| rectangle walk with a cell bound | one distance test per cell before its bucket | **2.3x slower** |
+| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | **3.9x slower in battle** |
+
+Every one of them inspects *fewer* cells and fewer candidates than the ladder - the best of them
+read 122 cells and measured 45 candidates per look against the ladder's 260 and 171 - and every
+one of them is slower. The isolation run says why: **one radius-32 box costs about 300 us
+whichever way it is walked**, and the ladder is cheap only because its first rung answers most
+looks before the second rung is reached. In an interpreter, a bound test in a loop body costs
+about 0.3 us and the empty cell it skips costs about 0.12 us to open and dismiss. A walk that
+prunes per cell pays more for the pruning than it saves on the skipping; pruning pays only where
+it lives in the loop bounds, and the cheapest loop bounds are the ones a rectangle already has.
+
+**Decision: the search is unchanged.** No re-implementation is shipped. The ladder's staging - a
+small first rung that answers most looks, widening only for the looks that find nobody - is
+already the right architecture for this cost model, and its blunt loops are the cheapest form
+the language offers. The blocks-and-rings version was discarded with the block mask it needed,
+because keeping the mask would have cost a write per soldier per tick in the rebuild for a path
+that never runs.
+
+**What ships instead, and why it is not nothing.** The instruments that produced the finding,
+and they are the milestone's deliverable: the search-shape counters (queries per look, cells read
+and cells repeated, candidates split by rung, escalations, the distance an answer was found at,
+exact per-search percentiles), per-rung query timings, and per-sub-phase timings for the rest of
+the target loop - deciding whether a remembered opponent is worth keeping, deciding whether a
+look is worth making, the hysteresis, and answering with the formation. The split is what makes
+the milestone's conclusion checkable by anyone: at 20,000 soldiers the grid query is 85% of the
+target phase and everything around it is 15%, so any future attempt on this phase can be judged
+against the same numbers. `scripts/dev/search_bench.gd` keeps the two box measurements that
+outlived the milestone.
+
+**What remains expensive, and what would be needed.** The second rung: a 67x67-unit rectangle
+walk taken by 70% of looks, ~300 us each, ~510 ms a tick at twenty thousand soldiers. Nothing
+cheaper is available *exactly* in this language - that is the measurement - so the options are
+to stop asking the question (a formation-level proof that a soldier's neighbourhood is clear,
+which the bucket hierarchy of D-089 is too coarse to give in contact) or to change what the
+answer is allowed to be (a bounded search whose bound is the formation's own focus distance,
+which is not equivalent and is therefore not this milestone's to make).
+
+**Consequence for the milestone.** `STEP 7.6 CANDIDATE: NO`. The phase it was scoped to reduce
+is unchanged; what the milestone produced is the measurement that says why, a cheaper search
+than the ladder being, as far as five attempts and a purpose-built benchmark can tell, not
+available in GDScript at this scale. Every existing behaviour is untouched: the same suite, the
+same battles, the same numbers as Step 7.5, plus the instruments.

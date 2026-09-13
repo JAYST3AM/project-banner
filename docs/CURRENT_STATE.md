@@ -1410,3 +1410,108 @@ directly on what already exists:
    need to be shown back to the player (a "so-and-so survived Greywatch" notice, a
    memorial for the fallen).
 5. **Overworld life** - caravans, trade, settlement production.
+
+---
+
+## Step 7.6 - Automatic target search cost scaling
+
+Step 7.5's own measurement named the next bottleneck, and this milestone attacked it. It
+finished by leaving the search exactly as it was, and the reason is a measurement rather than a
+preference: **every cheaper search that was written measured slower than the one already in
+place.** Five exact re-implementations were built and benchmarked, in a micro-benchmark written
+for the purpose and in live battles. What ships is the instrumentation that established that,
+and no behavioural change at all.
+
+### Where the target phase actually goes
+
+Counted before anything was changed - a development counter per sub-phase, all of it behind the
+profile flag - at twenty thousand soldiers on the realistic benchmark:
+
+| component | ms/tick | share of the phase |
+| --- | ---: | ---: |
+| the spatial query | 509.7 | **85.2%** |
+| answering with the formation (the focus path) | 21.2 | 3.5% |
+| deciding whether a remembered opponent is worth keeping | 19.4 | 3.2% |
+| deciding whether a look is worth making (the D-087 proof) | 7.7 | 1.3% |
+| hysteresis and storing the answer | 2.6 | 0.4% |
+| the rest of the target loop | 37.9 | 6.3% |
+| **the target phase** | **598.5** | 100% |
+
+### What one look costs
+
+| | 5,000 soldiers | 10,000 | 20,000 |
+| --- | ---: | ---: | ---: |
+| looks per tick | 993.7 | 1,825.5 | 2,449.8 |
+| grid queries per look | 1.79 | 1.68 | 1.71 |
+| cells read per look | 232.4 | 233.2 | 242.5 |
+| of those, ground walked twice by one look | 19.5 (8.4%) | 19.5 (8.4%) | 20.4 (8.4%) |
+| candidates measured per look | 139.0 | 156.4 | 174.2 |
+| looks answered by the first radius | 32.6% | 32.3% | 29.2% |
+| looks answered after widening | 44.8% | 39.8% | 41.4% |
+| looks that found nobody at all | 22.6% | 27.9% | 29.4% |
+
+A look is asked only on cadence, and half the soldier-ticks whose turn it is are answered by the
+D-087 proof without asking the battlefield at all - so the cost of this phase is not how many
+questions are asked but **what one question costs**, and the answer is a second-rung rectangle
+walk of 289 cells handing over 171 candidates to keep one.
+
+### The five searches that were tried, and what they measured
+
+Each was designed to inspect less than the ladder and stop as soon as no unopened cell could
+hold a better answer. Each is exact - the micro-benchmark checks the answer against the ladder's
+on every query point and reports disagreements, and reported none.
+
+| implementation | shape | measured against the ladder |
+| --- | --- | --- |
+| Chebyshev ring walk | cells opened ring by ring outward from the soldier | 2.6x slower |
+| rectangle walk with a cell bound | one distance test per cell before its bucket | 2.3x slower |
+| row walk | rectangle pass with a per-row reach window | 1.9x slower |
+| row walk, nearest rows first | the same, rows and columns outward from the soldier | 1.9x slower |
+| block-indexed walk | a coarse 4x4-cell side mask walked before the cells | 3.9x slower |
+
+The best of them read 122 cells and measured 45 candidates per look - **half the ladder's work**
+- and was still nearly twice as slow. The isolation run says why: **one radius-32 box costs
+about 300 us however it is walked.** In an interpreted loop a bound test costs about 0.3 us and
+the empty cell it skips costs about 0.12 us to open and dismiss, so pruning inside the loop
+cannot pay for itself. The ladder is cheap because its *first* rung is small and answers most
+looks before the second rung is reached, not because of how it walks.
+
+### What ships
+
+- **The search itself: nothing.** Unchanged since Step 7.5, and that is the milestone's decision
+  rather than an omission. The block-indexed attempt went with the block mask it needed, because
+  the mask cost a write per soldier per tick in the spatial rebuild for a path that never runs.
+- **Search-shape counters** on the grid and the simulator: queries per look, cells read and
+  cells walked twice, candidates split by rung, escalations, the distance an answer was found
+  at, and exact per-search percentiles from one sample per search. Development-only.
+- **Per-sub-phase timings** for the whole target loop, so the split above can be re-measured by
+  anyone rather than believed.
+- **`scripts/dev/search_bench.gd`**, a micro-benchmark that answers "what does one query cost"
+  in seconds instead of "what does one tick cost" in two minutes, with the two box measurements
+  that outlived the milestone in it.
+
+### Result
+
+The phase is unchanged, and it was measured rather than assumed. The realistic benchmark was run
+matched - same tick count, both builds, one after the other in the same session - with the
+locked tip checked out beside this one:
+
+| soldiers | Step 7.5 | Step 7.6 | change |
+| ---: | ---: | ---: | ---: |
+| 1,000 | 30.024 ms | 30.277 ms | +0.8% |
+| 2,500 | 100.329 ms | 100.257 ms | -0.1% |
+| 5,000 | 262.319 ms | 264.932 ms | +1.0% |
+| 10,000 | 582.194 ms | 583.738 ms | +0.3% |
+| 20,000 | 991.379 ms | 995.693 ms | +0.4% |
+
+Everything inside a percent, which is the run-to-run spread of this machine; the combat ticks
+and casualty counts are identical, so it is the same battle. Both figures also sit about 2-3%
+above the numbers recorded when Step 7.5 shipped, which is the drift between sessions rather
+than anything in either build - and it is why the comparison above was taken back to back
+rather than against the log from last time.
+
+At twenty thousand soldiers the target phase is ~598 ms/tick profiled (602.7 ms in this run, of
+which 509.7 ms is the query), the simulation ~1,044 ms/tick profiled and ~996 ms/tick with the
+clock off, and the next bottleneck is the same one this milestone was scoped to remove: the
+second rung of the search. `STEP 7.6 CANDIDATE: NO` - the scoped reduction was not
+achieved, and the measurement that says why is the deliverable. See D-094.

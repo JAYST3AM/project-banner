@@ -489,6 +489,66 @@ GDExtension, no ECS, no second multi-rate system.
 **Definition of done:** measured; **20 suites, 2831 assertions, 0 failures**; 95 restart
 checks, 0 failures; the windowed flow clean; CI green. See D-088 through D-091.
 
+## Step 7.6 - Automatic target search cost scaling (`milestone-07.6`)
+
+**Goal:** remove the next measured bottleneck. Step 7.5 left the profile unambiguous - at
+twenty thousand soldiers on the realistic benchmark, target acquisition cost 575 ms of a 965 ms
+tick, 57% of the simulation - and this milestone set out to make the local search cheaper
+without changing a single answer it gives. It finished by leaving the search exactly as it was,
+because every cheaper one measured slower. The milestone's product is the measurement that
+establishes that, and the instruments that make it checkable.
+
+**Where the target phase actually goes.** Counted before anything was changed, at twenty
+thousand soldiers:
+
+| component | ms/tick | share of the phase |
+| --- | ---: | ---: |
+| the spatial query | 509.7 | **85.2%** |
+| answering with the formation (the focus path) | 21.2 | 3.5% |
+| deciding whether a remembered opponent is worth keeping | 19.4 | 3.2% |
+| deciding whether a look is worth making (the D-087 proof) | 7.7 | 1.3% |
+| hysteresis and storing the answer | 2.6 | 0.4% |
+| the rest of the target loop | 37.9 | 6.3% |
+| **the phase** | **598.5** | 100% |
+
+And the query itself, per look: **1.77 grid queries** (one per rung), **260 cells read**, **171
+candidates measured** to keep one, 24% of looks answered by the first radius, 44% after
+widening, 32% by nobody at all. The second rung is 78% of the query time.
+
+**What was tried.** Five exact re-implementations of the search, all of them designed to
+inspect less ground than the ladder, all of them measured against it in a purpose-built
+micro-benchmark (`scripts/dev/search_bench.gd`) and in live battles:
+
+| implementation | measured |
+| --- | --- |
+| Chebyshev ring walk, outward from the soldier | 2.6x slower |
+| rectangle walk, per-cell distance bound | 2.3x slower |
+| row walk, nearest rows first | 1.9x slower |
+| row walk with an exact reach | 1.9x slower |
+| block-indexed walk over a coarse side mask | 3.9x slower |
+
+The best of them read 122 cells and measured 45 candidates per look - **half the ladder's work**
+- and was still nearly twice as slow. The reason is the interpreter and it is now a recorded
+number: one radius-32 box costs about 300 us however it is walked, a bound test in a loop body
+costs about 0.3 us, and the empty cell it skips costs about 0.12 us to open and dismiss. Pruning
+inside the loop cannot pay for itself; the ladder is cheap because its *first* rung is small and
+answers most looks before the second one is reached.
+
+- **The search is unchanged, and that is the decision.** No re-implementation ships. The
+  block-indexed attempt went with the block mask it required, because the mask cost a write per
+  soldier per tick in the spatial rebuild for a path that never runs. See D-094.
+- **What ships is the measurement.** Search-shape counters (queries per look, cells read and
+  cells walked twice, candidates split by rung, escalations, the distance an answer was found
+  at, exact per-search percentiles), per-rung query timings, and sub-phase timings for the rest
+  of the target loop. All of it is development-only, behind the profile flag, and the shipped
+  simulation pays nothing for it.
+- **Nothing else changed.** Same suite, same battles, same numbers as Step 7.5 - which is the
+  regression argument for a milestone whose only code changes are instruments.
+
+**Definition of done:** measured; **21 suites, 2881 assertions, 0 failures**; the restart check
+unchanged; the windowed flow clean; CI green. The target phase is unchanged at ~598 ms/tick and
+the next bottleneck is the same one: the second rung of the search. See D-094.
+
 ---
 
 ## Standing design principle

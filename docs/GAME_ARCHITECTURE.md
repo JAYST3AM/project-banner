@@ -514,6 +514,38 @@ The radius is deliberately not tied to melee reach: archers, long spears and cav
 threat detection all want to search further than they can hit, and widening the ladder is
 a config change (D-061). Step 7.2 adds none of those systems.
 
+#### Why this search is shaped the way it is (Step 7.6)
+
+Step 7.6 set out to replace the ladder with a cheaper exact search and left it alone, because
+five re-implementations - a ring walk, two row walks, a rectangle walk with a cell bound and a
+walk over a coarse block index - all inspected **less** ground than the ladder and all measured
+**slower**. The reason is now a recorded number rather than an opinion: one radius-32 box costs
+about 300 us however it is walked, a bound test in a loop body costs about 0.3 us in this
+interpreter, and the empty cell it skips costs about 0.12 us to open and dismiss. A search that
+prunes per cell pays more for the pruning than it saves on the skipping.
+
+What makes the ladder cheap is its *staging*, not its walk: the first rung is a 25-cell box and
+it answers a third of looks outright, so the expensive rung is only reached by looks that had
+nothing nearby - which is why the milestone's own numbers (below) are dominated by the looks
+that find nobody. A future attempt on this phase has two honest options and no third: stop
+asking the question (a formation-level proof that a neighbourhood is clear, which the focus
+bucket hierarchy is too coarse to give during contact), or change what the answer is allowed to
+be (bounding the search by the formation's own focus distance, which is *not* equivalent to the
+locked answer and would be a gameplay decision rather than an optimisation). See D-094.
+
+#### What one look cost (Step 7.6 instrumentation)
+
+The target path carries development-only counters, all behind `profile_enabled`, and the
+benchmark's `=== SEARCH SHAPE ===` table reads them: grid queries per look (one per rung),
+cells read and how much of that ground one look walked twice, candidates measured split by
+rung, how many looks escalated to the ceiling rung, the distance an answer was found at, and
+exact per-search percentiles taken from one sample per search. Per-sub-phase timings cover the
+rest of the target loop - deciding whether a remembered opponent is worth keeping, deciding
+whether a look is worth making, the hysteresis, and answering with the formation - so that "the
+query is 85% of the phase" is a measurement anybody can repeat rather than a claim to believe.
+`scripts/dev/search_bench.gd` measures one query in isolation, in seconds, at a chosen density
+and spacing.
+
 #### How often a soldier looks (Step 7.4)
 
 Step 7.2 made the search *local*. Step 7.4 made it *rare*, and the two rules it serves are

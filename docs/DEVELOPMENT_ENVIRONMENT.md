@@ -115,6 +115,11 @@ godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --uni
 godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100 --focus-scale=1 --reliable=0
 #     Family B's phase profile without re-running its unprofiled table, for a long run.
 godotc --headless --path "$PROJ" res://scenes/dev/battle_benchmark.tscn -- --units=100 --battle-units=5000 --profile=1 --scaled-table=0
+#     What one search costs, rather than what one tick costs: one grid query, at a chosen
+#     density and spacing, so a change to the traversal can be measured in seconds. Leave it
+#     alone unless you are changing the search - and read D-094 first, which is the record of
+#     what happened the last time somebody did.
+godotc --headless --path "$PROJ" res://scenes/dev/search_bench.tscn -- --units=20000 --queries=20000 --gap=0.25
 ```
 
 `--check-only` does **not** load autoloads, so "Identifier not found: GameData" or
