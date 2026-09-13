@@ -224,9 +224,16 @@ func _agree(grid: BattleSpatialGrid, points: PackedVector2Array, units: Array[Ba
 	var checked := 0
 	var mismatches := 0
 	var resolved := 0
+	# Sampled across the *whole* roster rather than off the front of it. The query points cycle
+	# through the units in order, and the roster is built one army at a time - so taking the
+	# first three thousand samples only soldiers standing in their own army's rear, where
+	# nobody has an enemy within the ceiling and the check resolves nothing. It reported
+	# "0 disagreements, 0 with somebody to find", which looks like evidence and is not: a
+	# correctness check that cannot fail is worse than no check at all.
 	var sample := mini(points.size(), 3000)
+	var stride := maxi(1, points.size() / sample)
 	for i in sample:
-		var point := points[i]
+		var point := points[i * stride]
 		# A soldier is not its own enemy, so the queried side is the one opposite the point's
 		# owner. The traversal is positional and has no idea who is asking.
 		var reference := _box_nearest(grid, point, 8.0, scratch)
@@ -244,6 +251,9 @@ func _agree(grid: BattleSpatialGrid, points: PackedVector2Array, units: Array[Ba
 			resolved += 1
 	print("")
 	print("  agreement: %d queries, %d with somebody to find, %d disagreements" % [checked, resolved, mismatches])
+	if resolved == 0:
+		print("  (nothing to resolve at this spacing: run it with --gap=0 to put the armies in")
+		print("   contact, where the check has answers to compare.)")
 	print("")
 
 
