@@ -1425,17 +1425,23 @@ and no behavioural change at all.
 ### Where the target phase actually goes
 
 Counted before anything was changed - a development counter per sub-phase, all of it behind the
-profile flag - at twenty thousand soldiers on the realistic benchmark:
+profile flag - at twenty thousand soldiers on the scaled battlefield, in the matched twenty-tick
+window the before-and-after comparison uses:
 
 | component | ms/tick | share of the phase |
 | --- | ---: | ---: |
-| the spatial query | 509.7 | **85.2%** |
-| answering with the formation (the focus path) | 21.2 | 3.5% |
-| deciding whether a remembered opponent is worth keeping | 19.4 | 3.2% |
-| deciding whether a look is worth making (the D-087 proof) | 7.7 | 1.3% |
+| the spatial query | 516.8 | **85.7%** |
+| answering with the formation (the focus path) | 19.8 | 3.3% |
+| deciding whether a remembered opponent is worth keeping | 19.1 | 3.2% |
+| deciding whether a look is worth making (the D-087 proof) | 7.8 | 1.3% |
 | hysteresis and storing the answer | 2.6 | 0.4% |
-| the rest of the target loop | 37.9 | 6.3% |
-| **the target phase** | **598.5** | 100% |
+| the rest of the target loop | 36.6 | 6.1% |
+| **the target phase** | **602.7** | 100% |
+
+Three runs measure the same split with the same shape: this window puts 85.7% of 602.7 ms in the
+query, a hundred-tick sweep puts 86.1% of 601.3 ms, and a thirty-tick window 85.2% of 598.5 ms.
+The window is quoted with each figure because the phase wanders 1-4% between them, and the ratio
+does not - which is the point of counting it.
 
 ### What one look costs
 
@@ -1449,6 +1455,11 @@ profile flag - at twenty thousand soldiers on the realistic benchmark:
 | looks answered by the first radius | 32.6% | 32.3% | 29.2% |
 | looks answered after widening | 44.8% | 39.8% | 41.4% |
 | looks that found nobody at all | 22.6% | 27.9% | 29.4% |
+
+One table, one run: the numbers above are the matched twenty-tick window on the scaled
+battlefield, the same run the rest of this milestone's figures come from. A hundred-tick sweep
+over the same battles draws the same picture within a few percent - 1.77 queries, 260 cells, 171
+candidates per look - and reports the same 8.4% of cells walked twice by one look.
 
 A look is asked only on cadence, and half the soldier-ticks whose turn it is are answered by the
 D-087 proof without asking the battlefield at all - so the cost of this phase is not how many
@@ -1538,8 +1549,8 @@ above the numbers recorded when Step 7.5 shipped, which is the drift between ses
 than anything in either build - and it is why the comparison above was taken back to back
 rather than against the log from last time.
 
-At twenty thousand soldiers the target phase is ~598 ms/tick profiled (602.7 ms in this run, of
-which 509.7 ms is the query), the simulation ~1,044 ms/tick profiled and ~996 ms/tick with the
-clock off, and the next bottleneck is the same one this milestone was scoped to remove: the
-second rung of the search. `STEP 7.6 CANDIDATE: NO` - the scoped reduction was not
+At twenty thousand soldiers the target phase is **602.7 ms/tick** profiled, **516.8 ms** of it
+inside the spatial query, the simulation ~1,044 ms/tick profiled and ~996 ms/tick with the clock
+off, and the next bottleneck is the same one this milestone was scoped to remove: the second
+rung of the search. `STEP 7.6 CANDIDATE: NO` - the scoped reduction was not
 achieved, and the measurement that says why is the deliverable. See D-094.
