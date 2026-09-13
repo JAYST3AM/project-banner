@@ -2,20 +2,21 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 7.3 - dense battle / overlap scaling
+**Last updated:** end of Step 7.4 - target acquisition scaling
 **Engine:** Godot 4.7.2-stable
-**Test status:** `2490 assertions, 0 failures, 18 of 18 suites` headless, plus
+**Test status:** `2732 assertions, 0 failures, 19 of 19 suites` headless, plus
 `95 checks, 0 failures` in a genuine two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
 every pull request against it, pinned to Godot 4.7.2-stable.
 
-**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, and Steps 7.2 and 7.3 were
+**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, and Steps 7.2, 7.3 and 7.4 were
 engineering milestones; none of them added gameplay. Step 7 added terrain and formations.
 See [Step 7 - terrain and formation
 foundation](#step-7---terrain-and-formation-foundation), [Step 7.1 - formation
 hardening](#step-71---formation-hardening), [Step 7.2 - battle simulation scaling
-foundation](#step-72---battle-simulation-scaling-foundation) and [Step 7.3 - dense battle /
-overlap scaling](#step-73---dense-battle--overlap-scaling) below.
+foundation](#step-72---battle-simulation-scaling-foundation), [Step 7.3 - dense battle /
+overlap scaling](#step-73---dense-battle--overlap-scaling) and [Step 7.4 - target acquisition
+scaling](#step-74---target-acquisition-scaling) below.
 
 ---
 
@@ -777,6 +778,264 @@ soldier searches for a target every tick. That is what Step 7.4 should attack.
 | Windowed smoke | campaign -> settlement -> recruit -> battle -> **formation drill** -> results, zero script errors |
 | CI | **green** on `e32bfbc` — [run 34754179794](https://github.com/JAYST3AM/project-banner/actions/runs/34754179794), and on every commit since — read from the raw job logs: 18 of 18 suites, 2490 assertions, both persistence phases |
 
+## Step 7.4 - Target acquisition scaling
+
+Step 7.3 took the separation pass off the top of the profile and reported what was left:
+at five thousand soldiers **target selection alone cost 248.542 ms a tick - 66% of the
+tick** - because every soldier asked the battlefield who was nearest to it on every
+simulation tick. Step 7.4 attacked that. It added **no gameplay**.
+
+### 1. The counters came first
+
+A phase clock can say a phase costs 248 ms. It cannot say whether to make the work smaller
+or to stop it happening, and those are different fixes. So target handling was counted
+before it was changed, and the counters chose the milestone: the search was already local
+(Step 7.2) and each look was not expensive. **There were simply far too many of them.**
+
+To make that a measurement rather than an argument, the counters were first run against the
+*unmodified* Step 7.3 code - the same harness, the same seed, the same fixed-area battles,
+150 ticks - and then against the new code at the same windows. Counters are per soldier-tick
+rates, so they compare directly:
+
+| Soldiers | Step 7.3 looks/tick | Step 7.4 looks/tick | 7.3 looks/soldier/s | 7.4 looks/soldier/s | avoided |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 500.0 | 54.6 | 20.00 | 3.28 | **89.1%** |
+| 2,500 | 2,500.0 | 409.4 | 20.00 | 4.91 | **83.6%** |
+| 5,000 | 5,000.0 | 925.6 | 20.00 | 5.55 | **81.5%** |
+
+And what the old looks were looking at, at the same windows, at five thousand soldiers:
+**4,095 of 5,000 looks a tick found nobody at all**, and the 5,000 that remained saw an
+average of **71.8 candidates** each to return one answer that was usually already known.
+Two in every eighty-one candidates handed over by the broadphase named a soldier worth
+naming. That number - not the milliseconds - is what chose the architecture.
+
+### 2. A remembered opponent, and a staggered awareness tick
+
+A soldier now keeps the enemy it is dealing with. The rule:
+
+> Once a soldier acquires an automatic opponent, that opponent remains preferred while alive,
+> hostile and locally relevant. Reacquisition happens immediately on invalidation, or
+> according to a deterministic staggered awareness cadence, or when the soldier's own turn
+> comes round - and an explicit player order outranks all of it.
+
+The order of the questions is the design, and every step is cheaper than the one below it:
+
+```
+explicit order?          use it                     (a player instruction: no search)
+remembered opponent?
+    in reach?            use it                     (no search: the fastest path)
+    not this soldier's turn yet?
+                         use it                     (no search: still relevant)
+turned to look?
+    nearest local enemy, or the body's focus        (the only expensive answer)
+```
+
+A soldier that can reach the enemy in front of it never searches at all, which is why the
+counters above fall by four fifths. A soldier that cannot reach anybody looks on its own
+cadence and is pointed at the fighting in between by its formation's or its side's focus -
+the answer the bodies have already worked out for themselves once a tick.
+
+**The schedule is `unit.id % battle.target_reacquisition_ticks`**, four ticks by default,
+against an integer simulation tick counter. Three consequences, all deliberate:
+
+- **staggered** - a quarter of the army looks on any given tick, rather than the whole army
+  on every fourth, which is the difference between a flat cost and a sawtooth;
+- **deterministic** - the same seed, orders and roster produce the same schedule, and
+  re-ordering the roster does not move a single soldier's phase (tested);
+- **no clock** - not `Time.get_ticks_msec()`, not a render frame. Wall-clock timing in this
+  project lives inside the benchmark's counters, behind a boolean, measuring rather than
+  deciding.
+
+### 3. The cadence is a latency bound, not merely a saving
+
+An enemy that arrives immediately after a soldier's scheduled look is noticed on the next
+one - one cadence minus the tick it arrived on - and the tests measure exactly that at every
+cadence the sweep covered (1, 2, 3, 4, 6 and 8 ticks).
+
+Measured in live battles, the cost of the cadence is small and it is bounded:
+
+| Soldiers | reacquisitions sampled | average wait | within one cadence | worst |
+| ---: | ---: | ---: | ---: | ---: |
+| 500 | 1,014 | 2.7 ticks | 98.7% | 250 ticks |
+| 2,500 | 5,831 | 1.3 ticks | 99.8% | 11 ticks |
+| 5,000 | 11,503 | 1.4 ticks | 99.4% | 23 ticks |
+| 20,000 | 19 | 2.5 ticks | 100.0% | 3 ticks |
+
+The worst case is not the schedule arriving late: it is a soldier with nobody left to find -
+standing at the edge of a battle where its side has already won. The distinction is counted
+rather than excused (`latency_over_cadence`).
+
+### 4. The bound that stops a chase, and the margin that stops a twitch
+
+`battle.target_retention_radius` is how far a remembered opponent may be before it stops
+being worth continuing with. It ships at 32 units - **equal to the search ceiling on
+purpose**, and the sweep says why: at 8, 16 and 24 a soldier acquires an enemy at long range
+and releases it again on the very next tick, which is thrash dressed up as a rule. What the
+bound is for is the opponent that genuinely leaves, and for that it only has to be finite.
+
+`battle.target_switch_advantage` (1.25) is hysteresis: a new candidate has to be a quarter
+closer before it takes over from the enemy a soldier already has. Two enemies at similar
+range no longer swap the answer on alternate ticks, which is cheaper and less twitchy to
+watch. Measured churn at five thousand soldiers in the fixed-area fight: **47.8 changes a
+tick across five thousand soldiers** - about one change per soldier per hundred ticks.
+
+### 5. Urgency: the one search that may run off the cadence
+
+Exactly one situation brings a search forward: an opponent that stopped being valid while it
+was **inside the soldier's own reach**. A soldier whose opponent falls in front of it should
+not stand over the corpse waiting for its turn; a soldier whose opponent walked off, or that
+never reached the one it was marching towards, waits like everything else. The rule is
+configurable (`battle.target_immediate_on_contact_loss`), tested on and off, and bounded by
+the size of the contact line rather than the size of the army.
+
+The worst case it can produce is measured by a storm benchmark that kills an entire front
+rank on one tick, in two lines already fighting, held still so that the storm is the only
+thing that changes:
+
+| Soldiers | front rank killed | average tick | storm tick | spike | next tick | looks: normal / storm |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 600 | 100 | 15.532 ms | 16.992 ms | 1.09x | 13.985 ms | 100 / 200 |
+| 1,200 | 200 | 33.362 ms | 37.018 ms | 1.11x | 29.536 ms | 200 / 400 |
+| 2,400 | 400 | 45.331 ms | 49.068 ms | 1.08x | 41.797 ms | 400 / 800 |
+
+A storm tick carries double the ordinary number of looks and costs about a tenth more than
+the tick it interrupts; the tick after it is cheaper than average. **No cliff.** The searches
+that follow the storm are the ones the schedule was going to make anyway - the soldiers who
+lost an opponent off the cadence were left to their own turn.
+
+### 6. The look that is proved not worth making
+
+Removing the repeated looks revealed what had been hiding behind them. Once the soldiers with
+an enemy in reach stopped searching, the looks that remained were **self-selected for being
+expensive**: a soldier with nobody within eight units escalates to a thirty-two-unit query,
+and on a dense field that walks hundreds of cells to hand back candidates that are nearly all
+beyond the radius. The average look cost roughly three times what it had in Step 7.3,
+precisely because the cheap ones had been optimised away.
+
+So a soldier now asks one question before looking: *could a look return anybody at all?* The
+body's focus is the enemy nearest to the body's anchor, at a known distance, and the soldier
+stands a known distance from that anchor, so
+
+```
+d(soldier, E) >= d(anchor, E) - d(soldier, anchor) >= focus_distance - offset
+```
+
+If that bound is already beyond the widest rung of the soldier's ladder, no look can find
+anybody and the look is skipped. The grid's own query margin is subtracted, because both the
+focus and the soldier may have moved since the focus was computed. It is **a proof, not a
+threshold**: when the bound holds, the search would have returned nothing and the soldier
+ends up pointed at its body's focus either way - the answer is identical, and only the
+question is skipped. A test drives a formed battle for two hundred ticks and, for every
+skipped look, checks *every enemy on the field* to confirm none was inside the soldier's own
+bound.
+
+Measured, it removes 7 to 16 per cent of the cheap path's work at the sizes benchmarked - and
+it is what took the 5,000-soldier target phase from the 86.3 ms the first version of the
+milestone measured to **81.3 ms**, with the same behaviour.
+
+### 7. Benchmark A - the fixed-area torture test
+
+Unchanged from Step 7 in seed (70707), dimensions, layouts, rules and budget, so the
+comparison holds across four milestones and the historical figures are not touched.
+
+| Soldiers | Step 7.3 ms/tick | **Step 7.4 ms/tick** | speedup | 7.4 ticks/sec | contact |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 100 | 3.651 | **1.987** | 1.84x | 503 | yes |
+| 500 | 33.939 | **12.760** | 2.66x | 78 | yes |
+| 1,000 | 57.537 | **30.746** | 1.87x | 33 | yes |
+| 2,500 | 172.164 | **91.848** | 1.87x | 11 | yes |
+| 5,000 | 425.177 | **235.303** | 1.81x | 4 | yes |
+| 10,000 | 781.491 | **541.734** | 1.44x | 2 | yes |
+| 20,000 | 1,632.897 | **1,141.059** | 1.43x | 0.9 | no |
+
+Total simulation time improves at **every** size. Contact is now reached at 10,000 as well as
+2,500 and 5,000, because the cheaper ticks fit more of the battle into the same budget;
+20,000 on a field far too small for it still spends its whole window marching.
+
+**And the phase this milestone attacked**, at matched windows (150 ticks, both builds, same
+seed and layout, clock on):
+
+| Soldiers | Step 7.3 target ms | **Step 7.4 target ms** | speedup | 7.3 total | 7.4 total | total speedup |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 8.840 | **2.433** | **3.63x** | 18.021 | 11.076 | 1.63x |
+| 2,500 | 79.784 | **22.839** | **3.49x** | 133.215 | 73.522 | 1.81x |
+| 5,000 | 286.694 | **81.268** | **3.53x** | 403.398 | 196.244 | 2.06x |
+
+The Step 7.3 column is a **probe build**: the tip of Step 7.3 with the same counters added and
+nothing else changed, run on this machine with this harness. It is the only honest way to
+compare counters and phases across a behaviour change, because the battles themselves evolve
+differently once the behaviour differs.
+
+### 8. Benchmark B - the battlefield scaled with the army
+
+The torture test crams every army into the same small field; this family grows the ground
+with the army so that density stays at the 500-on-100x60 reference and the numbers describe a
+battle rather than a crowd. Same seed, layouts, rules and budget as Step 7.3's run.
+
+| Soldiers | field | density | ms/tick | ticks/sec | ticks | combat ticks | deaths | armies |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 141x85 | 0.0833 | **71.379** | 14 | 169 | 74 | 135 | 6 |
+| 2,500 | 224x134 | 0.0833 | **163.447** | 6 | 184 | 163 | 321 | 14 |
+| 5,000 | 316x190 | 0.0833 | **452.613** | 2 | 133 | 121 | 319 | 26 |
+| 10,000 | 447x268 | 0.0833 | **763.788** | 1 | 80 | 77 | 246 | 50 |
+| 20,000 | 633x380 | 0.0833 | **2,572.922** | 0.4 | 24 | 20 | 25 | 100 |
+
+Step 7.3 measured, on the same battles: 145.160, 511.941, 1,182.920, 2,953.324 and
+5,852.212 ms a tick - so the realistic family improves by **2.0x, 3.1x, 2.6x, 3.9x and
+2.3x**.
+
+**Every size reached sustained contact and fought.** The 20,000-soldier battle measured 24
+ticks in its sixty-second window, 20 of them with blows landing and 25 dead. At 2.57 seconds
+a tick that is **nowhere near playable, and this milestone does not claim otherwise**: it is
+2.3 times cheaper than it was, which is a large engineering step and not a finished
+battle. Twenty thousand soldiers remain a goal, not a result.
+
+### 9. What is now the most expensive phase
+
+By phase, ms per tick, clock on, standard budget windows. Family A:
+
+| units | grid | focus | formations | soldiers | of which target | overlap | total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 0.731 | 0.665 | 0.652 | 8.808 | **6.428** | 2.067 | 13.607 |
+| 2,500 | 3.673 | 3.389 | 3.078 | 59.416 | **45.899** | 20.544 | 93.717 |
+| 5,000 | 7.902 | 7.654 | 6.622 | 167.676 | **137.591** | 55.951 | 253.908 |
+| 10,000 | 15.925 | 18.025 | 14.882 | 312.539 | **234.591** | 238.681 | 649.560 |
+| 20,000 | 33.453 | 37.989 | 34.258 | 359.590 | 163.603 | **995.016** | 1,516.293 |
+
+Family B, which is the family that resembles a battle:
+
+| units | grid | focus | formations | soldiers | of which target | overlap | total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 1.275 | 1.906 | 1.350 | 19.248 | 15.634 | 4.384 | 29.496 |
+| 2,500 | 3.649 | 11.968 | 3.493 | 101.015 | 88.576 | 18.262 | 142.340 |
+| 5,000 | 7.301 | 45.314 | 6.980 | 220.460 | 194.212 | 45.765 | 333.558 |
+| 10,000 | 15.264 | **188.332** | 14.787 | 423.027 | 366.789 | 105.409 | 762.818 |
+| 20,000 | 31.890 | **881.765** | 34.925 | 808.431 | 692.196 | 202.048 | 1,992.731 |
+
+**The next bottleneck is named by the measurement, not chosen in advance: formation focus.**
+`_refresh_focus()` gives every body an answer to "where is the fighting" once a tick, by
+scanning the enemy army once per body. That is linear in the army and linear in the number of
+bodies, and family B has one body per two hundred soldiers - so the cost is quadratic in
+(`bodies x army`) and it shows: 1.9 ms at one thousand soldiers, 45.3 at five thousand, 188.3
+at ten thousand, **881.8 at twenty thousand - 44% of the tick and the single largest item in
+the realistic family.**
+
+It was invisible until this milestone, because target selection was larger. Now that target
+selection is four times smaller, the pass that tells soldiers where the battle *is* has
+become the most expensive thing in the battle. Any next step that does not start from that
+number is guessing.
+
+### 10. Verification
+
+| | |
+| --- | --- |
+| Headless suites | **19 of 19 reported, 2,732 assertions, 0 failures** (was 2,490 across 18) |
+| New suite | `test_target_acquisition` (231) - retention, invalidation by death and by distance, explicit orders, the cadence at every interval, staggered phases, roster-order independence, hysteresis, cell boundaries, the death storm, the provable skip, the counter partition, and determinism of the whole target sequence |
+| Benchmark flags added | `--reacquire=`, `--retention=`, `--switch=`, `--immediate=`, `--spikes=`, `--storm=` |
+| Two-process restart | **95 checks, 0 failures** - unchanged; no save-format change |
+| Windowed smoke | campaign -> settlement -> recruit -> battle -> **formation drill** -> results, zero script errors |
+| CI | **green** on the milestone tip - run id, head SHA and the raw job log's suite and assertion counts are in the milestone report |
+
 ## Known limitations
 
 The honest list. None of these blocks the checkpoint; all of them are the natural
@@ -816,19 +1075,33 @@ next work.
 16. Balance is deliberately rough. Fights work and are decisive; they have not been
     tuned for a long campaign, and the formation path has never been balance-measured
     the way the unformed path has.
-17. **Target selection is the most expensive phase.** After Step 7.3 removed the
-    separation pass from the top of the profile, what is left is the per-soldier target
-    search: 60% of a tick at five thousand soldiers, because every soldier searches every
-    tick. Step 7.2 bounded the search and Step 7.3 made the other phases smaller; the
-    remaining question is how often a soldier needs to look, not how the looking is done.
-    That is the next milestone's subject, not a limitation of this one.
-18. **The fixed-area benchmark stops being a battle past a few hundred soldiers.** It
+17. ~~**Target selection is the most expensive phase.**~~ **Step 7.4 closed this in the
+    way Step 7.3 suggested: by making soldiers look less often rather than by making the
+    look cheaper.** Every soldier no longer searches every tick, so target selection is
+    **3.5x cheaper** at the sizes where both builds were measured at the same window, and
+    ten thousand soldiers now reach contact inside the same benchmark budget where Step 7.3
+    ran out of it mid-march. What remains is stated in the entry below rather than claimed
+    as solved.
+18. **Target selection is still the largest single phase in the realistic range**, at
+    137.6 of 253.9 ms a tick at five thousand soldiers on the fixed-area field, and overlap
+    takes over only in the twenty-thousand-soldier crush. The cadence is a floor, not a
+    solution: soldiers still look once every four ticks, and a soldier's look is still a
+    spatial query over an escalating radius. Further reductions want a cheaper answer to
+    "is anybody near me" rather than a cheaper schedule - which is a design question, not a
+    tuning one.
+19. **The awareness cadence is a behaviour change, and it is a deliberate one.** A soldier
+    faces the enemy it was dealing with rather than re-deriving the nearest one every tick,
+    switches only when a new candidate is a quarter closer, and can be up to three ticks
+    (150 ms) late to notice an enemy that has arrived. All three are documented in D-085 and
+    covered by tests; they are listed here because "the battle got cheaper" is not the whole
+    story of a milestone that changed when soldiers think.
+20. **The fixed-area benchmark stops being a battle past a few hundred soldiers.** It
     crams every army into the same 100x60 field, so at twenty thousand the soldiers do not
     fit in it dressed and the measurement describes a crowd. It is kept because it is a
     useful torture test and because it is the only way to compare against earlier
     milestones; the scaled family is where a real twenty-thousand-soldier battle is
     measured. Both say whether contact was reached.
-19. **Rendering is not in any of these measurements.** Both benchmark families step the
+21. **Rendering is not in any of these measurements.** Both benchmark families step the
     simulation directly. Drawing twenty thousand soldiers on a 633x380 battlefield is a
     separate problem the large-battle milestone will also have to pay for, and nothing
     here claims otherwise.

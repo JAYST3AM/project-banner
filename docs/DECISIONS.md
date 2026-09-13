@@ -1484,3 +1484,337 @@ the tidier choice. It is a config value instead because it is a *performance* de
 that happens to equal a *physical* number today, and the two are not the same kind of
 thing. When ranged combat arrives and somebody wants a separation pass tuned for a
 different crowd, the number should be adjustable without changing what a body is.
+
+
+## D-079: Target handling was counted before it was changed
+
+**Decision.** Target acquisition was instrumented before it was altered - searches run, where
+the answer came from, why a remembered opponent was dropped, how many candidates a look
+measured, how long a soldier went without an opponent - and the counters, not the phase
+clock, chose what the milestone would attack. Every counter is incremented behind
+`profile_enabled`, so a real battle pays nothing to be explained.
+
+**What the counters said.** They were run twice: once against the unmodified Step 7.3 code
+(the tip of that milestone with the counters added and nothing else changed) and once
+against the shipped build, both at the same seed, layout and 150-tick windows. Counters are
+rates per soldier-tick, so they compare directly:
+
+| Soldiers | Step 7.3 looks/tick | Step 7.4 looks/tick | 7.3 looks per soldier per second | 7.4 looks per soldier per second | avoided |
+| --- | --- | --- | --- | --- | --- |
+| 500 | 500.0 | 54.6 | 20.00 | 3.28 | 89.1% |
+| 2,500 | 2,500.0 | 409.4 | 20.00 | 4.91 | 83.6% |
+| 5,000 | 5,000.0 | 925.6 | 20.00 | 5.55 | 81.5% |
+
+And what those looks were doing at five thousand soldiers: **4,095 of 5,000 found nobody at
+all**, and the 5,000 between them measured a candidate 71.8 times to return one answer - so
+roughly two candidates in eighty-one named a soldier worth naming.
+
+**Why it mattered that the counters came first.** The phase clock said "target selection
+costs 248 ms a tick", which is equally consistent with "the search is slow" and "the search
+happens too often" - and those call for opposite fixes. The counters said the question was
+already cheap and asked sixty-six thousand times a second to be given an answer that had not
+changed. A reading of the code could not have decided it either way, because every line of
+the old search is reasonable; only counting what it *did* decided it.
+
+**What is counted.** Looks, successful looks, empty looks, rung counts for the escalation
+ladder, the cheap focus path (and how much of it was reached by proof rather than by a
+soldier's turn), explicit-order uses, retained-tick counts split by whether the opponent was
+in reach, invalidations split by cause, immediate versus scheduled reacquisitions, candidates
+per look and the worst look, opponent changes, and acquisition latency in ticks. They
+partition soldier-ticks exactly - a test asserts the five paths add up to the number of
+soldier-ticks simulated - because a set of counters that overlaps cannot be added up.
+
+
+## D-080: An automatic target is a persistent engagement, and awareness is staggered
+
+**Decision.** A soldier's automatic opponent is remembered between ticks. Once acquired it
+stays the answer while it is alive, hostile and still within `battle.target_retention_radius`
+of the soldier. A soldier looks around again when that stops being true, or when its own
+awareness tick comes round, and never merely to rediscover that the enemy in front of it is
+still standing there.
+
+The awareness tick is a simulation tick counter (`BattleUnit.next_search_tick`), and the
+phase a soldier starts on is `unit.id % battle.target_reacquisition_ticks`. Both are integers,
+both are derived from data the battle already has, and no clock of any kind is read to decide
+when a soldier looks.
+
+**Why persistence.** Step 7.3's profile said target selection was 248.542 ms a tick at five
+thousand soldiers - 66% of the tick - because every soldier asked the battlefield who was
+nearest to it, every tick. The question was already cheap, because Step 7.2 made it local;
+what was expensive was asking it sixty-six thousand times a second to be told the same
+answer. A soldier in a fight is dealing with an enemy it can see, and the tick that
+discovers "still there" is a tick bought and thrown away.
+
+**Why a staggering rather than a global slowdown.** The obvious way to ask less often is to
+ask every fourth tick, and the obvious way to implement that is `tick_index % 4 == 0`. That
+turns a smooth cost into a sawtooth: three cheap ticks and one that costs four times as much.
+Phasing on the unit id spreads the same work evenly, keeps every tick the same shape, and
+makes the schedule a property of the *soldier* rather than of the moment - so re-ordering the
+roster cannot move it, and a re-run reproduces it exactly. A test asserts that: the same
+soldiers in the reversed order look on the same ticks.
+
+**Why simulation ticks and not a clock.** Everything about a battle in this project is
+reproducible from a seed: the same orders must produce the same fight, tick for tick, and the
+determinism test compares the whole target sequence between two runs. A scheduler reading
+`Time.get_ticks_msec()` cannot promise that, because the wall clock is not part of the
+battle's input. Wall-clock timing remains where it belongs: inside the benchmark's counters,
+behind a boolean, measuring rather than deciding.
+
+**What it costs.** Responsiveness, bounded and measured. A soldier that loses an opponent
+while it could have struck it reacquires in the same tick (D-083); a soldier that loses one
+that was never in reach waits at most one cadence, and the tests measure that bound at every
+cadence the sweep covered. What it does not cost is a player order: an explicit attack order
+is resolved before the automatic path is reached at all (D-085).
+
+**What it is not.** Not a reservation system, not a threat table, not an aggro table, not a
+squad assignment, and not a per-unit timer node. It is one integer of memory and one integer
+of schedule on a struct that already exists for the duration of a battle, and both are
+battle-transient: no campaign save ever sees them.
+
+
+## D-081: The cadence is four ticks, and the switch margin is a quarter
+
+**Decision.** `battle.target_reacquisition_ticks` is 4 and
+`battle.target_switch_advantage` is 1.25. Both were swept on the fixed-area benchmark at
+2,500 and 5,000 soldiers with the same seed, layout, tick limit (120) and budget, back to
+back on one machine.
+
+The cadence, at five thousand soldiers:
+
+| cadence (ticks) | looks per soldier per second | target ms/tick | total ms/tick | 2,500 total |
+| --- | --- | --- | --- | --- |
+| 1 (every tick) | 18.65 | 123.013 | 246.204 | 92.546 |
+| 2 | 10.10 | 93.290 | 213.519 | 77.332 |
+| 3 | 6.79 | 66.438 | 178.096 | 70.308 |
+| **4** | **5.09** | **58.745** | **182.575** | **64.430** |
+| 6 | 3.39 | 38.743 | 148.948 | 59.825 |
+| 8 | 2.54 | 31.850 | 141.573 | 58.100 |
+
+**Why 4 and not 1.** One is the behaviour the milestone replaced, and it is measurably the
+worst column: twice the target cost of four, and the widest spread between the average tick
+and the worst one (D-084).
+
+**Why 4 and not 8.** Eight is cheaper - about a fifth of the tick at five thousand soldiers
+in this window - and it costs 350 ms of worst-case awareness latency instead of 150 ms. The
+sweep's returns diminish quickly after four (the target phase falls by half again from 4 to
+8, but the *total* by a fifth, because the target phase is no longer most of the tick), while
+the latency a soldier pays for it grows linearly and without limit. Four ticks is a sixth of
+a melee swing; eight is nearly two fifths. The value is a config knob and this table is the
+reason it is four, not a number somebody liked.
+
+**Why 1.25 for the switch margin.** Hysteresis exists so that two enemies at similar range do
+not exchange the answer on alternate ticks, and the margin is how much closer a new candidate
+has to be to take over. Measured churn at the shipped value, at five thousand soldiers in the
+fixed-area fight: **47.8 opponent changes a tick across five thousand soldiers** - about one
+change per soldier per hundred ticks - and zero in a test where two enemies stand three and a
+bit units away for forty ticks. A margin of 1.0 would switch on any difference at all, which
+is what the old every-tick rule did; a much larger margin would start ignoring enemies that
+have genuinely come closer, and the milestone's own test pins both ends: a hair closer is not
+a reason to change, and an unmistakably closer enemy is.
+
+
+## D-082: The retention radius is the search ceiling, and the sweep is why
+
+**Decision.** `battle.target_retention_radius` is 32 world units, equal to
+`battle.target_search_max_radius` - deliberately equal, and swept before it was chosen.
+
+**The sweep.** Same fixed-area benchmark, 2,500 and 5,000 soldiers, same seed, layout, tick
+limit and budget, one run per value. The interesting column is not the milliseconds - it is
+what the soldiers *did*:
+
+| retention radius | 5,000 total ms/tick | target ms/tick | releases per tick ("too far") |
+| --- | --- | --- | --- |
+| 8 | 161.700 | 51.668 | 127.1 |
+| 16 | 167.871 | 52.569 | 110.7 |
+| 24 | 164.380 | 52.652 | 68.9 |
+| **32** | **163.458** | **52.410** | **0.1** |
+
+**What the numbers say.** The time is flat - the retention radius is not where the
+milliseconds are. The behaviour is not flat at all: at 8, 16 and 24 a soldier acquires an
+enemy at long range via the second rung of the ladder and then releases it again on the very
+next tick, because the radius it will *keep* is narrower than the radius it is allowed to
+*search*. A hundred and twenty-seven releases a tick at eight units is not a retention rule;
+it is a loop. At 32 - where a soldier can keep anything a search could have found - the
+releases fall to essentially zero, and the only opponent that is ever let go is one that has
+genuinely walked away.
+
+**Why not just delete the knob.** Because the *release* rule is what stops a soldier running
+after one enemy across a battlefield, and it needs a finite number to do that. The knob is
+also what a future pursuit or ranged milestone will turn, and its meaning is now clear:
+how far a soldier will continue with an opponent it already has, regardless of how far it
+may look for a new one.
+
+
+## D-083: Urgency is one rule, and it is a loss taken inside the soldier's own reach
+
+**Decision.** Exactly one situation can bring a search forward off the cadence: a remembered
+opponent that has stopped being valid *and* was within the soldier's own reach when it
+stopped. It is on by default (`battle.target_immediate_on_contact_loss`), it is measured in
+both positions, and it is the only off-cadence path in the milestone.
+
+A loss at a distance - an opponent that walked off, or one that was never in reach, or any
+loss when the rule is switched off - waits for the soldier's own awareness tick like
+everything else.
+
+**Why that rule and not "always immediate".** Always-immediate is what the milestone removed:
+it makes the search rate proportional to the *death* rate rather than to the schedule, and
+deaths come in bursts. The narrow rule keeps the responsiveness where a player can see it -
+the melee line, where a soldier whose opponent just fell should not stand over the corpse -
+while a soldier that was marching towards somebody it had not reached yet has nothing to
+react to.
+
+**What bounds it.** The size of the contact line, not the size of the army: only soldiers
+whose opponent was within reach can search off-cadence, and those are the ranks actually
+fighting. The death-storm benchmark kills an entire front rank of a twelve-hundred-soldier
+battle on one tick and measures the tick it lands on against the thirty ticks of ordinary
+fighting before it; the storm tick costs a few per cent more than the average and the tick
+after it is cheaper again. The figures are in the milestone report.
+
+**And the API the brief anticipated was not added.** A cheaper narrow question - "does this
+nearby region contain a hostile soldier?" - was expected to be needed for an
+immediate-versus-deferred decision. It was not: the two questions the new path asks are "may
+I continue with the opponent I have" (an id probe and a distance) and "is it within my reach"
+(a distance), and the one query-shaped decision - whether a loss was taken mid-swing - is a
+distance against a corpse. Adding a method nobody calls would widen the grid for nothing, so
+`BattleSpatialGrid` is unchanged by this milestone apart from a comment recording that
+decision. Measurement decides what to add, and here it decided against.
+
+
+## D-084: Every tick is sampled, because the average is not the evidence
+
+**Decision.** The benchmark can sample every phase on every tick (`--spikes=1`) and report
+the average, p50, p95, p99 and worst case. A staggered schedule is exactly the kind of system
+that can average well and spike - three quiet ticks and one expensive one - and the average
+of such a system is a number that hides its own defect.
+
+**Why it was needed here.** The question the milestone had to answer was not "is the cadence
+cheaper on average" but "does staggering flatten the ticks or sawtooth them", and those are
+different measurements of the same run. At five thousand soldiers on the fixed-area field,
+same seed, same window, milliseconds per tick for the whole tick:
+
+| cadence | average | p50 | p95 | p99 | worst | worst / average |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 (every tick) | 233.091 | 179.714 | 487.453 | 542.521 | 592.590 | 2.54x |
+| **4 (shipped)** | **161.339** | **141.300** | **244.874** | **259.029** | **263.095** | **1.63x** |
+
+The tail is where the cadence pays most. Both configurations are measured over the same
+battle and both have a long tail, because the tail is the battle itself - the tick on which
+the armies meet - but the every-tick baseline is two and a half times its own average at the
+worst tick, and the staggered schedule is one and a half times its own. The spread the
+milestone is most likely to have introduced is the spread it measurably reduced.
+
+The same instrument answers the question the brief asked about synchronized bursts: the
+phases are sampled per tick, so a system that saved work on five ticks out of six and spent
+it on the sixth would show up as a p50 far below its average with a p99 far above. It does
+not.
+
+
+## D-085: Target handling is a hierarchy, and the nearest enemy is only the last question
+
+**Decision.** A soldier's opponent for a tick is resolved in a fixed order, cheapest first:
+
+1. **An explicit player order.** Resolved before anything automatic, honoured whenever its
+   quarry is a living enemy, and never delayed by a cadence, a retention rule or a search
+   bound. A soldier holding an order does not advance its awareness clock at all.
+2. **The remembered opponent**, while it is alive, hostile, and within the retention radius.
+   If it is also within reach this is the end of the matter, and the tick cost nothing.
+3. **A search**, when the soldier has nobody worth continuing with or when its own awareness
+   tick has come round. The search is unchanged from Step 7.2.
+4. **The formation's or the side's focus**, which is the answer the bodies have already
+   worked out for themselves once this tick, and what a soldier outside the fighting is
+   pointed at.
+
+**What this deliberately changes.** Step 7.3 asked for the nearest local enemy every tick, so
+a soldier always faced whoever was marginally closest, and a soldier with an enemy in front
+of it re-derived that fact sixty-six thousand times a second. The new rule is:
+
+> Once a soldier acquires an automatic opponent, that opponent remains preferred while alive,
+> hostile and locally relevant. Reacquisition happens immediately on invalidation, or
+> according to a deterministic staggered awareness cadence, or when the soldier's own turn
+> comes round - and an explicit player order outranks all of it.
+
+The differences are three, and they are behavioural rather than cosmetic:
+
+- **A soldier does not switch to a marginally nearer enemy.** Hysteresis
+  (`battle.target_switch_advantage`, 1.25) means a new candidate has to be a quarter closer
+  to take over. Two enemies at similar range no longer swap the answer on alternate ticks,
+  which is both cheaper and less twitchy to watch.
+- **A soldier faces the enemy it was dealing with rather than recomputing.** For a formed
+  soldier this only changes facing, because a formed soldier dresses to its slot either way.
+  For an unformed one it is the difference between walking at the enemy it engaged and
+  walking at whoever is currently nearest.
+- **A soldier outside its own search bound may be pointed at its body's fight rather than its
+  own nearest enemy.** That was already true in Step 7.2 (D-067); the bound is the same and
+  the rule is the same, but the skip in D-087 means the wide look that used to happen first
+  no longer runs when it provably cannot find anybody.
+
+The search itself is untouched: `_nearest_local_enemy()` answers exactly what a whole-field
+scan answers inside its bound, ties to the lower id, and is still the function the
+brute-force equivalence tests drive. Step 7.4 changed how often that answer is asked for,
+never what it says.
+
+**Why the order matters.** Every step in the hierarchy is cheaper than the one below it, so
+the order *is* the optimisation. A soldier in a melee - the common case in a real battle -
+never reaches step 3. A soldier marching towards a fight reaches step 4 and stops there.
+
+
+## D-086: Awareness is a capability a unit declares, not a weapon it is carrying
+
+**Decision.** `BattleUnit.awareness_radius` is how far a unit looks for its own enemies, zero
+meaning "use the battle's configured ladder". The retention radius is derived from the same
+number (`max(search radius, battle.target_retention_radius)`), so a unit that can see further
+also keeps what it finds further off.
+
+**Why it exists while there are no archers.** Step 8 does not start here, but the brief is
+explicit that this architecture must not assume a one-point-eight-unit melee reach: target
+validity and reacquisition have to work from reach, capability and configured awareness
+rather than from what a unit is. So the four decisions the target path makes - how far to
+look, how far to keep, whether a target is within reach, whether a look is worth making - are
+all expressed in terms of a unit's own numbers, and nothing anywhere in the path branches on
+`unit_type_id` or on `ranged`.
+
+**How it is pinned.** Two ways, both in `tests/test_target_acquisition.gd`. A source scan
+asserts the simulator contains no code-shaped weapon check (`"archer"`, `unit_type_id ==`,
+`ranged ==`). And a behavioural test gives a unit a wider awareness, checks that it finds an
+enemy a standard soldier cannot see, and separately checks that two soldiers with identical
+stats but different type names behave identically. A future ranged milestone changes the
+radius, not the algorithm - and if it ever needs a special case, it has to delete a test to
+get it.
+
+
+## D-087: A look that can be proved to find nobody is not made
+
+**Decision.** Before a soldier searches, it checks whether a search could possibly return
+anybody, and if it cannot, the battlefield is not asked. The check is a bound, not a
+heuristic:
+
+```
+d(soldier, E) >= d(anchor, E) - d(soldier, anchor) >= focus_distance - offset
+```
+
+The body's focus is the enemy nearest to the body's anchor, at a known distance; the soldier
+stands a known distance from that anchor; so if `focus_distance - offset` is already beyond
+the widest rung of the soldier's ladder, no enemy is inside it and every candidate the query
+would have measured was outside the radius it could return. The grid's own query margin is
+subtracted, because both the focus and the soldier may have moved by up to the distance the
+fastest soldier can walk since the focus was computed.
+
+**Why it was needed.** Removing the repeated looks revealed what had been hiding behind them.
+Once the soldiers with an enemy in reach stopped searching at all, the searches that remained
+were *self-selected for being expensive*: a soldier with nobody within eight units escalates
+to a thirty-two-unit query, which on a dense field walks hundreds of cells to hand back
+candidates that are nearly all beyond the radius. The wide look of a rear-rank soldier
+marching towards a battle it cannot reach is the clearest example of the waste: it cannot
+find anybody, and the formation's own focus already knows where the fighting is.
+
+**Why a proof and not a threshold.** A threshold would be a behaviour change dressed as an
+optimisation. This is not: when the bound holds, the search would have returned nothing and
+the soldier ends up pointed at its body's focus either way. The answer is identical; only the
+question is skipped. A test drives a formed battle for two hundred ticks, and for every
+soldier whose look was skipped checks *every enemy on the field* to confirm that none was
+inside the soldier's own bound.
+
+**What it is like.** The settled-interior skip of the separation pass (D-076): the same
+"prove there is nothing there, then decline to look" shape, taken on arithmetic rather than
+on a guess, and asserted by a test rather than described in a comment. The two together are
+the pattern to reach for when a phase is dominated by work that cannot change an answer.

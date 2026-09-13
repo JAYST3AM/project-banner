@@ -403,69 +403,49 @@ An engineering milestone: no new gameplay, nothing from Step 8.
 checks, 0 failures; the windowed flow clean; CI green. Total simulation time improved at
 every size, 1.07x to 7.36x. See D-070 through D-078.
 
+## Step 7.4 - Target acquisition scaling (`milestone-07.4`)
 
-## Step 7.3 - Dense battle / overlap scaling (`milestone-07.3`)
+**Goal:** remove the next measured bottleneck. Step 7.3 took the separation pass off the
+top of the profile and reported what was left: at five thousand soldiers **target selection
+alone was 248.542 ms a tick, 66% of the tick**, because every soldier looked for an enemy
+on every simulation tick. An engineering milestone: no new gameplay, nothing from Step 8,
+no threads, no C++, no GDExtension, no multi-rate simulation.
 
-**Goal:** remove the next measured bottleneck. Step 7.2 replaced the quadratic proximity
-scans and reported that 66% of a tick at five thousand soldiers was the separation pass.
-An engineering milestone: no new gameplay, nothing from Step 8.
+- **The counters came first.** Target handling was instrumented before it was changed, and
+  what the counters said chose the milestone: the search was not too slow, it happened far
+  too often. See D-079.
+- **Target persistence.** A soldier keeps a valid opponent - alive, hostile, still nearby -
+  instead of asking for the nearest enemy every tick. `BattleUnit.auto_target_id` and
+  nothing more elaborate than an id and a tick: no node references, no timers, no
+  coroutines, no per-soldier dictionaries, no signals, and nothing that reaches a campaign
+  save. See D-080, D-085.
+- **A deterministic staggered cadence.** `battle.target_reacquisition_ticks` (4), phased as
+  `unit.id % interval`, so a quarter of the army looks on any given tick rather than the
+  whole army on every fourth. Simulation ticks, never a wall clock. See D-080, D-081.
+- **A retention radius**, so a remembered opponent is finite: past
+  `battle.target_retention_radius` a soldier stops continuing with it rather than running
+  after it across a battlefield. Shipped equal to the search ceiling, on purpose, and swept
+  at 8, 16, 24 and 32 first. See D-082.
+- **Hysteresis** (`battle.target_switch_advantage`, 1.25): an opponent is not abandoned
+  because something else is a hundredth of a unit closer. See D-081.
+- **Urgency, and one kind of it.** The only search allowed to run off the cadence is one for
+  an opponent lost inside the soldier's own reach. Configurable, tested on and off, measured
+  by a death-storm benchmark that kills an entire front rank on one tick. See D-083.
+- **The search itself untouched.** The local search, its ladder and its tie-breaking are
+  Step 7.2's, and the brute-force equivalence tests still drive them. See D-085.
+- **Generic foundations for the ranged milestone**, with no archers in this one: a unit
+  declares `awareness_radius`, and nothing in the target path branches on what it carries.
+  See D-086.
+- **A spike analysis**, because a staggered system is exactly the kind that can average
+  well and spike: per-tick phases are sampled and reported as average, p50, p95, p99 and
+  worst. See D-084.
 
-- **The measurement came first.** The separation pass was given counters before it was
-  changed, and they said it was handed **95.6 candidates per soldier to find 226 touching
-  pairs** army-wide, with the broadphase 62-66% of the phase. See D-071.
-- **A dedicated separation index.** `BattleOverlapGrid`, with its own cell size
-  (`battle.overlap_cell_size`, 1.35 - one body's width, chosen by a sweep), enumerating
-  cell against cell so every pair is produced once with no per-soldier query. See D-073,
-  D-078.
-- **Pushes accumulated rather than applied**, which removes order dependence from the
-  physics entirely and makes order independence a property that can be checked instead of
-  preserved. It is a deliberate change in relaxation and is documented as one. See D-074.
-- **A displacement ceiling**, so a crush cannot fling a soldier across the field. D-075.
-- **Formation geometry does the spacing.** Settled interiors of a body are skipped on a
-  proof, never across two bodies, and never where the formation's own spacing is tight.
-  See D-076.
-- **Two benchmark families**, because one battlefield cannot answer both "what if an army
-  is packed into too small a space" and "what does a battle of twenty thousand cost".
-  See D-077.
-- **Two Step 7.2 hardening fixes**: the grid's bucket tails are persistent storage rather
-  than a per-rebuild allocation (D-070), and an explicit attack order is resolved before
-  the automatic target search rather than after it (D-072).
-
-**Definition of done:** measured; **18 suites, 2490 assertions, 0 failures**; 95 restart
-checks, 0 failures; the windowed flow clean; CI green. Total simulation time improved at
-every size, 1.07x to 7.36x. See D-070 through D-078.
-
-
-## Step 7.3 - Dense battle / overlap scaling (`milestone-07.3`)
-
-**Goal:** remove the next measured bottleneck. Step 7.2 replaced the quadratic proximity
-scans and reported that 66% of a tick at five thousand soldiers was the separation pass.
-An engineering milestone: no new gameplay, nothing from Step 8.
-
-- **The measurement came first.** The separation pass was given counters before it was
-  changed, and they said it was handed **95.6 candidates per soldier to find 226 touching
-  pairs** army-wide, with the broadphase 62-66% of the phase. See D-071.
-- **A dedicated separation index.** `BattleOverlapGrid`, with its own cell size
-  (`battle.overlap_cell_size`, 1.35 - one body's width, chosen by a sweep), enumerating
-  cell against cell so every pair is produced once with no per-soldier query. See D-073,
-  D-078.
-- **Pushes accumulated rather than applied**, which removes order dependence from the
-  physics entirely and makes order independence a property that can be checked instead of
-  preserved. It is a deliberate change in relaxation and is documented as one. See D-074.
-- **A displacement ceiling**, so a crush cannot fling a soldier across the field. D-075.
-- **Formation geometry does the spacing.** Settled interiors of a body are skipped on a
-  proof, never across two bodies, and never where the formation's own spacing is tight.
-  See D-076.
-- **Two benchmark families**, because one battlefield cannot answer both "what if an army
-  is packed into too small a space" and "what does a battle of twenty thousand cost".
-  See D-077.
-- **Two Step 7.2 hardening fixes**: the grid's bucket tails are persistent storage rather
-  than a per-rebuild allocation (D-070), and an explicit attack order is resolved before
-  the automatic target search rather than after it (D-072).
-
-**Definition of done:** measured; **18 suites, 2490 assertions, 0 failures**; 95 restart
-checks, 0 failures; the windowed flow clean; CI green. Total simulation time improved at
-every size, 1.07x to 7.36x. See D-070 through D-078.
+**Definition of done:** measured; **19 suites, 2732 assertions, 0 failures**; 95 restart
+checks, 0 failures; the windowed flow clean; CI green. Total simulation time improves at
+every size of both benchmark families (1.43x to 2.66x on the fixed-area torture test, 2.0x to
+3.9x at realistic density), and target acquisition itself is **3.5x cheaper** at the sizes
+where both builds were measured at the same window. The next bottleneck is named by the
+measurement rather than guessed: formation focus. See D-079 through D-087.
 
 ---
 

@@ -514,6 +514,81 @@ The radius is deliberately not tied to melee reach: archers, long spears and cav
 threat detection all want to search further than they can hit, and widening the ladder is
 a config change (D-061). Step 7.2 adds none of those systems.
 
+#### How often a soldier looks (Step 7.4)
+
+Step 7.2 made the search *local*. Step 7.4 made it *rare*, and the two rules it serves are
+worth stating in full because everything in the section follows from them:
+
+> **Automatic battlefield targets are persistent local engagements, not a nearest-enemy
+> query recomputed every simulation tick.** Soldiers retain a valid opponent and reacquire
+> deterministically when local circumstances require it.
+
+> **Expensive soldier awareness work must be staggered deterministically so army scale
+> does not create synchronized simulation spikes.**
+
+The shape of a soldier's decision is a ladder of questions, ordered by cost. Every one of
+them is answered from data the soldier is already holding until the last:
+
+```
+explicit order?          use it                     (a player instruction: no search)
+remembered opponent?
+    in reach?            use it                     (no search: the fastest path)
+    not this soldier's turn yet?
+                         use it                     (no search: still relevant)
+turned to look?
+    nearest local enemy, or the body's focus        (the only expensive answer)
+```
+
+A soldier who can reach the enemy in front of it therefore never searches at all: the tick
+that would have discovered "the same enemy is still standing there" is not spent. A soldier
+who cannot reach anybody is re-examined on its own cadence, and between looks it is pointed
+at the fighting by its formation's or its side's focus - the answer the bodies have already
+worked out for themselves once this tick (D-067), which is why a soldier far from the
+fighting does not need a private spatial query to know which way to march.
+
+**Where the schedule lives.** `BattleUnit.next_search_tick` is an integer simulation tick,
+and the phase a soldier starts on is `unit.id % battle.target_reacquisition_ticks`. Three
+consequences, all deliberate:
+
+- it is **staggered** - a quarter of the army looks on any given tick rather than the whole
+  army on every fourth, which is what keeps the cost per tick flat instead of spiky;
+- it is **deterministic** - the same seed, roster and orders produce the same schedule, and
+  re-ordering the roster changes the order soldiers are updated in, not when any one of
+  them looks;
+- it reads **no clock** - not `Time.get_ticks_msec()`, not a render frame. Wall-clock
+  timing exists in this project only inside the benchmark's counters (D-080).
+
+**The schedule is a latency bound, not merely a saving.** An enemy that arrives immediately
+after a soldier's scheduled look is noticed on the next one, one cadence minus the tick it
+arrived on; `tests/test_target_acquisition.gd` measures that at every cadence the sweep
+covered. What the cadence must never do is delay a *player*: an explicit attack order is
+resolved before the automatic path is even reached, it is answered on the tick it is given,
+and a soldier holding an order does not advance its awareness clock at all (D-085).
+
+**Losing an opponent.** A remembered opponent stops being the answer when it dies, when it
+turns out not to be an enemy, when it is gone from the roster, or when it has moved beyond
+`battle.target_retention_radius`. The first three are facts about the opponent; the fourth
+is the bound that stops a soldier running after one enemy across a battlefield it is no
+longer fighting in.
+
+The one case that is allowed to search **off** the cadence is a loss that happened inside
+the soldier's own reach: an opponent killed while this soldier could have struck it is a
+fight in progress, and making it wait for its slot would leave it standing over a corpse.
+That rule is a decision rather than an accident - it is configurable, it is tested both on
+and off, and the worst tick it can produce is measured by the death-storm benchmark, in
+which an entire front rank is killed on one tick (D-083).
+
+**The search itself is unchanged.** `_nearest_local_enemy()` still answers exactly what a
+whole-field scan answers inside its bound, still ties to the lower id, and is still the
+function the brute-force equivalence tests drive. Step 7.4 changed how often that answer is
+asked for, never what it says (D-085).
+
+**Where a wider awareness will go.** A unit carries `awareness_radius` - zero meaning "use
+the battle's configured ladder". A soldier that one day carries a bow says how far it can
+see on itself; the retention radius follows the same number so a unit never keeps less than
+it can find. Nothing in the target path branches on what a unit is carrying, and a test
+asserts that a soldier called an archer behaves exactly like one called a spearman (D-086).
+
 ### The separation pass: keeping bodies apart (Step 7.3)
 
 Every soldier is a body on the ground. Two of them cannot stand in the same place, and

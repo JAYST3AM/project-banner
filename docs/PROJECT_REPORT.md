@@ -429,7 +429,7 @@ size of the band, which is the right behaviour and not evidence of a systematic 
 
 The working rule is: **never claim something works unless it has been run.**
 
-### 9.1 Headless suites — 18 suites, 2,490 assertions, 0 failures
+### 9.1 Headless suites — 19 suites, 2,732 assertions, 0 failures
 
 | Suite | Assertions | Covers |
 | --- | --- | --- |
@@ -446,6 +446,7 @@ The working rule is: **never claim something works unless it has been run.**
 | `test_formation_battle` | 132 | **both systems together** — both armies formed, the enemy on the same engine, the AI ignoring wiped-out bodies, contact belonging to a body rather than a side, terrain slowing a body, a formed battle resolving and being reproducible, the architecture guardrails, a 500-unit scale smoke, **combat across a cell boundary and a cell corner**, every soldier finding a target while the armies are apart, a body pointed by its own focus, and a 300-soldier pile in a single cell run twice |
 | `test_spatial_grid` | 111 | **the proximity index** — insertion, rebuild, empty and single-unit grids, many units, cell boundaries as non-walls, radius queries, side filtering, dead-unit exclusion at build time **and at query time**, movement between cells, duplicates, a saturated cell, large-radius queries, query order across index orderings, scratch-buffer reuse, **agreement with a brute-force reference over 200 generated queries**, the movement margin, target selection against the same brute-force reference over 80 ticks of a moving battle, the search bound and its long-range fallback, overlap resolution against the exhaustive pairwise loop on eight arrangements, explicit attack orders, and a seeded battle repeating tick-for-tick |
 | `test_overlap` | 140 | **separating dense soldier bodies** — two soldiers separate and distant ones do not move, coincident soldiers resolve deterministically, cell boundaries including corners and exact coordinates, no pair resolved twice, **order independence** (the roster is reversed and nobody moves), repeatability, **no allocation after a rebuild**, settled-formation skipping for line/column/loose, a compressed line, two friendly bodies crossing, enemy contact, flank contact, dense piles of 200 and 800, no launches, convergence, brute-force agreement on sparse *and* deliberately dense deployments, and a cell-size sweep |
+| `test_target_acquisition` | 231 | **how often a soldier looks, and who it keeps** — a remembered opponent kept while it is alive and relevant, an enemy in reach as the fastest path, a loss in reach replaced in the same tick, a loss at a distance waiting its turn, an opponent released when it gets too far away, orders never delayed and never queued behind a cadence, an arriving enemy noticed inside one cadence **at every cadence the sweep covered**, phases staggered across ticks rather than massed, the schedule unchanged by roster order, a wing that searches rarely while marching and fights when it arrives, hysteresis against two similar enemies, cell boundaries as non-walls, a death storm bounded and deterministic, a wider awareness as a capability rather than a weapon check, the search itself unchanged, the retention path allocating nothing, the whole target sequence deterministic across two runs, urgency switched off, **the counters partitioning every soldier-tick**, and the benchmark report's own figures |
 | `test_enemy_persistence` | 121 | **the same enemy fought twice** — battle → campaign → save/load → second battle |
 | `test_e2e_loop` | 147 | **the Step 5 critical end-to-end path**, through the real scenes — including the real `BattleResult` reaching the real results screen |
 | `test_persistence` | 150 | every persisted field, migration, refusal, corrupt files, metadata for every save shape |
@@ -843,6 +844,96 @@ acted on.
 
 ---
 
+### 9.9 The Step 7.4 benchmark — target acquisition, four times cheaper
+
+Step 7.3's report ended with an engineering question rather than a bug: target selection cost
+248.542 ms a tick at five thousand soldiers, 66% of the tick, because every soldier asked the
+battlefield who was nearest to it on every tick. Step 7.4's answer was to stop asking the
+question when the answer cannot have changed.
+
+**The evidence that the work was unnecessary**, taken from the unmodified Step 7.3 code with
+counters added and nothing else changed, at the same seed, layout and 150-tick windows:
+
+| Soldiers | looks/tick | looks per soldier per simulated second | looks that found nobody | candidates measured per look |
+| ---: | ---: | ---: | ---: | ---: |
+| 500 | 500.0 | 20.00 | 481.1 | 1.4 |
+| 2,500 | 2,500.0 | 20.00 | 2,216.2 | 23.6 |
+| 5,000 | 5,000.0 | 20.00 | 4,095.2 | 71.8 |
+
+Four thousand and ninety-five of five thousand looks, at five thousand soldiers, found nobody
+at all - and the five thousand that remained measured 71.8 candidates each to produce one
+answer. That is the shape of the waste: not one expensive question, but a cheap question asked
+sixty-six thousand times a second.
+
+**The same counters on the shipped build**, at the same windows:
+
+| Soldiers | looks/tick | looks per soldier per second | avoided | kept and used | look on own cadence | reacquisitions within one cadence |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 54.6 | 3.28 | 89.1% | 12.2/tick | 54.6/tick | 98.7% |
+| 2,500 | 409.4 | 4.91 | 83.6% | 200.5/tick | 409.4/tick | 99.8% |
+| 5,000 | 925.6 | 5.55 | 81.5% | 640.3/tick | 925.6/tick | 99.4% |
+
+**Benchmark A, the fixed-area torture test** - unchanged seed, layout, rules and budget since
+Step 7:
+
+| Soldiers | Step 7 ms/tick | Step 7.2 ms/tick | Step 7.3 ms/tick | **Step 7.4 ms/tick** | 7.3 -> 7.4 | ticks/sec |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 4.783 | 4.160 | 3.651 | **1.987** | 1.84x | 503 |
+| 500 | 110.337 | 36.165 | 33.939 | **12.760** | 2.66x | 78 |
+| 1,000 | 439.993 | 65.299 | 57.537 | **30.746** | 1.87x | 33 |
+| 2,500 | 2,684.557 | 254.277 | 172.164 | **91.848** | 1.87x | 11 |
+| 5,000 | 10,988.004 | 703.456 | 425.177 | **235.303** | 1.81x | 4 |
+| 10,000 | not measured | 2,872.690 | 781.491 | **541.734** | 1.44x | 2 |
+| 20,000 | not measured | 12,016.796 | 1,632.897 | **1,141.059** | 1.43x | 0.9 |
+
+**The phase the milestone attacked**, measured at matched windows with the same harness on the
+same machine - the Step 7.3 column being a probe build with counters and nothing else changed:
+
+| Soldiers | Step 7.3 target ms/tick | **Step 7.4 target ms/tick** | speedup | 7.3 total | 7.4 total | total speedup |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 | 8.840 | **2.433** | **3.63x** | 18.021 | 11.076 | 1.63x |
+| 2,500 | 79.784 | **22.839** | **3.49x** | 133.215 | 73.522 | 1.81x |
+| 5,000 | 286.694 | **81.268** | **3.53x** | 403.398 | 196.244 | 2.06x |
+
+Over the milestone, target acquisition is **3.5x cheaper** at every size where both builds
+could be measured at the same window, and total simulation time improves at every size of both
+benchmark families. The requirement was a multi-fold reduction in the target phase rather than
+a few per cent, and this is the number that says whether it was met.
+
+**The death storm.** An entire front rank is killed on one tick in two lines that are already
+fighting; the two armies are held still so the storm is the only thing that changes. Measured
+through the phase clock, against the thirty ticks of ordinary fighting it interrupts:
+
+| Soldiers | front rank killed | average tick | storm tick | spike | next tick | looks: normal / storm |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 600 | 100 | 15.532 ms | 16.992 ms | 1.09x | 13.985 ms | 100 / 200 |
+| 1,200 | 200 | 33.362 ms | 37.018 ms | 1.11x | 29.536 ms | 200 / 400 |
+| 2,400 | 400 | 45.331 ms | 49.068 ms | 1.08x | 41.797 ms | 400 / 800 |
+
+A storm tick carries twice the ordinary number of looks and costs a tenth more. The tick after
+it costs less than average.
+
+**The spikes.** Average cost is not evidence about a staggered system: the failure mode is a
+flat average with a sawtooth underneath it, so every tick of every profiled run is sampled.
+At five thousand soldiers on the fixed-area field, milliseconds per tick:
+
+| phase | average | p50 | p95 | p99 | worst |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| total | 249.022 | 259.273 | 430.588 | 477.586 | 525.450 |
+| target | 137.591 | 160.596 | 268.516 | 293.423 | 347.582 |
+| overlap | 55.951 | 52.909 | 80.763 | 85.516 | 107.862 |
+| soldiers | 167.676 | 189.085 | 313.009 | 346.005 | 403.375 |
+
+The tail is real and it is the *battle*, not the schedule: it is the tick on which the armies
+meet. No per-tick distribution was recorded for Step 7.3, so the tails cannot be compared
+across the milestone - only the averages can, and that limit is stated rather than glossed.
+
+**What is now the most expensive phase.** At five thousand soldiers the target phase is still
+the largest single item - 137.6 of 253.9 ms - and it is four times smaller than it was. On the
+twenty-thousand fixed-area crush the separation pass takes over at 995.0 of 1,516.3 ms.
+
+---
+
 ## 10. Bugs found, and how
 
 Recording these because they indicate where the risk actually lives.
@@ -1064,6 +1155,47 @@ Stated so that nothing above is read as more than it is:
   size a battlefield-wide scan is genuinely cheap and the index has a fixed per-tick cost
   of its own. The crossover where the index clearly wins is between 100 and 500 soldiers.
 
+### 10.10 The Step 7.4 pass — the cost hiding behind the cost
+
+Four findings, in the order they were made. Three were caught by tests written to fail, and
+one by a search for duplicated headings; none were caught by reading code.
+
+**1. Optimising the cheap work away leaves only the expensive work.** Removing the repeated
+looks worked, and then the phase barely moved: the average look cost roughly three times what
+it had in Step 7.3, because the looks that remained were *self-selected for being expensive*.
+A soldier with an enemy in reach had stopped searching at all, so what was left was the
+soldier with nobody within eight units escalating to a thirty-two-unit query - the widest,
+emptiest, most wasteful look in the system. The phase clock could not show this and neither
+could the code: it is a property of the population that survives an optimisation, and it only
+exists after.
+*The generalisable lesson:* when an optimisation removes a large share of a phase's work,
+re-measure the *shape* of what remains before believing the phase is solved. The fix was the
+proof-based skip of D-087 - and it is the same shape as the separation pass's settled-interior
+skip, which had been in the codebase for a milestone.
+
+**2. A bound narrower than the thing it bounds is a loop.** The first design released a
+remembered opponent that went beyond `target_retention_radius`, shipped at 16, while a search
+could still acquire one at up to 32. A test that asserted "a soldier keeps the enemy in front
+of it" failed with the soldier holding *nobody* - it had acquired an enemy at 29 units and let
+it go on the next tick, then acquired it again on its next look. The retention radius was not
+a policy, it was a loop, and the sweep made it visible: 127 releases a tick at a radius of 8.
+The fix went into the rule (retention is the search ceiling, D-082) and not into the test.
+
+**3. Counters that overlap cannot be added up.** The focus-fallback counter was incremented
+both when a soldier was pointed at the fighting without looking *and* when it looked and found
+nobody - the same tick counted twice, in a report whose whole purpose is to be believed.
+Nothing in the code looked wrong; what found it was an assertion that the five target paths
+add up to the number of soldier-ticks simulated, run in a scenario where searches come back
+empty-handed. The suite now asserts that partition in three different battles.
+*The generalisable lesson:* a set of counters is a claim about a partition. Assert the
+partition, or the report will confidently print numbers that do not add up.
+
+**4. The documentation was wrong about itself.** Step 7.3's section had been pasted into
+`ROADMAP.md` three times - identical, three hundred lines apart - so the roadmap described one
+milestone three times and nothing detected it. It was found by grepping for duplicated
+headings before adding a fourth copy. Documentation is not verified by any test, and that is
+exactly where a silent error is cheapest to make and most expensive to trust.
+
 ## 11. What is *not* implemented
 
 The honest list of gaps.
@@ -1072,9 +1204,17 @@ The honest list of gaps.
 already existed, and both deliberately added no gameplay. **Step 7 closed the first two**
 and left the rest untouched: battlefields are no longer flat, and formations exist.
 **Step 7.2 closed none of them either** — it was an engineering milestone, and the brief
-for it forbade new gameplay outright, as did Step 7.3's. What it closed was an *engineering* gap rather than
-a gameplay one, and that gap had its own entry below; it is now struck out and replaced
-with what the measurement says remains.
+for it forbade new gameplay outright, as did Step 7.3's and Step 7.4's. What those three
+closed were *engineering* gaps rather than gameplay ones, and each had its own entry below;
+the ones that have been closed are struck out and replaced with what the measurement says
+remains.
+
+**Step 7.4 changed behaviour without adding gameplay, which is worth stating plainly.** Every
+soldier now keeps the opponent it is dealing with rather than re-deriving the nearest one
+every tick, switches only when a new candidate is a quarter closer, and can be up to three
+ticks late to notice an enemy that has just arrived (D-085). None of that is a new system and
+none of it is visible on a menu, but it is a change to how a battle plays, and it is recorded
+here rather than described as a pure optimisation.
 
 **Combat depth**
 
