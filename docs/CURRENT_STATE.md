@@ -1479,8 +1479,27 @@ Every one of them inspects *fewer* cells and fewer candidates than the ladder - 
 read 122 cells and measured 45 candidates per look against the ladder's 260 and 171 - and every
 one of them is slower, by more in a real battle than in the micro-benchmark: a benchmark times
 one query against a warm index, a battle times two and a half thousand a tick against an index
-that is rebuilt every tick. The isolation run says why: **one radius-32 box costs
-about 300 us however it is walked.** In an interpreted loop a bound test costs about 0.3 us and
+that is rebuilt every tick.
+
+**The isolation run, which is where the milestone's conclusion actually comes from.** One
+radius-32 box, asked about every query point on a twenty-thousand-soldier field at realistic
+packing:
+
+| implementation of the same single query | time |
+| --- | ---: |
+| the locked path - `collect_within` plus the flat nearest loop over the list it built | 344.5 us |
+| the new walk - one rectangle pass keeping the best as it goes, no list at all | 306.8 us |
+| the whole locked *look*, which is that same box preceded by a radius-8 one | **63.2 us** |
+
+Two different walks of the same ground, within 12% of each other - and the full ladder, the same
+outer box plus a small inner one, is **five times cheaper than either**, because nine looks in
+ten are answered by the inner box and the outer one is never walked. So the box is the cost, not
+the way the box is walked, and no traversal that still walks it can win. (Those standalone-box
+figures ask the box about every point, including contact-zone points where it holds nearly six
+hundred candidates; they compare two implementations of one query, which is what the isolation
+was for, and they are not the ladder's second-rung population.)
+
+In an interpreted loop a bound test costs about 0.3 us and
 the empty cell it skips costs about 0.12 us to open and dismiss, so pruning inside the loop
 cannot pay for itself. The ladder is cheap because its *first* rung is small and answers most
 looks before the second rung is reached, not because of how it walks.

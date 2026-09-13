@@ -2083,12 +2083,26 @@ decided on.
 
 Every one of them inspects *fewer* cells and fewer candidates than the ladder - the best of them
 read 122 cells and measured 45 candidates per look against the ladder's 260 and 171 - and every
-one of them is slower. The isolation run says why: **one radius-32 box costs about 300 us
-whichever way it is walked**, and the ladder is cheap only because its first rung answers most
-looks before the second rung is reached. In an interpreter, a bound test in a loop body costs
-about 0.3 us and the empty cell it skips costs about 0.12 us to open and dismiss. A walk that
-prunes per cell pays more for the pruning than it saves on the skipping; pruning pays only where
-it lives in the loop bounds, and the cheapest loop bounds are the ones a rectangle already has.
+one of them is slower. The isolation run says why. One radius-32 box, asked about every query
+point on a twenty-thousand-soldier field at realistic packing, costs:
+
+| implementation of the same single query | time |
+| --- | ---: |
+| the locked path - `collect_within` plus the flat nearest loop over the list it built | 344.5 us |
+| the new walk - one rectangle pass keeping the best as it goes, no list | 306.8 us |
+| the whole locked *look*, which is the same box preceded by a radius-8 one | **63.2 us** |
+
+Two different walks of the same ground land within 12% of each other, and the full ladder - the
+same outer box plus a small inner one - is **five times cheaper than either**, because nine looks
+in ten are answered by the inner box and the outer one is never walked. That is the finding:
+**the box is the cost, not the way the box is walked**, and no traversal that still walks it can
+win. (The standalone-box figures ask the box about every point, including points in the contact
+zone where it holds nearly six hundred candidates; they compare two implementations of one query,
+which is what the isolation was for, and they are not the ladder's second-rung population.) In
+an interpreter a bound test in a loop body costs about 0.3 us and the empty cell it skips costs
+about 0.12 us to open and dismiss, so a walk that prunes per cell pays more for the pruning than
+it saves on the skipping. Pruning pays only where it lives in the loop bounds, and the cheapest
+loop bounds are the ones a rectangle already has.
 
 **Decision: the search is unchanged.** No re-implementation is shipped. The ladder's staging - a
 small first rung that answers most looks, widening only for the looks that find nobody - is
