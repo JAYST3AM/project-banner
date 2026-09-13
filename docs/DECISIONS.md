@@ -1850,7 +1850,9 @@ bodies:
 | focus answers that changed from the previous tick | 38.1 |
 
 The phase cost **856 ms a tick** in that run, which is the 881 ms of the Step 7.4 report
-re-measured with the counters in place on this machine.
+re-measured with the counters in place on this machine - and **763 ms of a 1,786 ms tick** in
+the matched-window run that produced the Step 7.5 tables. The two are the same phase measured
+over different windows of the same battle; neither is the other's correction.
 
 **Why it was needed.** The phase clock could say that formation focus cost most of a second.
 It could not say whether to make the pass smaller or to stop the pass from happening so often,
