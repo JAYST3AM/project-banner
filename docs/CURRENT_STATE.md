@@ -1439,7 +1439,8 @@ window the before-and-after comparison uses:
 | **the target phase** | **602.7** | 100% |
 
 Three runs measure the same split with the same shape: this window puts 85.7% of 602.7 ms in the
-query, a hundred-tick sweep puts 86.1% of 601.3 ms, and a thirty-tick window 85.2% of 598.5 ms.
+query, the Phase-1 sweep (about two hundred ticks) puts 86.1% of 601.3 ms, and a thirty-tick
+window 85.2% of 598.5 ms.
 The window is quoted with each figure because the phase wanders 1-4% between them, and the ratio
 does not - which is the point of counting it.
 
@@ -1457,9 +1458,9 @@ does not - which is the point of counting it.
 | looks that found nobody at all | 22.6% | 27.9% | 29.4% |
 
 One table, one run: the numbers above are the matched twenty-tick window on the scaled
-battlefield, the same run the rest of this milestone's figures come from. A hundred-tick sweep
-over the same battles draws the same picture within a few percent - 1.77 queries, 260 cells, 171
-candidates per look - and reports the same 8.4% of cells walked twice by one look.
+battlefield, the same run the rest of this milestone's figures come from. The Phase-1 sweep -
+about two hundred ticks over the same battles - draws the same picture within a few percent: 1.77
+queries, 260 cells, 171 candidates per look, and the same 8.4% of cells walked twice by one look.
 
 A look is asked only on cadence, and **half of the looks a cadence of four implies never
 happen**: 2,438 a tick against 5,000, the other 2,562 already answered - a retained opponent

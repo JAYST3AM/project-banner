@@ -2037,8 +2037,9 @@ realistic twenty-thousand-soldier benchmark, automatic target acquisition cost 5
 phase just fixed, had fallen to 41.6 ms. Step 7.6 set out to attack that 575 ms with an exact
 re-implementation of the local search, and a target of a three-fold cut.
 
-**What was measured before anything was changed.** The path was counted, not guessed at, over a
-hundred ticks at each of five, ten and twenty thousand soldiers. At twenty thousand a tick ran
+**What was measured before anything was changed.** The path was counted, not guessed at, over
+about two hundred ticks at each of five, ten and twenty thousand soldiers - 193 at five thousand,
+which the run's own totals give exactly: 192,088 looks at 995.3 of them a tick. At twenty thousand a tick ran
 **2,438 looks** - not the 5,000 that a cadence of four would imply - and a look cost **212 us**
 inside the grid query (45 us in the first rung, 167 in the second), which the phase timers put
 at **86.1%** of the whole 601.3 ms target phase. One look made **1.77 grid queries**: one per
@@ -2050,7 +2051,7 @@ query time.
 (The same profile taken over the twenty-tick window that the before-and-after comparison uses
 agrees throughout - 1.71 queries, 243 cells, 174 candidates, 71% of looks escalating, 86% of the
 phase inside the query - and differs where a difference is expected rather than in noise: the
-shorter window is the opening approach, the hundred-tick window spans the contact era too, so
+shorter window is the opening approach, the longer one spans the contact era too, so
 more looks are answered from memory or by the formation and fewer reach the second rung. The two
 are quoted as their own windows rather than averaged.)
 
