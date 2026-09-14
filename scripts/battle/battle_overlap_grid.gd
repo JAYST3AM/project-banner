@@ -83,6 +83,24 @@ var _count: int = 0
 var _occupied: PackedInt32Array = PackedInt32Array()
 ## Displacement accumulators, indexed by slot, so the inner loop is two array writes.
 var _push_x: PackedFloat32Array = PackedFloat32Array()
+
+## ---------- development-only phase clocks (Step 7.8) ------------------------
+##
+## Where the overlap phase's time goes, in three coarse blocks. Deliberately not one clock per
+## pair or per cell: a clock inside the hot loops would be measuring the profiler. Build covers
+## clearing, the roster walk, alive filtering, cell calculation and insertion; same-cell and
+## neighbours cover the two pair loops; whatever is left of the phase is the apply pass and the
+## arithmetic between the loops, and the report says so rather than inventing a fourth number.
+var dev_usec_build: int = 0
+var dev_usec_same_cell: int = 0
+var dev_usec_pairs: int = 0
+var dev_coincident: int = 0
+var dev_moved: int = 0
+var dev_displacement_sum: float = 0.0
+var dev_cell_pop_max: int = 0
+var dev_pop_p50: int = 0
+var dev_pop_p95: int = 0
+var dev_pop_p99: int = 0
 var _push_y: PackedFloat32Array = PackedFloat32Array()
 
 ## Per cell: whether everyone in it is standing where its formation put it, and if so
@@ -146,7 +164,11 @@ func resolve(units: Array[BattleUnit], minimum: float, settle_epsilon: float = 0
 	_build_offsets()
 	if stats_enabled:
 		_reset_stats()
+	var clock := Time.get_ticks_usec() if stats_enabled else 0
 	_rebuild(units, settle_epsilon)
+	if stats_enabled:
+		dev_usec_build = Time.get_ticks_usec() - clock
+		_measure_population()
 	if _count == 0:
 		return
 
@@ -158,6 +180,8 @@ func resolve(units: Array[BattleUnit], minimum: float, settle_epsilon: float = 0
 
 		# Inside one cell: every pair, once, walking the bucket as a linked list rather
 		# than copying it out.
+		if stats_enabled:
+			clock = Time.get_ticks_usec()
 		var slot_a := _head[cell]
 		while slot_a >= 0:
 			var slot_b := _next[slot_a]
@@ -167,6 +191,9 @@ func resolve(units: Array[BattleUnit], minimum: float, settle_epsilon: float = 0
 				_consider(slot_a, slot_b, minimum, minimum_sq)
 				slot_b = _next[slot_b]
 			slot_a = _next[slot_a]
+		if stats_enabled:
+			dev_usec_same_cell += Time.get_ticks_usec() - clock
+			clock = Time.get_ticks_usec()
 
 		# Against the half-neighbourhood in front, so each pair of cells is visited once.
 		# The cell's row and column are worked out once for all the offsets rather than
@@ -217,9 +244,55 @@ func reset_stats() -> void:
 
 ## Everything the last pass did, as one dictionary, for the benchmark and for tests.
 ## Development-only data; nothing in the game reads it.
+func _measure_population() -> void:
+	# Population percentiles across occupied cells, built once per rebuild from the same
+	# buckets the pairs come from. Workload shape, not timing: it is what says whether the
+	# pass is walking a few fat cells or many thin ones.
+	var hist: PackedInt32Array = PackedInt32Array()
+	for cell in _occupied:
+		var population := 0
+		var slot := _head[cell]
+		while slot >= 0:
+			population += 1
+			slot = _next[slot]
+		if population > dev_cell_pop_max:
+			dev_cell_pop_max = population
+		if hist.size() <= population:
+			hist.resize(population + 1)
+		hist[population] += 1
+	var total := 0
+	for value in hist:
+		total += value
+	if total == 0:
+		return
+	var cumulative := 0
+	var half := int(ceil(float(total) * 0.5))
+	var ninety_five := int(ceil(float(total) * 0.95))
+	var ninety_nine := int(ceil(float(total) * 0.99))
+	for population in hist.size():
+		cumulative += hist[population]
+		if dev_pop_p50 == 0 and cumulative >= half:
+			dev_pop_p50 = population
+		if dev_pop_p95 == 0 and cumulative >= ninety_five:
+			dev_pop_p95 = population
+		if dev_pop_p99 == 0 and cumulative >= ninety_nine:
+			dev_pop_p99 = population
+			break
+
+
 func report() -> Dictionary:
 	var cells := maxi(1, _occupied.size())
 	return {
+		"usec_build": dev_usec_build,
+		"usec_same_cell": dev_usec_same_cell,
+		"coincident": dev_coincident,
+		"moved_units": dev_moved,
+		"displacement_sum": dev_displacement_sum,
+		"cell_population_max": dev_cell_pop_max,
+		"cell_population_p50": dev_pop_p50,
+		"cell_population_p95": dev_pop_p95,
+		"cell_population_p99": dev_pop_p99,
+		"max_push": max_push,
 		"cell_pairs": stat_cell_pairs,
 		"cell_pairs_skipped": stat_cell_pairs_skipped,
 		"pairs": stat_pairs,
@@ -254,6 +327,16 @@ func cell_state_of(cell: int) -> int:
 ## ---------- internals ------------------------------------------------------
 
 func _reset_stats() -> void:
+	dev_usec_build = 0
+	dev_usec_same_cell = 0
+	dev_usec_pairs = 0
+	dev_coincident = 0
+	dev_moved = 0
+	dev_displacement_sum = 0.0
+	dev_cell_pop_max = 0
+	dev_pop_p50 = 0
+	dev_pop_p95 = 0
+	dev_pop_p99 = 0
 	stat_cell_pairs = 0
 	stat_cell_pairs_skipped = 0
 	stat_pairs = 0
@@ -382,6 +465,8 @@ func _consider(slot_a: int, slot_b: int, minimum: float, minimum_sq: float) -> v
 		return
 	if stats_enabled:
 		stat_touching += 1
+	if stats_enabled:
+		dev_coincident += 1
 	if distance_sq <= 0.0000001:
 		# Exactly on top of each other: there is no axis to separate along, so one is
 		# chosen. Fixed rather than random, so a pair in precisely the same spot resolves
@@ -407,6 +492,8 @@ func _apply_pushes() -> void:
 		var py := _push_y[slot]
 		if px == 0.0 and py == 0.0:
 			continue
+		if stats_enabled:
+			dev_moved += 1
 		var magnitude_sq := px * px + py * py
 		if magnitude_sq > ceiling_sq:
 			var scale := max_push / sqrt(magnitude_sq)
@@ -416,6 +503,8 @@ func _apply_pushes() -> void:
 				stat_clamped += 1
 		elif stats_enabled:
 			stat_displacement_max = maxf(stat_displacement_max, sqrt(magnitude_sq))
+		if stats_enabled:
+			dev_displacement_sum += sqrt(px * px + py * py)
 		var unit := _units[slot]
 		unit.position = Vector2(unit.position.x + px, unit.position.y + py)
 

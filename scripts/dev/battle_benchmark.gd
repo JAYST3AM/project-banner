@@ -675,6 +675,28 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 	if overlaps.is_empty():
 		return
 	print("")
+	print("=== THE SEPARATION PASS: where its time goes (Step 7.8) ===")
+	print("  Three coarse clocks, not one per pair. 'build' covers clearing, the roster walk,")
+	print("  alive filtering, cell calculation and insertion; 'same-cell' is the intra-cell pair")
+	print("  loop. Both are per pass, as the counters beside them are; the rest of the phase is")
+	print("  the neighbour loop and the apply pass, and the phase table above is where its cost")
+	print("  is read. Nothing here is derived from another column.")
+	print("")
+	print("%7s | %10s | %11s | %8s | %8s | %8s | %8s | %7s | %8s" % [
+		"units", "build us", "same-cell us", "pop p50", "pop p95", "pop p99", "pop max", "coincid", "moved/tk"])
+	print("-".repeat(110))
+	for report in overlaps:
+		var ticks_done := maxf(1.0, float(report.get("ticks", 1)))
+		# Only directly measured figures are printed: the remainder of the phase is not
+		# derived here, because the clocks in this table are per pass and the phase value is
+		# per tick, and subtracting one from the other produced a number that was neither.
+		print("%7d | %10.0f | %11.0f | %8.0f | %8.0f | %8.0f | %8.0f | %7.0f | %8.1f" % [
+			int(report["units"]),
+			float(report.get("usec_build", 0)), float(report.get("usec_same_cell", 0)),
+			float(report.get("cell_population_p50", 0)), float(report.get("cell_population_p95", 0)),
+			float(report.get("cell_population_p99", 0)), float(report.get("cell_population_max", 0)),
+			float(report.get("coincident", 0)), float(report.get("moved_units", 0))])
+	print("")
 	print("=== THE SEPARATION PASS: what it did, not only what it cost ===")
 	print("  Per tick. 'pairs' is how many soldier pairs the broadphase produced and measured;")
 	print("  'touching' is how many of them were actually inside the separation distance.")
