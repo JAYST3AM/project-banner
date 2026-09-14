@@ -1,0 +1,6 @@
+Godot must not scan this tree.
+
+It is the native accelerator: C++ sources, a pinned dependency checkout and SCons object
+files. Nothing in here is a Godot resource, and without this file the editor tries to import
+the compiler output - which aborted `--import` in CI on Linux rather than merely warning.
+See D-095 and native/README.md.
