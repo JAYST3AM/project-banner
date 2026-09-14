@@ -2,22 +2,23 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 7.5 - formation battlefield focus scaling
+**Last updated:** end of Step 7.6 - automatic target search cost scaling
 **Engine:** Godot 4.7.2-stable
-**Test status:** `2831 assertions, 0 failures, 20 of 20 suites` headless, plus
+**Test status:** `2881 assertions, 0 failures, 21 of 21 suites` headless, plus
 `95 checks + 6 checks, 0 failures` in a genuine two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
 every pull request against it, pinned to Godot 4.7.2-stable.
 
-**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, and Steps 7.2, 7.3, 7.4 and 7.5 were
+**Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, and Steps 7.2, 7.3, 7.4, 7.5 and 7.6 were
 engineering milestones; none of them added gameplay. Step 7 added terrain and formations.
 See [Step 7 - terrain and formation
 foundation](#step-7---terrain-and-formation-foundation), [Step 7.1 - formation
 hardening](#step-71---formation-hardening), [Step 7.2 - battle simulation scaling
 foundation](#step-72---battle-simulation-scaling-foundation), [Step 7.3 - dense battle /
 overlap scaling](#step-73---dense-battle--overlap-scaling), [Step 7.4 - target acquisition
-scaling](#step-74---target-acquisition-scaling) and [Step 7.5 - formation battlefield focus
-scaling](#step-75---formation-battlefield-focus-scaling) below.
+scaling](#step-74---target-acquisition-scaling), [Step 7.5 - formation battlefield focus
+scaling](#step-75---formation-battlefield-focus-scaling) and [Step 7.6 - automatic target search
+cost scaling](#step-76---automatic-target-search-cost-scaling) below.
 
 ---
 
