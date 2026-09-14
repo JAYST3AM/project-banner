@@ -1602,6 +1602,17 @@ bought to remove ~490 ms of GDScript candidate scanning, and it is the trade the
 on. In the 20K accelerated battle: 83,669 queries and 29.9 million candidates answered with **0
 disagreements**.
 
+### Family A - the fixed-area torture field
+
+Matched twenty-tick windows, total ms/tick, reference -> shape B: 100 soldiers 1.82 -> 1.89
+(**0.96x**), 500 9.36 -> 9.88 (**0.95x**), 1,000 32.38 -> 18.44 (1.76x), 2,500 105.70 -> 53.04
+(1.99x), 5,000 276.47 -> 124.50 (2.22x), 10,000 616.74 -> 271.28 (2.27x), 20,000 1,028.87 ->
+527.50 (1.95x). Below about a thousand soldiers the accelerator loses a few percent - the
+snapshot and the mirror are paid for a search that costs almost nothing - so a battle picks its
+backend once, before the first tick, from the size of the army it is about to run
+(`BattleSimulator.TARGET_NATIVE_MIN_UNITS`, 1,000, which is where the measurement changes sign).
+The two implementations agree on every answer either side of it; only who answers changes.
+
 ### Spikes at 20,000 soldiers (avg / p50 / p95 / p99 / worst, ms)
 
 | phase | reference | shape B |

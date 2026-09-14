@@ -825,8 +825,22 @@ func _cohesion_reference(formation: BattleFormation) -> float:
 
 
 
+## The army size at which the accelerator starts to pay. Measured, not guessed: at 500
+## soldiers the reference is 5% cheaper (the snapshot and the mirror are paid for a search
+## that costs almost nothing), at 1,000 the accelerator is 1.8x cheaper, and the gap widens
+## from there. Behaviour is identical either side of the threshold - only who answers the
+## query changes - so this is a cost boundary, not a rule about battles. See D-095.
+const TARGET_NATIVE_MIN_UNITS := 1000
+
+
 func start() -> void:
+	# A battle chooses its backend once, before the first tick, from the size of the army
+	# it is about to run. Nothing switches mid-battle: the two implementations agree on
+	# every answer, but a battle that changed backends half way through would be a battle
+	# whose performance nobody could attribute.
 	if OS.get_environment("PB_TARGET_BACKEND").to_lower() == "native":
+		target_backend = BattleSpatialGrid.Backend.NATIVE_FULL
+	elif target_backend == BattleSpatialGrid.Backend.GDSCRIPT and units.size() >= TARGET_NATIVE_MIN_UNITS:
 		target_backend = BattleSpatialGrid.Backend.NATIVE_FULL
 	state = State.RUNNING
 	elapsed = 0.0

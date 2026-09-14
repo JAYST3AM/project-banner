@@ -23,6 +23,12 @@ OUT = "../addons/pb_native/bin/pb_native"
 env.Append(CPPPATH=["src/"])
 sources = Glob("src/*.cpp")
 
+# No `lib` prefix. SCons adds one on Linux and macOS and none on Windows, and the
+# .gdextension file names the library exactly: a prefix would leave CI's build succeeding
+# and the engine failing to find what it built - which is how this was found.
+env["SHLIBPREFIX"] = ""
+env["SHLIBSUFFIX"] = ".so" if env["platform"] == "linux" else env["SHLIBSUFFIX"]
+
 if env["platform"] == "windows":
     libname = "{}.windows.{}.{}.dll".format(OUT, env["target"], env["arch"])
 elif env["platform"] == "linux":

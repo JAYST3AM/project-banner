@@ -2251,6 +2251,17 @@ live-state coupling means mirroring its mutation points - which is a correctness
 for with proof, not a free speed-up. A future candidate must bring its own profile, its own
 measurement of the boundary, and its own comparison mode.
 
+**Family A - the fixed-area torture field - says the same thing, and finds the crossover.**
+Matched twenty-tick windows, reference against shape B: at 100 / 500 soldiers the total is
+1.82 -> 1.89 and 9.36 -> 9.88 ms/tick (**0.96x and 0.95x** - the snapshot and the mirror are paid
+for a search that costs almost nothing), and from 1,000 up it is 1.76x / 1.99x / 2.22x / 2.27x /
+1.95x, with the target phase 4.25x to 7.12x cheaper at every size above the crossover. So a
+battle chooses its backend **once, before the first tick, by the size of the army it is about to
+run**: below `BattleSimulator.TARGET_NATIVE_MIN_UNITS` (1,000, where the measurement changes
+sign) the reference answers and the accelerator is not consulted at all; at or above it, the
+accelerator does. Nothing switches mid-battle. The threshold is a measured cost boundary, not a
+rule about battles - the two implementations agree on every answer either side of it.
+
 **Limitations, stated plainly.**
 
 - The mirror is only as complete as the mutation points it knows about: the tests assert the
