@@ -2,9 +2,10 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 7.7 - native spatial query feasibility spike
+**Last updated:** end of Step 7.8 - the separation pass, corrected and moved onto packed data
+and then native
 **Engine:** Godot 4.7.2-stable
-**Test status:** `4142 assertions, 0 failures, 22 of 22 suites` headless (with the native
+**Test status:** `8468 assertions, 0 failures, 23 of 23 suites` headless (with the native
 accelerator loaded and required), plus `95 checks + 6 checks, 0 failures` in a genuine
 two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
@@ -20,7 +21,8 @@ overlap scaling](#step-73---dense-battle--overlap-scaling), [Step 7.4 - target a
 scaling](#step-74---target-acquisition-scaling), [Step 7.5 - formation battlefield focus
 scaling](#step-75---formation-battlefield-focus-scaling), [Step 7.6 - automatic target search
 cost scaling](#step-76---automatic-target-search-cost-scaling) and [Step 7.7 - native spatial
-query feasibility spike](#step-77---native-spatial-query-feasibility-spike) below.
+query feasibility spike](#step-77---native-spatial-query-feasibility-spike) and [Step 7.8 -
+separation-pass optimisation](#step-78---separation-pass-optimisation) below.
 
 ---
 
@@ -1653,3 +1655,61 @@ rendering and none of them are FPS. The accelerator's correctness is conditional
 being complete: the battle mirrors exactly two mutation points (movement and death), the suite
 asserts the current count, and a new mutation point upstream is the one change that could break
 it quietly.
+
+
+## Step 7.8 - separation-pass optimisation
+
+**What it is.** Steps 7.2-7.6 removed the quadratic loops and the repeated work from the battle
+tick, and the first Step 7.8 pass measured what was left: the separation pass (the one that keeps
+soldiers from standing inside each other) was the **largest single phase** - ~200.6 ms/tick at
+20,000 soldiers on a realistic field, in a ~571.6 ms/tick instrumented total. That pass stopped
+at measurement on purpose. This one fixes two profiler counters an audit found wrong, establishes
+why the pass's own optimisation never fires, splits the phase's own cost, and then moves the pass
+itself: onto packed GDScript arrays first, then - behind a measured threshold - into the native
+accelerator as **shape C**, where the kernel performs the entire pass and returns one displacement
+per soldier per axis.
+
+**Realistic density (family B), matched 200-tick windows, no budget, one machine, seed 70707.**
+
+| units | reference overlap | packed overlap | native overlap | native whole tick | native speedup |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 6.215 ms | 4.266 ms | **1.731 ms** | 15.926 ms (from 20.460) | 3.59x |
+| 2,500 | 20.615 ms | 11.685 ms | **4.850 ms** | 47.922 ms (from 63.818) | 4.25x |
+| 5,000 | 52.572 ms | 24.729 ms | **10.330 ms** | 106.529 ms (from 149.249) | 5.09x |
+| 10,000 | 122.489 ms | 51.704 ms | **21.280 ms** | 226.003 ms (from 328.427) | 5.76x |
+| 20,000 | 237.990 ms | 103.282 ms | **42.686 ms** | 454.725 ms (from 650.507) | 5.58x |
+
+**The 20,000-soldier result, in the terms the milestone was set in:** overlap 200.6 -> **42.7
+ms/tick** (the "strong" target was 65), whole tick 650.5 -> **454.7 ms/tick** measured in the same
+window on the same machine (the historical 571.6 figure was a different window and is not
+comparable), and the next-largest phase is now the per-soldier update loop at 246.6 ms/tick, of
+which target selection is 106.2 ms.
+
+**The exact pair work, measured rather than apportioned.** Three passes over one frozen field -
+the real pass, the same pass without the push arithmetic, and the same without the distance test
+either - give the phase's decomposition at 20,000 soldiers: rebuild 43.4 ms, same-cell traversal
+18.6 ms, neighbour-cell traversal 154.8 ms, apply/clamp 9.0 ms, total ~231.6 ms; of which the
+squared-distance test for every enumerated pair is ~85-103 ms and the push arithmetic for the
+touching pairs is ~2-19 ms (a difference of differences, so the noisy end of the range).
+
+**Why the settled-cell skip never fires (Step 7.3's one optimisation).** Counted over every tick of
+a realistic battle rather than read off the last one: **95.3-98.2%** of the cell pairs that reach
+the proof are rejected because at least one of the two cells holds a soldier who is not standing
+on his assigned place. Soldiers are settled for ~4.8% of a 5,000-soldier battle's ticks and ~8.5%
+of a 20,000-soldier one - the dressing and approach phases - and the skip does fire there. It is
+not broken: it is exact, it is cheap, and a real fight simply has no settled soldiers in it. The
+proof was left alone (D-097).
+
+**Equivalence, not tolerance.** 1,500 generated states (sparse, dense, clustered, cell-boundary,
+corner, edge, coincident, one body, two friendly bodies, enemies, loose, settled, unsettled, dead,
+crossing) plus the named boundary arrangements are run through the packed pass and 600 of them
+through the native pass, and compared against the locked reference **position for position and
+counter for counter**; a 300-tick battle is fingerprinted under each pass. Zero disagreements,
+zero drift, no tolerance to argue about - the candidates are the same arithmetic on the same
+numbers (D-098, D-099).
+
+**What did not change.** Every soldier is still simulated and every touching pair is still
+resolved: no distance lowered, no pair skipped, no contact disabled, no targeting touched. The
+300 v 300 showcase run on this build is the visual evidence - and it also documents a stalemate
+the formation layer reaches at that scale, which reproduces identically on the pre-7.8 build and
+is a finding rather than a regression (D-100).

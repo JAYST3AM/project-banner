@@ -806,7 +806,36 @@ Two limits that remain, and are not claims to the contrary:
   cell degrades a uniform grid towards the scan it replaced; that is inherent to a uniform
   grid, it is measured rather than assumed, and the honest answer at that point is a
   larger battlefield or a finer cell, not a different data structure.
-- **No threading, no GDExtension, no ECS.** This is GDScript throughout (D-069).
+- **No threading, no ECS.** The battle loop is GDScript, step for step, and it is stepped in
+  one go (D-069). The one place native code appears is the pair of kernels in section 1a, and
+  each of them was profiled before it was allowed to exist.
+
+#### Three implementations of the same pass (Step 7.8)
+
+The pass has one interface - `configure`, `resolve`, `report`, and the counters beside them -
+and three implementations behind it. A battle selects one **once, before its first tick**, from
+the size of the army it is about to run, and never switches:
+
+| Implementation | What it is | When it runs |
+| --- | --- | --- |
+| `BattleOverlapGrid` | the locked GDScript reference, object by object | below the packed threshold, and always in the oracle suite and CI |
+| `BattleOverlapGridPacked` | the same arithmetic over packed per-slot arrays | above the packed threshold, and wherever the native library is not built |
+| `BattleOverlapNative` | shape C: the whole pass in the kernel, one displacement per soldier returned | above the native threshold, when the library is loaded |
+
+All three produce the **same field**, bit for bit, which is not a claim but a suite: 1,500
+generated states and the named boundary arrangements are run through each candidate and
+compared against the reference position for position, and a 300-tick battle is fingerprinted
+under each pass. That is what allows the choice to be a cost decision rather than a
+behavioural one.
+
+**What the native pass owns: nothing.** It is handed a packed snapshot of the living soldiers -
+positions, body codes, body spacings, settled flags - and it returns one displacement per
+soldier per axis. It holds no `BattleUnit`, no formation, no battle rule and no persistent
+state, so unlike the targeting kernel it has no live-state mirror and no mutation points to
+keep true. GDScript remains authoritative for everything else: soldiers, bodies, damage,
+targeting, movement, campaign state and saves. No native state enters a save file, and if the
+library is missing the battle runs the packed pass - or, below the thresholds, the reference -
+without noticing anything except a slower tick.
 
 ---
 

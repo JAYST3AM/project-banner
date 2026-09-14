@@ -58,6 +58,16 @@ extends Node
 ## --reliable=0       family A alone: no family B table, no repeatability pass
 ## --ticks=20         matched windows, for a before/after comparison across two builds
 ## [/codeblock]
+## Step 7.8 added four switches for the separation pass, which is measured one implementation
+## at a time on the same battles:
+## [codeblock]
+## --overlap-backend=gdscript|packed|native|compare   force one pass for every run
+## --overlap-sweep=1   run the same battles once per pass and print the comparison
+## --overlap-diag=1    accumulate the settled-cell proof's counters over a whole battle
+## --overlap-split=1   decompose the phase's own cost by re-running it with its arithmetic
+##                     removed, three passes over one frozen field per sample
+## [/codeblock]
+##
 ## A before/after comparison must not be made across `--budget` runs. The budget decides how
 ## long a run lasts by how fast the build is, so a cheaper build measures a later, heavier
 ## window of the same battle and can appear not to have improved. `--ticks=` is the fix: same
@@ -133,6 +143,20 @@ var _overlap_cell_override: float = 0.0
 ## A comparison run measures correctness only and never performance.
 var _target_backend: int = 0
 
+## Step 7.8. Why the settled-cell skip fires or does not fire, accumulated over a whole
+## family-B battle rather than read off the last tick, and the three-pass decomposition of
+## the overlap phase's own cost on frozen proxy units. Both are measurement only and neither
+## changes what a battle does.
+var _overlap_diag: bool = false
+var _overlap_split: bool = false
+## Step 7.8. Which separation pass a run uses: -1 keeps the production rule (the thresholds on
+## BattleSimulator), anything else forces one pass so that it can be measured on the same
+## battle as the others. The sweep prints the same battles once per pass.
+var _overlap_backend: int = -1
+var _overlap_sweep: bool = false
+var _diag: Dictionary = {}
+var _split_samples: Array[Dictionary] = []
+
 ## Step 7.4's swept values, each zero-or-negative meaning "use whatever the config says",
 ## so that a cadence, a retention radius or a hysteresis margin can be swept without
 ## editing data/config/game_config.json between runs. A sweep that required editing the
@@ -160,6 +184,9 @@ func _ready() -> void:
 	_switch_override = float(options["switch"])
 	_immediate_override = int(options["immediate"])
 	_spikes = bool(options["spikes"])
+	_overlap_diag = bool(options["overlap_diag"])
+	_overlap_split = bool(options["overlap_split"])
+	_overlap_sweep = bool(options["overlap_sweep"])
 
 	print("=== PROJECT BANNER - BATTLE SCALE BENCHMARK ===")
 	print("cpu      %s (%d threads)" % [OS.get_processor_name(), OS.get_processor_count()])
@@ -217,6 +244,8 @@ func _ready() -> void:
 
 	if bool(options["profile"]):
 		_print_scaled_profile(options)
+	if _overlap_sweep:
+		_print_overlap_sweep(options)
 
 	if bool(options["storm"]):
 		_print_storm(options)
@@ -242,6 +271,9 @@ func _parse_args() -> Dictionary:
 		"breakdown": true,
 		"breakdown_max": DEFAULT_BREAKDOWN_MAX,
 		"profile": false,
+		"overlap_diag": false,
+		"overlap_split": false,
+		"overlap_sweep": false,
 		"grid_scale": false,
 		"reliable": true,
 		"gap": 0.25,
@@ -278,6 +310,24 @@ func _parse_args() -> Dictionary:
 			options["breakdown_max"] = maxi(0, int(arg.substr(16)))
 		elif arg.begins_with("--profile="):
 			options["profile"] = arg.substr(10).to_int() != 0
+		elif arg.begins_with("--overlap-diag="):
+			options["overlap_diag"] = arg.substr(15).to_int() != 0
+		elif arg.begins_with("--overlap-split="):
+			options["overlap_split"] = arg.substr(16).to_int() != 0
+		elif arg.begins_with("--overlap-sweep="):
+			options["overlap_sweep"] = arg.substr(16).to_int() != 0
+		elif arg.begins_with("--overlap-backend="):
+			match arg.substr(18).to_lower():
+				"gdscript", "reference":
+					_overlap_backend = BattleSimulator.OverlapBackend.GDSCRIPT
+				"packed":
+					_overlap_backend = BattleSimulator.OverlapBackend.PACKED
+				"native":
+					_overlap_backend = BattleSimulator.OverlapBackend.NATIVE
+				"compare":
+					_overlap_backend = BattleSimulator.OverlapBackend.COMPARE
+				_:
+					_overlap_backend = -1
 		elif arg.begins_with("--grid-scale="):
 			options["grid_scale"] = arg.substr(13).to_int() != 0
 		elif arg.begins_with("--reliable="):
@@ -405,6 +455,8 @@ func _run_battle(
 	if _overlap_cell_override > 0.0:
 		simulator.overlap_cell_size = _overlap_cell_override
 		simulator.overlap_grid.configure(simulator.field_size, _overlap_cell_override)
+	if _overlap_backend >= 0:
+		simulator.overlap_backend = _overlap_backend
 	_apply_target_overrides(simulator)
 	var units := _build_ranks(count, config)
 	simulator.add_units(units)
@@ -426,6 +478,9 @@ func _run_battle(
 		simulator.reset_profile()
 		simulator.profile_enabled = true
 		simulator.sample_phases = _spikes
+	if _overlap_diag:
+		_diag = _empty_diag(maxi(1, ticks / 20))
+		simulator.profile_enabled = true
 
 	simulator.start()
 	var started := Time.get_ticks_usec()
@@ -445,6 +500,8 @@ func _run_battle(
 				hits += 1
 			elif kind == "death":
 				deaths += 1
+		if _overlap_diag:
+			_accumulate_diag(simulator)
 		done += 1
 	var total_us := Time.get_ticks_usec() - started
 
@@ -481,6 +538,8 @@ func _run_battle(
 	if profile:
 		out["profile"] = simulator.profile.duplicate()
 		out["overlap_report"] = simulator.overlap_report()
+		out["overlap_backend"] = simulator.overlap_backend_active
+		out["overlap_backend_report"] = simulator.overlap_backend_report()
 		out["target_report"] = simulator.target_report()
 		if _target_backend != 0:
 			out["backend_report"] = simulator.backend_report()
@@ -488,9 +547,11 @@ func _run_battle(
 			var stats := {}
 			# "focus" and "grid" are sampled by the tick mark already; naming them here is what
 			# puts the two phases this milestone is judged on into the tail table.
-			for key in ["total", "focus", "grid", "target", "overlap", "soldiers"]:
+			for key in ["total", "focus", "grid", "target", "overlap", "soldiers", "overlap_sync", "overlap_native", "overlap_apply"]:
 				stats[key] = simulator.phase_stats(key)
 			out["spike_stats"] = stats
+			# The worst tick, with what it was doing. Counters only; the pass has already run.
+			out["overlap_worst"] = simulator.overlap_worst()
 	return out
 
 
@@ -663,7 +724,7 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 		targets.append(target_report)
 		var stats: Dictionary = run.get("spike_stats", {})
 		if not stats.is_empty():
-			spikes.append({"units": count, "stats": stats})
+			spikes.append({"units": count, "stats": stats, "worst": run.get("overlap_worst", {})})
 	print("-".repeat(114))
 	print("  'accounted' is the sum of the phases and should sit just under 'total'; the gap")
 	print("  is the parts of a tick nothing has been instrumented for. 'soldiers' is the")
@@ -676,25 +737,28 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 		return
 	print("")
 	print("=== THE SEPARATION PASS: where its time goes (Step 7.8) ===")
-	print("  Three coarse clocks, not one per pair. 'build' covers clearing, the roster walk,")
-	print("  alive filtering, cell calculation and insertion; 'same-cell' is the intra-cell pair")
-	print("  loop. Both are per pass, as the counters beside them are; the rest of the phase is")
-	print("  the neighbour loop and the apply pass, and the phase table above is where its cost")
-	print("  is read. Nothing here is derived from another column.")
+	print("  Per pass, and all from the same field: 'build' is clearing, the roster walk, alive")
+	print("  filtering, cell calculation and insertion; 'same-cell' is the intra-cell pair loop;")
+	print("  'neighbour' is the neighbour-cell loop including the settled-cell proof; 'apply' is")
+	print("  the clamp and the write-back. 'total' is the whole pass as the pass itself timed it,")
+	print("  so the four parts can be checked against the whole rather than being the whole.")
+	print("  The exact pair work lives inside the two traversal columns - see the split table")
+	print("  printed with the family-B profile, which measures it by subtraction.")
 	print("")
-	print("%7s | %10s | %11s | %8s | %8s | %8s | %8s | %7s | %8s" % [
-		"units", "build us", "same-cell us", "pop p50", "pop p95", "pop p99", "pop max", "coincid", "moved/tk"])
-	print("-".repeat(110))
+	print("%7s | %9s | %11s | %11s | %9s | %9s | %8s | %8s | %7s | %s" % [
+		"units", "build us", "same-cell us", "neighbour us", "apply us", "total us",
+		"pop p50", "pop p99", "coincid", "moved/tk"])
+	print("-".repeat(126))
 	for report in overlaps:
-		var ticks_done := maxf(1.0, float(report.get("ticks", 1)))
 		# Only directly measured figures are printed: the remainder of the phase is not
 		# derived here, because the clocks in this table are per pass and the phase value is
 		# per tick, and subtracting one from the other produced a number that was neither.
-		print("%7d | %10.0f | %11.0f | %8.0f | %8.0f | %8.0f | %8.0f | %7.0f | %8.1f" % [
+		print("%7d | %9.0f | %11.0f | %11.0f | %9.0f | %9.0f | %8.0f | %8.0f | %7.0f | %8.1f" % [
 			int(report["units"]),
 			float(report.get("usec_build", 0)), float(report.get("usec_same_cell", 0)),
-			float(report.get("cell_population_p50", 0)), float(report.get("cell_population_p95", 0)),
-			float(report.get("cell_population_p99", 0)), float(report.get("cell_population_max", 0)),
+			float(report.get("usec_neighbour", 0)), float(report.get("usec_apply", 0)),
+			float(report.get("usec_total", 0)),
+			float(report.get("cell_population_p50", 0)), float(report.get("cell_population_p99", 0)),
 			float(report.get("coincident", 0)), float(report.get("moved_units", 0))])
 	print("")
 	print("=== THE SEPARATION PASS: what it did, not only what it cost ===")
@@ -784,6 +848,8 @@ func _run_battle_scaled(
 	simulator.field_size = field
 	simulator.grid.configure(field, simulator.cell_size)
 	simulator.overlap_grid.configure(field, simulator.overlap_cell_size)
+	if _overlap_backend >= 0:
+		simulator.overlap_backend = _overlap_backend
 	_apply_target_overrides(simulator)
 
 	var units := _build_ranks_scaled(count, field, gap_fraction)
@@ -800,6 +866,15 @@ func _run_battle_scaled(
 		simulator.profile_enabled = true
 		simulator.sample_phases = _spikes
 
+	if _overlap_diag:
+		_diag = _empty_diag(maxi(1, ticks / 20))
+	if _overlap_split:
+		_split_samples.clear()
+	# Enabling the counters is what makes the report readable at all; the accumulation below
+	# reads the same dictionary the phase table does, once a tick.
+	if _overlap_diag or _overlap_split:
+		simulator.profile_enabled = true
+
 	simulator.start()
 	var started := Time.get_ticks_usec()
 	var budget_us := int(budget * 1000000.0)
@@ -807,13 +882,18 @@ func _run_battle_scaled(
 	var combat_ticks := 0
 	var deaths := 0
 	var first_contact := -1
+	var split_every := maxi(1, ticks / 6)
 	while done < ticks:
 		if simulator.is_finished():
 			break
 		if Time.get_ticks_usec() - started >= budget_us:
 			break
 		ai.update(simulator, TICK)
+		if _overlap_split and done > 0 and done % split_every == 0:
+			_split_samples.append(_overlap_split_probe(simulator, done))
 		var events := simulator.step(TICK)
+		if _overlap_diag:
+			_accumulate_diag(simulator)
 		var fought := false
 		for event in events:
 			var kind := str(event.get("type", ""))
@@ -859,9 +939,15 @@ func _run_battle_scaled(
 		"checksum": checksum,
 		"simulator": simulator,
 	}
+	if _overlap_diag:
+		out["overlap_diag"] = _diag.duplicate(true)
+	if _overlap_split:
+		out["overlap_split"] = _split_samples.duplicate(true)
 	if profile:
 		out["profile"] = simulator.profile.duplicate()
 		out["target_report"] = simulator.target_report()
+		out["overlap_backend"] = simulator.overlap_backend_active
+		out["overlap_backend_report"] = simulator.overlap_backend_report()
 		if _target_backend != 0:
 			out["backend_report"] = simulator.backend_report()
 		out["focus_report"] = simulator.focus_report()
@@ -869,9 +955,11 @@ func _run_battle_scaled(
 			var stats := {}
 			# "focus" and "grid" are sampled by the tick mark already; naming them here is what
 			# puts the two phases this milestone is judged on into the tail table.
-			for key in ["total", "focus", "grid", "target", "overlap", "soldiers"]:
+			for key in ["total", "focus", "grid", "target", "overlap", "soldiers", "overlap_sync", "overlap_native", "overlap_apply"]:
 				stats[key] = simulator.phase_stats(key)
 			out["spike_stats"] = stats
+			# The worst tick, with what it was doing. Counters only; the pass has already run.
+			out["overlap_worst"] = simulator.overlap_worst()
 	return out
 
 
@@ -1339,7 +1427,7 @@ func _print_spike_table(rows: Array[Dictionary]) -> void:
 	print("-".repeat(96))
 	for row in rows:
 		var stats: Dictionary = row["stats"]
-		for key in ["total", "focus", "grid", "target", "overlap", "soldiers"]:
+		for key in ["total", "focus", "grid", "target", "overlap", "soldiers", "overlap_sync", "overlap_native", "overlap_apply"]:
 			if not stats.has(key) or stats[key].is_empty():
 				continue
 			var phase: Dictionary = stats[key]
@@ -1348,6 +1436,15 @@ func _print_spike_table(rows: Array[Dictionary]) -> void:
 				float(phase["avg"]), float(phase["p50"]),
 				float(phase["p95"]), float(phase["p99"]), float(phase["max"])])
 	print("-".repeat(96))
+	for row in rows:
+		var worst: Dictionary = row.get("worst", {})
+		if worst.is_empty():
+			continue
+		print("  %d units' worst overlap tick (%.0f us): %d candidate pairs, %d touching, %d clamped, %d coincident, max cell population %d" % [
+			int(row["units"]), float(worst.get("usec", 0)),
+			int(worst.get("pairs", 0)), int(worst.get("touching", 0)),
+			int(worst.get("clamped", 0)), int(worst.get("coincident", 0)),
+			int(worst.get("cell_population_max", 0))])
 	print("  Nearest-rank percentiles over every tick of the run, from the phase clock. A")
 	print("  spread between the average and the tail is the price of staggering: it is the")
 	print("  worst tick, not the average one, that a frame notices.")
@@ -1376,9 +1473,12 @@ func _print_scaled_profile(options: Dictionary) -> void:
 	var targets: Array[Dictionary] = []
 	var focuses: Array[Dictionary] = []
 	var spikes: Array[Dictionary] = []
+	var diags: Array[Dictionary] = []
+	var splits: Array[Dictionary] = []
 	for count_value in counts:
 		var count := int(count_value)
 		var effective := minf(MAX_BUDGET, budget * maxf(1.0, float(count) / 1000.0))
+		_split_samples.clear()
 		var run := _run_battle_scaled(count, ticks, seed_value, effective, gap, group, true)
 		var done := maxf(1.0, float(run["ticks"]))
 		var phases: Dictionary = run.get("profile", {})
@@ -1404,13 +1504,32 @@ func _print_scaled_profile(options: Dictionary) -> void:
 			focuses.append(focus_stats)
 		var stats: Dictionary = run.get("spike_stats", {})
 		if not stats.is_empty():
-			spikes.append({"units": count, "stats": stats})
+			spikes.append({"units": count, "stats": stats, "worst": run.get("overlap_worst", {})})
+		if _overlap_diag:
+			var diag: Dictionary = run.get("overlap_diag", {})
+			if not diag.is_empty():
+				diag["units"] = count
+				# Which pass was measured. The rejection counters the diagnosis is read from
+				# live in the locked reference, so a run that measured the packed or native
+				# pass reports zeros for every reason - which looks exactly like a proof that
+				# never fires. Naming the pass in the table is what stops that being read as
+				# a finding.
+				diag["pass"] = BattleSimulator.overlap_backend_label(int(run.get("overlap_backend", 0)))
+				diags.append(diag)
+		if _overlap_split:
+			var split_rows: Array = run.get("overlap_split", [])
+			for row in split_rows:
+				splits.append(row as Dictionary)
 	print("-".repeat(114))
 	print("  Combat ticks for each size are reported in the table above; a size that never")
 	print("  reached contact is an approach measurement and its profile says so.")
 	_print_focus_table(focuses)
 	_print_target_table(targets)
 	_print_spike_table(spikes)
+	if _overlap_diag:
+		_print_overlap_diagnosis(diags)
+	if _overlap_split:
+		_print_overlap_split(splits)
 
 
 ## What the formation-focus path did, per size. The column that matters is 'soldier scans':
@@ -1662,6 +1781,8 @@ func _storm_measure(count: int) -> Dictionary:
 	simulator.field_size = field
 	simulator.grid.configure(field, simulator.cell_size)
 	simulator.overlap_grid.configure(field, simulator.overlap_cell_size)
+	if _overlap_backend >= 0:
+		simulator.overlap_backend = _overlap_backend
 	_apply_target_overrides(simulator)
 
 	var units: Array[BattleUnit] = []
@@ -1757,3 +1878,374 @@ func _storm_unit(id: int, side: String, position: Vector2) -> BattleUnit:
 
 func _ms(value: float) -> String:
 	return "%.3f ms" % value
+
+
+
+## ---------- Step 7.8: the separation pass, one battle per implementation ----------
+
+## The same battles, run once per separation pass, so the comparison is between
+## implementations rather than between runs.
+##
+## Matched tick windows, no budget: a cheaper pass fits more ticks into the same wall-clock
+## budget and would then be compared at a later, heavier moment of the same fight - which is
+## a way of measuring the battle and calling it the pass. `--ticks=` is the whole
+## configuration, and both families are swept with it.
+##
+## The reference is the baseline of the table rather than a column in it: every row's speedup
+## is against the same battle run with BattleOverlapGrid, which is the pass that has shipped
+## since Step 7.3. "total" is the whole tick as the harness clocks it, which is what a player
+## would feel; "overlap" is the pass's own phase.
+func _print_overlap_sweep(options: Dictionary) -> void:
+	var ticks: int = options["ticks"]
+	var seed_value: int = options["seed"]
+	var budget: float = minf(MAX_BUDGET, float(options["budget"]))
+	var gap: float = options["gap"]
+	var group: int = options["group"]
+	var passes: Array[int] = [BattleSimulator.OverlapBackend.GDSCRIPT, BattleSimulator.OverlapBackend.PACKED]
+	if BattleOverlapNative.available():
+		passes.append(BattleSimulator.OverlapBackend.NATIVE)
+
+	print("")
+	print("=== STEP 7.8: THE SEPARATION PASS, ONE BATTLE PER IMPLEMENTATION ===")
+	print("  matched tick windows (%d ticks), no budget shortening either run, seed %d" % [ticks, seed_value])
+	print("")
+
+	for family in ["A", "B"]:
+		var counts: Array = options["units"] if family == "A" else options["battle_units"]
+		print("--- FAMILY %s (%s) ---" % [family,
+			"fixed 100x60 torture field" if family == "A" else "field scaled with the army"])
+		print("%7s | %10s | %11s | %11s | %9s | %8s | %9s | %7s | %7s | %7s | %s" % [
+			"units", "pass", "overlap ms", "total ms", "speedup", "cell prs", "pairs", "touch",
+			"pop max", "contact", "note"])
+		print("-".repeat(130))
+		for count_value in counts:
+			var count := int(count_value)
+			var baseline_overlap := 0.0
+			var baseline_total := 0.0
+			for pass_id in passes:
+				_overlap_backend = pass_id
+				# The counters beside the timings are accumulated over every tick of the run
+				# rather than read off the last one: a battle's last tick is one moment of
+				# one battle, and "2.2 pairs measured per touching pair at 20,000 soldiers"
+				# was a claim about a whole fight being read off a single sample of it.
+				_overlap_diag = true
+				var run := _run_sweep_battle(family, count, ticks, seed_value, budget, gap, group)
+				var done := maxf(1.0, float(run["ticks"]))
+				var phases: Dictionary = run.get("profile", {})
+				var overlap := float(phases.get("overlap", 0.0)) / done
+				var total := float(run["per_tick_ms"])
+				var overlap_report: Dictionary = _diag
+				_overlap_diag = false
+				var speedup := 0.0
+				var note := "%d ticks" % int(run["ticks"])
+				if pass_id == BattleSimulator.OverlapBackend.GDSCRIPT:
+					baseline_overlap = overlap
+					baseline_total = total
+					note = "reference, %d ticks" % int(run["ticks"])
+				else:
+					if overlap > 0.0:
+						speedup = baseline_overlap / overlap
+					note = "vs reference, %d ticks" % int(run["ticks"])
+					if total > 0.0 and baseline_total > 0.0:
+						note += ", total x%.2f" % (baseline_total / total)
+				var boundary: Dictionary = run.get("overlap_backend_report", {})
+				if pass_id == BattleSimulator.OverlapBackend.NATIVE and not boundary.is_empty():
+					note += ", sync %d us + native %d us + apply %d us" % [
+						int(boundary.get("sync_us", 0)) / maxi(1, int(run["ticks"])),
+						int(boundary.get("native_us", 0)) / maxi(1, int(run["ticks"])),
+						int(boundary.get("apply_us", 0)) / maxi(1, int(run["ticks"]))]
+					if int(boundary.get("mismatches", 0)) > 0:
+						note += ", MISMATCHES %d" % int(boundary["mismatches"])
+				# Family A reports "contact" and family B reports the tick contact was first
+				# made; both mean the same thing here, and a row that never reached contact is
+				# an approach measurement and says so.
+				var engaged := bool(run.get("contact", int(run.get("first_contact", -1)) >= 0))
+				print("%7d | %10s | %10.3f ms | %8.3f ms | %8s | %8.0f | %9.1f | %7.1f | %7d | %7s | %s" % [
+					count, BattleSimulator.overlap_backend_label(pass_id), overlap, total,
+					"%.2fx" % speedup if speedup > 0.0 else "-",
+					float(overlap_report.get("cell_pairs", 0)) / done,
+					float(overlap_report.get("pairs", 0)) / done,
+					float(overlap_report.get("touching", 0)) / done,
+					int(overlap_report.get("cell_population_max", 0)),
+					"yes" if engaged else "no",
+					note])
+			print("-".repeat(130))
+		print("  'overlap ms' is the phase clock; 'total ms' is the whole tick; 'pop max' is the")
+		print("  busiest single cell the pass walked. 'speedup' compares" )
+		print("  passes on the same battle, and the tick counts above are the same for every row")
+		print("  of a size, because nothing here runs on a budget.")
+		print("")
+	_overlap_backend = -1
+
+
+## One battle for the sweep, in the family the caller asked for.
+func _run_sweep_battle(family: String, count: int, ticks: int, seed_value: int, budget: float,
+		gap: float, group: int) -> Dictionary:
+	# A sweep is a set of matched windows, so the budget is deliberately generous rather than
+	# tuned: it exists to stop a pathological run, not to decide how long a row lasts. Each
+	# row prints the tick count it actually completed, so a shortened row is visible rather
+	# than silent.
+	var effective := maxf(120.0, budget * 20.0)
+	if family == "A":
+		return _run_battle(count, ticks, seed_value, true, true, effective, true)
+	return _run_battle_scaled(count, ticks, seed_value, effective, gap, group, true)
+
+## ---------- Step 7.8: the separation pass, explained -----------------------
+
+## One tick of the separation pass's own counters, accumulated over a whole battle.
+##
+## The Step 7.8 pass read these counters off the *last* tick and concluded the settled-cell
+## skip never fires. The last tick of a battle is a field full of fighting soldiers, which is
+## the one state in which nobody can be settled, so that conclusion was about the sample
+## rather than about the mechanism. Accumulating the same counters over every tick, plus a
+## series of samples through the battle, is what turns it into an answer: how often the skip
+## fires, when it fires, and - when it does not - which of the five tests rejected the pair.
+func _empty_diag(sample_every: int) -> Dictionary:
+	return {
+		"ticks": 0,
+		"sample_every": maxi(1, sample_every),
+		"cell_pairs": 0, "skipped": 0, "pairs": 0, "touching": 0,
+		"settled": 0, "living": 0, "interior": 0, "mixed": 0,
+		"coincident": 0, "clamped": 0,
+		"skip_not_settled_a": 0, "skip_not_settled_b": 0, "skip_no_body": 0,
+		"skip_other_body": 0, "skip_spacing": 0, "skip_proved": 0,
+		"settled_max": 0, "skipped_max": 0, "ticks_with_skip": 0, "cell_population_max": 0,
+		"series": [],
+		"bodies": {},
+	}
+
+
+func _accumulate_diag(simulator: BattleSimulator) -> void:
+	var report := simulator.overlap_report()
+	if report.is_empty():
+		return
+	_diag["ticks"] = int(_diag["ticks"]) + 1
+	_diag["cell_pairs"] = int(_diag["cell_pairs"]) + int(report.get("cell_pairs", 0))
+	_diag["skipped"] = int(_diag["skipped"]) + int(report.get("cell_pairs_skipped", 0))
+	_diag["pairs"] = int(_diag["pairs"]) + int(report.get("pairs", 0))
+	_diag["touching"] = int(_diag["touching"]) + int(report.get("touching", 0))
+	_diag["settled"] = int(_diag["settled"]) + int(report.get("settled_units", 0))
+	_diag["living"] = int(_diag["living"]) + int(report.get("indexed_units", 0))
+	_diag["interior"] = int(_diag["interior"]) + int(report.get("interior_cells", 0))
+	_diag["mixed"] = int(_diag["mixed"]) + int(report.get("mixed_cells", 0))
+	_diag["coincident"] = int(_diag["coincident"]) + int(report.get("coincident", 0))
+	_diag["clamped"] = int(_diag["clamped"]) + int(report.get("clamped", 0))
+	for key in ["skip_not_settled_a", "skip_not_settled_b", "skip_no_body",
+			"skip_other_body", "skip_spacing", "skip_proved"]:
+		_diag[key] = int(_diag[key]) + int(report.get(key, 0))
+	var settled := int(report.get("settled_units", 0))
+	var skipped := int(report.get("cell_pairs_skipped", 0))
+	_diag["settled_max"] = maxi(int(_diag["settled_max"]), settled)
+	_diag["cell_population_max"] = maxi(int(_diag.get("cell_population_max", 0)),
+		int(report.get("cell_population_max", 0)))
+	_diag["skipped_max"] = maxi(int(_diag["skipped_max"]), skipped)
+	if skipped > 0:
+		_diag["ticks_with_skip"] = int(_diag["ticks_with_skip"]) + 1
+
+	var sample_every := int(_diag["sample_every"])
+	if int(_diag["ticks"]) == 1 or int(_diag["ticks"]) % sample_every == 0:
+		var series: Array = _diag["series"]
+		series.append({
+			"tick": simulator.tick_index,
+			"living": int(report.get("indexed_units", 0)),
+			"settled": settled,
+			"cell_pairs": int(report.get("cell_pairs", 0)),
+			"skipped": skipped,
+			"pairs": int(report.get("pairs", 0)),
+			"touching": int(report.get("touching", 0)),
+			"not_settled": int(report.get("skip_not_settled_a", 0)) + int(report.get("skip_not_settled_b", 0)),
+			"spacing": int(report.get("skip_spacing", 0)),
+			"proved": int(report.get("skip_proved", 0)),
+		})
+		_diag["series"] = series
+
+	for raw in report.get("bodies", []) as Array:
+		var body := raw as Dictionary
+		var index := int(body.get("index", 0))
+		var bodies: Dictionary = _diag["bodies"]
+		var accumulated: Dictionary = bodies.get(index, {
+			"index": index, "living": 0, "settled": 0,
+			"distance_average": 0.0, "distance_p50": 0.0, "distance_p95": 0.0,
+		})
+		accumulated["living"] = int(accumulated["living"]) + int(body.get("living", 0))
+		accumulated["settled"] = int(accumulated["settled"]) + int(body.get("settled", 0))
+		accumulated["distance_average"] = float(body.get("distance_average", 0.0))
+		accumulated["distance_p50"] = float(body.get("distance_p50", 0.0))
+		accumulated["distance_p95"] = float(body.get("distance_p95", 0.0))
+		bodies[index] = accumulated
+		_diag["bodies"] = bodies
+
+
+## The overlap phase's own cost, split by measurement rather than by apportioning.
+##
+## Three passes over one frozen field: the real pass, the same pass with the push arithmetic
+## left out, and the same pass with the distance test left out as well. A dry pass never moves
+## anybody, so all three read identical positions - which is the only thing that makes
+## subtracting one from another mean anything. The units are proxies: same positions, sides,
+## bodies and slot indices, so the pass cannot tell the difference and the real battle is not
+## touched by being measured. Development-only, sampled a handful of times per run.
+func _overlap_split_probe(simulator: BattleSimulator, tick: int) -> Dictionary:
+	var proxies: Array[BattleUnit] = []
+	for unit in simulator.units:
+		if not unit.is_alive():
+			continue
+		var proxy := BattleUnit.new()
+		proxy.id = unit.id
+		proxy.side = unit.side
+		proxy.hp = 1
+		proxy.max_hp = 1
+		proxy.position = unit.position
+		proxy.formation_ref = unit.formation_ref
+		proxy.slot_index = unit.slot_index
+		proxies.append(proxy)
+
+	var minimum := simulator.separation_radius * BattleSimulator.SEPARATION_FACTOR
+	var settle := simulator.separation_settle_epsilon
+	var grid := BattleOverlapGrid.new()
+	grid.configure(simulator.field_size, simulator.overlap_cell_size)
+	grid.max_push = simulator.max_separation_push
+	grid.stats_enabled = true
+	# One throwaway pass so the first measurement does not pay for the arrays being grown to
+	# the size of the army. It moves nothing.
+	grid.dry_level = 2
+	grid.resolve(proxies, minimum, settle)
+
+	var samples := {}
+	for level in [0, 1, 2]:
+		grid.dry_level = level
+		grid.resolve(proxies, minimum, settle)
+		var report := grid.report()
+		var name := "full" if level == 0 else ("distance_only" if level == 1 else "enumerate_only")
+		samples[name] = {
+			"total_us": int(report.get("usec_total", 0)),
+			"build_us": int(report.get("usec_build", 0)),
+			"same_cell_us": int(report.get("usec_same_cell", 0)),
+			"neighbour_us": int(report.get("usec_neighbour", 0)),
+			"apply_us": int(report.get("usec_apply", 0)),
+			"pairs": int(report.get("pairs", 0)),
+			"touching": int(report.get("touching", 0)),
+		}
+	return {"tick": tick, "living": proxies.size(), "samples": samples}
+
+
+func _print_overlap_diagnosis(diags: Array[Dictionary]) -> void:
+	if diags.is_empty():
+		return
+	print("")
+	print("=== WHY THE SETTLED-CELL SKIP DOES OR DOES NOT FIRE (Step 7.8) ===")
+	print("  Every tick of the battle, not the last one. 'settled/tick' is how many soldiers")
+	print("  stood on the place their body gave them, averaged over the run; 'skip %' is the")
+	print("  share of neighbour-cell pairs the proof let the pass skip.")
+	print("")
+	print("%7s | %10s | %9s | %12s | %10s | %9s | %9s | %8s | %s" % [
+		"units", "pass", "ticks", "settled/tick", "settled %", "cell prs", "skipped", "skip %", "ticks with a skip"])
+	print("-".repeat(110))
+	for diag in diags:
+		var ticks := maxf(1.0, float(diag["ticks"]))
+		var living := maxf(1.0, float(diag["living"]))
+		var cell_pairs := maxf(1.0, float(diag["cell_pairs"]))
+		print("%7d | %10s | %9.0f | %12.2f | %9.2f%% | %9.1f | %9.1f | %7.2f%% | %.1f" % [
+			int(diag["units"]), str(diag.get("pass", "?")), ticks,
+			float(diag["settled"]) / ticks, 100.0 * float(diag["settled"]) / living,
+			float(diag["cell_pairs"]) / ticks, float(diag["skipped"]) / ticks,
+			100.0 * float(diag["skipped"]) / cell_pairs, float(diag["ticks_with_skip"])])
+	print("-".repeat(110))
+	print("  The proof's own tests, as a share of the cell pairs that reached it. The first test")
+	print("  that fails is the one counted, so these add up to the cell pairs considered, and")
+	print("  'proved' is the only one of the six that ends in a skip.")
+	print("")
+	print("%7s | %10s | %11s | %11s | %9s | %11s | %9s | %s" % [
+		"units", "pass", "not settled", "settle off", "no body", "other body", "spacing", "proved"])
+	print("-".repeat(104))
+	for diag in diags:
+		var reached := maxf(1.0, float(int(diag["skip_not_settled_a"]) + int(diag["skip_not_settled_b"])
+			+ int(diag["skip_no_body"]) + int(diag["skip_other_body"])
+			+ int(diag["skip_spacing"]) + int(diag["skip_proved"])))
+		print("%7d | %10s | %10.1f%% | %10.1f%% | %8.1f%% | %10.1f%% | %8.1f%% | %.1f%%" % [
+			int(diag["units"]), str(diag.get("pass", "?")),
+			100.0 * float(diag["skip_not_settled_a"]) / reached,
+			100.0 * float(diag["skip_not_settled_b"]) / reached,
+			100.0 * float(diag["skip_no_body"]) / reached,
+			100.0 * float(diag["skip_other_body"]) / reached,
+			100.0 * float(diag["skip_spacing"]) / reached,
+			100.0 * float(diag["skip_proved"]) / reached])
+	print("-".repeat(104))
+	print("  'not settled' means one of the two cells held a soldier who was not standing within")
+	print("  the settle epsilon of his place. 'settle off' means the same but for the other cell.")
+	print("  'spacing' means both cells were settled and of one body, but that body's own slot")
+	print("  spacing is not wide enough to prove the pair apart.")
+	print("")
+	for diag in diags:
+		print("  %d units: through the battle (one sample every %dth tick):" % [
+			int(diag["units"]), int(diag["sample_every"])])
+		print("  %8s | %8s | %9s | %8s | %11s | %8s | %8s | %9s | %s" % [
+			"tick", "living", "settled", "cell prs", "not settled", "spacing", "skipped", "proved", "pairs"])
+		print("  " + "-".repeat(92))
+		for raw in diag["series"] as Array:
+			var row := raw as Dictionary
+			print("  %8d | %8d | %9d | %8d | %11d | %8d | %8d | %9d | %d" % [
+				int(row["tick"]), int(row["living"]), int(row["settled"]), int(row["cell_pairs"]),
+				int(row["not_settled"]), int(row["spacing"]), int(row["skipped"]), int(row["proved"]),
+				int(row["pairs"])])
+		print("")
+	print("  Per body, over the whole run: how often its soldiers were standing where it put")
+	print("  them, and how far off they were at the last tick (half-unit buckets).")
+	print("  %6s | %11s | %10s | %s" % [
+		"body", "living/tick", "settled %", "distance avg / p50 / p95 at the last tick"])
+	print("  " + "-".repeat(86))
+	for diag in diags:
+		var bodies: Dictionary = diag["bodies"]
+		var keys: Array = bodies.keys()
+		keys.sort()
+		var ticks := maxf(1.0, float(diag["ticks"]))
+		for index in keys:
+			var body: Dictionary = bodies[index]
+			var body_living := maxf(1.0, float(body["living"]))
+			print("  %6d | %11.1f | %9.1f%% | %.2f / %.2f / %.2f" % [
+				int(index), float(body["living"]) / ticks,
+				100.0 * float(body["settled"]) / body_living,
+				float(body["distance_average"]), float(body["distance_p50"]), float(body["distance_p95"])])
+
+
+func _print_overlap_split(splits: Array[Dictionary]) -> void:
+	if splits.is_empty():
+		return
+	print("")
+	print("=== THE SEPARATION PASS: what its own time is spent on (Step 7.8) ===")
+	print("  Three passes over one frozen field per sample: the real pass, the same pass with the")
+	print("  push arithmetic removed, and the same with the distance test removed as well. A dry")
+	print("  pass never moves anybody, so the three read identical positions and the differences")
+	print("  between them are the removed work, measured rather than apportioned.")
+	print("")
+	print("%7s | %9s | %11s | %11s | %11s | %11s | %10s | %s" % [
+		"units", "tick", "build us", "same-cell us", "neighbour us", "apply us", "total us", "pairs/touching"])
+	print("-".repeat(112))
+	for row in splits:
+		var samples: Dictionary = row["samples"]
+		var full: Dictionary = samples["full"]
+		print("%7d | %9d | %11.0f | %11.0f | %11.0f | %11.0f | %10.0f | %d / %d" % [
+			int(row["living"]), int(row["tick"]),
+			float(full["build_us"]), float(full["same_cell_us"]), float(full["neighbour_us"]),
+			float(full["apply_us"]), float(full["total_us"]),
+			int(full["pairs"]), int(full["touching"])])
+	print("-".repeat(112))
+	print("%7s | %10s | %10s | %10s | %10s | %10s | %s" % [
+		"units", "full us", "no push us", "no push/d", "apply", "pair math", "push math"])
+	print("-".repeat(112))
+	for row in splits:
+		var samples: Dictionary = row["samples"]
+		var full: Dictionary = samples["full"]
+		var no_push: Dictionary = samples["distance_only"]
+		var bare: Dictionary = samples["enumerate_only"]
+		var pair_math := float(no_push["total_us"]) - float(bare["total_us"])
+		var push_math := float(full["total_us"]) - float(no_push["total_us"]) - float(full["apply_us"])
+		print("%7d | %10.0f | %10.0f | %10.0f | %10.0f | %10.0f | %.0f" % [
+			int(row["living"]), float(full["total_us"]), float(no_push["total_us"]),
+			float(bare["total_us"]), float(full["apply_us"]), pair_math, push_math])
+	print("-".repeat(112))
+	print("  One sample per sixth of the run. 'pair math' is the squared-distance test for every")
+	print("  enumerated pair; 'push math' is the square root, the scale and the accumulated")
+	print("  writes for the pairs that turned out to be touching. Both are differences of clocks")
+	print("  read on the same field, and a difference of clocks carries the noise of both.")
+
+

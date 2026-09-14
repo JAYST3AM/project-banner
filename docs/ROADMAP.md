@@ -575,3 +575,32 @@ toolchain pin and a CI build that proves the native class loaded.
 Not done, and not this milestone: threads, ECS, per-soldier nodes, any second native kernel, or
 any change to what the simulation decides. The GDScript reference remains the authority and the
 fallback, and `CURRENT_STATE.md` carries the measured numbers.
+
+## Step 7.8 - separation-pass optimisation (`milestone-07.8`)
+
+**Done.** The Step 7.8 first pass measured the tick and found the separation pass to be the largest
+single phase at realistic scale (~200.6 ms/tick at 20,000 soldiers). This pass:
+
+- corrected the two profiler counters the audit found wrong (`dev_coincident` counted touching
+  pairs; `dev_usec_pairs` was never assigned) and added the assertions that pin them (D-096);
+- diagnosed the settled-cell skip rather than assuming it: it fires during dressing and approach
+  and cannot fire at contact, because a real fight has almost no settled soldiers in it. The proof
+  was left exactly as it was (D-097);
+- split the phase's own cost by measurement - rebuild, same-cell traversal, neighbour traversal,
+  apply, and the exact pair work by subtraction (D-096);
+- measured a packed GDScript candidate (2.3-3.7x the reference's phase, bit-for-bit equivalent on
+  1,500 generated states) and shipped it as the portable fast path (D-098);
+- built a native shape-C kernel that performs the whole pass and returns one displacement per
+  soldier per axis: **42.7 ms/tick at 20,000 on a realistic field, against 238.0 for the
+  reference, a 5.6x overlap speedup and a whole-tick 650.5 -> 454.7 ms/tick in matched windows**
+  (D-099);
+- ran the 300 v 300 windowed showcase the brief asked for, which found a formation-layer stalemate
+  at that scale and documents it with numbers rather than impressions (D-100).
+
+**Next measured bottleneck:** the per-soldier update loop - 246.6 ms/tick of the 474.6 ms/tick at
+20,000 soldiers, of which automatic target selection is 106.2 ms. The next largest phases are the
+formation focus layer (49.0 ms) and the spatial grid rebuild (45.3 ms). One suspicion is already
+located and not yet proved: `BattleSimulator._attack()` walks the whole roster on every kill to
+clear hunting orders, which is O(deaths x army) per tick.
+
+**Not started:** Step 7.9, and any optimisation of the above.

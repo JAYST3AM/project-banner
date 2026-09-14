@@ -274,6 +274,57 @@ var max_separation_push: float = 1.35
 ## without reaching into it. Development only. See D-071.
 var overlap_stats: Dictionary = {}
 
+## Development only, and only while the per-tick sampler is on: the separation pass's own
+## report from the tick that cost the most. The average says what the pass usually costs and
+## the worst tick says what a player would notice, but neither says what that tick was
+## doing - this does, and "the worst tick measured 47,695 pairs and clamped 831 soldiers" is
+## a different problem from "the worst tick was the first one, with a cold cache".
+var overlap_worst_report: Dictionary = {}
+var _overlap_worst_usec: int = 0
+
+## Which implementation runs the separation pass. Chosen once, before the first tick, from
+## the size of the army - never switched mid-battle, because a battle that changed its
+## separation pass half way through would be a battle whose performance nobody could
+## attribute. See Step 7.8's report for the measurements behind these numbers.
+enum OverlapBackend { AUTO, GDSCRIPT, PACKED, NATIVE, COMPARE }
+
+## -1 (the default) means AUTO: the threshold below decides. Anything else forces that pass,
+## which is what the benchmark and the tests use.
+var overlap_backend: int = OverlapBackend.AUTO
+
+## The army sizes at which the separation pass's faster implementations start to pay for
+## themselves. Both measured on this machine, in matched tick windows, with all three passes
+## run over the same battles - the tables are in the Step 7.8 report and in the benchmark's
+## `--overlap-sweep`.
+##
+## 1,000 is where the native pass stops being a rounding error and starts carrying the phase:
+## at 1,000 soldiers on a realistic field it is 3.6x the reference's overlap phase and takes a
+## fifth off the whole tick, and the ratio only widens from there (5.6x at 20,000). Below it the
+## pass is a small share of a tick that is already cheap, and the accelerator's fixed per-tick
+## cost is a larger share of what it saves. It is deliberately the same number the targeting
+## kernel uses, so there is one "this is a real battle now" line in the project rather than two.
+##
+## 500 is the same argument for the packed pass, which has no boundary to amortise and no
+## library to load: at 500 soldiers it is 1.5x the reference's phase, and at 100 the saving is
+## inside the noise of a tick that costs two milliseconds.
+const OVERLAP_NATIVE_MIN_UNITS := 1000
+const OVERLAP_PACKED_MIN_UNITS := 500
+## Set when the pass was chosen, for the report: what actually ran, not what was asked for.
+var overlap_backend_active: int = OverlapBackend.GDSCRIPT
+
+
+## A short name for one of those passes, for reports and benchmarks.
+static func overlap_backend_label(backend: int) -> String:
+	match backend:
+		OverlapBackend.PACKED:
+			return "packed"
+		OverlapBackend.NATIVE:
+			return "native"
+		OverlapBackend.COMPARE:
+			return "native+cmp"
+		_:
+			return "gdscript"
+
 ## Development-only timing accumulators. Off by default and free when off: every read
 ## of them is behind a boolean, and nothing is measured unless the benchmark asks.
 ## Deliberately coarse - phase-level, plus one pair of clock reads per soldier for
@@ -563,9 +614,13 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		target_contact_loss_factor = maxf(0.0, config.get_float("battle.target_contact_loss_factor", 1.0))
 	grid = BattleSpatialGrid.new()
 	grid.configure(field_size, cell_size)
+	# The pass is built as the locked reference here and replaced by the measured best path in
+	# start(), which is the earliest point the army size is known and the last point before a
+	# tick could read it.
 	overlap_grid = BattleOverlapGrid.new()
 	overlap_grid.configure(field_size, overlap_cell_size)
 	overlap_grid.max_push = max_separation_push
+	overlap_backend_active = OverlapBackend.GDSCRIPT
 
 
 func add_units(p_units: Array[BattleUnit]) -> void:
@@ -842,8 +897,53 @@ func start() -> void:
 		target_backend = BattleSpatialGrid.Backend.NATIVE_FULL
 	elif target_backend == BattleSpatialGrid.Backend.GDSCRIPT and units.size() >= TARGET_NATIVE_MIN_UNITS:
 		target_backend = BattleSpatialGrid.Backend.NATIVE_FULL
+	select_overlap_backend()
 	state = State.RUNNING
 	elapsed = 0.0
+
+
+## Choose the separation pass, once, from the army the battle is about to run. The thresholds
+## are measurements rather than opinions: below the packed threshold the reference is already
+## cheap enough that packing the field costs more than the pass saves, and above the native
+## threshold the accelerator's boundary crossing is amortised. The environment variable is
+## what lets CI and a benchmark hold one implementation still while measuring it.
+func select_overlap_backend() -> void:
+	var wanted := overlap_backend
+	var forced := OS.get_environment("PB_OVERLAP_BACKEND").to_lower()
+	if not forced.is_empty():
+		match forced:
+			"gdscript", "reference":
+				wanted = OverlapBackend.GDSCRIPT
+			"packed":
+				wanted = OverlapBackend.PACKED
+			"native":
+				wanted = OverlapBackend.NATIVE
+			"compare":
+				wanted = OverlapBackend.COMPARE
+	if wanted == OverlapBackend.AUTO:
+		if units.size() >= OVERLAP_NATIVE_MIN_UNITS and BattleOverlapNative.available():
+			wanted = OverlapBackend.NATIVE
+		elif units.size() >= OVERLAP_PACKED_MIN_UNITS:
+			wanted = OverlapBackend.PACKED
+		else:
+			wanted = OverlapBackend.GDSCRIPT
+	if wanted == OverlapBackend.NATIVE and not BattleOverlapNative.available():
+		# A missing accelerator is a slower tick, not a broken battle: the reference answers.
+		wanted = OverlapBackend.GDSCRIPT
+	overlap_backend_active = wanted
+	var pass_object: BattleOverlapGrid = null
+	match wanted:
+		OverlapBackend.PACKED:
+			pass_object = BattleOverlapGridPacked.new()
+		OverlapBackend.NATIVE, OverlapBackend.COMPARE:
+			var native_pass := BattleOverlapNative.new()
+			native_pass.compare_enabled = wanted == OverlapBackend.COMPARE
+			pass_object = native_pass
+		_:
+			pass_object = BattleOverlapGrid.new()
+	pass_object.configure(field_size, overlap_cell_size)
+	pass_object.max_push = max_separation_push
+	overlap_grid = pass_object
 
 
 func is_running() -> bool:
@@ -995,6 +1095,8 @@ func profile_ms(key: String) -> float:
 func reset_profile() -> void:
 	profile = {}
 	samples = {}
+	overlap_worst_report = {}
+	_overlap_worst_usec = 0
 	tgt_searches = 0
 	tgt_successful_searches = 0
 	tgt_empty_searches = 0
@@ -1087,6 +1189,12 @@ func _sample_mark() -> Dictionary:
 		"soldiers": float(profile.get("soldiers", 0.0)),
 		"target": float(profile.get("target", 0.0)),
 		"overlap": float(profile.get("overlap", 0.0)),
+		# Step 7.8. The native pass's own decomposition, sampled like the rest: a kernel that
+		# is fast on average and occasionally slow at the boundary is a stutter, and an
+		# average is exactly the figure that hides it.
+		"overlap_sync": float(profile.get("overlap_sync", 0.0)),
+		"overlap_native": float(profile.get("overlap_native", 0.0)),
+		"overlap_apply": float(profile.get("overlap_apply", 0.0)),
 	}
 
 
@@ -2585,15 +2693,58 @@ func _resolve_overlaps() -> void:
 		return
 	overlap_grid.stats_enabled = profile_enabled
 	overlap_grid.max_push = max_separation_push
+	# Only the spike sampler needs the tick's own cost; a per-tick clock read in a normal
+	# battle would be the profiler measuring itself.
+	var tick_clock := Time.get_ticks_usec() if (profile_enabled and sample_phases) else 0
 	overlap_grid.resolve(units, separation_radius * SEPARATION_FACTOR, separation_settle_epsilon)
 	if profile_enabled:
 		_pull_overlap_stats()
+	if tick_clock > 0:
+		var usec := Time.get_ticks_usec() - tick_clock
+		if usec > _overlap_worst_usec:
+			_overlap_worst_usec = usec
+			overlap_worst_report = overlap_stats
+	# The comparison modes record when a disagreement happened rather than only that one did.
+	# Nothing is applied from the comparison: the reference's result is the one that moved.
+	var native_pass := overlap_grid as BattleOverlapNative
+	if native_pass != null:
+		if native_pass.compare_enabled:
+			native_pass.note_tick(tick_index)
+		if profile_enabled:
+			# The boundary's own decomposition, so the profile can say what the accelerator
+			# cost rather than only what the phase did.
+			var boundary := native_pass.boundary_report()
+			profile["overlap_sync"] = float(profile.get("overlap_sync", 0.0)) + float(boundary["sync_us"]) / 1000.0
+			profile["overlap_native"] = float(profile.get("overlap_native", 0.0)) + float(boundary["native_us"]) / 1000.0
+			profile["overlap_apply"] = float(profile.get("overlap_apply", 0.0)) + float(boundary["apply_us"]) / 1000.0
 
 
 ## Copy the separation pass's counters and density picture into one dictionary. Called
 ## once per tick and only while profiling, so a normal battle pays nothing for it.
 func _pull_overlap_stats() -> void:
 	overlap_stats = overlap_grid.report()
+
+
+## The worst overlap tick's own counters, with the tick's cost in microseconds. Development
+## only: empty unless the per-tick sampler has been running.
+func overlap_worst() -> Dictionary:
+	if overlap_worst_report.is_empty():
+		return {}
+	var out := overlap_worst_report.duplicate()
+	out["usec"] = _overlap_worst_usec
+	return out
+
+
+## What the separation pass's backend is, and - when it is the native one - what the boundary
+## cost. Shaped like [method backend_report], and never used for anything but reporting.
+func overlap_backend_report() -> Dictionary:
+	var native_pass := overlap_grid as BattleOverlapNative
+	if native_pass == null:
+		return {"backend": overlap_backend_active, "sync_us": 0, "native_us": 0,
+			"apply_us": 0, "total_us": 0, "mismatches": 0, "passes": 0}
+	var report := native_pass.boundary_report()
+	report["backend"] = overlap_backend_active
+	return report
 
 
 func _check_victory() -> void:

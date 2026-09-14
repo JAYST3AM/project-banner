@@ -51,6 +51,11 @@ func run() -> void:
 	_test_against_a_brute_force_reference()
 	_test_a_dense_deployment_is_fully_enumerated()
 	_test_cell_size_is_configurable()
+	_test_the_profiler_counts_what_it_names()
+	_test_the_phase_clock_has_parts_that_add_up()
+	_test_the_settled_proof_says_which_test_rejected_it()
+	_test_a_dry_pass_moves_nobody()
+	_test_a_battle_is_identical_whichever_pass_runs_it()
 	_complete()
 
 
@@ -856,3 +861,271 @@ func _test_cell_size_is_configurable() -> void:
 		isolated_grid.resolve(isolated, _minimum(), 0.0)
 		approx(isolated[0].position.distance_to(isolated[1].position), _minimum(), 0.0001,
 			"at a %.2f-unit cell size a lone pair is separated exactly once" % size)
+
+
+## ---------- the profiler itself (Step 7.8) --------------------------------
+
+## The counters the Step 7.8 audit found wrong, pinned so they cannot be wrong again.
+##
+## The first was a name that lied: `dev_coincident` was incremented for every touching pair
+## before the coincidence test, so it counted touching pairs and called them coincident. The
+## second was a phase clock that was declared, reset, and never assigned - a zero that read
+## as "no work" rather than "not measured". Both are instrumentation, and neither is allowed
+## to change what the pass does, so this section asserts the counts and the arithmetic and a
+## later section asserts the positions.
+func _test_the_profiler_counts_what_it_names() -> void:
+	section("the separation profiler counts what its names say")
+	var minimum := _minimum()
+
+	# One ordinary overlap: touching, and nothing else.
+	var touching := _roster([Vector2(10.0, 10.0), Vector2(10.0 + minimum * 0.5, 10.0)])
+	var touching_grid := _grid()
+	touching_grid.stats_enabled = true
+	touching_grid.resolve(touching, minimum, 0.0)
+	equal(touching_grid.stat_touching, 1, "one pair inside the distance is one touching pair")
+	equal(touching_grid.dev_coincident, 0, "and an ordinary overlap is not a coincident pair")
+	equal(touching_grid.stat_pairs, 1, "and it was measured exactly once")
+
+	# The same pair in exactly the same place: touching *and* coincident.
+	var same := _roster([Vector2(10.0, 10.0), Vector2(10.0, 10.0)])
+	var same_grid := _grid()
+	same_grid.stats_enabled = true
+	same_grid.resolve(same, minimum, 0.0)
+	equal(same_grid.stat_touching, 1, "a pair in one spot is touching")
+	equal(same_grid.dev_coincident, 1, "and it is the pair the coincident counter is for")
+
+	# Coincident is a sub-count of touching and can never exceed it: a pass with both kinds
+	# of pair on one field must say one and one.
+	var mixed := _roster([
+		Vector2(20.0, 20.0), Vector2(20.0, 20.0),
+		Vector2(30.0, 20.0), Vector2(30.0 + minimum * 0.4, 20.0)])
+	var mixed_grid := _grid()
+	mixed_grid.stats_enabled = true
+	mixed_grid.resolve(mixed, minimum, 0.0)
+	equal(mixed_grid.stat_touching, 2, "two touching pairs on the field")
+	equal(mixed_grid.dev_coincident, 1, "and exactly one of them was coincident")
+
+	# The counters mean nothing to a real battle: with stats off nothing is counted at all,
+	# which is what makes the counter path free rather than merely cheap.
+	var unmeasured := _roster([Vector2(40.0, 40.0), Vector2(40.0, 40.0)])
+	var quiet_grid := _grid()
+	quiet_grid.resolve(unmeasured, minimum, 0.0)
+	equal(quiet_grid.stat_touching, 0, "with the counters off, nothing is counted")
+	equal(quiet_grid.dev_coincident, 0, "and no coincident pair is claimed either")
+	approx(unmeasured[0].position.distance_to(unmeasured[1].position), minimum, 0.0001,
+		"while the pass itself still separates the pair exactly as before")
+
+
+## The phase clock is four parts and a whole, and the whole is not derived from the parts.
+func _test_the_phase_clock_has_parts_that_add_up() -> void:
+	section("the overlap phase's clock is populated, in parts and as a whole")
+	# A field big enough that every part of the pass has work to do: several occupied cells,
+	# several neighbours between them, and pushes to apply.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = SEED + 41
+	var spec: Array[Vector2] = []
+	for i in 240:
+		spec.append(Vector2(rng.randf_range(20.0, 34.0), rng.randf_range(20.0, 34.0)))
+	var units := _roster(spec)
+	var grid := _grid()
+	grid.stats_enabled = true
+	grid.resolve(units, _minimum(), 0.0)
+
+	greater(float(grid.stat_cell_pairs), 0.0, "the field has neighbouring occupied cells")
+	greater(float(grid.dev_usec_total), 0.0, "the whole pass is timed")
+	greater(float(grid.dev_usec_build), 0.0, "the rebuild is timed")
+	greater(float(grid.dev_usec_same_cell), 0.0, "the same-cell loop is timed when it has work")
+	greater(float(grid.dev_usec_neighbour), 0.0, "the neighbour loop is timed too")
+	greater(float(grid.dev_usec_apply), 0.0, "and the apply pass is timed when somebody was pushed")
+
+	var parts := grid.dev_usec_build + grid.dev_usec_same_cell + grid.dev_usec_neighbour + grid.dev_usec_apply
+	check(parts <= grid.dev_usec_total,
+		"the four parts fit inside the whole (%d <= %d us)" % [parts, grid.dev_usec_total])
+	greater(float(parts), 0.0, "and between them they are the work")
+
+	# A sparse field: work exists, but not in every part. The pass must report the parts it
+	# did do and not invent the others.
+	var sparse := _roster([Vector2(5.0, 5.0), Vector2(80.0, 50.0), Vector2(20.0, 40.0)])
+	var sparse_grid := _grid()
+	sparse_grid.stats_enabled = true
+	sparse_grid.resolve(sparse, _minimum(), 0.0)
+	equal(sparse_grid.stat_pairs, 0, "three soldiers far apart make no pairs")
+	equal(sparse_grid.stat_cell_pairs, 0, "and no neighbouring cells")
+	equal(sparse_grid.dev_moved, 0, "so nobody is moved")
+	# Not "the clock is non-zero": three soldiers are a couple of microseconds of work and a
+	# microsecond clock is allowed to round that to nothing. The claim that matters is that
+	# the cost follows the work.
+	less(float(sparse_grid.dev_usec_total), float(grid.dev_usec_total),
+		"a field with three soldiers on it costs less than one with two hundred and forty")
+
+	# Nothing at all: no soldiers, no work, no stale numbers from the pass before.
+	var empty: Array[BattleUnit] = []
+	var empty_grid := _grid()
+	empty_grid.stats_enabled = true
+	empty_grid.resolve(units, _minimum(), 0.0)
+	greater(float(empty_grid.stat_pairs), 0.0, "the field before the empty pass had work in it")
+	empty_grid.resolve(empty, _minimum(), 0.0)
+	equal(empty_grid.stat_pairs, 0, "an empty pass reports no pairs rather than the last pass's")
+	equal(empty_grid.indexed_count(), 0, "and nobody is indexed")
+
+
+## The settled-cell skip is a proof with five ways to fail. When it does not fire, the
+## counters must say which test refused - that is the difference between "the skip is broken"
+## and "soldiers are not settled during a fight", and the two have opposite fixes.
+func _test_the_settled_proof_says_which_test_rejected_it() -> void:
+	section("the settled proof reports which of its tests rejected a cell pair")
+	var minimum := _minimum()
+	var settle := _config().get_float("battle.separation_settle_epsilon", 0.15)
+
+	# Two settled cells of one body whose spacing proves them apart: the proof holds, and the
+	# reason counters must say so.
+	var simulator := BattleSimulator.new(_config(), SEED + 51)
+	var body := _body(simulator, "line", BattleContext.SIDE_PLAYER, Vector2(30.0, 30.0), 0.0, 40, 0)
+	simulator.start()
+	for tick in 6:
+		simulator.step(0.05)
+	var grid := _grid()
+	grid.stats_enabled = true
+	grid.resolve(simulator.units, minimum, settle)
+	greater(float(grid.dev_skip_proved), 0.0, "a dressed body's interior cells are proved apart")
+	greater(float(grid.stat_cell_pairs_skipped), 0.0, "and the proof is what skips them")
+	equal(grid.stat_cell_pairs_skipped, grid.dev_skip_proved,
+		"every skipped cell pair is a proved cell pair")
+
+	# The reasons partition: the first test that fails is the one counted, so the six counts
+	# must add up to the cell pairs that reached the proof.
+	var reasons := grid.dev_skip_not_settled_a + grid.dev_skip_not_settled_b + grid.dev_skip_no_body \
+		+ grid.dev_skip_other_body + grid.dev_skip_spacing + grid.dev_skip_proved
+	equal(reasons, grid.stat_cell_pairs,
+		"the five ways to fail and the one way to pass add up to the cell pairs considered")
+
+	# Put one soldier of the body out of place: its cell stops being an interior, and the
+	# rejection is reported as a soldier who is not settled rather than as anything else.
+	var dressed_bodies: Array = grid.report()["bodies"]
+	var settled_before := int((dressed_bodies[0] as Dictionary).get("settled", 0))
+	var members := _members(simulator, body)
+	if members.size() >= 2 and members[0].formation_ref != null and members[0].slot_index >= 0:
+		var place: Vector2 = body.slots[members[0].slot_index]
+		members[0].position = place + Vector2(3.0, 0.0)
+		var perturbed := _grid()
+		perturbed.stats_enabled = true
+		perturbed.resolve(simulator.units, minimum, settle)
+		check(perturbed.cell_state_of(grid.cell_index_of(place)) != BattleOverlapGrid.CELL_SETTLED,
+			"the cell the stray left is no longer a settled interior")
+		var perturbed_bodies: Array = perturbed.report()["bodies"]
+		equal(int((perturbed_bodies[0] as Dictionary).get("settled", 0)), settled_before - 1,
+			"and the body reports exactly one fewer soldier standing on his place")
+		greater(float((perturbed_bodies[0] as Dictionary).get("distance_p95", 0.0)), 0.0,
+			"with the distance statistics seeing him as well")
+
+	# The per-body statistics answer the question the counters cannot: how far from their
+	# places a body's soldiers actually are, and what share of them is standing on them.
+	var bodies: Array = grid.report()["bodies"]
+	greater(float(bodies.size()), 0.0, "the pass reports its bodies")
+	var dressed := bodies[0] as Dictionary
+	equal(int(dressed.get("living", 0)), 40, "the body's forty soldiers are all counted")
+	greater(float(dressed["settled_fraction"]), 0.5,
+		"a body six ticks into a battle still has most of its soldiers on their places")
+	less(float(dressed["distance_average"]), float(settle) * 4.0,
+		"and their average distance from those places is small")
+
+
+## A dry pass is how the phase's own arithmetic is measured by subtraction, so it must be the
+## same pass: same pairs, same touching pairs, same everything except the writhes it declines
+## to make - and it must leave the field exactly as it found it.
+func _test_a_dry_pass_moves_nobody() -> void:
+	section("a dry pass enumerates the same work and moves nobody")
+	var minimum := _minimum()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = SEED + 61
+	var spec: Array[Vector2] = []
+	for i in 120:
+		spec.append(Vector2(rng.randf_range(30.0, 44.0), rng.randf_range(30.0, 44.0)))
+	var units := _roster(spec)
+	var before := _positions(units)
+
+	var full := _grid()
+	full.stats_enabled = true
+	full.resolve(units, minimum, 0.0)
+	var full_touching := full.stat_touching
+	var full_pairs := full.stat_pairs
+	var full_build := full.dev_usec_build
+
+	# Reset the field, then measure it twice without touching it.
+	var fresh := _roster(spec)
+	var enumerate_only := _grid()
+	enumerate_only.stats_enabled = true
+	enumerate_only.dry_level = 2
+	enumerate_only.resolve(fresh, minimum, 0.0)
+	equal(_positions(fresh), before, "the enumeration-only pass moved nobody")
+	equal(enumerate_only.stat_pairs, full_pairs, "and enumerated the same pairs")
+
+	var distance_only := _grid()
+	distance_only.stats_enabled = true
+	distance_only.dry_level = 1
+	distance_only.resolve(fresh, minimum, 0.0)
+	equal(_positions(fresh), before, "the distance-only pass moved nobody either")
+	equal(distance_only.stat_pairs, full_pairs, "and it enumerated the same pairs")
+	equal(distance_only.stat_touching, full_touching, "and found the same touching pairs")
+
+	# And the real pass over the same field does separate them, so this section cannot pass by
+	# the pass having quietly stopped working.
+	var real := _grid()
+	real.resolve(fresh, minimum, 0.0)
+	not_equal(_positions(fresh), before, "the real pass over the same field does move soldiers")
+	greater(float(full_build), 0.0, "and the full pass still reports its own build time")
+
+
+## ---------- the three passes, on one battle ---------------------------------
+
+## The end-to-end claim: a battle comes out the same whichever separation pass resolves its
+## contacts.
+##
+## The oracle suite compares passes on generated fields, one pass at a time. This compares
+## them on a *battle*: two bodies ordered into each other, a few hundred ticks of real
+## simulation, and every soldier's position and hit points at the end. If a pass disagreed
+## about which pairs were touching - even in the last bit of one push - the field would drift
+## and the fighting would diverge, and this is where that shows up as a difference in the
+## battle rather than as a difference in a number.
+func _test_a_battle_is_identical_whichever_pass_runs_it() -> void:
+	section("a battle comes out the same whichever separation pass resolves it")
+	var passes: Array[int] = [BattleSimulator.OverlapBackend.GDSCRIPT, BattleSimulator.OverlapBackend.PACKED]
+	if ClassDB.class_exists("NativeOverlapKernel"):
+		passes.append(BattleSimulator.OverlapBackend.NATIVE)
+	else:
+		equal(false, false, "no native kernel is loaded, so this battle is compared across two passes")
+		print("    SKIP the native pass in this comparison: no accelerator loaded")
+
+	var fingerprints := {}
+	for pass_id in passes:
+		var simulator := BattleSimulator.new(_config(), SEED + 91)
+		simulator.overlap_backend = pass_id
+		_body(simulator, "player_line", BattleContext.SIDE_PLAYER, Vector2(26.0, 30.0), 0.0, 60, 0)
+		_body(simulator, "enemy_line", BattleContext.SIDE_ENEMY, Vector2(38.0, 30.0), PI, 60, 100)
+		for body in simulator.formations:
+			body.order_engage()
+			body.ensure_slots()
+		simulator.start()
+		equal(simulator.overlap_backend_active, pass_id,
+			"the battle runs the pass it was asked for (%s)" % BattleSimulator.overlap_backend_label(pass_id))
+		for tick in 300:
+			simulator.step(0.05)
+		var parts := PackedStringArray()
+		for unit in simulator.units:
+			parts.append("%d:%.6f,%.6f:%d" % [unit.id, unit.position.x, unit.position.y, unit.hp])
+		fingerprints[pass_id] = "|".join(parts)
+
+	var reference: String = fingerprints[BattleSimulator.OverlapBackend.GDSCRIPT]
+	for pass_id in passes:
+		if pass_id == BattleSimulator.OverlapBackend.GDSCRIPT:
+			continue
+		equal(fingerprints[pass_id], reference,
+			"three hundred ticks of fighting are identical under the %s pass" % BattleSimulator.overlap_backend_label(pass_id))
+
+	# And the pass really was the one asked for, so this cannot pass by every battle quietly
+	# running the reference.
+	var forced := BattleSimulator.new(_config(), SEED + 92)
+	forced.overlap_backend = BattleSimulator.OverlapBackend.PACKED
+	forced.start()
+	equal(forced.overlap_backend_active, BattleSimulator.OverlapBackend.PACKED,
+		"a forced pass is what the battle runs, not the threshold's choice")

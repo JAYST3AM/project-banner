@@ -89,6 +89,15 @@ jobs:
           godot --headless --path . res://scenes/dev/tests.tscn -- --suite=native_query --require-native 2>&1 | tee native-output.log
           grep -q "RESULT: PASS" native-output.log             || { echo "::error::the native query suite did not report PASS"; exit 1; }
 
+      # Step 7.8. Same rule for the separation pass's kernel: the equivalence suite is the
+      # one that puts both candidates against the locked reference, and it is run here on its
+      # own so a failure names the pass rather than the suite that contains it.
+      - name: Confirm the native separation pass agrees with the reference
+        run: |
+          set -euo pipefail
+          godot --headless --path . res://scenes/dev/tests.tscn -- --suite=overlap_oracle --require-native 2>&1 | tee overlap-output.log
+          grep -q "RESULT: PASS" overlap-output.log             || { echo "::error::the overlap equivalence suite did not report PASS"; exit 1; }
+
       # NO `-e` swallowing here: `set -o pipefail` means the pipeline fails if the
       # engine fails, and the explicit grep means a run that reported no overall
       # PASS is a failure even if the exit code somehow said otherwise.
@@ -128,6 +137,8 @@ jobs:
           name: godot-logs
           path: |
             test-output.log
+            native-output.log
+            overlap-output.log
             persistence-write.log
             persistence-verify.log
           if-no-files-found: ignore

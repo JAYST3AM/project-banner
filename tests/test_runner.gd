@@ -38,6 +38,7 @@ const SUITES: Array[String] = [
 	"res://tests/test_formation_battle.gd",
 	"res://tests/test_spatial_grid.gd",
 	"res://tests/test_overlap.gd",
+	"res://tests/test_overlap_oracle.gd",
 	"res://tests/test_target_acquisition.gd",
 	"res://tests/test_formation_focus.gd",
 	"res://tests/test_target_search.gd",

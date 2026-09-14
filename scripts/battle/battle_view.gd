@@ -31,6 +31,11 @@ var context: BattleContext = null
 var show_terrain: bool = true
 ## The development overlay: anchors, facing, target slots, formation bounds, cohesion.
 var show_formation_debug: bool = false
+## The label above each body - its id, state, cohesion and shape. Split from the geometry
+## drawing because at a zoomed-out camera the text is drawn in world units and covers a large
+## part of the field: a showcase that wants to see the armies arrange themselves can drop the
+## words and keep the marks. On by default, which is what the battle scene has always done.
+var show_formation_labels: bool = true
 
 var selected_ids: Array[int] = []
 
@@ -117,9 +122,8 @@ func _draw() -> void:
 		else:
 			_draw_fallen(unit)
 
-	if show_formation_debug:
+	if show_formation_debug and show_formation_labels:
 		_draw_formation_labels()
-
 	if box_select_active:
 		draw_rect(box_select_rect, COLOR_GOLD.darkened(0.2), false, 0.18)
 		draw_rect(box_select_rect, Color(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b, 0.12))

@@ -186,3 +186,15 @@ Token scope confirmed: `repo`, `workflow`, `gist` (account `JAYST3AM`).
 | Fallback | if the library is not built, `ClassDB.instantiate("NativeTargetQuery")` returns null, the grid never reaches for it, and the game runs the locked GDScript path. A missing accelerator never corrupts a battle |
 | Selecting the backend | the benchmark takes `--target-backend=gdscript\|native\|compare\|full\|compare-full`; a real run selects the accelerator with `PB_TARGET_BACKEND=native` |
 | Verification | `tests/test_native_query.gd` compares both backends; CI builds the extension and runs the suites with `--require-native`, so a missing library fails there instead of being skipped |
+
+### The separation pass's accelerator (Step 7.8, D-099)
+
+The same library (`addons/pb_native/bin/`) carries a second class, `NativeOverlapKernel`, which
+performs the whole separation pass and returns one displacement per soldier per axis.
+
+| | |
+| --- | --- |
+| Selecting the pass | production rule: native at or above `BattleSimulator.OVERLAP_NATIVE_MIN_UNITS` when the library is loaded, the packed GDScript pass at or above `OVERLAP_PACKED_MIN_UNITS` otherwise, the reference below both. `PB_OVERLAP_BACKEND=gdscript\|packed\|native\|compare` forces one |
+| Benchmarking it | `--overlap-backend=` forces one pass for a run; `--overlap-sweep=1` runs the same battles once per pass and prints the comparison; `--overlap-diag=1` accumulates the settled-skip counters over a whole battle, and `--overlap-split=1` measures the phase's own decomposition by running the reference with its arithmetic removed, three times, over one frozen field |
+| Verification | `tests/test_overlap_oracle.gd` compares it with the locked reference - 600 generated states bit for bit, 1,500 for the packed pass - plus the boundary timing checks; CI runs that suite with `--require-native` |
+| Failure mode | if the library is missing, the battle runs the packed pass or the reference; nothing about the battle changes except its cost |

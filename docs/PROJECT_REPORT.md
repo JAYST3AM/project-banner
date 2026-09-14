@@ -1401,3 +1401,99 @@ detaches from the console on Windows and prints nothing.
 | `docs/CURRENT_STATE.md` | what is playable and how it is verified (living) |
 | `docs/DECISIONS.md` | 32 recorded technical and design decisions |
 | `docs/DEVELOPMENT_ENVIRONMENT.md` | toolchain, paths, full command reference |
+
+### 9.10 The Step 7.8 benchmark — the separation pass, three ways
+
+The separation pass keeps soldiers from standing inside each other. Step 7.2 replaced its
+quadratic form with a cell-pairing grid and Step 7.3 gave it its own proximity index; the first
+Step 7.8 pass then measured it as the largest single phase of a realistic tick. This milestone
+optimised it, and the numbers below are matched windows: the same battle, the same tick count, the
+same machine, run once per implementation, with no budget that could let a faster build be
+measured at a later and heavier moment of the same fight. `--overlap-sweep=1` runs them.
+
+| units | pass | overlap ms/tick | total ms/tick | overlap speedup | whole-tick speedup |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1,000 | reference | 6.215 | 20.460 | - | - |
+| 1,000 | packed | 4.266 | 18.465 | 1.46x | 1.11x |
+| 1,000 | **native** | **1.731** | **15.926** | **3.59x** | **1.28x** |
+| 2,500 | reference | 20.615 | 63.818 | - | - |
+| 2,500 | packed | 11.685 | 54.780 | 1.76x | 1.17x |
+| 2,500 | **native** | **4.850** | **47.922** | **4.25x** | **1.33x** |
+| 5,000 | reference | 52.572 | 149.249 | - | - |
+| 5,000 | packed | 24.729 | 121.271 | 2.13x | 1.23x |
+| 5,000 | **native** | **10.330** | **106.529** | **5.09x** | **1.40x** |
+| 10,000 | reference | 122.489 | 328.427 | - | - |
+| 10,000 | packed | 51.704 | 256.384 | 2.37x | 1.28x |
+| 10,000 | **native** | **21.280** | **226.003** | **5.76x** | **1.45x** |
+| 20,000 | reference | 237.990 | 650.507 | - | - |
+| 20,000 | packed | 103.282 | 517.275 | 2.30x | 1.26x |
+| 20,000 | **native** | **42.686** | **454.725** | **5.58x** | **1.43x** |
+
+Realistic density (family B: the field grows with the army), matched 200-tick windows, seed 70707.
+Every row of a size ran the same battle for the same number of ticks; contact was reached in every
+one of them.
+
+### The fixed-area torture family (family A), 200-tick matched windows
+
+The historical cross-milestone family: every army crammed into the same 100 x 60 field, so
+density rises with the count. Same test, same seed, three implementations, one row each, the same
+number of ticks for every row of a size.
+
+| units | pass | overlap ms/tick | total ms/tick | overlap speedup | whole-tick speedup |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 100 | reference | 0.471 | 2.428 | - | - |
+| 100 | packed | 0.382 | 2.354 | 1.23x | 1.03x |
+| 100 | native | 0.184 | 2.153 | 2.56x | 1.13x |
+| 500 | reference | 3.378 | 14.235 | - | - |
+| 500 | packed | 2.266 | 12.982 | 1.49x | 1.10x |
+| 500 | native | 0.930 | 11.744 | 3.63x | 1.21x |
+| 1,000 | reference | 7.492 | 25.947 | - | - |
+| 1,000 | packed | 4.711 | 23.181 | 1.59x | 1.12x |
+| 1,000 | native | 1.877 | 20.316 | 3.99x | 1.28x |
+| 2,500 | reference | 23.332 | 70.276 | - | - |
+| 2,500 | packed | 12.458 | 59.267 | 1.87x | 1.19x |
+| 2,500 | native | 5.094 | 51.935 | 4.58x | 1.35x |
+| 5,000 | reference | 60.428 | 157.007 | - | - |
+| 5,000 | packed | 26.821 | 123.051 | 2.25x | 1.28x |
+| 5,000 | native | 10.829 | 107.495 | 5.58x | 1.46x |
+| 10,000 | reference | 187.813 | 389.179 | - | - |
+| 10,000 | packed | 66.309 | 268.460 | 2.83x | 1.45x |
+| 10,000 | native | 21.887 | 223.575 | 8.58x | 1.74x |
+| 20,000 | reference | 680.701 | 1112.726 | - | - |
+| 20,000 | packed | 204.585 | 635.787 | 3.33x | 1.75x |
+| 20,000 | native | 46.724 | 477.504 | 14.57x | 2.33x |
+
+Contact is reached in every row from 500 soldiers up. Candidate pairs, touching pairs and the
+busiest single cell for a given row are the pass's own counters, printed by `--overlap-sweep`
+beside the timings; the whole-battle averages for those counters on a realistic field are in the
+diagnosis table in D-097, because a single tick's counters are a sample of one moment and the
+diagnosis needed every tick.
+
+**Where the phase's own time goes, measured by subtraction.** Three passes over one frozen field
+per sample - the real pass, the same pass with the push arithmetic removed, and the same with the
+distance test removed too - on the locked reference at 20,000 soldiers:
+
+| Component | ms/tick (20K) |
+| --- | ---: |
+| rebuild: clearing, roster walk, cell calculation, insertion | 43.4 |
+| same-cell traversal (including the pairs it measures) | 18.6 |
+| neighbour-cell traversal (including the settled-cell proof) | 154.8 |
+| apply and clamp | 9.0 |
+| whole pass as the pass timed itself | 231.6 |
+| of which the squared-distance test for every enumerated pair | 84.9 - 102.7 |
+| of which the push arithmetic for the pairs that were touching | 1.9 - 18.8 |
+
+The last two lines are differences of clocks read on the same field, three passes apart, so they
+carry the noise of all three; they are quoted as a range for that reason. The traversal figures
+include the pair work that runs inside them - the same work is counted once there and once as a
+difference, and the two are not added together anywhere.
+
+**Why the pass's own optimisation does not fire.** See D-097: 95.3-98.2% of the cell pairs that
+reach the settled-cell proof are rejected because a soldier is not standing on his assigned place.
+The proof is exact and it works; a fight simply has almost nobody standing on their marks.
+
+**The next bottleneck, measured on the new build.** At 20,000 soldiers the tick is 474.6 ms:
+per-soldier update 246.6 (target selection 106.2 of it), formation focus 49.0, spatial grid 45.3,
+formations 36.5, separation pass 43.1. The spike table (per tick, 20,000 soldiers) puts the overlap
+phase at p95 46.5 / p99 53.3 / worst 54.1 ms, and the native kernel itself at p99 3.4 ms - the
+kernel is not a source of stutter; the field packing that feeds it is the larger half.

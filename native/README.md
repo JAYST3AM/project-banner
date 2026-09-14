@@ -1,8 +1,10 @@
 # Project Banner - native accelerator
 
-A GDExtension that accelerates **one** kernel: the spatial query inside automatic soldier
-target search. Nothing else lives here, and this directory's existence is not permission for
-anything else to move native without its own profile (see D-095).
+A GDExtension that accelerates **two** kernels, each of which was profiled, measured and given
+its own comparison mode before it was allowed to exist: the spatial query inside automatic
+soldier target search (Step 7.7, D-095), and the separation pass that keeps soldiers from
+standing inside one another (Step 7.8, D-099). This directory's existence is not permission for
+anything else to move native without its own profile.
 
 ## What is native and what is not
 
@@ -80,3 +82,28 @@ or when `PB_TARGET_BACKEND=native` asks for it explicitly. Shape A stays because
 structural: if the mirror is ever suspected, it is the shape to compare against.
 
 The comparison modes are for correctness only and are never used to claim performance.
+
+## NativeOverlapKernel - shape C, the separation pass
+
+Step 7.7's lesson was that a native kernel which hands its intermediate results back to
+GDScript is measuring the bridge rather than the work. The overlap kernel takes that seriously:
+it does **everything** - its own cell index, its own same-cell and neighbour-cell enumeration,
+the exact squared-distance test, the coincident branch, the push arithmetic, the accumulation
+and the clamp - and returns one number per soldier per axis: the displacement to apply.
+
+| | |
+| --- | --- |
+| Native | the whole pass, and the clamp |
+| GDScript | packing the field once, applying the returned displacements to the units it owns, and everything else in the game |
+| Ownership | none of the battle's. It holds transient arrays sized to the army and no `BattleObject` of any kind, so there is no mirror, no mutation point, and nothing that could enter a save |
+| Enumeration | the reference's, case for case: occupied cells in first-occupancy order, slots in ascending order inside a cell, the same forward half-neighbourhood in the same offset order - kept so that the floating-point sums match and the two can be compared bit for bit |
+| Accumulators | `float`, matching the `PackedFloat32Array` the GDScript pass accumulates into. That rounding is part of the shipped result and is reproduced rather than improved |
+| Production rule | selected once, before the first tick, at `BattleSimulator.OVERLAP_NATIVE_MIN_UNITS`; `PB_OVERLAP_BACKEND=native` forces it, and the packed GDScript pass covers the case where the library is not built |
+
+**What it is measured against.** The locked `BattleOverlapGrid` remains the oracle: 600 generated
+states and the named boundary arrangements are compared position for position and counter for
+counter, and a 300-tick battle is run under each pass and fingerprinted. The comparison mode
+(`BattleOverlapNative.compare_enabled`) runs the reference over the same pre-overlap field on
+its own proxy copies and reports the first disagreement with ids, bodies, cells and both
+displacements - and the reference's result is the one applied, so a comparison can never change
+a battle.

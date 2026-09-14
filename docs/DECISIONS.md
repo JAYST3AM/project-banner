@@ -2275,3 +2275,145 @@ rule about battles - the two implementations agree on every answer either side o
   deliberate (see `native/README.md`).
 - Twenty thousand soldiers is still an engineering stress target: at ~525 ms/tick it is ~1.9
   simulation ticks a second, not a playable battle, and none of these figures are rendering.
+
+## D-096: A profiler counter's name is a claim, and two of them were false
+
+The Step 7.8 audit found two mistakes in the separation pass's own instrumentation, and both were
+the kind that produce a confident wrong answer rather than an obvious one.
+
+**`dev_coincident` counted the wrong thing.** It was incremented for every touching pair, before
+the test that distinguishes a coincident pair (distance squared at or below `1e-7`) from an
+ordinary overlap - so the counter that was supposed to say "soldiers are stacked exactly on top
+of each other" was saying "soldiers are touching", which the counter beside it already said.
+Anything read from it ("coincidence is common", "the coincident branch is worth optimising")
+would have been about the wrong set of pairs. The increment now lives inside the coincident
+branch, and two assertions in `test_overlap` pin the difference: one ordinary overlap increments
+touching and not coincident; one pair in exactly the same place increments both.
+
+**`dev_usec_pairs` was declared, reset, and never assigned.** The comment above it promised
+pair-loop timing; the pass never gave it one and `report()` never printed it, so a reader looking
+for where the phase's time went found a zero that looked like "no work" rather than "not
+measured". A number that can only ever read zero is worse than no number: it is a claim of
+absence. It is gone, replaced by five clocks that are all written - rebuild, same-cell traversal,
+neighbour traversal, apply, and the whole pass as the pass itself timed it - with the exact pair
+work measured by subtraction (three passes over one frozen field, with the arithmetic left out)
+rather than given a column that would have to be apportioned.
+
+**The rule this leaves behind.** Counters partition or nest explicitly, and every field a report
+prints is assigned somewhere in the code that produces it. `test_overlap` asserts the partition
+for the settled proof (five ways to fail plus one way to pass add up to the cell pairs that
+reached it), asserts that a pass with nothing to do reports having done nothing rather than
+holding the last pass's numbers, and asserts that with `stats_enabled` false nothing is counted
+at all.
+
+## D-097: The settled-cell skip never fired because a real fight has no settled soldiers
+
+Step 7.3 built the pass's one optimisation - skip the cell pairs a formation's own spacing already
+proves cannot be touching - and the first Step 7.8 profile found it firing **zero times** at every
+size. The question was whether the proof was broken or whether the state it needs is rare, and the
+two have opposite fixes: one is a bug, the other is a fact about battles.
+
+Instrumenting the proof's five rejection reasons, and counting them **over every tick of the
+battle rather than on the last one**, answers it. (The first pass's zero was partly an artefact of
+when it looked: the last tick of a battle is the one tick at which nobody can be settled.) On a
+realistic field, over whole battles:
+
+| units | cell pairs / tick | skipped / tick | skip rate | of the pairs that reached the proof |
+| ---: | ---: | ---: | ---: | --- |
+| 5,000 | 8,284 | 6.5 | 0.08% | 98.2% cell A not settled, 1.4% cell B not settled, 0.4% different body, 0.0% spacing too small, 0.1% proved |
+| 20,000 | 32,535 | 54.8 | 0.17% | 95.3% cell A not settled, 3.8% cell B not settled, 0.7% different body, 0.0% spacing too small, 0.2% proved |
+
+So the answer is the second one. Soldiers stand on their assigned places for ~4.8% of a
+5,000-soldier battle and ~8.5% of a 20,000-soldier one - the dressing and approach - and the skip
+does fire there, which is where it saves the pass from comparing every pair of a body against
+itself. Once bodies move and fight, the settle test fails almost every time, which is what the
+proof says and what the code says.
+
+**The proof was not weakened to raise the number.** Nothing about `separation_settle_epsilon`,
+slot spacing, formation movement, the arrive epsilon or the compression rules was touched: the
+skip is allowed only where the existing physical proof holds. The instrumentation was the change,
+and the finding is that the optimisation is worth keeping for the phases it does apply to and
+worth nothing at contact - so the milestone's effort went where the time actually is, in the pair
+loop itself.
+
+## D-098: Packed GDScript: the same pass, 2.3-3.7x faster, bit for bit
+
+`BattleOverlapGrid`'s pair loop reads through objects: `_units[slot]` per pair, then
+`unit.position` twice, each constructing a `Vector2`, before any arithmetic happens.
+`BattleOverlapGridPacked` copies the field into packed arrays during the rebuild and runs the same
+arithmetic over those reads.
+
+Three properties make it a candidate rather than an experiment:
+
+- **The arithmetic is the same, not similar.** Positions are stored as the exact doubles a
+  `Vector2` component converts to, and the push accumulators stay `PackedFloat32Array` with a
+  per-pair write - batching the pushes into locals would be *more* precise and therefore no longer
+  comparable.
+- **The enumeration order is kept**, so the floating-point sums match as well as the mathematics.
+- **The oracle proves it**: 1,500 generated states against the locked reference, bit for bit.
+
+Measured, matched windows: 3.3x the reference's overlap phase at 20,000 on the torture field, 2.3x
+on a realistic field, and it takes the whole tick down by a quarter. It ships as the **portable
+fast path**: above `OVERLAP_PACKED_MIN_UNITS` (500) a battle uses it whenever the native library
+is not built, which is what makes the fast path available to anyone who clones the repository and
+runs it.
+
+## D-099: The separation pass moves native as shape C, on a measured threshold
+
+Shape C is the shape Step 7.7's lesson dictates: the kernel does everything - its own cell index,
+its own same-cell and neighbour-cell enumeration, the exact squared-distance test, the coincident
+branch, the push, the accumulation and the clamp - and returns **one displacement per soldier per
+axis**. GDScript packs the field once, calls once, applies the displacements to units it owns.
+Nothing per pair crosses the boundary, and nothing per soldier crosses it twice.
+
+Ownership is unchanged and strictly weaker than the targeting kernel's: the overlap kernel holds
+no `BattleUnit`, no formation, no battle rule and no persistent state, so it has no live-state
+mirror and no mutation points to keep true. No native state enters a save.
+
+**The boundary is priced, not assumed.** At 20,000 soldiers, per tick: packing the field 32.5 ms,
+the kernel's own compute 2.3 ms, applying the returned displacements 8.2 ms - 43.0 ms of round
+trip for a 2.3 ms computation, and still 5.6x cheaper than the 238.0 ms the reference pass costs
+on the same field. A kernel that computes in 20 ms but costs 70 to marshal is not a 20 ms
+solution; this one's marshalling is the larger half of its cost and it is still the fastest pass
+available by a wide margin.
+
+**The crossover is measured, not borrowed from the targeting kernel's own 1,000.** The native pass
+beats the reference at every size measured (2.6x at 100 soldiers on the torture field, 3.6x at
+1,000 on a realistic one) and beats the packed pass at every size, so the threshold is not where
+native stops winning but where it starts carrying a meaningful share of a tick:
+
+| units (family B) | reference | packed | native |
+| ---: | ---: | ---: | ---: |
+| 1,000 | 6.215 ms | 4.266 ms | 1.731 ms |
+| 20,000 | 237.990 ms | 103.282 ms | 42.686 ms |
+
+`OVERLAP_NATIVE_MIN_UNITS = 1000`, where native is 3.6x the reference's phase and takes a fifth
+off the whole tick - deliberately the same number the targeting kernel uses, so the project has
+one "this is a real battle now" line rather than two. Selection happens **once, before the first
+tick**, from the army size: never mid-battle, because a battle that changed its separation pass
+half way through would be a battle whose performance nobody could attribute. `PB_OVERLAP_BACKEND`
+forces one pass, which is what the benchmark and CI use.
+
+## D-100: A formed 300 v 300 battle stalemates, and it is not the separation pass
+
+The pre-optimisation showcase the brief asked for - three hundred men a side, three bodies each,
+production settings, windowed, with a live performance overlay - reached contact, fought, and then
+**froze**: 302 casualties in the first ~260 seconds of battle time, and then no more casualties at
+all, for as long as the battle was allowed to run. Raising the battle clock from the production
+600 seconds to 3,600 changed nothing (no deaths for 2,500 seconds). Re-running the same field on
+the pre-7.8 build reproduces it exactly.
+
+The mechanism is measured rather than guessed: at the freeze, **0 of 298 survivors had a living
+enemy inside their reach** (the peak had been 40 of 590 at contact). The survivors stand on the
+rigid slots their bodies gave them, holes included, and once the ranks have thinned the nearest
+living enemy is simply further away than any melee reach. The rule that exists for exactly this
+case - a body that is not in contact closes the whole way - requires a body that has *stopped*,
+and an engaged body steering towards an anchor inside the enemy line never stops; it reports
+`moving` forever. So nothing closes the gap, and the two armies stand a few metres apart until the
+clock runs out.
+
+**What this milestone did about it: nothing, deliberately.** It is a formation-layer behaviour, it
+is not caused by the separation pass, it was not weakened or hidden to make the showcase look
+better, and it is recorded here so that whoever fixes it starts from a measurement rather than
+from a screenshot. The showcase's own report - screenshots, reachability per stage, physicality
+probe - is the evidence.
