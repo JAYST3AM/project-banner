@@ -1433,41 +1433,30 @@ Realistic density (family B: the field grows with the army), matched 200-tick wi
 Every row of a size ran the same battle for the same number of ticks; contact was reached in every
 one of them.
 
-### The fixed-area torture family (family A), 200-tick matched windows
+### The fixed-area torture family (family A)
 
 The historical cross-milestone family: every army crammed into the same 100 x 60 field, so
-density rises with the count. Same test, same seed, three implementations, one row each, the same
-number of ticks for every row of a size.
+density rises with the count. Twenty-tick matched windows - the same convention Step 7.7's family
+A table used - three implementations, one row each, seed 70707. The counters beside the timings
+are accumulated over every tick of the run, and they are identical for all three passes of a size
+by construction: the passes enumerate the same pairs.
 
-| units | pass | overlap ms/tick | total ms/tick | overlap speedup | whole-tick speedup |
-| ---: | --- | ---: | ---: | ---: | ---: |
-| 100 | reference | 0.471 | 2.428 | - | - |
-| 100 | packed | 0.382 | 2.354 | 1.23x | 1.03x |
-| 100 | native | 0.184 | 2.153 | 2.56x | 1.13x |
-| 500 | reference | 3.378 | 14.235 | - | - |
-| 500 | packed | 2.266 | 12.982 | 1.49x | 1.10x |
-| 500 | native | 0.930 | 11.744 | 3.63x | 1.21x |
-| 1,000 | reference | 7.492 | 25.947 | - | - |
-| 1,000 | packed | 4.711 | 23.181 | 1.59x | 1.12x |
-| 1,000 | native | 1.877 | 20.316 | 3.99x | 1.28x |
-| 2,500 | reference | 23.332 | 70.276 | - | - |
-| 2,500 | packed | 12.458 | 59.267 | 1.87x | 1.19x |
-| 2,500 | native | 5.094 | 51.935 | 4.58x | 1.35x |
-| 5,000 | reference | 60.428 | 157.007 | - | - |
-| 5,000 | packed | 26.821 | 123.051 | 2.25x | 1.28x |
-| 5,000 | native | 10.829 | 107.495 | 5.58x | 1.46x |
-| 10,000 | reference | 187.813 | 389.179 | - | - |
-| 10,000 | packed | 66.309 | 268.460 | 2.83x | 1.45x |
-| 10,000 | native | 21.887 | 223.575 | 8.58x | 1.74x |
-| 20,000 | reference | 680.701 | 1112.726 | - | - |
-| 20,000 | packed | 204.585 | 635.787 | 3.33x | 1.75x |
-| 20,000 | native | 46.724 | 477.504 | 14.57x | 2.33x |
+| units | reference overlap | packed overlap | native overlap | native whole tick | overlap speedup (packed / native) | cell pairs/tick | pairs/tick | touching/tick | busiest cell | contact |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 100 | 0.450 ms | 0.356 ms | 0.182 ms | 1.857 ms (from 2.159) | 1.26x / 2.47x | 46 | 48 | 12 | 2 | no |
+| 500 | 2.920 ms | 2.140 ms | 0.933 ms | 8.907 ms (from 10.749) | 1.36x / 3.13x | 871 | 1,285 | 446 | 4 | no |
+| 1,000 | 8.534 ms | 4.681 ms | 1.930 ms | 18.585 ms (from 26.272) | 1.82x / 4.42x | 2,051 | 5,415 | 1,833 | 5 | no |
+| 2,500 | 29.459 ms | 13.069 ms | 4.965 ms | 44.925 ms (from 70.064) | 2.25x / 5.93x | 3,535 | 29,411 | 9,541 | 11 | no |
+| 5,000 | 85.475 ms | 30.760 ms | 11.372 ms | 96.538 ms (from 170.737) | 2.78x / 7.52x | 4,570 | 95,712 | 35,625 | 19 | no |
+| 10,000 | 262.894 ms | 80.726 ms | 23.148 ms | 201.309 ms (from 442.370) | 3.26x / 11.36x | 5,704 | 324,988 | 131,852 | 32 | no |
+| 20,000 | 941.902 ms | 252.084 ms | **49.627 ms** | 417.481 ms (from 1310.086) | 3.74x / **18.98x** | 6,493 | 1,230,494 | 528,668 | 59 | no |
 
-Contact is reached in every row from 500 soldiers up. Candidate pairs, touching pairs and the
-busiest single cell for a given row are the pass's own counters, printed by `--overlap-sweep`
-beside the timings; the whole-battle averages for those counters on a realistic field are in the
-diagnosis table in D-097, because a single tick's counters are a sample of one moment and the
-diagnosis needed every tick.
+No row reaches contact in twenty ticks at these sizes - the armies are still closing - so this
+family is an approach measurement, which is what it has always been at this window and what the
+historical tables recorded too. Re-running it at two hundred ticks, where the lines have met and
+are fighting, gives the same shape: at 20,000 soldiers the reference's overlap is 680.7 ms/tick,
+the packed pass 204.6 (3.33x) and the native pass 46.7 (14.57x), with the whole tick going from
+1112.7 to 477.5 ms (2.33x).
 
 **Where the phase's own time goes, measured by subtraction.** Three passes over one frozen field
 per sample - the real pass, the same pass with the push arithmetic removed, and the same with the
