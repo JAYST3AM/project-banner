@@ -1,0 +1,19 @@
+[configuration]
+
+entry_symbol = "pb_native_library_init"
+compatibility_minimum = "4.7"
+reloadable = false
+
+[libraries]
+
+; Both feature sets point at the optimized (template_release) library on purpose. Godot's
+; own editor and headless binaries are debug builds, so this is the library every run in
+; this project loads - development, tests and benchmarks alike - which is what keeps a
+; native measurement comparable with the GDScript one it is measured against: same engine
+; binary, same library, no configuration drifting between two runs. To develop against a
+; debug build instead, run `TARGET=template_debug bash native/build.sh` and point the
+; debug line below at `pb_native.windows.template_debug.x86_64.dll`.
+windows.debug.x86_64 = "res://addons/pb_native/bin/pb_native.windows.template_release.x86_64.dll"
+windows.release.x86_64 = "res://addons/pb_native/bin/pb_native.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://addons/pb_native/bin/pb_native.linux.template_release.x86_64.so"
+linux.release.x86_64 = "res://addons/pb_native/bin/pb_native.linux.template_release.x86_64.so"

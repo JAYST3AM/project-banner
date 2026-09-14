@@ -57,9 +57,37 @@ jobs:
             *) echo "::error::expected Godot ${GODOT_VERSION}, got $VERSION"; exit 1 ;;
           esac
 
+      # Step 7.7. The accelerator is built here, from the pinned godot-cpp revision the
+      # repository records, so a clean runner reproduces the native path rather than
+      # silently testing the fallback. The library is a generated artifact and is
+      # git-ignored; this step is what produces it.
+      - name: Install the native build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq g++ python3 python3-pip
+          python3 -m pip install --quiet --break-system-packages scons || python3 -m pip install --quiet scons
+          scons --version | head -1
+          g++ --version | head -1
+
+      - name: Build the native accelerator
+        run: |
+          set -euo pipefail
+          bash native/build.sh
+          ls -la addons/pb_native/bin/
+
       # .godot/ is gitignored, so a fresh checkout has no import cache.
       - name: Import project resources
         run: godot --headless --path . --import
+
+      # The accelerator must be *loaded*, not merely built: the native suite asserts that
+      # the class is registered, and --require-native turns its absence into a failure
+      # rather than a skip. A CI that quietly fell back to GDScript would pass without it.
+      - name: Confirm the native accelerator loaded
+        run: |
+          set -euo pipefail
+          godot --headless --path . res://scenes/dev/tests.tscn -- --suite=native_query --require-native 2>&1 | tee native-output.log
+          grep -q "RESULT: PASS" native-output.log             || { echo "::error::the native query suite did not report PASS"; exit 1; }
 
       # NO `-e` swallowing here: `set -o pipefail` means the pipeline fails if the
       # engine fails, and the explicit grep means a run that reported no overall
@@ -67,7 +95,7 @@ jobs:
       - name: Run the full headless test suite
         run: |
           set -euo pipefail
-          godot --headless --path . res://scenes/dev/tests.tscn 2>&1 | tee test-output.log
+          godot --headless --path . res://scenes/dev/tests.tscn -- --require-native 2>&1 | tee test-output.log
           grep -q "RESULT: PASS" test-output.log \
             || { echo "::error::the test runner did not report PASS"; exit 1; }
 

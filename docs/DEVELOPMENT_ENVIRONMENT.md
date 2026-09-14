@@ -168,3 +168,18 @@ in the remote URL, because git then writes it into `.git/config` and into the br
 upstream tracking ref. Verify with `grep -ri "gho_" .git/config` returning nothing.
 
 Token scope confirmed: `repo`, `workflow`, `gist` (account `JAYST3AM`).
+
+## Native accelerator (Step 7.7, D-095)
+
+| | |
+| --- | --- |
+| Engine | Godot 4.7.2-stable; the extension declares `compatibility_minimum = "4.7"` |
+| Dependency | godot-cpp, pinned to the revision in `native/GODOT_CPP_REVISION` (never floated; `build.sh` checks out the exact commit) |
+| Toolchain (Windows) | Visual Studio 2022 with the C++ workload (MSVC 14.4x), Python 3, SCons (`python -m pip install scons`) |
+| Toolchain (Linux/CI) | any C++17 compiler, Python 3, SCons |
+| Build | `bash native/build.sh` (fetches the pin into the git-ignored `native/deps/`), or `native/build.cmd` from a command prompt; `TARGET=template_debug` builds a debug library |
+| Output | `addons/pb_native/bin/` - git-ignored: a generated artifact, built by developers and by CI, never committed |
+| Build mode used for benchmarks | `template_release`. The editor and headless binaries are debug builds, and the `.gdextension` points both feature sets at the optimized library on purpose, so every run in this project loads the same one; see `native/README.md` |
+| Fallback | if the library is not built, `ClassDB.instantiate("NativeTargetQuery")` returns null, the grid never reaches for it, and the game runs the locked GDScript path. A missing accelerator never corrupts a battle |
+| Selecting the backend | the benchmark takes `--target-backend=gdscript\|native\|compare\|full\|compare-full`; a real run selects the accelerator with `PB_TARGET_BACKEND=native` |
+| Verification | `tests/test_native_query.gd` compares both backends; CI builds the extension and runs the suites with `--require-native`, so a missing library fails there instead of being skipped |

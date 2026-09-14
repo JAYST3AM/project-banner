@@ -2175,3 +2175,92 @@ is unchanged; what the milestone produced is the measurement that says why, a ch
 than the ladder being, as far as five attempts and a purpose-built benchmark can tell, not
 available in GDScript at this scale. Every existing behaviour is untouched: the same suite, the
 same battles, the same numbers as Step 7.5, plus the instruments.
+
+## D-095: The target search's spatial kernel moves native, on one measured condition
+
+**Context.** Step 7.6 ended by leaving the target search alone: five exact GDScript
+re-implementations had all measured slower than the ladder in place, and the profile said why -
+one radius-32 box costs what it costs however it is walked. What that milestone did *not*
+answer is the question this one asks: at twenty thousand soldiers the target phase is ~602 ms of
+a ~1,045 ms tick, the spatial query inside it is 85.7% of that, and ~85% of the *query* turned
+out to be the candidate scan - one distance test per candidate per look, in GDScript, against
+live positions.
+
+**Two boundary shapes were built and measured, because the boundary is the question.**
+
+- **Shape A - broadphase only.** The accelerator walks the cells and returns the candidates; the
+  exact distance test, the liveness recheck and the tie-break stay in GDScript. Exact by
+  construction, because live state never leaves GDScript. Measured at 20K: target phase 591.27 ->
+  546.16 ms/tick, total 996.65 -> 954.51 ms/tick, **1.04x**. Almost nothing: the walk it replaces
+  is only ~45 ms of the query, because Step 7.2's cell mask already made it cheap (D-068). The
+  2,438 looks a tick hand back ~170 candidates each, and paying to move those across the
+  boundary costs most of what the walk cost.
+- **Shape B - broadphase and the exact test.** The accelerator answers the whole query and
+  returns one slot number. Nothing crosses per search. The price is live state: the kernel holds
+  positions and liveness, so the battle mirrors its two mutation points into it - a soldier's
+  movement (`_move_toward`) and a soldier's death (the killing blow) - and the mirror is proven
+  by comparison, not by review. Measured at 20K with the same matched windows: target phase
+  591.48 -> 99.49 ms/tick (**5.94x**), total 1,004.88 -> 525.51 ms/tick (**1.91x**), and at
+  1,000 / 2,500 / 5,000 / 10,000 the total falls 1.73x / 2.00x / 2.20x / 2.20x. The grid phase
+  itself gets *worse* (35.02 -> 44.31 ms/tick) because a tick now pushes its snapshot and
+  mirrors its movements across the boundary, and that cost - about 9 ms a tick at 20K - is
+  bought deliberately.
+
+**Decision: shape B ships, and native code is allowed exactly here.** The threshold the project
+set for itself was a kernel at least twice as fast and a tick at least a quarter cheaper, with
+no behavioural difference, no pathological spikes and no regression at normal sizes. Measured:
+5.94x and 48% cheaper at the primary size, better at every smaller size, 0 disagreements in
+83,669 queries over 29.9 million candidates in live battles, and no spike introduced (see the
+spike table in `docs/CURRENT_STATE.md`). Shape A is kept as a mode because it is the shape whose
+exactness is structural, and it is the cheaper one to reason about if the mirror is ever
+suspected.
+
+**What is native and what is not.** Native: building the cell index from a per-tick snapshot,
+walking it, filtering by side and liveness, the exact squared-distance test, and the lower-id
+tie-break - `NativeTargetQuery` in `native/`, about 300 lines of C++. GDScript, unchanged: every
+other decision in the target path - the ladder's staging and ceiling, the D-087 proof, retained
+opponents, hysteresis, cadence, explicit orders, formation focus, the query margin, and which
+backend is in use. `BattleSpatialGrid` keeps the locked walk as `_collect_reference` and is the
+reference, the oracle and the fallback.
+
+**The determinism contract.** The accelerator must return the answer the GDScript reference
+returns, on the same battle state, for every query - and the project checks that rather than
+asserting it. `Backend.COMPARE_FULL` runs both implementations on the same rung of the same
+ladder and records the first disagreement with the tick, the asking soldier, the position, the
+radius and both answers. The suite (`tests/test_native_query.gd`) compares candidate sets over
+generated layouts, boundary cases, deaths after the rebuild, movement after the rebuild, dense
+and tied cells, and runs whole battles both ways - the accelerated battle must reproduce the
+reference's survivors, health, positions and targets unit by unit. Two real defects were caught
+by these modes during development and neither reached a benchmark: a radius that silently
+included `query_margin` (caught in a live battle at tick 15: the reference found nobody at the
+ceiling and the accelerator found a soldier just beyond it), and a counter call that threw once
+per query while profiling (caught as a 34x slowdown that was 34x of error handling, not of
+kernel).
+
+**Native code in Project Banner is an accelerator for proven hot data-processing kernels, not a
+second gameplay architecture.** GDScript retains orchestration and gameplay semantics unless
+profiling demonstrates a narrower native boundary is necessary.
+
+**Any native battlefield accelerator must preserve the locked deterministic result of its
+GDScript reference implementation.** Performance alone is not grounds for changing tactical
+outcomes.
+
+**Where native code is still not allowed.** This decision is not a licence to move anything else.
+Nothing else has been profiled to the point where a boundary is justified, and moving work with
+live-state coupling means mirroring its mutation points - which is a correctness liability paid
+for with proof, not a free speed-up. A future candidate must bring its own profile, its own
+measurement of the boundary, and its own comparison mode.
+
+**Limitations, stated plainly.**
+
+- The mirror is only as complete as the mutation points it knows about: the tests assert the
+  current two, and a static guard in the suite fails if the count of position writes in the
+  battle path ever changes without the list being updated.
+- The accelerator's cell order matches the reference's because it is fed the same cells, not
+  because it recomputes them; `_sync_native` is not optional for exactness.
+- A tick that never rebuilds (a battle that has not started) cannot be answered natively;
+  `can_answer_natively()` is false until the first rebuild, and the reference answers.
+- The release library is the one every run loads, including headless ones, and that is
+  deliberate (see `native/README.md`).
+- Twenty thousand soldiers is still an engineering stress target: at ~525 ms/tick it is ~1.9
+  simulation ticks a second, not a playable battle, and none of these figures are rendering.

@@ -126,6 +126,13 @@ const GRID_SCALE_QUERIES := 2000
 ## config between runs. Zero means "use whatever the config says".
 var _overlap_cell_override: float = 0.0
 
+## Step 7.7. Which implementation answers the target search's spatial queries:
+## 0 = the locked GDScript reference; 1 = the accelerator's broadphase only; 2 = both of
+## those, compared; 3 = the accelerator answering the whole query (shape B); 4 = shape B
+## against the reference, compared. A comparison run measures correctness only.
+## A comparison run measures correctness only and never performance.
+var _target_backend: int = 0
+
 ## Step 7.4's swept values, each zero-or-negative meaning "use whatever the config says",
 ## so that a cadence, a retention radius or a hysteresis margin can be swept without
 ## editing data/config/game_config.json between runs. A sweep that required editing the
@@ -275,6 +282,18 @@ func _parse_args() -> Dictionary:
 			options["grid_scale"] = arg.substr(13).to_int() != 0
 		elif arg.begins_with("--reliable="):
 			options["reliable"] = arg.substr(11).to_int() != 0
+		elif arg.begins_with("--target-backend="):
+			match arg.substr(17):
+				"native":
+					_target_backend = 1
+				"compare":
+					_target_backend = 2
+				"full":
+					_target_backend = 3
+				"compare-full":
+					_target_backend = 4
+				_:
+					_target_backend = 0
 		elif arg.begins_with("--battle-units="):
 			var wanted: Array[int] = []
 			for piece in arg.substr(15).split(",", false):
@@ -382,6 +401,7 @@ func _run_battle(
 	context.terrain_seed = seed_value
 
 	var simulator := BattleSimulator.new(config, seed_value)
+	simulator.target_backend = _target_backend
 	if _overlap_cell_override > 0.0:
 		simulator.overlap_cell_size = _overlap_cell_override
 		simulator.overlap_grid.configure(simulator.field_size, _overlap_cell_override)
@@ -428,6 +448,14 @@ func _run_battle(
 		done += 1
 	var total_us := Time.get_ticks_usec() - started
 
+	if _target_backend != 0:
+		# What the backend did, printed with the run it belongs to, so a native number can
+		# never be quoted without the mode and the counters that produced it.
+		var backend: Dictionary = simulator.backend_report()
+		print("    backend %d: queries %d, mismatches %d, native candidates %d, native %d us" % [
+			backend.get("backend", -1), backend.get("native_calls", 0), backend.get("native_mismatches", 0),
+			backend.get("native_candidates", 0), backend.get("native_usec", 0)])
+
 	var alive := 0
 	for unit in simulator.units:
 		if unit.is_alive():
@@ -454,6 +482,8 @@ func _run_battle(
 		out["profile"] = simulator.profile.duplicate()
 		out["overlap_report"] = simulator.overlap_report()
 		out["target_report"] = simulator.target_report()
+		if _target_backend != 0:
+			out["backend_report"] = simulator.backend_report()
 		if _spikes:
 			var stats := {}
 			# "focus" and "grid" are sampled by the tick mark already; naming them here is what
@@ -725,6 +755,7 @@ func _run_battle_scaled(
 	context.terrain_seed = seed_value
 
 	var simulator := BattleSimulator.new(config, seed_value)
+	simulator.target_backend = _target_backend
 	# The field is a property of the battle rather than of the game, so it is set on the
 	# simulator and its two indexes rather than edited into the config. Nothing else reads
 	# the field size.
@@ -775,6 +806,14 @@ func _run_battle_scaled(
 		done += 1
 	var total_us := Time.get_ticks_usec() - started
 
+	if _target_backend != 0:
+		# What the backend did, printed with the run it belongs to, so a native number can
+		# never be quoted without the mode and the counters that produced it.
+		var backend: Dictionary = simulator.backend_report()
+		print("    backend %d: queries %d, mismatches %d, native candidates %d, native %d us" % [
+			backend.get("backend", -1), backend.get("native_calls", 0), backend.get("native_mismatches", 0),
+			backend.get("native_candidates", 0), backend.get("native_usec", 0)])
+
 	var alive := 0
 	for unit in simulator.units:
 		if unit.is_alive():
@@ -801,6 +840,8 @@ func _run_battle_scaled(
 	if profile:
 		out["profile"] = simulator.profile.duplicate()
 		out["target_report"] = simulator.target_report()
+		if _target_backend != 0:
+			out["backend_report"] = simulator.backend_report()
 		out["focus_report"] = simulator.focus_report()
 		if _spikes:
 			var stats := {}
@@ -1470,6 +1511,7 @@ func _focus_scale_row(bodies: int) -> Dictionary:
 			plan.append({"id": "%s_%d" % [side, body_index], "side": side, "anchor": anchor, "facing": 0.0 if left else PI, "ids": ids})
 
 	var simulator := BattleSimulator.new(config, DEFAULT_SEED)
+	simulator.target_backend = _target_backend
 	simulator.field_size = field
 	simulator.grid.configure(field, simulator.cell_size)
 	simulator.overlap_grid.configure(field, simulator.overlap_cell_size)
@@ -1594,6 +1636,7 @@ func _storm_measure(count: int) -> Dictionary:
 	var width := float(files) * 1.4 + 20.0
 	var field := Vector2(width, 30.0 + float(files) * 1.4)
 	var simulator := BattleSimulator.new(config, DEFAULT_SEED)
+	simulator.target_backend = _target_backend
 	simulator.field_size = field
 	simulator.grid.configure(field, simulator.cell_size)
 	simulator.overlap_grid.configure(field, simulator.overlap_cell_size)

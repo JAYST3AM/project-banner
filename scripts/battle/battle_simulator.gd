@@ -826,6 +826,8 @@ func _cohesion_reference(formation: BattleFormation) -> float:
 
 
 func start() -> void:
+	if OS.get_environment("PB_TARGET_BACKEND").to_lower() == "native":
+		target_backend = BattleSpatialGrid.Backend.NATIVE_FULL
 	state = State.RUNNING
 	elapsed = 0.0
 
@@ -1434,6 +1436,10 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 
 	var killed := target.take_damage(damage, attacker.id)
 	attacker.damage_dealt += damage
+	if killed and grid != null:
+		# One of the battle's two live-state mutation points. The other is movement, in
+		# _move_toward. COMPARE_FULL is what proves the pair is complete. See D-095.
+		grid.native_died(target)
 
 	events.append({
 		"type": "hit",
@@ -2424,6 +2430,28 @@ func _nearest_enemy_to_point(side: String, point: Vector2, source: String = "") 
 func _nearest_enemy_within(unit: BattleUnit, enemy_side: String, radius: float) -> BattleUnit:
 	if grid == null:
 		return null
+	if grid.backend == BattleSpatialGrid.Backend.NATIVE_FULL and grid.can_answer_natively():
+		# Shape B: the whole query, exact test included, answered in the accelerator. The
+		# live positions it tests against are mirrored from this battle's own mutation
+		# points, and the shape counters below are read from the same fields the reference
+		# walk writes, so the profile means the same thing either way.
+		var best: BattleUnit = grid.native_nearest(unit, enemy_side, radius)
+		if profile_enabled:
+			tgt_candidates += grid.native_last_candidates()
+			tgt_candidates_max = maxi(tgt_candidates_max, grid.native_last_candidates())
+		return best
+	if grid.backend == BattleSpatialGrid.Backend.COMPARE_FULL and grid.can_answer_natively():
+		# Correctness only: the reference ladder stays authoritative and the accelerator's
+		# answer is compared against it, rung for rung. Never used for performance.
+		var reference := _nearest_enemy_within_reference(unit, enemy_side, radius)
+		var native_answer: BattleUnit = grid.native_nearest(unit, enemy_side, radius)
+		grid.note_answer(unit, radius, reference, native_answer)
+		return reference
+	return _nearest_enemy_within_reference(unit, enemy_side, radius)
+
+
+## The locked query: the grid walk for candidates, then the exact test against live positions.
+func _nearest_enemy_within_reference(unit: BattleUnit, enemy_side: String, radius: float) -> BattleUnit:
 	grid.collect_within(unit.position, radius, enemy_side, _query_scratch)
 	if profile_enabled:
 		# What the broadphase handed over, before the exact test below throws most of it
@@ -2463,6 +2491,11 @@ func _nearest_enemy_within(unit: BattleUnit, enemy_side: String, radius: float) 
 func _rebuild_spatial(delta: float) -> void:
 	if grid == null:
 		return
+	# Step 7.7. The backend belongs to the battle, not to the grid instance, so it is applied
+	# here - one assignment a tick - and the stamp below is what lets a disagreement be
+	# reported with the tick that produced it.
+	grid.backend = target_backend
+	grid.dev_tick = tick_index
 	# Step 7.6. The grid's own cell counters follow this simulator's profile flag, set once a
 	# tick rather than read per query, so a battle that is not being measured pays one
 	# comparison per tick for the counters it is not keeping.
@@ -2471,6 +2504,21 @@ func _rebuild_spatial(delta: float) -> void:
 	# half-unit of slack absorbs the separation pushes that happen later in the tick.
 	grid.query_margin = _fastest_speed * absf(delta) + 0.5
 	grid.rebuild(units)
+
+
+## Which implementation answers the automatic target search's spatial queries. See
+## [enum BattleSpatialGrid.Backend]. Defaults to the locked GDScript reference; the benchmark
+## and the tests change it directly, and a real run can select the accelerator with the
+## PB_TARGET_BACKEND environment variable (`PB_TARGET_BACKEND=native`), which exists so the
+## windowed smoke test exercises the accelerated path deliberately rather than by accident.
+var target_backend: int = 0
+
+
+## What the query backend did this battle - calls, disagreements, time in the accelerator.
+func backend_report() -> Dictionary:
+	if grid == null:
+		return {"backend": target_backend, "native_calls": 0, "native_mismatches": 0}
+	return grid.backend_report()
 
 
 func _move_toward(unit: BattleUnit, point: Vector2, delta: float) -> void:
@@ -2482,6 +2530,12 @@ func _move_toward(unit: BattleUnit, point: Vector2, delta: float) -> void:
 		clampf(unit.position.x, 0.5, field_size.x - 0.5),
 		clampf(unit.position.y, 0.5, field_size.y - 0.5)
 	)
+	if grid != null:
+		# One of the battle's two live-state mutation points - the other is death, where the
+		# killing blow lands. The accelerator's mirrored positions are only true because
+		# these two are the only places a soldier's live state changes inside a tick, and
+		# COMPARE_FULL is what proves that. See D-095.
+		grid.native_moved(unit)
 
 
 ## A soldier's speed over the ground it is standing on. Terrain is read here and

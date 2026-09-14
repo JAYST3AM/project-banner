@@ -104,6 +104,46 @@ var _occupied: PackedInt32Array = PackedInt32Array()
 ## discarding every soldier in it. See D-068.
 var _cell_mask: PackedByteArray = PackedByteArray()
 
+## ---------- target-search backend selection (Step 7.7) ----------------------
+##
+## The walk above is the reference, the oracle and the fallback. When the native accelerator
+## is built and loaded, a battle may ask it to walk the same cells instead: it returns the
+## slot numbers of the candidates it found, and every decision that needs live battle state
+## stays here - the exact distance test, the liveness recheck, the tie-break. The cell index
+## is a snapshot taken before the soldier loop while soldiers move and die inside that same
+## loop, so the native boundary stops exactly where live state begins. See D-095.
+enum Backend {
+	GDSCRIPT, ## the locked reference walk
+	NATIVE, ## the accelerator answers the broadphase, the caller keeps the exact test
+	COMPARE, ## reference and NATIVE both run, candidate sets compared
+	NATIVE_FULL, ## the accelerator answers the whole query, live state mirrored into it
+	COMPARE_FULL, ## reference and NATIVE_FULL both run, answers compared
+}
+var backend: int = Backend.GDSCRIPT
+## The accelerator, or null when the project runs without it. Nothing requires it.
+var native_query: Object = null
+## Queries the native path answered, and - in COMPARE - how often the two backends
+## disagreed. A disagreement is a correctness failure, not a tuning signal.
+var native_calls: int = 0
+var native_mismatches: int = 0
+var native_first_mismatch: Dictionary = {}
+var native_candidates: int = 0
+var native_usec: int = 0
+## The tick the simulator is on, stamped once a tick so a disagreement can be reported with
+## the state that produced it rather than as a bare count.
+var dev_tick: int = -1
+var _native_cells: PackedInt32Array = PackedInt32Array()
+var _native_bits: PackedInt32Array = PackedInt32Array()
+var _native_ids: PackedInt32Array = PackedInt32Array()
+var _native_positions: PackedVector2Array = PackedVector2Array()
+## Unit id -> slot, so a soldier that moves or dies can be mirrored without a search.
+var _slot_of: PackedInt32Array = PackedInt32Array()
+var _synced: bool = false
+var _native_capacity: int = 0
+var _native_cols: int = 0
+var _native_rows: int = 0
+var _compare_scratch: Array[BattleUnit] = []
+
 
 ## [b]What Step 7.4 did not add.[/b] The brief anticipated a narrow question - "does this
 ## nearby region contain any hostile soldier?" - because a cheaper yes/no might have been
@@ -139,6 +179,16 @@ func configure(p_field_size: Vector2, p_cell_size: float) -> void:
 	_occupied.resize(0)
 	_count = 0
 	_living_count = 0
+	# The accelerator is sized from the grid it mirrors, so a grid that resizes has to make
+	# it re-size on the next rebuild rather than trust a stale shape.
+	_native_capacity = 0
+	_native_cols = 0
+	_native_rows = 0
+	# Build the accelerator if the library is loaded. Nothing here fails when it is not: the
+	# backend stays GDSCRIPT and the locked walk answers every query, which is the whole
+	# point of the fallback. See D-095.
+	if native_query == null and ClassDB.class_exists("NativeTargetQuery"):
+		native_query = ClassDB.instantiate("NativeTargetQuery")
 
 
 ## Rebuild membership from the living units in [param units], in the order given.
@@ -168,6 +218,8 @@ func rebuild(units: Array[BattleUnit]) -> void:
 	if units.is_empty():
 		_next.resize(0)
 		_slot_units.clear()
+		if _native_wanted():
+			_sync_native()
 		return
 	if _next.size() != units.size():
 		_next.resize(units.size())
@@ -181,6 +233,23 @@ func rebuild(units: Array[BattleUnit]) -> void:
 		var slot := _count
 		_slot_units[slot] = unit
 		_next[slot] = -1
+		if _native_wanted():
+			# The accelerator is handed the cell, id, side and position of each living unit,
+			# in slot order - which is the order its own slot numbers must agree with. The
+			# positions are the snapshot's; the battle's own mutation points keep them true
+			# afterwards, and COMPARE_FULL is what proves they do.
+			if _native_cells.size() <= slot:
+				_native_cells.resize(slot + 1)
+				_native_bits.resize(slot + 1)
+				_native_ids.resize(slot + 1)
+				_native_positions.resize(slot + 1)
+			_native_cells[slot] = cell
+			_native_bits[slot] = _side_bit_of(unit.side)
+			_native_ids[slot] = unit.id
+			_native_positions[slot] = unit.position
+			if _slot_of.size() <= unit.id:
+				_slot_of.resize(unit.id + 1)
+			_slot_of[unit.id] = slot
 		_cell_mask[cell] |= _side_bit_of(unit.side)
 		if _tails[cell] < 0:
 			_head[cell] = slot
@@ -192,6 +261,8 @@ func rebuild(units: Array[BattleUnit]) -> void:
 		_living_count += 1
 	if _occupied.size() > 1:
 		_occupied.sort()
+	if _native_wanted():
+		_sync_native()
 
 
 ## How many living units are indexed. The grid holds nothing else.
@@ -223,6 +294,19 @@ func collect_within(position: Vector2, radius: float, side: String, out: Array[B
 	out.clear()
 	if _living_count == 0 or radius <= 0.0:
 		return
+	if _native_wanted():
+		if backend == Backend.NATIVE:
+			_collect_native(position, radius, side, out)
+		else:
+			_collect_compare(position, radius, side, out)
+		return
+	_collect_reference(position, radius, side, out)
+
+
+## The locked walk. Kept whole and callable on its own, because it is the reference the
+## native path is measured against and the fallback the project runs on when the
+## accelerator is not there.
+func _collect_reference(position: Vector2, radius: float, side: String, out: Array[BattleUnit]) -> void:
 	var reach := radius + query_margin
 	var min_col := _clamp_col(int(floor((position.x - reach) / cell_size)))
 	var max_col := _clamp_col(int(floor((position.x + reach) / cell_size)))
@@ -290,6 +374,174 @@ func collect_enemies_within(position: Vector2, radius: float, side: String, out:
 
 static func enemy_side_of(side: String) -> String:
 	return BattleContext.SIDE_ENEMY if side == BattleContext.SIDE_PLAYER else BattleContext.SIDE_PLAYER
+
+
+## Is the accelerator to be consulted at all? False for the locked backend, and false when
+## no library is loaded - so a build without the accelerator pays one boolean per rebuild
+## and nothing per query.
+func _native_wanted() -> bool:
+	return native_query != null and backend != Backend.GDSCRIPT
+
+
+## Hand the accelerator this tick's snapshot. The cell index it mirrors is the one already
+## built above, so a synced battle does the cell arithmetic once, not twice.
+func _sync_native() -> void:
+	if _native_cols != cols or _native_rows != rows or _native_capacity < _count:
+		var capacity := maxi(_count, 64)
+		native_query.call("setup", cols, rows, cell_size, 0.0, capacity)
+		_native_cols = cols
+		_native_rows = rows
+		_native_capacity = capacity
+	_native_cells.resize(_count)
+	_native_bits.resize(_count)
+	_native_ids.resize(_count)
+	_native_positions.resize(_count)
+	native_query.call("rebuild", _native_cells, _native_ids, _native_bits, _native_positions)
+	# The margin widens the walk; the radius stays the promise the exact test keeps. The
+	# kernel applies it itself so both walkers reach the same ground. See D-065.
+	native_query.call("set_margin", query_margin)
+	_synced = true
+
+
+## Is the accelerator holding this tick's index, and is a query allowed to reach it?
+func can_answer_natively() -> bool:
+	return native_query != null and _synced and backend != Backend.GDSCRIPT
+
+
+## A soldier moved. Its cell is deliberately *not* updated: the index is a snapshot of where
+## everyone stood at the rebuild, and only the position the exact test reads is live.
+func native_moved(unit: BattleUnit) -> void:
+	if not can_answer_natively() or unit.id >= _slot_of.size():
+		return
+	native_query.call("update_position", _slot_of[unit.id], unit.position.x, unit.position.y)
+
+
+## A soldier died. The reference rechecks liveness on every candidate it walks, so the mirror
+## has to as well - a death that is not mirrored here is a wrong answer later in the tick.
+func native_died(unit: BattleUnit) -> void:
+	if not can_answer_natively() or unit.id >= _slot_of.size():
+		return
+	native_query.call("mark_dead", _slot_of[unit.id])
+
+
+## The whole query, answered in the accelerator: cells, side, liveness, the exact distance and
+## the tie-break, with the live state mirrored in by the two hooks above.
+func native_nearest(unit: BattleUnit, side: String, radius: float) -> BattleUnit:
+	var wanted := _side_bit_of(side) if not side.is_empty() else 0
+	var started := Time.get_ticks_usec() if dev_profile else 0
+	var slot: int = native_query.call("collect_nearest", unit.position.x, unit.position.y, radius, wanted)
+	native_calls += 1
+	if dev_profile:
+		native_usec += Time.get_ticks_usec() - started
+		# The shape counters are read from the same fields the reference walk writes, so the
+		# SEARCH SHAPE table means the same thing whichever backend answered.
+		dev_last_read = native_query.call("last_cells_read")
+		dev_last_span = dev_last_read
+		native_candidates += native_query.call("last_candidates")
+	if slot < 0:
+		return null
+	return _slot_units[slot]
+
+
+## How many candidates the accelerator measured in its last search, for the simulator's own
+## shape counters.
+func native_last_candidates() -> int:
+	if native_query == null:
+		return 0
+	return native_query.call("last_candidates")
+
+
+## Record one ladder rung where the two full implementations disagreed. The reference stays
+## authoritative; this only counts and keeps the first disagreement whole.
+func note_answer(unit: BattleUnit, radius: float, reference: BattleUnit, native: BattleUnit) -> void:
+	var reference_id := -1 if reference == null else reference.id
+	var native_id := -1 if native == null else native.id
+	if reference_id == native_id:
+		return
+	native_mismatches += 1
+	if native_first_mismatch.is_empty():
+		native_first_mismatch = {
+			"tick": dev_tick,
+			"asker": unit.id,
+			"position": unit.position,
+			"radius": radius,
+			"reference_id": reference_id,
+			"native_id": native_id,
+			"candidates": native_candidates,
+		}
+
+
+## The accelerator's answer, filtered exactly as the reference filters while it walks.
+##
+## The accelerator returns candidate slot numbers, not units, and it cannot know that a
+## soldier died after the index was built and before its own turn came round. The reference
+## rechecks liveness and side per candidate, so this does too - which is what makes the
+## collected set identical rather than merely similar, and why the order it arrives in
+## cannot matter: the exact test below keeps the nearest and breaks ties by unit id.
+func _collect_native(position: Vector2, radius: float, side: String, out: Array[BattleUnit]) -> void:
+	var wanted := _side_bit_of(side) if not side.is_empty() else 0
+	var started := Time.get_ticks_usec() if dev_profile else 0
+	# The margin the reference adds is added here, so the accelerator needs no margin of its
+	# own and the reach it walks is the same reach.
+	var count: int = native_query.call("collect", position.x, position.y, radius, wanted)
+	native_calls += 1
+	var buffer: PackedInt32Array = native_query.call("candidates")
+	for i in count:
+		var unit := _slot_units[buffer[i]]
+		if unit.alive and (side.is_empty() or unit.side == side):
+			out.append(unit)
+	if dev_profile:
+		native_usec += Time.get_ticks_usec() - started
+		native_candidates += out.size()
+
+
+## Both backends, one query. The reference fills [param out] and remains authoritative; the
+## accelerator's answer is collected beside it and the two are compared as sets of unit ids,
+## because the scan above them is indifferent to the order it is handed candidates in. A
+## disagreement is reported whole - tick, query, radius, both counts and the ids that
+## differ - so it can be reproduced rather than merely counted.
+func _collect_compare(position: Vector2, radius: float, side: String, out: Array[BattleUnit]) -> void:
+	_collect_reference(position, radius, side, out)
+	_compare_scratch.clear()
+	_collect_native(position, radius, side, _compare_scratch)
+	# Compared as sorted id lists rather than by searching one list for each member of the
+	# other: a per-candidate scan would make this mode quadratic, and the mode exists to be
+	# trusted, not to be slow on purpose.
+	var reference_ids: PackedInt32Array = PackedInt32Array()
+	for unit in out:
+		reference_ids.append(unit.id)
+	var native_ids: PackedInt32Array = PackedInt32Array()
+	for unit in _compare_scratch:
+		native_ids.append(unit.id)
+	reference_ids.sort()
+	native_ids.sort()
+	if reference_ids == native_ids:
+		return
+	native_mismatches += 1
+	if native_first_mismatch.is_empty():
+		native_first_mismatch = {
+			"tick": dev_tick,
+			"position": position,
+			"radius": radius,
+			"side": side,
+			"reference_count": reference_ids.size(),
+			"native_count": native_ids.size(),
+			"reference_ids": reference_ids.slice(0, 12),
+			"native_ids": native_ids.slice(0, 12),
+		}
+
+
+## What the backend did, for the benchmark and the suite. Counters only; nothing here
+## changes behaviour.
+func backend_report() -> Dictionary:
+	return {
+		"backend": backend,
+		"native_calls": native_calls,
+		"native_mismatches": native_mismatches,
+		"first_mismatch": native_first_mismatch.duplicate(),
+		"native_candidates": native_candidates,
+		"native_usec": native_usec,
+	}
 
 
 ## Cell index for a world position. Exposed for tests and tooling; the simulation has no

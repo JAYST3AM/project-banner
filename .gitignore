@@ -30,3 +30,13 @@ desktop.ini
 *.log
 /tmp/
 /tools/local/
+
+# Native accelerator (Step 7.7) ---------------------------------------------
+# godot-cpp is fetched and pinned by native/build.sh into this path; it is a dependency
+# checkout, not project source, and never committed.
+native/deps/
+native/.sconsign.dblite
+# The built library is a generated artifact: CI builds it, developers build it, git does not.
+addons/pb_native/bin/
+# Engine API dumps are generated with --dump-extension-api for verification, never shipped.
+extension_api.json

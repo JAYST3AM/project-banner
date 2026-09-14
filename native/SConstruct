@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+"""Build the Project Banner native accelerator.
+
+The godot-cpp dependency is not vendored: `native/build.sh` fetches the exact revision
+recorded in `native/GODOT_CPP_REVISION` into `native/deps/godot-cpp`, which is ignored by
+git, and this script builds against it. The output lands next to the `.gdextension` file
+that loads it, in `addons/pb_native/bin/`, which is also ignored.
+
+    bash native/build.sh                     # fetch the pin if needed, build, done
+    scons -C native platform=linux target=template_release arch=x86_64 api_version=4.7
+
+`api_version=4.7` is not optional: godot-cpp ships one extension_api per engine minor and
+refuses to guess, which is the property that keeps a build tied to the pinned engine.
+"""
+
+import os
+
+env = SConscript("deps/godot-cpp/SConstruct")
+
+# Relative to the SConstruct's directory: native/ -> repo root -> addons/pb_native/bin/.
+OUT = "../addons/pb_native/bin/pb_native"
+
+env.Append(CPPPATH=["src/"])
+sources = Glob("src/*.cpp")
+
+if env["platform"] == "windows":
+    libname = "{}.windows.{}.{}.dll".format(OUT, env["target"], env["arch"])
+elif env["platform"] == "linux":
+    libname = "{}.linux.{}.{}.so".format(OUT, env["target"], env["arch"])
+elif env["platform"] == "macos":
+    libname = "{}.macos.{}.{}.dylib".format(OUT, env["target"], env["arch"])
+else:
+    libname = "{}.{}.{}.{}".format(OUT, env["platform"], env["target"], env["arch"])
+
+library = env.SharedLibrary(libname, source=sources)
+Default(library)

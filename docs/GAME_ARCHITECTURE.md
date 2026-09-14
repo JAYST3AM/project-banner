@@ -5,6 +5,29 @@ Update this file in the same commit as any structural change.
 
 ---
 
+## 1a. Native code (Step 7.7, D-095)
+
+**Native code in Project Banner is an accelerator for proven hot data-processing kernels, not a
+second gameplay architecture.** GDScript retains orchestration and gameplay semantics unless
+profiling demonstrates a narrower native boundary is necessary.
+
+**Any native battlefield accelerator must preserve the locked deterministic result of its
+GDScript reference implementation.** Performance alone is not grounds for changing tactical
+outcomes.
+
+One accelerator exists, and those two rules bound it:
+
+| | |
+| --- | --- |
+| What is native | `NativeTargetQuery` (`native/`): the cell index built from a per-tick snapshot, the walk over it, the side and liveness filters, the exact squared-distance test, the tie-break |
+| What is GDScript | everything else in the target path and in the game: the ladder's staging and ceiling, the D-087 proof, retained opponents, hysteresis, cadence, explicit orders, formation focus, the query margin, backend selection, overlap, movement, damage, persistence |
+| Why it is allowed here | profiled to a measured boundary: the query is 85.7% of the target phase, its candidate scan is ~85% of that, and the accelerated kernel measured 5.94x faster with the tick 1.91x cheaper at 20K |
+| Why it is bounded | moving a kernel native means mirroring whatever live state it reads. This one reads positions and liveness, so the battle mirrors its two mutation points - movement and death - and `COMPARE_FULL` plus the native suite exist to prove that mirror, because a missing hook is a silently wrong answer rather than a crash |
+| Where it is not allowed | anywhere else without its own profile, its own boundary measurement and its own comparison mode. This decision is not a general licence for native code |
+
+The GDScript walk is not deleted: `BattleSpatialGrid._collect_reference` is the reference, the
+oracle and the fallback, and every suite run exercises it.
+
 ## 1. Layers
 
 ```

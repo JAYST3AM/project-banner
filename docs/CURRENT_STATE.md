@@ -2,10 +2,11 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 7.6 - automatic target search cost scaling
+**Last updated:** end of Step 7.7 - native spatial query feasibility spike
 **Engine:** Godot 4.7.2-stable
-**Test status:** `2881 assertions, 0 failures, 21 of 21 suites` headless, plus
-`95 checks + 6 checks, 0 failures` in a genuine two-process restart check.
+**Test status:** `4142 assertions, 0 failures, 22 of 22 suites` headless (with the native
+accelerator loaded and required), plus `95 checks + 6 checks, 0 failures` in a genuine
+two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
 every pull request against it, pinned to Godot 4.7.2-stable.
 
@@ -17,8 +18,9 @@ hardening](#step-71---formation-hardening), [Step 7.2 - battle simulation scalin
 foundation](#step-72---battle-simulation-scaling-foundation), [Step 7.3 - dense battle /
 overlap scaling](#step-73---dense-battle--overlap-scaling), [Step 7.4 - target acquisition
 scaling](#step-74---target-acquisition-scaling), [Step 7.5 - formation battlefield focus
-scaling](#step-75---formation-battlefield-focus-scaling) and [Step 7.6 - automatic target search
-cost scaling](#step-76---automatic-target-search-cost-scaling) below.
+scaling](#step-75---formation-battlefield-focus-scaling), [Step 7.6 - automatic target search
+cost scaling](#step-76---automatic-target-search-cost-scaling) and [Step 7.7 - native spatial
+query feasibility spike](#step-77---native-spatial-query-feasibility-spike) below.
 
 ---
 
@@ -1573,3 +1575,70 @@ inside the spatial query, the simulation ~1,044 ms/tick profiled and ~996 ms/tic
 off, and the next bottleneck is the same one this milestone was scoped to remove: the second
 rung of the search. `STEP 7.6 CANDIDATE: NO` - the scoped reduction was not
 achieved, and the measurement that says why is the deliverable. See D-094.
+
+## Step 7.7 - Native spatial query feasibility spike
+
+The target search's spatial kernel moved into a GDExtension - but only after the boundary was
+measured twice, because the boundary turned out to be the question. Both measurements are
+matched twenty-tick windows on the scaled, realistic battlefield, reference and accelerator
+taken back to back in one session.
+
+### The two boundary shapes, measured
+
+| shape | what crosses the boundary | 20,000 soldiers: target phase | total |
+| --- | --- | ---: | ---: |
+| A - broadphase only | ~170 candidate slots per look | 591.27 -> 546.16 ms/tick | 996.65 -> 954.51 ms/tick (**1.04x**) |
+| B - broadphase + exact test | one slot per search | 591.48 -> **99.49** ms/tick (**5.94x**) | 1,004.88 -> **525.51** ms/tick (**1.91x**) |
+
+Shape B at every size, same windows: 1,000 soldiers 31.66 -> 18.33 ms/tick (**1.73x**), 2,500
+105.20 -> 52.71 (**2.00x**), 5,000 270.40 -> 122.92 (**2.20x**), 10,000 591.73 -> 268.95
+(**2.20x**). Ordinary battles do not pay for the stress case: every size is faster.
+
+### What the sync costs, and what it buys
+
+The spatial rebuild gets *more* expensive, not less - 35.02 -> 44.31 ms/tick at 20K - because a
+tick now pushes its snapshot and mirrors its movements across the boundary. That is ~9 ms a tick
+bought to remove ~490 ms of GDScript candidate scanning, and it is the trade the decision rests
+on. In the 20K accelerated battle: 83,669 queries and 29.9 million candidates answered with **0
+disagreements**.
+
+### Spikes at 20,000 soldiers (avg / p50 / p95 / p99 / worst, ms)
+
+| phase | reference | shape B |
+| --- | --- | --- |
+| total | 1033.5 / 1004.3 / 1156.1 / 1157.8 / **1157.8** | 537.8 / 530.5 / 571.3 / 598.8 / **598.8** |
+| target | 604.6 / 581.5 / 705.8 / 710.0 / **710.0** | 100.4 / 97.2 / 109.9 / 115.6 / **115.6** |
+| grid | 35.2 / 35.2 / 35.8 / 36.0 / 36.0 | 44.3 / 44.0 / 44.9 / 48.3 / 48.3 |
+
+No spike was introduced: the accelerated distribution is *tighter* relative to its average than
+the reference's (tail-to-average 1.11x against 1.12x), and the worst tick falls from 1,157.8 to
+598.8 ms.
+
+### Fidelity, and how it is proven rather than asserted
+
+`Backend.COMPARE_FULL` runs both implementations on the same rung of the same ladder and records
+the first disagreement with the tick, the asking soldier, the radius and both answers.
+`tests/test_native_query.gd` (1,261 assertions) compares candidate sets over generated layouts and
+boundary cases, checks deaths and movement after the snapshot, runs a battle in compare mode and
+runs whole battles both ways - the accelerated battle must reproduce the reference's survivors,
+health, positions and targets unit by unit. It caught two real defects before any benchmark
+quoted a number: a radius that silently included `query_margin` (a live battle at tick 15), and a
+counter call that threw once per query while profiling (35x of error handling, not of kernel).
+
+### What is native, and what is not
+
+Native: the cell index from a per-tick snapshot, the walk, the side and liveness filters, the
+exact squared-distance test, the tie-break. GDScript: the ladder's staging and ceiling, the
+D-087 proof, retained opponents, hysteresis, cadence, explicit orders, formation focus, the query
+margin, backend selection, and everything else in the simulation. The locked walk remains as
+`BattleSpatialGrid._collect_reference` - reference, oracle and fallback - and runs in every
+suite.
+
+### Limits, stated plainly
+
+20,000 soldiers at ~525 ms/tick is **~1.9 simulation ticks a second: not playable**, and it is
+still an engineering stress target rather than a normal army size. None of these figures include
+rendering and none of them are FPS. The accelerator's correctness is conditional on the mirror
+being complete: the battle mirrors exactly two mutation points (movement and death), the suite
+asserts the current count, and a new mutation point upstream is the one change that could break
+it quietly.

@@ -558,3 +558,20 @@ already carries the fields this needs - age, traits, loyalty, level, kills,
 battles survived, and an open-ended `history` log. The systems that fill that log
 come later; the storage for it exists now so those systems never have to
 retro-fit identity onto a stat block.
+
+## Step 7.7 - Native spatial query feasibility spike (`milestone-07.7`)
+
+The question was where the boundary should sit, not whether to write C++: the target search's
+spatial kernel was measured twice - broadphase only, and broadphase plus the exact test - and the
+two answers were 1.04x and 1.91x on the realistic twenty-thousand-soldier tick. The second shape
+ships; the first is kept as a mode because its exactness is structural.
+
+Done: the `NativeTargetQuery` accelerator with both boundary shapes, the two mirror hooks that
+keep its live state true, a comparison backend that diffs the implementations per rung, an
+equivalence suite that caught two real defects before any benchmark quoted a number, a
+bridge-cost benchmark, matched before/after tables for both families, a spike distribution, the
+toolchain pin and a CI build that proves the native class loaded.
+
+Not done, and not this milestone: threads, ECS, per-soldier nodes, any second native kernel, or
+any change to what the simulation decides. The GDScript reference remains the authority and the
+fallback, and `CURRENT_STATE.md` carries the measured numbers.

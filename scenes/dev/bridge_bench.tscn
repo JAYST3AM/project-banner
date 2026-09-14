@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/dev/bridge_bench.gd" id="1_bridge_bench"]
+
+[node name="BridgeBench" type="Node"]
+script = ExtResource("1_bridge_bench")
