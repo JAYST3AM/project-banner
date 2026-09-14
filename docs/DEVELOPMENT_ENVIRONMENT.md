@@ -54,7 +54,10 @@ $ godotc --version
 
 ## Primary scripting language
 
-GDScript (typed, Godot 4 syntax). No C#, no GDExtension in the current scope.
+GDScript (typed, Godot 4 syntax). No C#. Project Banner remains primarily GDScript: one
+narrowly scoped C++ GDExtension exists for the proven target-query hot loop introduced in
+Step 7.7 (`native/`, D-095). Native code is not the default architecture, and expanding it
+requires separate profiling and approval.
 
 ## Command reference
 

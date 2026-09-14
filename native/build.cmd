@@ -21,5 +21,17 @@ if not defined VSPATH (
 
 call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 
+rem This wrapper runs native\build.sh, so it needs a Bash on PATH. Say that plainly here
+rem rather than letting a missing shell look like a broken build.
+where bash >nul 2>nul
+if errorlevel 1 (
+	echo native: Bash was not found on PATH.
+	echo native: this wrapper runs native\build.sh, so Git for Windows is required.
+	echo native: install it from https://git-scm.com/download/win, then open a NEW prompt ^(the
+	echo native: installer adds Git Bash to PATH^) and run this command again.
+	echo native: alternatively, open Git Bash and run: bash native/build.sh
+	exit /b 1
+)
+
 bash "%~dp0build.sh" %*
 exit /b %ERRORLEVEL%

@@ -38,5 +38,13 @@ native/deps/
 native/.sconsign.dblite
 # The built library is a generated artifact: CI builds it, developers build it, git does not.
 addons/pb_native/bin/
+# SCons writes object files next to the sources they compile, so native/src/ collects
+# compiler output that is not source. Scoped to native/ on purpose: `.obj` is also a 3D model
+# format, and this project does not use it, so nothing outside the accelerator tree is affected.
+native/**/*.obj
+native/**/*.obj.import
+native/**/*.o
+native/**/*.os
+native/**/*.pdb
 # Engine API dumps are generated with --dump-extension-api for verification, never shipped.
 extension_api.json

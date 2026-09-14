@@ -26,14 +26,22 @@ esac
 if [ ! -d "$DEPS/godot-cpp/.git" ]; then
 	echo "native: fetching godot-cpp into $DEPS (ignored by git)"
 	mkdir -p "$DEPS"
-	git clone --quiet https://github.com/godotengine/godot-cpp.git "$DEPS/godot-cpp"
+	# `cd` first and name the target relatively: git is a native Windows program here and
+	# cannot resolve the MSYS-style paths this script works in, so passing one to `-C` or as
+	# a clone target fails with "cannot change to ..." - which is how this was found.
+	(cd "$DEPS" && git clone --quiet https://github.com/godotengine/godot-cpp.git godot-cpp)
 fi
 
 echo "native: checking out godot-cpp $REV"
-git -C "$DEPS/godot-cpp" fetch --quiet --all || true
-git -C "$DEPS/godot-cpp" checkout --quiet "$REV"
+(
+	cd "$DEPS/godot-cpp"
+	git fetch --quiet --all 2>/dev/null || true
+	git checkout --quiet "$REV"
+)
 
 echo "native: building $TARGET for $PLATFORM (api_version=4.7)"
-"$SCONS" -C "$ROOT" platform="$PLATFORM" target="$TARGET" arch=x86_64 api_version=4.7 "$@"
+# Same reason as the git calls above: scons is a native program and `-C` with an MSYS path
+# does not resolve, so the directory is entered with the shell instead.
+(cd "$ROOT" && "$SCONS" platform="$PLATFORM" target="$TARGET" arch=x86_64 api_version=4.7 "$@")
 
 echo "native: done - addons/pb_native/bin/"
