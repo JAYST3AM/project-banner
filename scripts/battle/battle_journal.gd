@@ -43,6 +43,9 @@ var _milestones := 0
 var _seed := 0
 ## Seconds one tick of this battle represents, from the battle's own configuration.
 var _step := 0.05
+## True while the journal's own line is passing through the log funnel, so the mirror does not
+## write the line that has already been written.
+var _mirroring_own_line := false
 
 
 ## Open a journal. Pass a path, or an empty string for [constant DEFAULT_PATH]. Returns null - and
@@ -181,7 +184,9 @@ func _finish_lines(simulator: BattleSimulator) -> void:
 ## Mirror the project's own battle-log entries into the file, so a run's Diagnostics tab and its
 ## journal do not tell different stories.
 func _on_logged(entry: Dictionary) -> void:
-	if _file == null or _finished or str(entry.get("category", "")) != CATEGORY:
+	if _file == null or _finished or _mirroring_own_line:
+		return
+	if str(entry.get("category", "")) != CATEGORY:
 		return
 	_file.store_line("        %s" % str(entry.get("message", "")))
 	_lines += 1
@@ -198,4 +203,8 @@ func note(tick: int, message: String) -> void:
 	# whether or not anybody closed the file. Lines are rare - transitions and milestones.
 	_file.flush()
 	_lines += 1
+	# This line is about to come back through the funnel it just entered, and the mirror below
+	# would write it a second time. It is already on disk.
+	_mirroring_own_line = true
 	DebugLogger.info(message, CATEGORY)
+	_mirroring_own_line = false
