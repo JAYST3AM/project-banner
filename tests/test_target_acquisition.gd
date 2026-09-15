@@ -480,15 +480,23 @@ func _test_soldiers_far_from_the_fighting_do_not_search_every_tick() -> void:
 	greater(float(bodies[0].anchor.x), float(start.x), "while the body kept advancing the whole time")
 	greater(float(simulator.tgt_focus_fallbacks), 0.0, "and soldiers with nobody of their own used the cheap answer")
 
-	# Which is also the case where the cheap path earns its place, so it is the case that
-	# proves the counters add up: every soldier-tick is exactly one of an order, an opponent
-	# in reach, an opponent held, a look, or the cheap answer, and nothing is counted twice.
+	# Which is also the case where the hierarchy earns its place, so it is the case that proves
+	# the counters add up: every soldier-tick is exactly one of an order, an opponent in reach,
+	# an opponent held, a look, the cheap answer, or a look the soldier's own body refused - and
+	# nothing is counted twice. The sixth term is Step 7.8's: a soldier whose awareness came
+	# round while its body was still marching is told to wait for its front rather than to ask
+	# the battlefield a strategic question. See D-105.
 	var report := simulator.target_report()
 	var accounted := int(report["searches"]) + int(report["retained_in_reach"]) \
-		+ int(report["retained_held"]) + int(report["focus_fallbacks"]) + int(report["explicit_order_uses"])
+		+ int(report["retained_held"]) + int(report["focus_fallbacks"]) + int(report["explicit_order_uses"]) \
+		+ int(report["formation_deferrals"])
 	equal(accounted, int(report["soldier_ticks"]), "and every soldier-tick of the approach is accounted for")
-	greater(float(report["focus_proven"]), 0.0,
-		"most of the approach was skipped by proof rather than looked at")
+	if simulator.engagement_enabled:
+		greater(float(report["formation_deferrals"]), 0.0,
+			"most of the approach was refused by the soldier's own body rather than looked at")
+	else:
+		greater(float(report["focus_proven"]), 0.0,
+			"and with the hierarchy switched off the old proof did the skipping, as it did before")
 
 
 ## The cheapest look of all is the one that is not made. A soldier whose body's nearest
@@ -526,12 +534,34 @@ func _test_a_proven_skip_never_misses_an_enemy() -> void:
 	greater(float(checked), 100.0, "the proof fired plenty of times over two hundred ticks")
 	equal(mistaken, 0, "and never once while an enemy stood inside the soldier's own reach")
 
-	# And it is skipping real work rather than merely being called: the approach is where it
-	# earns its place, because that is where most soldiers have nobody to find.
-	var report := simulator.target_report()
-	greater(float(report["focus_proven"]), 0.0, "the skipped looks are counted: %d of them" % int(report["focus_proven"]))
-	less(float(report["focus_proven"]), float(report["focus_fallbacks"]) + 1.0,
-		"and they are a sub-count of the cheap path rather than a category of their own")
+	# The same guarantee, asked of the new layer rather than of the old proof: a soldier whose
+	# look the hierarchy refused must not have been able to strike anybody. Checked tick by tick
+	# against every enemy on the field, in a live formed battle - and it holds by construction,
+	# because the band a refusal is measured against is never narrower than a weapon's reach.
+	var refused := 0
+	var starving := 0
+	for i in 120:
+		ai.update(simulator, TICK)
+		simulator.step(TICK)
+		for unit in simulator.units:
+			if not unit.is_alive() or unit.auto_target_id >= 0 or unit.attack_order_target_id >= 0:
+				continue
+			if bool(simulator.call("_formation_driven_search_allowed", unit)):
+				continue
+			var body := unit.formation_ref
+			if body != null and body.in_contact:
+				continue
+			refused += 1
+			for other in simulator.units:
+				if not other.is_alive() or other.side == unit.side:
+					continue
+				if unit.position.distance_to(other.position) <= unit.attack_range:
+					starving += 1
+					break
+	if simulator.engagement_enabled:
+		greater(float(refused), 100.0, "the hierarchy refused plenty of looks over the rest of the battle")
+		equal(starving, 0,
+			"and never once refused one to a soldier that could have struck somebody")
 
 
 ## And when the bodies do meet, the soldiers in them find each other - the cadence must
@@ -845,8 +875,9 @@ func _test_every_soldier_tick_is_accounted_for() -> void:
 		simulator.step(TICK)
 	var report := simulator.target_report()
 	var accounted := int(report["searches"]) + int(report["retained_in_reach"]) \
-		+ int(report["retained_held"]) + int(report["focus_fallbacks"]) + int(report["explicit_order_uses"])
-	equal(accounted, int(report["soldier_ticks"]), "the five paths account for every soldier-tick")
+		+ int(report["retained_held"]) + int(report["focus_fallbacks"]) + int(report["explicit_order_uses"]) \
+		+ int(report["formation_deferrals"])
+	equal(accounted, int(report["soldier_ticks"]), "the six paths account for every soldier-tick")
 	greater(float(report["retained_uses"]), float(report["searches"]) * 3.0,
 		"and keeping an opponent is what most ticks were spent doing")
 
@@ -869,6 +900,9 @@ func _test_the_report_counts_what_it_claims_to() -> void:
 			"empty_searches", "retained_in_reach", "retained_held", "retained_uses",
 			"searches_avoided", "searches_avoided_pct", "searches_per_soldier_second",
 			"focus_fallbacks", "focus_per_tick", "explicit_order_uses", "order_clears",
+			"formation_enabled", "formation_deferrals", "formation_gate_allowed",
+			"formation_promoted", "formation_promotions", "formation_demotions",
+			"formation_retaliations", "formation_bodies_targeted", "formation_bodies_engaged",
 			"invalid_dead", "invalid_far", "invalid_gone", "invalid_side", "invalidations",
 			"invalidations_per_tick", "immediate_reacquires", "scheduled_reacquires",
 			"candidates", "candidates_per_search", "candidates_max", "acquisitions",
@@ -880,7 +914,15 @@ func _test_the_report_counts_what_it_claims_to() -> void:
 
 	greater(float(report["searches_avoided_pct"]), 70.0, "most looks did not happen")
 	greater(float(report["retained_uses"]), 0.0, "and opponents were retained instead")
-	greater(float(report["invalid_dead"]), 0.0, "opponents died and were replaced")
+	# What a fighting battle must still show: soldiers of their own accord acquiring opponents,
+	# and keeping them while they are worth keeping. That a fight also *ends* - opponents dying
+	# and being replaced - is measured where battles run to a result, in the Step 7.8 hardening
+	# and engagement suites, because this fixture only fights for fifteen seconds. See D-105.
+	greater(float(int(report["acquisitions"])), 0.0, "soldiers acquired opponents of their own")
+	greater(float(int(report["retained_in_reach"])), 0.0,
+		"and held them while they were in reach")
+	greater(float(report["formation_deferrals"]), 0.0,
+		"and the hierarchy was doing some of the looking's work for it")
 	# A soldier can only change its mind while looking, so the churn figure is bounded by
 	# the look count by construction rather than by luck.
 	less(float(report["switches"]), float(report["searches"]) + 1.0,

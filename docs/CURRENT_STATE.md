@@ -1713,7 +1713,65 @@ resolved: no distance lowered, no pair skipped, no contact disabled, no targetin
 300 v 300 showcase run on this build is the visual evidence - and it also documents a stalemate
 the formation layer reaches at that scale, which reproduces identically on the pre-7.8 build and
 is a finding rather than a regression (D-100).
+## Step 7.8 (formation-driven engagement) - the hierarchy performs the searching
+
+*(The brief that commissioned this work called it "Step 7.8 - formation-driven engagement / contact-zone
+targeting". Step 7.8 in this repository is the locked separation-pass milestone, so the work is
+recorded here as its own milestone and the locked history was not touched.)*
+
+**What it is.** A spike that asked whether a large body of soldiers should stop asking the
+battlefield a strategic question - *which individual enemy should I attack* - while its formation
+already knows the strategic answer: *that body, ahead of us*. The answer, measured: yes, and the
+saving is large. A soldier is now asked to look for an opponent of its own only when the fight
+could actually be his: within a weapon's reach of an enemy body close enough to matter, having
+just been struck, under an explicit order, or owing no body at all.
+
+**The rule, in one paragraph.** Each tick, on a cadence of ten ticks, a body works out which enemy
+body it is fighting - nearest by box distance, with the same switch-hysteresis a soldier's own
+target gets, and an explicit order overriding it outright. From the two bodies' reaches it derives
+a *contact band*, and its soldiers are allowed to search only inside that band, measured from the
+soldier to the enemy body's box - a box distance rather than a frontage test, because a formation
+can be taken on a flank or from behind. A soldier that has just been hit strikes back at whoever
+hit it, which costs one index probe and no search at all. Everything is derived from geometry the
+battle already computes: no new query, no scan, and the whole body pass costs **0.02 ms a tick at
+six hundred soldiers**.
+
+**Measured, in one build, on the same seed** (the layer is switchable off with
+`battle.engagement_enabled` or `PB_ENGAGEMENT=off`, which puts the architecture this milestone
+replaced back tick for tick):
+
+| battle | searches with the hierarchy | without it | soldiers in individual mode | total ms/tick on -> off |
+| --- | ---: | ---: | ---: | ---: |
+| 300 v 300 showcase, 900 ticks | 20,783 | 99,174 | 168 of 566 (29.7%) | - |
+| 500 v 500 showcase, 900 ticks | **17,112** | 169,738 | 143 of 962 (14.9%) | - |
+| far apart | 0.0 a tick | 150.0 a tick | 0% | 11.67 -> 11.67 |
+| approach | 0.0 a tick | 150.0 a tick | 0% | 11.81 -> 12.14 |
+| partial contact | 2.8 a tick | 149.7 a tick | 21.0% | 11.73 -> 16.26 |
+| full contact | 20.9 a tick | 144.0 a tick | 23.9% | 11.54 -> 18.45 |
+| flank (two bodies on two sides) | 45.6 a tick | 123.5 a tick | 54.7% | 12.72 -> 17.41 |
+| split during a fight | 18.1 a tick | 145.5 a tick | 31.8% | 11.97 -> 21.61 |
+
+**It is not an optimisation that makes soldiers stupid.** The scenarios above run the same battles
+to the same conclusions with and without the layer - 40 casualties against 43 at full contact, 103
+against 103 in the flank case, 27 against 23 in the split case - and the suite pins the safety
+property directly: over a whole battle, **every soldier whose look the hierarchy refused is checked
+against every enemy on the field, and not one of them could have struck anybody**. Nor is a
+soldier blind to being hit: the blow is recorded, and the man who took it strikes back without
+being asked to look.
+
+**Dynamic formations came with it.** A body is a roll of soldier ids plus the geometry that places
+them, so `split_formation()` and `merge_formations()` are membership edits through the existing
+`assign_formation` - no battlefield rebuild, **0.27 ms a split at six thousand soldiers and under
+1 ms at six hundred**, with soldier ids, health, kills and history preserved and no soldier created,
+destroyed, duplicated or lost (asserted across two thousand randomized transitions). Every living
+soldier is in at most one body by construction, and `check_membership_invariants()` proves it
+afterwards rather than trusting it.
+
+**See also:** D-105 (the rule and its numbers), D-106 (split, merge and the ownership invariants),
+and the engagement benchmark at `scenes/dev/engagement_bench.tscn`.
+
 ## Step 7.8B - large-battle stalemate hardening
+
 
 **What it is.** Step 7.8's showcase found that a formed 300 v 300 battle froze at half casualties
 (D-100): 302 dead, 298 standing, nobody within reach of anybody, and no further casualties for as

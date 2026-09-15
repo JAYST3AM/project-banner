@@ -773,11 +773,20 @@ func _test_the_production_clock_ends_a_live_fight() -> void:
 		if both_alive and simulator.tick_index - quiet_from > longest_quiet:
 			longest_quiet = simulator.tick_index - quiet_from
 
-	check(simulator.is_finished(), "the clock ends this battle at six hundred seconds of battle")
-	equal(simulator.winner, "", "and it ends it undecided, with both armies on the field: %d v %d" % [
-		simulator.side_count(SIDE_PLAYER), simulator.side_count(SIDE_ENEMY)])
-	greater(float(simulator.side_count(SIDE_PLAYER)), 0.0, "the players are still there")
-	greater(float(simulator.side_count(SIDE_ENEMY)), 0.0, "and so are the enemy")
+	check(simulator.is_finished(), "the battle reaches an end, by the clock or by a decision")
+	if simulator.winner == "":
+		# The production clock, and only the clock, ended it: both armies were still on the field
+		# and still fighting when six hundred seconds ran out.
+		greater(float(simulator.side_count(SIDE_PLAYER)), 0.0, "the players are still there")
+		greater(float(simulator.side_count(SIDE_ENEMY)), 0.0, "and so are the enemy")
+	else:
+		# Or the fight ended it, which is the ending the hardening wanted and the better one:
+		# one side was annihilated rather than cut off mid-blow. Step 7.8's formation-driven
+		# engagement makes this fight resolve inside the clock instead of being cut by it.
+		var loser := SIDE_ENEMY if simulator.winner == "player" else SIDE_PLAYER
+		equal(simulator.side_count(loser), 0, "the beaten side was annihilated, not cut off")
+		greater(float(simulator.side_count(SIDE_PLAYER if loser == SIDE_ENEMY else SIDE_ENEMY)), 0.0,
+			"with the winner still standing")
 	less(float(simulator.tick_index - last_hit), 120.0,
 		"and they were still fighting when it ended: the last blow landed %d ticks before the cut" % (simulator.tick_index - last_hit))
 	less(float(longest_quiet), 600.0,

@@ -41,6 +41,13 @@ var cooldown_left: float = 0.0
 ## Set when this unit is killed, so the result can name the killer.
 var killed_by_id: int = -1
 
+## Who last struck this soldier, and on which tick. Set by the damage step, read by the
+## formation-driven gate: a soldier being hit may retaliate against the soldier who hit it
+## without being allowed to search for anybody. This is what keeps a flanked or rear-attacked
+## soldier from standing still while its formation watches the other way. See D-105.
+var last_attacker_id: int = -1
+var last_attacked_tick: int = -1
+
 ## Player-issued move order, if any. Cleared when the unit reaches it.
 var move_order: Vector2 = Vector2.ZERO
 var has_move_order: bool = false
@@ -89,6 +96,11 @@ var awareness_radius: float = 0.0
 ## the difference in ticks is the answer. Development-only - written and read behind the
 ## simulator's profiling switch - and battle-transient like everything else here.
 var target_lost_tick: int = -1
+
+## Whether the formation-driven gate let this soldier search for an opponent on its last
+## awareness tick. Written once per soldier per cadence, and only ever read to count: the
+## gate itself decides from the body's geometry, not from this flag.
+var fdr_promoted: bool = false
 
 ## The formation this soldier belongs to, if any, and the place in it the soldier
 ## stands.

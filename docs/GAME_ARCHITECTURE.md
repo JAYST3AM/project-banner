@@ -484,6 +484,77 @@ would close - so neither could reach. The fight had stopped happening and nothin
 restart it. The press-forward rule above is the answer to that case, and D-101/D-102 are the answer
 to the larger version of it that a 300 v 300 battle reached.
 
+### Formation-driven engagement (Step 7.8)
+
+**The rule.** A body knows which enemy body it is fighting. Each soldier of that body is allowed to
+look for an opponent of its own only when the fight could actually be his, and there are exactly
+four ways to be allowed:
+
+* the player has ordered him at something (an explicit order is authoritative and is resolved
+  before anything else, as it always was);
+* he has just been struck - and then he strikes back at whoever struck him, which the damage step
+  recorded, for one index probe and no search;
+* he stands inside his body's *contact band*: within his own body's furthest reach plus the enemy
+  body's plus one rank of slack, measured from him to the *enemy body's box*;
+* or he has no body at all, in which case he is his own formation and keeps the pre-formation
+  behaviour exactly.
+
+**Why a box and not a frontage.** Measured from the enemy's bounding box, the band answers a
+formation taken on the flank or from behind as readily as one taken at the front, and it costs six
+comparisons per soldier with no query at all. A frontage band would have made a body blind to
+anything that walked around it, which is the failure D-105 exists to avoid.
+
+**The body's own thinking.** Once per ten-tick cadence a body picks its enemy: nearest living body
+of the other side by box distance, keeping the answer it had unless a rival is clearly nearer
+(`battle.engagement_switch_advantage`, the same hysteresis idea a soldier's target gets in D-081),
+and never overriding an explicit order while the body that order names is alive. The same pass
+derives the band, the handful of enemy bodies near enough that its soldiers may need to answer to
+them, and a state - `NONE`, `APPROACHING`, `NEAR_CONTACT`, `IN_CONTACT`, `DISENGAGING` - that the
+development overlay and the reports read. It costs **0.02 ms a tick** at six hundred soldiers.
+
+**What it does not touch.** A soldier keeps the opponent he already had: retention, the awareness
+cadence, the search ladder, the retention radius, the switch margin, the native target kernel, the
+separation pass and every explicit order are exactly as they were. The deferral is a *postponed*
+look, not a cancelled one - the next awareness tick asks again - and the accounting that Step 7.4
+established now has a sixth term, because *every soldier-tick is exactly one of them* is an
+invariant this architecture has to keep, not to relax.
+
+**Switchable.** `battle.engagement_enabled` (or `PB_ENGAGEMENT=off`) puts the architecture this
+replaced back, in the same build and tick for tick, which is how every figure in this milestone is
+a pair of runs rather than a comparison against an older log.
+
+### Dynamic formations: split, merge, ownership (Step 7.8)
+
+**A body is a roll.** `BattleFormation` holds a list of soldier ids and the geometry that places
+them; every soldier holds a reference back to its body and its own place in it. That is the whole
+of the membership model, and it is why splitting is cheap: `split_formation()` and
+`merge_formations()` move rolls through `assign_formation`, which takes a soldier off whatever roll
+held him before it adds him to another. Measured, a split of an engaged body is **0.27 ms at six
+thousand soldiers**, and no part of it is a battlefield rebuild.
+
+**What is preserved.** A split or a merge moves rolls, never soldiers: ids, names, health, kills,
+damage and history travel with the man. A split body inherits its parent's type, order, facing and
+movement intent and then becomes a real independent actor - its own anchor, facing, layout,
+formation target, contact state, cohesion and reform state - and either half may be given its own
+orders, targets and even its own disengagement. Nothing is created, destroyed, duplicated or lost,
+which the suite asserts across repeated surgery and two thousand randomized transitions.
+
+**Ownership is checked, not assumed.** `check_membership_invariants()` returns sentences: a soldier
+standing in two bodies, a soldier pointing at a body that does not roll him, a slot index that
+disagrees with the roll, a living count that disagrees with what the body rolls, a target body that
+is gone or empty. It builds the summaries first and it walks every soldier, so it belongs to the
+tools and the tests rather than to a tick.
+
+**A merge takes a body off the battlefield**, so the bodies are re-indexed (the focus and summary
+arrays are addressed by index) and anybody who was facing the donor has its target cleared rather
+than left naming something that is gone.
+
+**Cohort compatibility.** Nothing here assumes a body is indivisible: a Cohort is a sub-roll of
+soldiers with its own sub-block of the layout and its own summary, and the contact band is already
+per soldier rather than per body. Partial contact, local casualty tracking, local target assignment
+and multirate simulation all have somewhere to live without moving a soldier - none of it was
+built in this milestone, and none of it is blocked.
+
 ### Proximity: the battlefield index (Step 7.2)
 
 Every proximity question a battle asks goes through one object. `BattleSpatialGrid` is a

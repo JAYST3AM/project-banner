@@ -23,6 +23,11 @@ const UNIT_RADIUS := 1.5
 const COLOR_ANCHOR := Color("ffd166")
 const COLOR_SLOT := Color("9ad1d4")
 const COLOR_FACING := Color("ffe9a8")
+## Step 7.8's development overlay: the body a body has decided to fight, the band inside which
+## its soldiers may look for opponents of their own, and the soldiers who are allowed to.
+const COLOR_ENGAGEMENT := Color("c58cff")
+const COLOR_BAND := Color("c58cff", 0.5)
+const COLOR_PROMOTED := Color("ff8ad8")
 
 var simulator: BattleSimulator = null
 var context: BattleContext = null
@@ -177,6 +182,25 @@ func _draw_formations() -> void:
 			formation.anchor + formation.right_vector() * (formation.frontage() * 0.5),
 			COLOR_ANCHOR.darkened(0.35), 0.22
 		)
+
+	# Step 7.8's formation-driven engagement, drawn where it can be seen: which body each body
+	# has decided to fight, the band its soldiers are allowed to look for their own opponents in,
+	# and which soldiers are looking. Development only, and behind the same switch as the rest of
+	# the overlay - it answers "why is that man not fighting" by showing the band he is outside
+	# of. See D-105.
+	for formation in simulator.formations:
+		var target: BattleFormation = simulator.formation(formation.target_formation_id)
+		if target == null or target.living_count <= 0:
+			continue
+		draw_line(formation.centre, target.centre, COLOR_ENGAGEMENT.darkened(0.35), 0.25)
+		draw_circle(target.centre, 1.1, COLOR_ENGAGEMENT.darkened(0.2), false, 0.5)
+		var band := formation.contact_band
+		if band > 0.0:
+			draw_rect(target.bounds().grow(band), COLOR_BAND, false, 0.16)
+	for unit in simulator.units:
+		if not unit.is_alive() or not unit.fdr_promoted:
+			continue
+		draw_circle(unit.position, UNIT_RADIUS + 0.7, COLOR_PROMOTED, false, 0.3)
 
 
 func _draw_formation_labels() -> void:

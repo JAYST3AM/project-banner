@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cq8ng0enbench"]
+
+[ext_resource type="Script" path="res://scripts/dev/engagement_bench.gd" id="1_engbench"]
+
+[node name="EngagementBench" type="Node"]
+script = ExtResource("1_engbench")

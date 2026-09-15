@@ -646,3 +646,39 @@ target selection is 104.5 ms. The suspected O(deaths x army) walk in `_attack()`
 hypothesis.
 
 **Not started:** Step 7.9, and any optimisation of the above.
+
+## Step 7.8 (formation-driven engagement) (`milestone-07.8c`)
+
+**Done.** A feasibility spike into whether strategic awareness should live at the body rather than
+in every soldier, and whether formations can be split and merged at runtime without a battlefield
+rebuild. Both answered, measured, and shipped behind a switch:
+
+- formation-level target selection - each body picks the enemy body it is fighting, once per
+  ten-tick cadence, by box distance with hysteresis, overridable by an explicit order;
+- a *contact band* derived from the two bodies' actual weapon reaches, so a soldier is asked to
+  look for its own opponent only when the fight could be his. Measured: **zero searches a tick**
+  with the armies far apart or merely marching, **6.9x fewer** at full contact, and **9.9x fewer**
+  in a five-hundred-a-side showcase battle (169,738 -> 17,112), with the individual-mode share
+  falling from 100% to 14.9%;
+- a soldier that has just been struck strikes back at its attacker for one index probe and no
+  search, which is what keeps a flank or a rear attack answerable without a global scan;
+- `split_formation()` and `merge_formations()` as membership edits: **0.27 ms a split at six
+  thousand soldiers**, soldier ids, health and history preserved, no soldier created, destroyed or
+  duplicated, and an invariant checker that proves it;
+- the whole layer is switchable off (`PB_ENGAGEMENT=off`) so every measurement above is a pair of
+  runs in one build, and with it off the Step 7.4/7.6 target suite passes unchanged;
+- battles end the same way on both sides of the switch (40 casualties against 43 at full contact,
+  103 against 103 in the flank case), and the suite asserts the safety property directly: no
+  soldier is ever refused a look while it could have struck somebody.
+
+**Behavioural gate:** 193 new assertions across forty scenarios - distance, approach, contact,
+flanks, rear attacks, two enemies at once, dead bodies, explicit orders, split while distant,
+approaching and engaged, unequal and arbitrary splits, merge, ownership invariants, randomized
+membership transitions, and cross-seed reproducibility.
+
+**Next measured bottleneck:** unchanged and deliberately not touched - the per-soldier update loop
+at 231.7 ms/tick of a 437.1 ms/tick instrumented tick at twenty thousand soldiers, of which
+automatic target selection is 104.5 ms.
+
+**Not started:** the Cohort layer (the design is compatible; nothing was built), multi-rate
+simulation, threading, and any optimisation of the phases above.

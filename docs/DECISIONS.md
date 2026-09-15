@@ -2557,3 +2557,110 @@ while the ten-seed sweep was finishing, read 433-467 ms/tick for the same worklo
 
 **Reversible?** Yes, and it is the kind of choice that should be re-measured if the roll ever
 becomes cheaper to walk than the summary is to read.
+
+## D-105: A body chooses the enemy body, and a soldier only looks when the fight is his
+
+*(Recorded as Step 7.8 / `milestone-07.8c` in the repository's own numbering: the brief that
+commissioned this work called it "Step 7.8 - formation-driven engagement", but Step 7.8 is the
+locked separation-pass milestone, so the work landed as its own milestone and the locked history
+was left alone.)*
+
+**Decision.** A battle body picks the enemy body it intends to fight - once per re-check, by box
+distance, with hysteresis, overridable by an explicit order - and its soldiers are allowed to look
+for opponents of their own only when the fight could actually be theirs. There are exactly four
+ways to be allowed: an explicit order from the player, a blow taken within the last twenty ticks
+(and then the soldier strikes back at whoever struck it, which costs one index probe and no
+search), standing within a weapon's reach of an enemy body that is close enough to matter, or
+having no body at all - a soldier with no body is its own formation and keeps the pre-formation
+behaviour exactly.
+
+**Why.** A soldier six ranks back was asking the battlefield a strategic question - *which
+individual enemy should I attack* - when its body had already answered the strategic question for
+itself: *that body, ahead of us*. The work that remains is local and real: the men who can
+actually reach each other still choose their own opponents, keep them across ticks, and fight
+them. Nothing about a soldier's individuality changed; what changed is who is asked to search.
+
+**The band comes from weapons, not from swords.** A body's *contact band* is the furthest reach
+any of its living soldiers has, plus the same for the enemy body, plus one rank of slack (2.6
+units), all of it accumulated by the summary pass that already walks those soldiers once a tick.
+A body of archers promotes its men from further off than a body of spearmen, and the promotion
+test is a box distance from the soldier to the enemy body's bounds - not a frontage test, because
+a formation can be taken on a flank or from behind, and those are exactly the cases where its
+soldiers must not be blind. A body watches for enemy bodies within the band plus twelve units
+(about two seconds of marching), which is how a flanker becomes something its soldiers may answer
+to before it arrives rather than after.
+
+**Struck soldiers strike back without looking.** The damage step records who struck whom. A
+soldier that has been hit in the last twenty ticks and has nobody worth keeping strikes back at
+its attacker for one index probe. This is deliberately *after* the ordinary resolution, so a
+soldier already fighting somebody does not drop that fight because a second enemy clipped it -
+which is what stops a melee soldier thrashing between attackers (D-081's concern, one layer up).
+
+**What it costs and what it buys.** At three hundred a side, over nine hundred ticks of the
+showcase's own battle, the same seed with the layer on and off in one build:
+
+| | searches | deferrals | soldiers in individual mode |
+| --- | ---: | ---: | ---: |
+| hierarchy off (the architecture this milestone replaced) | 99,174 | 0 | 560 of 560 (100%) |
+| hierarchy on | **20,783** | 109,277 | **168 of 566 (29.7%)** |
+
+At five hundred a side it is **169,738 against 17,112 searches**, with 143 of 962 soldiers in
+individual mode - and the reduction grows with the size of the bodies, because the band is a fixed
+depth of frontage while the body behind it is not.
+
+**It is switchable, and that is the point.** `battle.engagement_enabled` (or `PB_ENGAGEMENT=off`)
+puts the old architecture back, in the same build, tick for tick: with it off the Step 7.4/7.6
+target suite passes all 231 of its assertions unchanged, and every benchmark in this milestone is
+a pair of runs that differ only in this one flag.
+
+**What it did not touch.** Target retention, the awareness cadence, the search ladder, the
+retention radius, the switch hysteresis, the native target kernel, the separation pass, the save
+format and every explicit order. The five-path accounting that Step 7.4 established now has a
+sixth term - the deferrals - and the invariant that *every soldier-tick is exactly one of them*
+is asserted on both sides of the switch rather than weakened.
+
+**The one honest caveat.** The cheap path that answers a soldier from its body's focus
+(`_focus_target`) already existed and already answered most soldier-ticks: in the baseline battle
+above, 10,908 of 14,400 soldier-ticks in a smaller fixture went through it. What this milestone
+removes is therefore *searches*, not focus reads - which is the expensive half, and the half whose
+cost grew with the size of the battlefield.
+
+## D-106: A formation is a roll of soldiers, so it can be split and merged at runtime
+
+**Decision.** `BattleSimulator.split_formation(body, ids, new_id)` carves any subset of a body's
+roll into a new body of its own, and `merge_formations(keeper, donor)` folds one body into
+another. Both are membership edits through the existing `assign_formation`, which takes a soldier
+off whatever roll held it before it adds it - so a living soldier is in at most one body by
+construction, and `check_membership_invariants()` proves it after the fact rather than trusting it.
+
+**Why this is cheap enough for gameplay.** There is no battlefield rebuild anywhere in it. The
+work is a pass over the two rolls, the same pass a body's summary makes every tick, plus the
+membership arrays being brought up to date: O(soldiers in the two bodies + bodies), not O(army).
+Measured, carving a third off one engaged body and then a third off the next: **0.269 ms a split**
+at six thousand soldiers, with zero invariant complaints.
+
+**What a split preserves.** Soldier ids, names, health, kills, damage, equipment and history -
+splitting moves rolls, never soldiers. No soldier is created, destroyed, duplicated or lost; the
+roster and every id are asserted unchanged across repeated surgery. The new body inherits the
+source's type, order, facing and movement intent, then becomes a real independent actor: its own
+anchor, facing, layout, order, target body, contact state, cohesion and reform state.
+
+**What a merge does.** The donor's roll is appended to the keeper's in order, the donor leaves the
+battlefield, the bodies are re-indexed (the focus and summary arrays are addressed by index, and
+an index that no longer means what it did is a stale answer waiting to be read), and any body that
+was facing the donor has its target cleared rather than left naming something that is gone.
+
+**The invariant checker.** `check_membership_invariants()` returns a list of sentences - duplicate
+membership, a soldier pointing at a body that does not roll it, a slot index that disagrees with
+the roll, a body whose living count disagrees with what it rolls, a target body that is gone or
+empty, a soldier who believes it is in a body that does not hold it. It builds the summaries
+first, so it answers about the battle rather than about when it was asked, and it is a tool rather
+than a tick: it walks every soldier. The randomized suite drives two thousand transitions -
+splits, merges, deaths, movement, ticks, with random subsets - and asserts the invariants, the
+roster, the ids and reproducibility throughout.
+
+**Cohort compatibility.** A body's soldiers are addressed by a roll, a slot index, and per-soldier
+state; nothing in this design assumes a body is one indivisible blob. A future Cohort layer is a
+sub-roll of the same shape - a list of soldier ids, a sub-block of the layout, its own summary -
+and the contact band already works per soldier rather than per body, so partial contact, local
+casualty tracking and local target assignment have somewhere to live without moving a soldier.

@@ -145,6 +145,55 @@ var membership_version: int = 0
 ## cleared at the end of each step. See D-056.
 var in_contact: bool = false
 
+## ---------- formation-driven engagement (D-105) ---------------------------
+##
+## A body knows which enemy body it is fighting, and its soldiers only look for opponents of
+## their own where a fight is actually happening. Everything below is derived from geometry the
+## battle already computes: the body's own box, its own reach, and the enemy's. No new queries.
+
+## Nowhere to go: no living enemy body left to face.
+const ENGAGEMENT_NONE := 0
+## A target exists and the two bodies have not met.
+const ENGAGEMENT_APPROACHING := 1
+## A target exists and the two bodies are within a weapon's reach of each other, but nobody on
+## either side has actually struck yet.
+const ENGAGEMENT_NEAR_CONTACT := 2
+## Fighting: at least one soldier of this body is in reach of an enemy this tick.
+const ENGAGEMENT_IN_CONTACT := 3
+## Was fighting, and the enemy is still alive and nearby, but the two bodies have come apart
+## again. Soldiers keep whatever opponent they had; nobody looks for a new one until the fight
+## returns or the state lapses back to APPROACHING.
+const ENGAGEMENT_DISENGAGING := 4
+
+## The enemy body this one is facing. Chosen once per body per cadence, deterministically, and
+## overridable only by an explicit order. Empty when there is nobody left to fight.
+var target_formation_id: String = ""
+## Set when the target above came from an explicit order rather than from choosing, so the
+## automatic choice leaves it alone until the body it names is gone. See [method
+## BattleSimulator.set_engagement_target].
+var target_explicit: bool = false
+## One of the ENGAGEMENT_* states. Never read by a soldier's movement; it is what the gate and
+## the development view ask.
+var engagement: int = ENGAGEMENT_NONE
+## Tick this body's target and state were last worked out, so the work happens on a cadence
+## rather than every tick. See [constant BattleSimulator.ENGAGEMENT_RECHECK_TICKS].
+var engagement_tick: int = -1000000
+## The furthest reach any living soldier in this body has, accumulated by the summary pass. The
+## contact band is derived from this rather than from a hardcoded sword: a body of archers
+## promotes its soldiers from further off than a body of spearmen. See D-105.
+var max_range: float = 0.0
+## How far a soldier of this body may stand from the *enemy* body's box and still be allowed to
+## look for its own opponent: this body's furthest reach, plus the enemy's, plus slack for one
+## rank and a step of movement. A soldier inside it is in the fight or about to be.
+var contact_band: float = 0.0
+## The enemy bodies close enough that soldiers of this body may need to look at them - normally
+## one, more when this body is being taken in the flank or from behind. Rebuilt with the state
+## above, and iterated by the gate, so the gate is a handful of box distances rather than a
+## walk of the battlefield.
+var nearby_enemy_ids: Array[String] = []
+## Tick this body was last in contact, for the DISENGAGING hysteresis.
+var last_contact_tick: int = -1000000
+
 var move_factor: float = 1.0
 var turn_rate_deg: float = 120.0
 
@@ -362,6 +411,7 @@ func begin_summary() -> void:
 	centre = Vector2.ZERO
 	bounds_min = Vector2.ZERO
 	bounds_max = Vector2.ZERO
+	max_range = 0.0
 	summary_ready = false
 
 
@@ -378,12 +428,14 @@ func write_summary(
 	count: int,
 	sum: Vector2,
 	low: Vector2,
-	high: Vector2
+	high: Vector2,
+	reach: float = 0.0
 ) -> void:
 	living_count = count
 	centre = Vector2.ZERO if count == 0 else sum / float(count)
 	bounds_min = low
 	bounds_max = high
+	max_range = reach
 	summary_ready = true
 
 

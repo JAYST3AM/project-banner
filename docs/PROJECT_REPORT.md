@@ -5,7 +5,7 @@ reader (human or AI) who needs to understand, review, or advise on Project Banne
 without access to the repository.
 
 **Repository state:** `github.com/JAYST3AM/project-banner` (public)
-**Revision:** `main` at Step 7.8B — large-battle stalemate hardening, working tree clean
+**Revision:** `main` at the formation-driven engagement spike, working tree clean
 **Engine:** Godot 4.7.2-stable, GDScript only
 **Status:** Steps 0–6 of the brief are complete and independently foundation-locked
 (6.5 audit remediation, 6.6 lock), **Step 7 — Tactical Combat 2.0: terrain and formation
@@ -14,6 +14,10 @@ measurement found, and moved the two hottest of them into a native accelerator.
 **Step 7.8B** fixed the one thing Step 7.8 left behind: a formed 300 v 300 battle that froze at
 half casualties. The same battle now fights to a decision, eleven seeds all resolve, and the
 runtime runs on a fixed simulation step so the same seed fights the same battle on any machine.
+**The formation-driven engagement spike** then moved strategic awareness up to the formation: a
+five-hundred-a-side battle now makes 17,112 searches where it made 169,738, no soldier is asked to
+look for an opponent while its body is still marching, and bodies can be split and merged at
+runtime for a fraction of a millisecond.
 **The first major checkpoint (the full vertical slice) is reached and verified**, on a clean CI
 runner as well as locally.
 
@@ -1239,6 +1243,52 @@ a value that does not change under an assignment is a different kind of bug from
 changes slowly. When a simulation stops, the question is not only "where is everything" but "what
 is each part *doing*" — and here, six bodies were all reporting that they were on their way
 somewhere while standing perfectly still.
+
+---
+
+### 10.12 The formation-driven engagement spike (Step 7.8, `milestone-07.8c`)
+
+The brief asked a scaling question rather than reporting a bug: should a large body of soldiers stop
+asking the battlefield a strategic question - *which individual enemy should I attack* - while its
+formation already knows the strategic answer? The spike answered yes, measured it, and shipped it
+behind a switch.
+
+**The rule.** A body picks the enemy body it is fighting, once per ten-tick cadence, nearest by box
+distance with hysteresis and an explicit order overriding it. From the two bodies' actual weapon
+reaches it derives a contact band, and a soldier may look for an opponent of his own only when the
+fight could be his: inside that band, having just been struck (and then he strikes back at whoever
+struck him, which the damage step recorded - one index probe, no search), under an explicit order,
+or owing no body at all.
+
+**Measured in one build, on one seed, with the layer switched off for the comparison:**
+
+| battle | searches with the hierarchy | without it | individual mode |
+| --- | ---: | ---: | ---: |
+| 300 v 300 showcase, 900 ticks | 20,783 | 99,174 | 168 of 566 (29.7%) |
+| 500 v 500 showcase, 900 ticks | 17,112 | 169,738 | 143 of 962 (14.9%) |
+| far apart / approach | 0.0 a tick | 150.0 a tick | 0% |
+| partial contact | 2.8 a tick | 149.7 a tick | 21.0% |
+| full contact | 20.9 a tick | 144.0 a tick | 23.9% |
+| flank, two enemies on two sides | 45.6 a tick | 123.5 a tick | 54.7% |
+
+**It is not an optimisation that makes soldiers stupid.** The same battles end the same way either
+side of the switch (40 casualties against 43 at full contact, 103 against 103 in the flank case),
+and the suite asserts the safety property directly: over a whole battle, every soldier whose look
+the hierarchy refused is checked against every enemy on the field, and not one of them could have
+struck anybody. A soldier who is struck strikes back; a body taken in the flank or from behind is
+answered, because the band is measured from the enemy's *box* rather than from its front.
+
+**Dynamic formations came with it.** `split_formation()` and `merge_formations()` are membership
+edits, not battlefield rebuilds: 0.27 ms a split at six thousand soldiers, soldier ids, health,
+kills and history preserved, nothing created or lost, one body per living soldier by construction,
+and an invariant checker that proves it after the fact. Two thousand randomized transitions - splits,
+merges, deaths, movement - leave no complaint, and the roster and ids are asserted unchanged.
+
+**The generalisable lesson.** The optimisation that worked was not a cheaper search but a *smaller
+set of soldiers who needed to search*, and what made that safe was refusing to touch the parts of
+the old architecture that were already right: retention, the cadence, the ladder, the hysteresis
+and the native kernel are exactly as they were, and the one invariant Step 7.4 established - every
+soldier-tick is exactly one of a handful of paths - was extended rather than relaxed.
 
 ---
 

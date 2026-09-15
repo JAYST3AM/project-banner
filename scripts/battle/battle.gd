@@ -671,6 +671,13 @@ func _report_formation_consistency() -> void:
 	DebugLogger.info("drill report: %d player bodies, %d inconsistencies%s" % [
 		_simulator.formations_of(BattleContext.SIDE_PLAYER).size(), problems,
 		"" if problems == 0 else " - SEE ERRORS ABOVE"], "Battle")
+	# The membership invariants, checked in the live scene as well as in the suite: a drill that
+	# detaches a body is a split through the real command path, and a duplicated soldier or a
+	# body pointing at one that no longer rolls it is exactly what this has to catch before a
+	# player does. Dev-only, and cheap at the sizes a battle is watched at. See D-106.
+	var membership := _simulator.check_membership_invariants()
+	DebugLogger.info("membership invariants: %d complaints%s" % [
+		membership.size(), "" if membership.is_empty() else " - %s" % membership[0]], "Battle")
 
 
 func _zoom_by(factor: float) -> void:

@@ -430,7 +430,13 @@ func _test_a_seeded_battle_repeats_exactly() -> void:
 	var second := _formed_battle()
 	equal(first["signature"], second["signature"], "two runs produce the same battle")
 	equal(first["deaths"], second["deaths"], "with the same casualties")
-	greater(float(first["looks"]), 0.0, "and the battle really did search for opponents")
+	# A battle can now be fought wholly through the body's focus: the men in reach are pointed at
+	# an enemy that their body chose and never need to look for one of their own (Step 7.8,
+	# D-105). So the question is not whether it searched, but whether it really was a battle.
+	greater(float(first["deaths"]), 0.0,
+		"and the battle really was a battle: opponents were found and men fell")
+	greater(float(first["looks"]), 0.0,
+		"and soldiers in the fight looked for opponents of their own (%d looks)" % int(first["looks"]))
 
 
 func _test_a_long_reach_is_still_only_a_number() -> void:
@@ -468,19 +474,28 @@ func _formed_battle() -> Dictionary:
 	simulator.profile_enabled = true
 	var units: Array[BattleUnit] = []
 	var per_side := 60
-	# Forty units apart, not a hundred: a formation whose enemy is far away proves that no look
-	# can find anybody and never searches at all, which is correct behaviour and a useless
-	# determinism fixture. These two meet inside the window.
+	# Two units apart: the sides are in each other's reach from the first tick, so this is a
+	# determinism fixture for a *battle* rather than for a march. Since Step 7.8 a body that is
+	# merely marching defers every look its soldiers would otherwise make (D-105), and a fixture
+	# in which nothing ever happens would exercise none of what it is meant to pin down.
 	for side_index in 2:
 		var side := PLAYER if side_index == 0 else ENEMY
-		var x := 130.0 if side_index == 0 else 170.0
+		var x := 150.0 if side_index == 0 else 152.0
 		for i in per_side:
 			units.append(_unit(side_index * per_side + i, side, Vector2(x, 40.0 + float(i) * 2.0), 2.0))
+	# Three blows and a man is down. At one blow a second a soldier of this fixture would need
+	# twenty-five seconds to fell an opponent, and the window is four: a fixture in which nobody
+	# can die proves nothing about a battle.
+	for unit in units:
+		unit.attack = 400
 	simulator.add_units(units)
 	for side_index in 2:
 		var side := PLAYER if side_index == 0 else ENEMY
+		# The bodies stand where their soldiers do: a body anchored a field away would spend the
+		# whole window marching its men to their places and never come within a contact band of
+		# the enemy, which is the opposite of what this fixture is for.
 		var body := BattleFormation.create("%s_body" % side, side,
-			Vector2(60.0 if side_index == 0 else 240.0, 100.0), 0.0, "line", catalog, config)
+			Vector2(150.0 if side_index == 0 else 152.0, 100.0), 0.0, "line", catalog, config)
 		simulator.add_formation(body)
 		var ids: Array[int] = []
 		for i in per_side:

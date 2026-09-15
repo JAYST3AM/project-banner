@@ -85,6 +85,31 @@ var target_search_max_radius: float = 60.0
 ## see D-081 for the figures and for what the behaviour costs at each.
 var target_reacquisition_ticks: int = 4
 
+## ---------- formation-driven engagement tunables (D-105) -------------------
+## Every one of these is a knob rather than a law: the defaults are what the milestone measured,
+## and a benchmark or a test can move any of them from config to see what the layer costs and
+## what it buys. See D-105.
+##
+## Ticks between a body re-checking which enemy body it is fighting. The layer's main cost knob.
+var engagement_recheck_ticks: int = ENGAGEMENT_RECHECK_TICKS
+## Ticks a body that has stopped fighting keeps believing it may come back to one.
+var engagement_disengage_ticks: int = ENGAGEMENT_DISENGAGE_TICKS
+## Slack beyond the two bodies' reach, for the contact band.
+var engagement_band_slack: float = CONTACT_BAND_SLACK
+## Whether soldiers are held to their body's engagement at all. On by default, and switchable
+## off from config or PB_ENGAGEMENT=off so that a benchmark or a test can run the architecture
+## this milestone replaced, in this build, tick for tick - which is the only honest way to
+## attribute a difference to it. See D-105.
+var engagement_enabled: bool = true
+## How much nearer a rival enemy body must be before a body changes its mind.
+var engagement_switch_advantage: float = ENGAGEMENT_SWITCH_ADVANTAGE
+## How far past the band a body watches for enemy bodies it might have to answer to.
+var engagement_nearby_margin: float = ENGAGEMENT_NEARBY_MARGIN
+## Ticks a soldier may strike back at whoever last struck it.
+var retaliation_ticks: int = RETALIATION_TICKS
+## The formation catalog, kept for any body this battle has to create - a split is a deployment.
+var _formation_catalog: FormationCatalog = null
+
 ## How far a retained opponent may be before it stops being worth continuing with, in
 ## world units.
 ##
@@ -608,6 +633,22 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		# cadence and would strand every soldier on the first enemy it ever met, so it is
 		# repaired to one tick - the every-tick behaviour - rather than honoured.
 		target_reacquisition_ticks = maxi(1, int(config.get_int("battle.target_reacquisition_ticks", 4)))
+		engagement_recheck_ticks = maxi(1, int(config.get_int(
+			"battle.engagement_recheck_ticks", ENGAGEMENT_RECHECK_TICKS)))
+		engagement_disengage_ticks = maxi(0, int(config.get_int(
+			"battle.engagement_disengage_ticks", ENGAGEMENT_DISENGAGE_TICKS)))
+		engagement_band_slack = maxf(0.0, config.get_float(
+			"battle.engagement_band_slack", CONTACT_BAND_SLACK))
+		engagement_switch_advantage = maxf(1.0, config.get_float(
+			"battle.engagement_switch_advantage", ENGAGEMENT_SWITCH_ADVANTAGE))
+		engagement_nearby_margin = maxf(0.0, config.get_float(
+			"battle.engagement_nearby_margin", ENGAGEMENT_NEARBY_MARGIN))
+		retaliation_ticks = maxi(0, int(config.get_int("battle.retaliation_ticks", RETALIATION_TICKS)))
+		engagement_enabled = config.get_bool("battle.engagement_enabled", true)
+		# The environment variable is what lets a benchmark or CI hold the layer still - off is
+		# the architecture this milestone replaced, in the same build. See D-105.
+		if OS.get_environment("PB_ENGAGEMENT").to_lower() in ["off", "0", "false", "no"]:
+			engagement_enabled = false
 		target_retention_radius = maxf(0.0, config.get_float("battle.target_retention_radius", 32.0))
 		target_switch_advantage = maxf(1.0, config.get_float("battle.target_switch_advantage", 1.25))
 		target_immediate_on_contact_loss = config.get_bool("battle.target_immediate_on_contact_loss", true)
@@ -813,7 +854,13 @@ func _update_formations(delta: float) -> void:
 ## and it happens where the body is already walking its roll to work out its pace. See
 ## [method _surviving_front].
 func _engage_target_for(formation: BattleFormation) -> Vector2:
-	var target := _nearest_enemy_formation(formation)
+	# The body's own choice of enemy, when it has one: the engagement layer works it out once
+	# per cadence with hysteresis, where this used to scan for the nearest body every tick.
+	# The scan remains the fallback for the first tick of a battle and for a body whose target
+	# has just died. See D-105.
+	var target := formation(formation.target_formation_id)
+	if target == null or target.living_count <= 0:
+		target = _nearest_enemy_formation(formation)
 	if target == null:
 		return formation.anchor
 	var to_target := target.anchor - formation.anchor
@@ -896,6 +943,480 @@ func _nearest_enemy_formation(formation: BattleFormation) -> BattleFormation:
 	return best
 
 
+## ---------- formation-driven engagement (Step 7.8, D-105) -----------------
+##
+## [b]The rule.[/b] A body knows which enemy body it is facing, and a soldier of that body is
+## asked to look for an opponent of its own only when the fight could actually be about it:
+## when it stands within a weapon's reach of an enemy body close enough to matter, when it is
+## being struck (and then it strikes back at its attacker directly, which costs one index
+## probe and no search at all), or when the player has ordered it at something. Everyone else
+## keeps the opponent it already had and dresses to its place, which is what a rear rank is
+## for.
+##
+## [b]Why this is a fair thing to do.[/b] The work removed is a soldier asking the battlefield
+## a strategic question - "which individual enemy should I attack" - when its body has already
+## answered the strategic question for itself, once, and hands the answer down. The work that
+## remains is local: the men who can reach each other still choose their own opponents, keep
+## them across ticks, and fight them. Nothing about a soldier's individuality changes; what
+## changes is who is asked to search. A soldier with no body to ask keeps the pre-formation
+## behaviour exactly: it is its own formation, and searches on its own behalf.
+
+## How often a body re-checks its target and its state. A tenth of a second of battle, which is
+## far faster than a body can walk out of a range band.
+const ENGAGEMENT_RECHECK_TICKS := 10
+## How long a body that has stopped fighting holds DISENGAGING before it is merely en route
+## again. Long enough that a line pushed apart and pushed back together is one engagement.
+const ENGAGEMENT_DISENGAGE_TICKS := 40
+## Slack beyond the two bodies' reach: one rank of spacing, so the men behind the front rank
+## are already allowed to look as the front rank comes into reach, plus room for a step of
+## movement between the check and the fight.
+const CONTACT_BAND_SLACK := 2.6
+## How much nearer another enemy body must be before a body changes its strategic target - the
+## same hysteresis a soldier's own target gets, for the same reason (D-081): two similar
+## answers must not swap on alternate checks.
+const ENGAGEMENT_SWITCH_ADVANTAGE := 1.25
+## How far beyond the contact band a body watches for enemy bodies it might have to answer to.
+## Covers the flankers, and costs one box distance per enemy body on the re-check tick.
+const ENGAGEMENT_NEARBY_MARGIN := 12.0
+## A soldier struck within this many ticks may strike back at whoever struck it.
+const RETALIATION_TICKS := 20
+
+## Bodies with a living enemy body to face this tick.
+var fdr_bodies_targeted := 0
+## Bodies whose soldiers are being told to look for their own opponents - in contact or about
+## to be.
+var fdr_bodies_engaged := 0
+## Soldiers currently allowed to look for their own opponent, maintained as a running total:
+## promoted on the tick their awareness comes round, demoted when the geometry stops asking,
+## and dropped when they die. Exact every tick and free every tick.
+var fdr_promoted_soldiers := 0
+## Searches the old architecture would have made this battle, that the gate refused: the
+## soldier's awareness came round and it was not its fight.
+var fdr_searches_avoided := 0
+## Searches the gate allowed.
+var fdr_searches_allowed := 0
+## Soldiers moved from formation-driven to individual-aware, and back.
+var fdr_promotions := 0
+var fdr_demotions := 0
+## Strikes returned by a soldier at whoever struck it, which needed no search.
+var fdr_retaliations := 0
+
+
+## Work out what every body is fighting and how close it is. A body pass on a cadence: a
+## hundred bodies is a few thousand box distances every ten ticks, which is nothing next to
+## the individual searches it stands in front of.
+##
+## Runs after the summaries are built (bounds, living counts and reaches are this tick's) and
+## before the contact flags are cleared, because it reads the contact the soldiers established
+## last tick to decide whether a body is still fighting or merely was.
+func _update_engagement() -> void:
+	# The pass reads the bodies' summaries, so a caller that has not built them this tick would
+	# be asking about bodies that have no bounds, no living count and no reach. The runtime
+	# always has them by this point; tooling and tests do not, and a layer that silently does
+	# nothing when it is asked too early is worse than one that pays for a summary it needed.
+	if not formations.is_empty() and not formations[0].summary_ready:
+		_refresh_summaries()
+	fdr_bodies_targeted = 0
+	fdr_bodies_engaged = 0
+	for formation in formations:
+		if formation.in_contact:
+			formation.last_contact_tick = tick_index
+		if formation.index < 0 or not formation.is_living():
+			formation.target_formation_id = ""
+			formation.engagement = BattleFormation.ENGAGEMENT_NONE
+			formation.contact_band = 0.0
+			if not formation.nearby_enemy_ids.is_empty():
+				formation.nearby_enemy_ids.clear()
+			continue
+		var recheck := tick_index >= formation.engagement_tick
+		if not recheck:
+			# A target that has died or been wiped out is not worth waiting for the cadence
+			# over: the body re-chooses on this tick, and an explicit order that can no longer
+			# be carried out lapses here rather than sitting on a body that is gone.
+			var current := formation(formation.target_formation_id)
+			if current == null or current.living_count <= 0:
+				formation.target_formation_id = ""
+				formation.target_explicit = false
+				recheck = true
+		if recheck:
+			formation.engagement_tick = tick_index + engagement_recheck_ticks
+			_choose_engagement_target(formation)
+		var target := formation(formation.target_formation_id)
+		if target == null or target.living_count <= 0:
+			# Nobody left to fight. The body keeps its orders, its dressing and its place; no
+			# soldier of it is asked to look for an enemy that is not there.
+			formation.target_formation_id = ""
+			formation.engagement = BattleFormation.ENGAGEMENT_NONE
+			formation.contact_band = formation.max_range + engagement_band_slack
+			if not formation.nearby_enemy_ids.is_empty():
+				formation.nearby_enemy_ids.clear()
+			continue
+		fdr_bodies_targeted += 1
+		formation.contact_band = formation.max_range + target.max_range + engagement_band_slack
+		if formation.in_contact:
+			formation.engagement = BattleFormation.ENGAGEMENT_IN_CONTACT
+			fdr_bodies_engaged += 1
+		elif tick_index - formation.last_contact_tick <= engagement_disengage_ticks:
+			formation.engagement = BattleFormation.ENGAGEMENT_DISENGAGING
+			fdr_bodies_engaged += 1
+		elif target.bounds_distance_squared(formation.centre) \
+				<= formation.contact_band * formation.contact_band:
+			formation.engagement = BattleFormation.ENGAGEMENT_NEAR_CONTACT
+			fdr_bodies_engaged += 1
+		else:
+			formation.engagement = BattleFormation.ENGAGEMENT_APPROACHING
+		if recheck:
+			_refresh_nearby_enemies(formation)
+
+
+## Pick the enemy body this one is fighting. Deterministic: nearest living enemy body by box
+## distance, ties broken by body id because the walk is over a deterministic array and the
+## comparison is strict.
+##
+## [b]An explicit order wins outright.[/b] A body told to fight a particular body fights that
+## body and does not drift onto a nearer one because the arithmetic prefers it. Otherwise the
+## body keeps the answer it had unless somebody is clearly nearer
+## ([constant engagement_switch_advantage]), which is the hysteresis that stops two similar
+## answers exchanging places every re-check.
+func _choose_engagement_target(formation: BattleFormation) -> void:
+	if formation.target_explicit:
+		var ordered := formation(formation.target_formation_id)
+		if ordered != null and ordered.living_count > 0:
+			return
+		# The order has lapsed - the body it named is gone. Fall back to choosing, and say so
+		# by dropping the flag rather than quietly keeping an order nobody can satisfy.
+		formation.target_explicit = false
+	var best := _nearest_enemy_formation(formation)
+	if best == null:
+		formation.target_formation_id = ""
+		return
+	var current := formation(formation.target_formation_id)
+	if current != null and current.living_count > 0 and current != best:
+		var keep := current.bounds_distance_squared(formation.centre)
+		var challenger := best.bounds_distance_squared(formation.centre)
+		if challenger * engagement_switch_advantage >= keep:
+			return
+	formation.target_formation_id = best.id
+
+
+## The enemy bodies this body's soldiers might have to answer to: its target, plus any body
+## whose box is within the band and a margin of this body's centre. Normally one entry - the
+## common case is a single box distance per soldier - and more when the body is being taken in
+## the flank or from behind, which is exactly when its soldiers must not be blind.
+func _refresh_nearby_enemies(formation: BattleFormation) -> void:
+	formation.nearby_enemy_ids.clear()
+	var target_id := formation.target_formation_id
+	if target_id != "":
+		formation.nearby_enemy_ids.append(target_id)
+	var reach := formation.contact_band + engagement_nearby_margin
+	var reach_sq := reach * reach
+	for other in formations:
+		if other.side == formation.side or other.living_count <= 0 or other.id == target_id:
+			continue
+		if other.bounds_distance_squared(formation.centre) <= reach_sq:
+			formation.nearby_enemy_ids.append(other.id)
+
+
+## The body-level order behind "attack that formation". Explicit orders are authoritative: the
+## body stops choosing until the named body is gone. See D-105.
+func set_engagement_target(body: BattleFormation, enemy_id: String) -> void:
+	if body == null:
+		return
+	var enemy := formation(enemy_id)
+	if enemy == null or enemy.side == body.side:
+		return
+	body.target_formation_id = enemy_id
+	body.target_explicit = true
+	body.engagement_tick = tick_index + engagement_recheck_ticks
+	_refresh_nearby_enemies(body)
+
+
+## Whether this soldier may look for an opponent of its own on this awareness tick.
+##
+## Four ways to be allowed, and no fifth: an explicit order, a recently delivered blow, a body
+## with nobody to fight (nobody to look for either), or standing within a weapon's reach of an
+## enemy body that is close enough to matter. Everything else is a soldier whose body is
+## marching or dressing, and whose fight has not started yet.
+func _formation_driven_search_allowed(unit: BattleUnit) -> bool:
+	if not engagement_enabled:
+		return true
+	if not unit.is_alive():
+		# A dead soldier acquires nothing. The runtime never asks on behalf of one - the tick
+		# walks the living - but the predicate has to say so on its own, because a rule that is
+		# only true because nobody looks is not a rule. See D-105.
+		return false
+	var body := unit.formation_ref
+	if body == null or body.index < 0:
+		# No body: this soldier is its own formation, and the pre-formation behaviour is
+		# exactly what it should get.
+		return true
+	if unit.attack_order_target_id >= 0:
+		return true
+	if unit.last_attacker_id >= 0 and tick_index - unit.last_attacked_tick <= retaliation_ticks:
+		return true
+	if body.nearby_enemy_ids.is_empty():
+		return false
+	var reach_sq := body.contact_band * body.contact_band
+	for enemy_id in body.nearby_enemy_ids:
+		var enemy: BattleFormation = _formations_by_id.get(enemy_id)
+		if enemy == null or enemy.living_count <= 0:
+			continue
+		if enemy.bounds_distance_squared(unit.position) <= reach_sq:
+			return true
+	return false
+
+
+## Count what the gate decided. Promotions and demotions are transitions of a per-soldier flag
+## kept for exactly this: the counters are the milestone's evidence, so they are incremented
+## where the decision is made rather than reconstructed afterwards.
+func _note_search_decision(unit: BattleUnit, allowed: bool) -> void:
+	if allowed:
+		fdr_searches_allowed += 1
+		if not unit.fdr_promoted:
+			unit.fdr_promoted = true
+			fdr_promotions += 1
+			fdr_promoted_soldiers += 1
+		return
+	fdr_searches_avoided += 1
+	if unit.fdr_promoted:
+		unit.fdr_promoted = false
+		fdr_demotions += 1
+		fdr_promoted_soldiers = maxi(0, fdr_promoted_soldiers - 1)
+
+
+## Strike back at whoever struck this soldier, if it struck it recently and is still standing.
+## One index probe and no search: the blow was recorded by the damage step, so the body's
+## attacker is known rather than looked for. This is what keeps a soldier taken in the flank or
+## from behind from standing in its rank while its formation watches the other way.
+func _retaliation_target(unit: BattleUnit) -> BattleUnit:
+	if not engagement_enabled:
+		return null
+	if unit.last_attacker_id < 0 or tick_index - unit.last_attacked_tick > retaliation_ticks:
+		return null
+	var attacker: BattleUnit = _unit_by_id.get(unit.last_attacker_id)
+	if attacker == null or not attacker.is_alive() or attacker.side == unit.side:
+		return null
+	if profile_enabled:
+		fdr_retaliations += 1
+	_store_target(unit, attacker)
+	return attacker
+
+
+## Every soldier's own view of the formation-driven layer, for the development view and the
+## reports: promoted means "allowed to look for its own opponent".
+func engagement_soldier_counts() -> Dictionary:
+	var promoted := 0
+	var formation_only := 0
+	for unit in units:
+		if not unit.is_alive():
+			continue
+		if unit.fdr_promoted:
+			promoted += 1
+		else:
+			formation_only += 1
+	return {"promoted": promoted, "formation_only": formation_only, "running_total": fdr_promoted_soldiers}
+
+
+## ---------- dynamic membership: split, merge, ownership (Step 7.8, D-106) --
+##
+## A body is a roll of soldier ids plus the geometry that places them. Splitting is therefore a
+## membership edit, not a battlefield rebuild: the soldiers keep their ids, their health, their
+## kills and their history; they leave one roll and join another, and both bodies re-dress. No
+## soldier is created, none is destroyed, and none can be in two rolls at once, because
+## [method assign_formation] takes a soldier off whatever roll held it before it adds it -
+## and [method check_membership_invariants] is what proves that after the fact rather than
+## trusting it.
+
+## Split a body in two. [param ids] leave, in any order and any size from one soldier to all
+## but one; the rest stay. Returns the new body, or null when the request could not be honoured
+## (nothing to move, everything to move, or the new id is already taken) - a split that would
+## leave an empty body or move nobody is a rename, and the caller can see it did not happen.
+##
+## [b]Cost.[/b] One pass over the two rolls - the pass a body's summary already makes - plus the
+## membership arrays being brought up to date. It is O(soldiers in the two bodies + bodies), not
+## a walk of the battlefield and not a rebuild of anything. See D-106.
+func split_formation(body: BattleFormation, ids: Array[int], new_id: String) -> BattleFormation:
+	if body == null or ids.is_empty() or new_id == "" or formation(new_id) != null:
+		return null
+	var moving: Array[int] = []
+	var seen: Dictionary = {}
+	for unit_id in ids:
+		if seen.has(unit_id) or not body.has_unit(unit_id):
+			continue
+		seen[unit_id] = true
+		moving.append(unit_id)
+	if moving.is_empty() or moving.size() >= body.unit_ids.size():
+		return null
+	var keep: Array[int] = []
+	for unit_id in body.unit_ids:
+		if not seen.has(unit_id):
+			keep.append(unit_id)
+	var split := BattleFormation.create(
+		new_id, body.side, body.anchor, body.facing, body.type_id,
+		_catalog_for_new_bodies(), config)
+	split.order = body.order
+	split.desired_facing = body.desired_facing
+	split.target_anchor = body.target_anchor
+	add_formation(split)
+	# The moving soldiers go to the new body first, so that nobody is ever off a roll: the
+	# invariant "a living soldier belongs to at most one body, and none of them is lost" is
+	# about the moments in between as much as about the result.
+	assign_formation(split, moving)
+	assign_formation(body, keep)
+	_refresh_summaries()
+	return split
+
+
+## Merge [param donor] into [param keeper]: every soldier of the donor joins the keeper's roll,
+## in the donor's own order, and the donor leaves the battlefield. Returns false when the two
+## cannot be merged (different sides, or the same body twice).
+##
+## A merged soldier keeps its id, health, kills and history exactly as a split soldier does:
+## merging moves rolls, never soldiers. See D-106.
+func merge_formations(keeper: BattleFormation, donor: BattleFormation) -> bool:
+	if keeper == null or donor == null or keeper == donor or keeper.side != donor.side:
+		return false
+	var combined: Array[int] = []
+	for unit_id in keeper.unit_ids:
+		combined.append(unit_id)
+	for unit_id in donor.unit_ids:
+		combined.append(unit_id)
+	assign_formation(keeper, combined)
+	formations.erase(donor)
+	_reindex_formations()
+	# Any body that was facing the donor faces nobody: the body it named is off the battlefield,
+	# and a name that resolves to nothing is how a stale target becomes a mystery later.
+	for body in formations:
+		if body.target_formation_id == donor.id:
+			body.target_formation_id = ""
+			body.target_explicit = false
+	_refresh_summaries()
+	return true
+
+
+## Re-index the bodies after one has left the array, because the focus and summary arrays are
+## addressed by a body's index and an index that no longer means what it did is a stale answer
+## waiting to be read.
+func _reindex_formations() -> void:
+	for i in formations.size():
+		formations[i].index = i
+	_ensure_focus_arrays()
+
+
+## The formation catalog, loaded once and kept for any body this battle has to create - a split
+## is a deployment, and a deployment needs the layout definitions.
+func _catalog_for_new_bodies() -> FormationCatalog:
+	if _formation_catalog == null:
+		_formation_catalog = FormationCatalog.load_from()
+	return _formation_catalog
+
+
+## Everything a formed battle must be able to say about its own membership, as a list of
+## complaints - empty meaning the invariants hold. Walks every soldier, so it belongs to the
+## tests and the development probe rather than to a tick.
+##
+## The list is written as sentences because it is read by a person looking at a failure, and a
+## sentence that names the two bodies a soldier is standing in is worth more than a code.
+func check_membership_invariants() -> Array[String]:
+	# The check compares what a body reports against what it rolls, so it builds the summaries
+	# first: a caller that has just killed somebody without stepping would otherwise be read as
+	# a body whose count is wrong rather than as a body whose count is old. It is a tool, not a
+	# tick, and walking the soldiers once is what makes its answers about the battle rather than
+	# about when it was asked.
+	if not formations.is_empty():
+		_refresh_summaries()
+	var problems: Array[String] = []
+	var claimed: Dictionary = {}
+	for body in formations:
+		var counted := 0
+		var slots := body.unit_ids.size()
+		for i in slots:
+			var unit_id := body.unit_ids[i]
+			var unit: BattleUnit = _unit_by_id.get(unit_id)
+			if unit == null:
+				problems.append("%s rolls a soldier that does not exist: id %d" % [body.id, unit_id])
+				continue
+			if unit.side != body.side:
+				problems.append("%s rolls a soldier of the other side: id %d" % [body.id, unit_id])
+			if claimed.has(unit_id):
+				problems.append("soldier %d stands in two bodies: %s and %s" % [
+					unit_id, claimed[unit_id], body.id])
+			claimed[unit_id] = body.id
+			if unit.formation_ref != body:
+				var where := "-" if unit.formation_ref == null else unit.formation_ref.id
+				problems.append("soldier %d points at %s but is rolled in %s" % [unit_id, where, body.id])
+			if unit.slot_index != i:
+				problems.append("soldier %d carries slot %d but stands at place %d of %s" % [
+					unit_id, unit.slot_index, i, body.id])
+			if unit.is_alive():
+				counted += 1
+		if body.summary_ready and counted != body.living_count:
+			problems.append("%s reports %d living soldiers but rolls %d" % [
+				body.id, body.living_count, counted])
+		if body.target_formation_id != "":
+			var target := formation(body.target_formation_id)
+			if target == null or target.living_count <= 0:
+				problems.append("%s is targeting a body that is gone or empty: %s" % [
+					body.id, body.target_formation_id])
+	for unit in units:
+		if not unit.is_alive():
+			continue
+		if unit.formation_ref != null and not unit.formation_ref.has_unit(unit.id):
+			problems.append("soldier %d believes it is in %s, which does not roll it" % [
+				unit.id, unit.formation_ref.id])
+	return problems
+
+
+## Forget the formation-driven counters. Maintained unconditionally rather than under the
+## profiler, because they are the milestone's evidence, and reset when a battle starts or when
+## something measuring the layer moves on to its next scenario.
+func reset_engagement_counters() -> void:
+	fdr_bodies_targeted = 0
+	fdr_bodies_engaged = 0
+	fdr_promoted_soldiers = 0
+	fdr_searches_avoided = 0
+	fdr_searches_allowed = 0
+	fdr_promotions = 0
+	fdr_demotions = 0
+	fdr_retaliations = 0
+
+
+## The formation-driven layer as numbers: what a benchmark or a test needs to say what the
+## hierarchy bought, and what a report quotes instead of an impression.
+func engagement_report() -> Dictionary:
+	var counts := engagement_soldier_counts()
+	var searches := fdr_searches_allowed + fdr_searches_avoided
+	return {
+		"soldiers": _living_total,
+		"bodies": formations.size(),
+		"bodies_with_target": fdr_bodies_targeted,
+		"bodies_engaged": fdr_bodies_engaged,
+		"promoted_soldiers": counts["promoted"],
+		"formation_only_soldiers": counts["formation_only"],
+		"running_promoted_total": fdr_promoted_soldiers,
+		"searches_allowed": fdr_searches_allowed,
+		"searches_avoided": fdr_searches_avoided,
+		"searches_total": searches,
+		"avoided_fraction": 0.0 if searches == 0 else float(fdr_searches_avoided) / float(searches),
+		"promotions": fdr_promotions,
+		"demotions": fdr_demotions,
+		"retaliations": fdr_retaliations,
+		"per_tick": _engagement_per_tick(),
+	}
+
+
+## The counters divided by the ticks the battle has run, for the per-tick figures a benchmark
+## reports. Zero rather than a division by nothing on a battle that has not ticked.
+func _engagement_per_tick() -> Dictionary:
+	var ticks := maxi(1, tick_index)
+	return {
+		"searches_allowed": float(fdr_searches_allowed) / float(ticks),
+		"searches_avoided": float(fdr_searches_avoided) / float(ticks),
+		"soldier_share_allowed": 0.0 if _living_total <= 0
+			else float(fdr_promoted_soldiers) / float(_living_total),
+	}
+
+
 ## Whether this soldier may leave its place to restart a fight that has stopped
 ## happening.
 ##
@@ -953,6 +1474,7 @@ const TARGET_NATIVE_MIN_UNITS := 1000
 
 
 func start() -> void:
+	reset_engagement_counters()
 	# A battle chooses its backend once, before the first tick, from the size of the army
 	# it is about to run. Nothing switches mid-battle: the two implementations agree on
 	# every answer, but a battle that changed backends half way through would be a battle
@@ -1081,6 +1603,18 @@ func step(delta: float) -> Array[Dictionary]:
 	phase = _profile_start()
 	_refresh_focus()
 	_profile_stop("focus", phase)
+
+	if engagement_enabled:
+		# The body's own thinking, from the summaries just built: which enemy body it is
+		# fighting and how close it is. Read below by every soldier's own awareness tick. The
+		# pass is skipped entirely when the layer is switched off, so a baseline run measures
+		# the architecture this one replaced rather than a gate that is always saying yes.
+		# Deliberately before the contact flags are cleared, because it reads the contact the
+		# soldiers established last tick to decide whether a body is still fighting or merely
+		# was. See D-105.
+		phase = _profile_start()
+		_update_engagement()
+		_profile_stop("engagement", phase)
 
 	# Contact is read by the formation orders immediately above, and set by the soldiers
 	# immediately below, so it is cleared in between. Clearing it at the end of the step
@@ -1338,6 +1872,18 @@ func target_report() -> Dictionary:
 		"focus_proven_pct": 100.0 * float(tgt_focus_proven) / maxf(1.0, float(tgt_focus_fallbacks)),
 		"explicit_order_uses": tgt_explicit_order_uses,
 		"order_clears": tgt_order_clears,
+		# The formation-driven layer (D-105). Named apart from the retention counters above,
+		# because "searches_avoided" already means something else in this report: looks the
+		# retention rule made unnecessary. These are looks the [i]hierarchy[/i] refused.
+		"formation_enabled": engagement_enabled,
+		"formation_deferrals": fdr_searches_avoided,
+		"formation_gate_allowed": fdr_searches_allowed,
+		"formation_promoted": fdr_promoted_soldiers,
+		"formation_promotions": fdr_promotions,
+		"formation_demotions": fdr_demotions,
+		"formation_retaliations": fdr_retaliations,
+		"formation_bodies_targeted": fdr_bodies_targeted,
+		"formation_bodies_engaged": fdr_bodies_engaged,
 		"invalid_dead": tgt_invalid_dead,
 		"invalid_far": tgt_invalid_far,
 		"invalid_gone": tgt_invalid_gone,
@@ -1553,6 +2099,15 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 		target = _resolve_target(unit)
 		if target_probe > 0:
 			_profile_accumulate("target", target_probe)
+
+	if target == null:
+		# Nobody worth keeping and nobody found - and this soldier has just been struck. Strike
+		# back at whoever struck it: the attacker's id was recorded by the damage step, so this
+		# costs one index probe and no search. It is what keeps a rank taken in the flank or the
+		# rear from standing still, and it is deliberately [i]after[/i] the ordinary resolution:
+		# a soldier already fighting somebody does not drop that fight because a second enemy
+		# clipped it, which is what stops a melee soldier thrashing between attackers. See D-105.
+		target = _retaliation_target(unit)
 	if target == null:
 		return
 
@@ -1622,6 +2177,12 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 
 	var killed := target.take_damage(damage, attacker.id)
 	attacker.damage_dealt += damage
+	# Who struck whom, for the formation-driven layer: a soldier that has just been hit may
+	# strike back at its attacker without being allowed to search for anybody. Recorded only on
+	# a hit, because a hit is the unambiguous statement that somebody is fighting this soldier.
+	# See D-105.
+	target.last_attacker_id = attacker.id
+	target.last_attacked_tick = tick_index
 	if killed and grid != null:
 		# One of the battle's two live-state mutation points. The other is movement, in
 		# _move_toward. COMPARE_FULL is what proves the pair is complete. See D-095.
@@ -1640,6 +2201,11 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 	if killed:
 		attacker.kills += 1
 		_living_total = maxi(0, _living_total - 1)
+		if target.fdr_promoted:
+			# A promoted soldier who dies stops being one, which is what keeps the running
+			# total of individual-aware soldiers exact without a recount.
+			target.fdr_promoted = false
+			fdr_promoted_soldiers = maxi(0, fdr_promoted_soldiers - 1)
 		events.append({
 			"type": "death",
 			"unit": target.id,
@@ -1704,6 +2270,20 @@ func _resolve_target(unit: BattleUnit) -> BattleUnit:
 			tgt_focus_fallbacks += 1
 			tgt_us_focus += Time.get_ticks_usec() - cheap_mark
 		return cheap
+	# The soldier's awareness has come round and it would look for an opponent of its own. Ask
+	# its body first: a soldier in a body that is marching, dressing or holding has no fight of
+	# its own to look for, and the battlefield is not asked on its behalf. See D-105.
+	var allowed := _formation_driven_search_allowed(unit)
+	_note_search_decision(unit, allowed)
+	if not allowed:
+		# Formation-driven. Keep the opponent this soldier already had - a fight in progress is
+		# not interrupted by a change of formation geometry - and otherwise take the answer the
+		# body has, which is the enemy it is marching towards. The search is deferred, not
+		# cancelled: the next awareness tick asks again, and the band will have moved by then.
+		unit.next_search_tick = tick_index + target_reacquisition_ticks
+		if retained != null:
+			return retained
+		return _focus_target(unit)
 	return _search_for_target(unit, retained)
 
 
@@ -2133,6 +2713,7 @@ func _refresh_summaries() -> void:
 		var sum := Vector2.ZERO
 		var low := Vector2.ZERO
 		var high := Vector2.ZERO
+		var reach := 0.0
 		for i in ids.size():
 			var unit_id := ids[i]
 			var unit: BattleUnit = _unit_slots[unit_id] if (unit_id >= 0 and unit_id < slots) else null
@@ -2148,11 +2729,16 @@ func _refresh_summaries() -> void:
 				high.x = maxf(high.x, position.x)
 				high.y = maxf(high.y, position.y)
 			sum += position
+			# The furthest reach in the body, for the contact band the formation-driven gate
+			# measures against. One comparison per soldier in a pass that is already walking
+			# them, so the band costs nothing to keep current. See D-105.
+			if unit.attack_range > reach:
+				reach = unit.attack_range
 			unit.summary_tick = tick_index
 			bucket[keeping] = unit
 			keeping += 1
 		_body_member_count[formation.index] = keeping
-		formation.write_summary(keeping, sum, low, high)
+		formation.write_summary(keeping, sum, low, high, reach)
 	_sides_built = false
 	var claimed := 0
 	for formation in formations:

@@ -691,8 +691,8 @@ func _print_recent_comparison(reports: Array[Dictionary]) -> void:
 func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -> void:
 	print("")
 	print("=== PHASE PROFILE (ms per tick, same battles, clock on) ===")
-	print("%7s | %10s | %9s | %11s | %10s | %12s | %9s | %10s | %s" % [
-		"units", "grid", "focus", "formations", "soldiers", "of which target", "overlap", "accounted", "total"])
+	print("%7s | %8s | %8s | %8s | %11s | %8s | %12s | %8s | %9s | %s" % [
+		"units", "grid", "focus", "engage", "formations", "soldiers", "of which target", "overlap", "accounted", "total"])
 	print("-".repeat(114))
 	var overlaps: Array[Dictionary] = []
 	var targets: Array[Dictionary] = []
@@ -705,13 +705,15 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 		var phases: Dictionary = run.get("profile", {})
 		var grid := float(phases.get("grid", 0.0)) / done
 		var focus := float(phases.get("focus", 0.0)) / done
+		var engagement := float(phases.get("engagement", 0.0)) / done
 		var formations := float(phases.get("formation", 0.0)) / done
 		var soldiers := float(phases.get("soldiers", 0.0)) / done
 		var target := float(phases.get("target", 0.0)) / done
 		var overlap := float(phases.get("overlap", 0.0)) / done
-		var accounted := grid + focus + formations + soldiers + overlap
-		print("%7d | %7.3f ms | %6.3f ms | %8.3f ms | %7.3f ms | %9.3f ms | %6.3f ms | %7.3f ms | %7.3f ms" % [
-			count, grid, focus, formations, soldiers, target, overlap, accounted, float(run["per_tick_ms"])])
+		var accounted := grid + focus + engagement + formations + soldiers + overlap
+		print("%7d | %7.3f ms | %6.3f ms | %7.3f ms | %8.3f ms | %7.3f ms | %9.3f ms | %6.3f ms | %7.3f ms | %7.3f ms" % [
+			count, grid, focus, engagement, formations, soldiers, target, overlap, accounted,
+			float(run["per_tick_ms"])])
 		var report: Dictionary = run.get("overlap_report", {})
 		report["units"] = count
 		report["ticks"] = int(run["ticks"])
@@ -1467,8 +1469,8 @@ func _print_scaled_profile(options: Dictionary) -> void:
 
 	print("")
 	print("=== FAMILY B PHASE PROFILE (scaled battlefield, clock on) ===")
-	print("%7s | %10s | %9s | %11s | %10s | %12s | %9s | %10s | %s" % [
-		"units", "grid", "focus", "formations", "soldiers", "of which target", "overlap", "accounted", "total"])
+	print("%7s | %8s | %8s | %8s | %11s | %8s | %12s | %8s | %9s | %s" % [
+		"units", "grid", "focus", "engage", "formations", "soldiers", "of which target", "overlap", "accounted", "total"])
 	print("-".repeat(114))
 	var targets: Array[Dictionary] = []
 	var focuses: Array[Dictionary] = []
@@ -1484,13 +1486,15 @@ func _print_scaled_profile(options: Dictionary) -> void:
 		var phases: Dictionary = run.get("profile", {})
 		var grid := float(phases.get("grid", 0.0)) / done
 		var focus := float(phases.get("focus", 0.0)) / done
+		var engagement := float(phases.get("engagement", 0.0)) / done
 		var formations := float(phases.get("formation", 0.0)) / done
 		var soldiers := float(phases.get("soldiers", 0.0)) / done
 		var target := float(phases.get("target", 0.0)) / done
 		var overlap := float(phases.get("overlap", 0.0)) / done
-		var accounted := grid + focus + formations + soldiers + overlap
-		print("%7d | %7.3f ms | %6.3f ms | %8.3f ms | %7.3f ms | %9.3f ms | %6.3f ms | %7.3f ms | %7.3f ms" % [
-			count, grid, focus, formations, soldiers, target, overlap, accounted, float(run["per_tick_ms"])])
+		var accounted := grid + focus + engagement + formations + soldiers + overlap
+		print("%7d | %7.3f ms | %6.3f ms | %7.3f ms | %8.3f ms | %7.3f ms | %9.3f ms | %6.3f ms | %7.3f ms | %7.3f ms" % [
+			count, grid, focus, engagement, formations, soldiers, target, overlap, accounted,
+			float(run["per_tick_ms"])])
 		var report: Dictionary = run.get("target_report", {})
 		report["units"] = count
 		report["ticks"] = int(run["ticks"])
