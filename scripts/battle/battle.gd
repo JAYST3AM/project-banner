@@ -29,6 +29,11 @@ var _drag_threshold_px := 6.0
 var _resolved := false
 ## Battle-time multiplier used by automated runs (DevFlags.battle_speed()).
 var _battle_speed := 1.0
+## Frames in, whole simulation ticks out. See [BattleClock] and D-103.
+var _clock: BattleClock = null
+## Dev-only: the transitions of a long battle, written down. Null unless the run asked for a
+## journal with --battlelog. See [BattleJournal].
+var _journal: BattleJournal = null
 ## The enemy's commander. Formation-level thinking, kept out of the simulator.
 var _ai: BattleAI = null
 var _formations_built := 0
@@ -54,6 +59,10 @@ func _ready() -> void:
 	BattleSetup.deploy(units, _config)
 
 	_simulator = BattleSimulator.new(_config, _context.battle_seed)
+	# The clock is built from the game data before the battle starts, so the step the fight
+	# will be simulated at is a design decision read from a file rather than whatever the
+	# first frame happens to take. See [BattleClock].
+	_clock = BattleClock.create(_config)
 	_simulator.add_units(units)
 	# The ground comes from the context's terrain seed, so the same battle is fought on
 	# the same field every time it is replayed. It is built before the armies are formed
@@ -273,9 +282,21 @@ func _process(delta: float) -> void:
 		# simulator: the battlefield does not decide anything on its own, so a battle
 		# with no commander attached is a battle where nothing moves that was not
 		# ordered to.
-		_ai.update(_simulator, delta * _battle_speed)
-		var events := _simulator.step(delta * _battle_speed)
-		_view.add_events(events)
+		#
+		# [b]The frame's own length stops here.[/b] Real seconds go into the clock and whole
+		# ticks of one fixed size come out, so a frame that took twice as long runs twice as
+		# many ticks instead of one tick twice the size. That is the difference between a slow
+		# machine and a different battle, and before this it was neither - it was the same
+		# seed producing a different fight. See [BattleClock] and D-103.
+		var ticks := _clock.frame(delta, _battle_speed)
+		for i in ticks:
+			if not _simulator.is_running():
+				break
+			_ai.update(_simulator, _clock.step)
+			var events := _simulator.step(_clock.step)
+			_view.add_events(events)
+			if _journal != null:
+				_journal.observe(_simulator)
 		_update_formation_drill()
 		_view.queue_redraw()
 		_info_timer += delta
@@ -795,8 +816,17 @@ func _on_start_battle() -> void:
 	if _simulator == null or _simulator.is_running():
 		return
 	_simulator.start()
-	DebugLogger.info("battle started", "Battle")
+	# A battle starts with an empty accumulator: time spent on the deployment screen is not
+	# simulation time waiting to be caught up. See [BattleClock].
+	_clock.reset()
+	DebugLogger.info("battle started at a fixed %.1f ticks/second" % _clock.rate(), "Battle")
 	_hint.text = "Select soldiers, then 1/2/3 for line, column or loose, Q/E to turn, H to hold, G to engage, right-click to move them as a body. F3 shows the formation overlay. Space starts, R retreats."
+	# Dev-only, and off unless the run asked for it: the transitions a long battle turns on.
+	if _journal == null and DevFlags.battle_log_requested():
+		_journal = BattleJournal.open(DevFlags.battle_log_path())
+		if _journal != null:
+			_journal.note_start(_simulator, _context.battle_seed)
+			DebugLogger.info("battle journal: %s" % _journal.path, "Battle")
 	_refresh()
 
 
@@ -832,4 +862,7 @@ func _resolve_and_show(retreated: bool) -> void:
 		result.enemy_display_name = _context.enemy_display_name
 
 	DebugLogger.info("battle resolved: %s (%s)" % [result.title(), result.battle_id], "Battle")
+	# The journal has said everything it is going to say about this battle.
+	if _journal != null:
+		_journal.close()
 	SceneManager.change_scene("battle_results", {"result": result, "context": _context})

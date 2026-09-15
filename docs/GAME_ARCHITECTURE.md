@@ -430,6 +430,40 @@ otherwise it walks to its slot. It does not pick its own ground and it does not 
 after a target. This is what keeps a line a line, and it is also what keeps a large
 battle affordable: most soldiers are doing arithmetic rather than deciding anything.
 
+**The station: where an engaged body's centre goes (Step 7.8B, D-101).** A body told to `engage`
+steers its centre at a point `max(0, own surviving front + enemy surviving front) + contact gap`
+in front of the hostile body's centre, measured along the closing direction. A *surviving front* is
+the forward-most place in the body's own slot layout that still holds a living man: casualties stay
+on the roll, so a killed rank is a hole, and a hole is not a front. Two intact bodies stop at
+exactly the old numbers - the sum of their depths plus the contact gap - which is why an un-fought
+battle behaves as it always did. A worn one walks in one spacing per rank destroyed, so a line
+whose front rank has been killed takes its next rank into the enemy rather than standing at the
+depth of a body it no longer has. The clamp is the other half of the rule: a body's centre is never
+steered inside - let alone through - the body it is closing on. That was not always true, and the
+state it produced is recorded in D-100.
+
+**Arriving (D-102).** `advance()` moves a centre by at most the distance left to its station, so a
+body converges on its station rather than overshooting it. A movement too fine for a single
+precision `Vector2` to express counts as having arrived: without that, a body can sit a rounding
+error short of its station and report `moving` for ever - measured in a frozen battle, 0.050003
+units short, for fifteen thousand ticks.
+
+**Pressing forward: the one exception to a soldier's place.** During Step 7 testing a battle
+resolved to nine players against one enemy and then stopped for four simulated minutes. The last
+enemy was standing in a gap where the soldier opposite it had fallen: two point
+six units from the next man along, which is further than a sword reaches. Both bodies
+were in `engage`, both had stopped, and neither would close - so neither could reach.
+The fight had stopped happening and nothing was going to restart it.
+
+The rule is deliberately narrow, and it is a formation-level rule rather than a
+per-soldier one. A body that has *stopped*, has been told to `engage`, and has nobody in contact
+lets its soldiers press forward out of their places until contact returns - at which point the
+dressing wins again, so a battle cannot dissolve into a crowd. Contact is a property of the body
+and not of a side (D-056), so a wing that has not arrived may press forward while the centre is
+fighting. The gate is `is_moving()`, which is why D-102 - a body that could not express its last
+step - mattered: it disabled this rule permanently. A body told to `hold` holds whatever the enemy
+does.
+
 **Turning is not teleportation.** `facing` and `desired_facing` are separate, and
 `advance()` walks `facing` toward `desired_facing` at `turn_rate_deg` per second. The
 slots rotate with it and the soldiers follow the moving slots, so a formation ordered to
@@ -442,20 +476,13 @@ between each soldier and the slot it was given, normalised by
 scattered. `is_reforming()` is true from the moment a new shape is ordered until
 cohesion recovers past `formation.settled_cohesion`.
 
-**The stalled battle, and why pressing forward exists.** During Step 7 testing a battle
-resolved to nine players against one enemy and then stopped for four simulated minutes.
-The last enemy was standing in a gap where the soldier opposite it had fallen: two point
-six units from the next man along, which is further than a sword reaches. Both bodies
-were in `engage`, both had stopped, and neither would close - so neither could reach.
-The fight had stopped happening and nothing was going to restart it.
-
-The fix is deliberately narrow, and it is a formation-level rule rather than a
-per-soldier one. A body whose side currently has **nobody** within reach of anybody, and
-which has stopped, and which has been told to engage, lets its soldiers press forward out
-of their places. While anyone on that side is in contact the dressing wins - so a battle
-cannot dissolve into a crowd, and a body told to `hold` holds whatever the enemy does.
-The flag costs one boolean, set inside the per-soldier reach test that already had to be
-made.
+**The stalled battle this shape came from.** During Step 7 testing a battle resolved to nine
+players against one enemy and then stopped for four simulated minutes. The last enemy was standing
+in a gap where the soldier opposite it had fallen: two point six units from the next man along,
+which is further than a sword reaches. Both bodies were in `engage`, both had stopped, and neither
+would close - so neither could reach. The fight had stopped happening and nothing was going to
+restart it. The press-forward rule above is the answer to that case, and D-101/D-102 are the answer
+to the larger version of it that a 300 v 300 battle reached.
 
 ### Proximity: the battlefield index (Step 7.2)
 
@@ -886,6 +913,18 @@ Seeds use a hand-written FNV-1a hash rather than Godot's built-in `hash()`,
 because the built-in is not guaranteed stable across engine versions and a seed
 that changes meaning after an engine upgrade would silently rewrite a saved world.
 
+### The simulation step (Step 7.8B, D-103)
+
+Rendering and simulation are separated by `BattleClock`. The battle scene hands it real frame time
+(multiplied by the player's battle speed) and receives whole simulation ticks of one fixed size -
+`1 / battle.tick_rate`, which is 0.05 s. Before this, the scene passed the rendered frame delta
+straight to `BattleSimulator.step()`, so the step size *was* the frame time and the same seed fought
+a different battle on a different machine. One frame may run at most eight ticks, and no more than
+half a second of un-run time is ever queued: a machine that cannot keep up sees the battle take
+longer in real time rather than fight differently. `BattleSimulator.step(delta)` itself is
+unchanged - the tests, the benchmark and the showcase drive it at whatever step they choose - so the
+fixed step is a property of the running game rather than of the simulation.
+
 ---
 
 ## 8. Saving
@@ -958,6 +997,16 @@ The Step-2 debug panel reads `DebugLogger.recent()` to show this in-game.
 
 Debug-only features are gated behind `debug.enabled` / `debug.debug_build_only`
 in the config, so shipping a build with them off is a data change.
+
+**The battle journal (Step 7.8B).** A long battle needed to be readable afterwards, and the
+transitions that decide one - contact gained and lost per body, casualty milestones, which enemy
+body each body is facing, the clock running out - were not written anywhere; a log of blows and
+deaths cannot tell a frozen battle from a thinking one. `BattleJournal` writes exactly those lines
+and nothing else: a hundred for a six-hundred-soldier battle, where a per-blow log would need five
+thousand. It is a *subscriber* of the funnel above rather than a logger of its own - its lines go
+through `DebugLogger` and it appends the battle category's entries to a file - and nothing
+constructs one unless a run asks, with `--battlelog` or `--battlelog=<path>`. Release play writes
+nothing to disk.
 
 ---
 

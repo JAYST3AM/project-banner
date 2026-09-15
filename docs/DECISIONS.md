@@ -2417,3 +2417,143 @@ is not caused by the separation pass, it was not weakened or hidden to make the 
 better, and it is recorded here so that whoever fixes it starts from a measurement rather than
 from a screenshot. The showcase's own report - screenshots, reachability per stage, physicality
 probe - is the evidence.
+
+**Resolved by Step 7.8B (D-101, D-102).** The mechanism above was reproduced headlessly, tick by
+tick, and turned out to be two defects nested inside each other: a body with nobody in contact
+steered at the enemy's *anchor*, so the two centres were driven onto each other and the surviving
+ranks ended up interleaved on one lattice exactly one spacing apart - outside every melee reach;
+and the body then reported itself `moving` on a residual its own centre could not express, which
+permanently disabled the one rule that could have restarted the fight. Both are fixed at the
+formation level, the reproduction is now a test (`tests/test_battle_hardening.gd`), and the same
+300 v 300 battle fights to a decision: **seed 780780 resolves at tick 12,222 (611.1 s), 596
+casualties, 4 enemy soldiers standing, longest silence in the whole battle 24 ticks, zero stall
+windows - and eleven seeds all resolve by annihilation with zero stalemates.** Under the production
+600-second clock this battle is now cut off eleven seconds *before* that decision, with both armies
+still trading blows (the last one 23 ticks before the cut); the clock is no longer ending a freeze,
+which was the whole complaint. The history above is kept because the measurement in it is what the
+fix was built from.
+
+## D-101: An engaged body's station is where the surviving fronts meet
+
+**Decision.** `BattleSimulator._engage_target_for()` places an engaged body's station at
+`max(0, own_surviving_front + enemy_surviving_front) + contact_gap` in front of the hostile
+centre, where a body's *surviving front* is the forward-most place in its own slot layout that
+still holds a living soldier - measured along the closing direction. A body never steers inside
+the enemy's centre, whether or not it currently has anybody in contact.
+
+**Why.** The rule this replaces was two rules: a body in contact stopped a rank's depth short of
+the enemy's centre, and a body that had lost contact closed the whole way onto that centre. The
+first is right for an intact line and wrong for a worn one - the depth it uses is the depth the
+body was *deployed* with, so a line whose front rank has been killed holds its centre where a body
+of full ranks would have stood and leaves its survivors behind their own dead, one rank short of
+every enemy. The second is how the frozen battle got where it did: measured on the 300 v 300
+reproduction, the two centres were **0.050003 units apart** with all six bodies reporting `moving`
+and nobody within 2.556 units of an enemy. Interleaved at one lattice spacing, just outside a 2.4
+reach, neither army could strike and neither could close.
+
+**What it fixes, in the two directions that matter.** For an intact body the new station is
+*exactly* the old one - two dressed lines still stand off at the sum of their depths plus the
+contact gap, which is why nothing about an un-fought battle changes and no small-battle behaviour
+moved. For a worn one it moves forward by one spacing per rank destroyed, so a damaged line walks
+its surviving rank into the enemy and keeps fighting; measured in the suite, one killed rank moves
+the station in by 2.60 units on both sides. The clamp is what makes the frozen state unreachable:
+a body's centre can never be driven inside - let alone through - the body it is closing on, and
+the suite asserts that over six hundred ticks of two bodies trying to close on each other with
+their front ranks destroyed.
+
+**Cost.** Two walks over a body's own roll per engaged body per tick, on slots already rebuilt for
+the movement the same function is about to do. Batch: 20,000 soldiers, same command and window as
+the pre-fix build - see the measured before/after in `CURRENT_STATE.md`.
+
+**Reversible?** Yes, and cheaply: it is one function plus one helper, and the old numbers are
+recoverable by measuring `(depth + depth) / 2 + gap`.
+
+## D-102: A step the centre cannot express is an arrival
+
+**Decision.** `BattleFormation.advance()` treats a movement that does not change the centre as an
+arrival: if the computed step is positive but adding it to `anchor` leaves `anchor` unchanged, the
+body takes its station (`anchor = target_anchor`) and `is_moving()` becomes false.
+
+**Why.** `Vector2` stores single-precision components, so at a coordinate of about 104 the smallest
+change a centre can hold is ~7.6e-6 units. The frozen battle sat with a residual distance of
+**0.050003052** - the arrive radius (0.05) plus 3.05e-6 - and a step of 3.05e-6 is below what the
+coordinate can express, so the body could not move, could not arrive, and reported `moving` for
+fifteen thousand ticks. That mattered because `is_moving()` is one of the conditions that decides
+whether a body's soldiers may press forward to restart a fight that has stopped: the state machine
+was not merely cosmetic, it was the gate on the only remaining recovery mechanism. With the guard,
+"has this body stopped" is answerable again in every reachable state, including the degenerate ones
+D-101 does not remove (two bodies whose survivors are all behind their own centres).
+
+**Consequence.** The centre moves by less than the arrive radius when this fires, so nothing is
+teleported and no normal battle's numbers change: a body already within a rounding error of its
+station was arriving on the next tick anyway. `tests/test_battle_hardening.gd` drives the exact
+frozen numbers - anchor 104.55005645752, station 104.600059509277 - and asserts it arrives rather
+than reporting movement forever.
+
+**Reversible?** Yes, one branch, but there is no reason to: without it a body can be permanently
+unable to act while claiming to be on its way.
+
+## D-103: The battle runs on a fixed simulation step, and `battle.tick_rate` is that step
+
+**Decision.** The battle scene no longer feeds the simulator the length of the frame it just
+rendered. `BattleClock` accumulates real frame time (multiplied by the player's battle speed) and
+emits whole fixed-size ticks; the scene runs exactly those ticks and draws the latest state. The
+step is `1 / battle.tick_rate`, and `battle.tick_rate` is corrected from 30.0 to **20.0** - the rate
+(0.05 s) every benchmark, showcase and suite in this repository has been measured at. One frame may
+run at most eight ticks, and a backlog beyond half a second is dropped rather than queued.
+
+**Why.** The scene called `_simulator.step(delta * _battle_speed)` with the render delta, so the
+simulation's step size was whatever the last frame took - which means the same seed, the same army
+and the same orders produced a *different battle* on a different machine, purely because of frame
+pacing. That is not a rendering difference; it is the fight itself. Step 7.8B proved it with a
+controlled comparison before changing anything: the same battle stepped at two frame patterns
+diverges, and the same battle stepped at one fixed size does not. Determinism is already a load
+bearing property of this project - target cadence is counted in ticks, awareness slots are derived
+from soldier ids, the whole test suite leans on it - so the runtime had no business being the one
+place where it was not true.
+
+**What it deliberately is not.** No interpolation between simulation states, no prediction, no LOD:
+a frame draws the state the simulation reached. That is a look rather than a correctness question
+and belongs to the milestone that adds it. Nor is 60 ticks/second chosen because rendering targets
+60 FPS - one tick is a design decision and it stays a design decision, which is why it lives in the
+game data and why the value is the one all the existing measurements were taken at.
+
+**Consequence.** A slow frame runs *more ticks*, not a longer tick: the same enemy does not think
+faster on a fast machine. Battle speed (the dev flag and any future UI control) also multiplies
+real time rather than the step, so `--battlespeed=8` is now eight times as many identical ticks
+rather than one eight-times-larger step. The catch-up cap means a machine that cannot keep up sees
+the battle take longer in real time, which is the honest failure mode.
+
+**Reversible?** Yes - one scene call site, one small class, one config value.
+
+## D-104: The surviving front is read off the summary the tick already built
+
+**Decision.** `_surviving_front()` walks the living members the tick's summary pass collected
+(`_body_members` / `_body_member_count`) rather than the body's roll, and computes the projection
+with the slot's own arithmetic (`lateral * (right . direction) + forward_offset * (forward .
+direction)`) rather than by building slot positions and subtracting vectors. The rule therefore
+reads membership as of the start of the tick and pays one tick of lag on a death.
+
+**Why.** The first version read the roll, one `_unit_by_id` probe and one `is_alive()` call per
+soldier, twice per engaged body per tick. Measured on the final build against the locked tip in
+matched thirty-tick windows at twenty thousand soldiers on the torture field, the formation phase
+went 36.459 -> **68.205 ms/tick**: +31.7 ms/tick, about 5% of the whole tick, for a question whose
+answer the battle had already computed a few hundred microseconds earlier in the same tick. The
+summary knows exactly who is alive and where they stand on the roll, so the second walk was pure
+duplication.
+
+**What the lag costs.** A rank that is destroyed becomes the body's front one tick later than it
+could have, which is a fiftieth of a second of a body's centre not yet having moved - and the
+station is a positioning decision taken at the top of a tick, not a combat rule. Nothing about
+contact, damage, targeting or the overlap pass reads it.
+
+**Measured, three interleaved pairs, family A at 20,000 soldiers, matched thirty-tick windows:**
+before 363.5 / 368.1 / 367.3 ms/tick, after 366.1 / 369.8 / 370.7 - **+2.6 ms/tick (+0.7%)**. The
+realistic family B, matched sixty-tick windows: 383.2 / 385.9 before against 393.9 / 393.6 after -
+**+9.2 ms/tick (+2.4%)**, with the formation phase itself 36.5 -> 37.3 ms/tick. Both figures come
+from runs interleaved with each other on one machine, because this host's twenty-thousand-soldier
+numbers move by tens of per cent with CPU state: an earlier set of the same comparisons, taken
+while the ten-seed sweep was finishing, read 433-467 ms/tick for the same workloads.
+
+**Reversible?** Yes, and it is the kind of choice that should be re-measured if the roll ever
+becomes cheaper to walk than the summary is to read.

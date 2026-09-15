@@ -2,10 +2,10 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 7.8 - the separation pass, corrected and moved onto packed data
-and then native
+**Last updated:** end of Step 7.8B - the large-battle stalemate, reproduced and fixed at the
+formation layer, with the runtime moved onto a fixed simulation step
 **Engine:** Godot 4.7.2-stable
-**Test status:** `8468 assertions, 0 failures, 23 of 23 suites` headless (with the native
+**Test status:** `8563 assertions, 0 failures, 24 of 24 suites` headless (with the native
 accelerator loaded and required), plus `95 checks + 6 checks, 0 failures` in a genuine
 two-process restart check.
 **Independent gate:** GitHub Actions runs both of those on every push to `main` and
@@ -1713,3 +1713,165 @@ resolved: no distance lowered, no pair skipped, no contact disabled, no targetin
 300 v 300 showcase run on this build is the visual evidence - and it also documents a stalemate
 the formation layer reaches at that scale, which reproduces identically on the pre-7.8 build and
 is a finding rather than a regression (D-100).
+## Step 7.8B - large-battle stalemate hardening
+
+**What it is.** Step 7.8's showcase found that a formed 300 v 300 battle froze at half casualties
+(D-100): 302 dead, 298 standing, nobody within reach of anybody, and no further casualties for as
+long as the battle was allowed to run. This step reproduces that headlessly, measures it tick by
+tick, fixes it at the formation layer, and proves the battle now fights to a decision - on eleven
+seeds, headless and windowed.
+
+**One battle, three callers.** The deployment the showcase has always used now lives in one place,
+`scripts/dev/showcase_battle.gd`, and it prints a setup checksum. The windowed showcase, the
+headless probe and the regression test all open that same battle, and all three report
+`600:f8a81f4d` for six hundred soldiers - so the run that is watched and the run that is measured
+cannot drift apart.
+
+**The reproduction.** `scenes/dev/battle_stalemate_probe.tscn` drives the production simulator with
+a fixed step and writes a timeline plus a per-soldier dump of the frozen state. On seed 780780 the
+pre-fix build froze at **tick 9000 (450 s of battle)**: 153 v 145 standing, **0 of 298 soldiers
+inside any reach**, nearest hostile **2.556 units**, no blow struck for **15,616 ticks (781 s)**
+while both armies lived, and **zero** further casualties in the remaining 750 seconds of the run.
+
+| at the freeze (seed 780780, pre-fix) | player_centre | player_left | player_right | enemy_centre | enemy_left | enemy_right |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| living | 47 | 55 | 51 | 52 | 45 | 48 |
+| state reported | moving | moving | moving | moving | moving | moving |
+| in contact | no | no | no | no | no | no |
+| cohesion | 0.99 | 0.99 | 0.99 | 0.99 | 0.99 | 0.99 |
+| mean distance from its own slot | 0.06 | 0.07 | 0.07 | 0.07 | 0.07 | 0.07 |
+| distance to the enemy's centre | 0.050 | 0.050 | 0.050 | 0.050 | 0.050 | 0.050 |
+| nearest living enemy | 2.61 | 2.56 | 2.60 | 2.61 | 2.56 | 2.60 |
+
+**The mechanism, measured rather than guessed.** Two defects, nested.
+
+1. **A body with nobody in contact steered at the enemy's *anchor*.** That rule (D-056) was written
+   to let a wing that had not arrived keep closing, and what it actually did was drive the two
+   centres onto one another: measured, they ended **0.050003 units apart**. With the centres
+   together the two bodies' surviving ranks land on one lattice - and because both armies are laid
+   out on the same file spacing, those ranks are exactly one spacing apart in the closing axis.
+   Slot spacing is 2.6 units and melee reach is 2.4, so the two masses slid through each other
+   without a single soldier ever being in reach, which is why `in_contact` was false everywhere
+   while 298 men stood in the same 23-unit box.
+2. **The body then could not stop, so it could not let anybody move.** The centre was 0.050003
+   units from its station - `ENGAGE_EPSILON` (0.05) plus 3.05e-6 - and the step needed to close
+   that gap is finer than a single-precision `Vector2` can express at a coordinate of 104, so
+   `advance()` computed a movement, applied it, and changed nothing. `is_moving()` therefore
+   reported `moving` for the rest of the battle, and `is_moving()` is one of the conditions on the
+   press-forward rule - the one mechanism that could have restarted the fight. Before the fix,
+   press-forward never fired once in a 300 v 300: its count was zero in every sample of a
+   24,000-tick run.
+
+**The fix: the station is where the surviving fronts meet (D-101), and an unexpressible step is an
+arrival (D-102).** `_engage_target_for()` now places an engaged body's centre at
+`max(0, own surviving front + enemy surviving front) + contact gap` in front of the hostile centre,
+where a surviving front is the forward-most place in the body's own slot layout that still holds a
+living man. A body can never steer inside the enemy's centre, and a body whose ranks have been
+killed walks its next rank in - one spacing per rank lost - instead of standing at the depth of a
+body it no longer has. `advance()` treats a movement too fine for the centre to express as an
+arrival, so "has this body stopped" has an answer in every reachable state.
+
+**What did not change.** For two intact bodies the new station is the old one exactly (the sum of
+their depths plus the contact gap), so nothing about an un-fought battle moved. Formations, slots,
+spacing, ownership, casualties on the roll, facing, contact semantics, the press-forward rule's own
+conditions, target acquisition, the native target kernel, the separation pass and the save format
+are all untouched. HOLD still holds: a held body's centre does not move at all, and none of its
+soldiers may press forward. The regression suite asserts each of those.
+
+**300 v 300, seed 780780, after the fix:** the battle resolves at **tick 12,222 (611.1 s of battle
+time)** - 596 casualties of 600, the player's last man dead, 4 enemy soldiers standing, 4,772 blows
+struck, contact gained 302 times and lost 300, and the **longest stretch with both armies alive and
+nobody struck was 24 ticks (1.2 s)**. Zero stall windows. Under the *production* 600-second clock
+the same battle is cut off eleven seconds before its decision, **still fighting**: 1 v 5 standing
+and the last blow 23 ticks before the cut. That is worth saying plainly - the stalemate is gone,
+and a six-hundred-second clock on a six-hundred-soldier battle is now a game-design question rather
+than a bug, because there is no longer anything for the clock to hide.
+
+**Eleven seeds, same battle, clock raised to 3,600 s so the fight rather than the timer decides:**
+
+| seed | result | battle time | ticks | casualties | survivors | longest quiet | stall windows |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 780780 | enemy wins | 611.1 s | 12,222 | 596 | 0 v 4 | 24 ticks | 0 |
+| 1001 | enemy wins | 661.7 s | 13,234 | 583 | 0 v 17 | 27 ticks | 0 |
+| 2026 | player wins | 581.8 s | 11,636 | 593 | 7 v 0 | 16 ticks | 0 |
+| 3141 | player wins | 597.6 s | 11,952 | 592 | 8 v 0 | 27 ticks | 0 |
+| 4321 | enemy wins | 600.2 s | 12,004 | 585 | 0 v 15 | 20 ticks | 0 |
+| 5555 | enemy wins | 642.8 s | 12,856 | 595 | 0 v 5 | 100 ticks | 0 |
+| 6060 | player wins | 623.2 s | 12,464 | 596 | 4 v 0 | 29 ticks | 0 |
+| 7100 | enemy wins | 670.5 s | 13,410 | 593 | 0 v 7 | 31 ticks | 0 |
+| 8888 | enemy wins | 598.8 s | 11,976 | 572 | 0 v 28 | 28 ticks | 0 |
+| 90210 | enemy wins | 596.3 s | 11,926 | 587 | 0 v 13 | 17 ticks | 0 |
+| 4711 | enemy wins | 597.4 s | 11,948 | 592 | 0 v 8 | 17 ticks | 0 |
+
+Every one of them ends with one army destroyed and the other reduced to between four and
+twenty-eight men: **eleven resolutions by annihilation, zero stalemates, zero battles still
+disconnected at the end, and 272-368 contact transitions each** - i.e. the formations lose and
+regain contact hundreds of times per battle and keep fighting through it.
+
+**Small battles, unchanged in shape and behaviour:**
+
+| battle | result | battle time | casualties | survivors | longest quiet | stall windows |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 6 v 6 | enemy wins | 44.7 s | 4 | 0 v 2 | 63 ticks | 0 |
+| 20 v 20 | enemy wins | 48.1 s | 17 | 0 v 3 | 4 ticks | 0 |
+| 50 v 50 | enemy wins | 91.4 s | 47 | 0 v 3 | 17 ticks | 0 |
+| 100 v 100 | player wins | 102.7 s | 93 | 7 v 0 | 6 ticks | 0 |
+
+**Determinism, and the frame-pacing defect it found (D-103).** The same-seed divergence the
+showcase report suspected is real: the battle scene fed the simulator `delta * battle_speed` from
+`_process`, so the simulation's step size *was* the last frame's duration, and the same seed fought
+a different battle on a different machine. The runtime now runs on `BattleClock`: real frame time
+accumulates, whole fixed steps come out (`battle.tick_rate`, corrected to 20.0 - the rate every
+measurement in this repository was taken at), at most eight ticks per frame, with a backlog beyond
+half a second dropped rather than queued. Frame pacing now decides how many ticks a frame runs and
+nothing else: the suite runs the same battle at 60 fps and at 20 fps and asserts the two reach an
+identical state, soldier for soldier, at the same tick. Battle speed multiplies real time rather
+than the step, so `--battlespeed=8` is eight times as many identical ticks rather than one
+eight-times-larger step.
+
+**And the strongest check of that:** the windowed 300 v 300 showcase and the headless probe, driving
+the same build through different code - one rendering a window and capturing screenshots, one
+writing JSON - produce the **same battle to the tick**: 12,222 ticks, 596 casualties, the enemy
+left with 4. Rendering does not touch the simulation at all.
+
+**What the fix costs at 20,000 soldiers.** Interleaved matched windows on one machine, final build
+against the locked tip:
+
+| family | window | before | after | change |
+| --- | --- | ---: | ---: | ---: |
+| A - fixed-area torture field | 30 ticks | 363.5 / 368.1 / 367.3 ms/tick | 366.1 / 369.8 / 370.7 ms/tick | **+2.6 ms/tick (+0.7%)** |
+| B - battlefield scaled with the army | 60 ticks | 383.2 / 385.9 ms/tick | 393.9 / 393.6 ms/tick | **+9.2 ms/tick (+2.4%)** |
+
+The formation phase itself goes 36.5 -> 37.3 ms/tick in the same windows; the rule's own cost was
++31.7 ms/tick when it walked the roll and is 0.9 now that it reads the summary the tick had already
+built (D-104). No new query, no quadratic loop, one linear pass over men the battle was already
+counting. This host's twenty-thousand-soldier numbers move by tens of per cent with CPU state, so
+the pairs above were taken back to back with each other rather than against older logs.
+
+**The next bottleneck is unchanged, and was not touched.** Family B profile, 20,000 soldiers,
+60-tick window, final build: **grid 44.5, focus 47.7, formations 41.8, soldiers 231.7 (of which
+target selection 104.5), overlap 40.4, total 437.1 ms/tick** instrumented. The largest phase is
+still the per-soldier update loop, and inside it automatic target selection - the same two the
+Step 7.8 report named. The suspected O(deaths x army) explicit-order cleanup in `_attack()` remains
+a hypothesis and was deliberately not investigated or touched.
+
+**The dev-only battle journal (off unless asked for).** A long battle needed a way to
+be read afterwards, so `scripts/battle/battle_journal.gd` records the transitions that decide one:
+battle start, contact gained and lost per body, casualty milestones, which enemy body each body is
+facing, the state every 1,500 ticks, and how it ended. Its lines go through `DebugLogger` - the
+project's existing funnel - and the journal subscribes to that funnel and appends to a file; there
+is no second logger. Nothing constructs one unless a run passes `--battlelog` or
+`--battlelog=<path>`, which is how the normal game writes nothing: verified by running the
+windowed showcase, the headless probe, the benchmark and the full campaign battle path without the
+flag and finding no journal anywhere in `user://`.
+
+**Tests.** A new suite, `tests/test_battle_hardening.gd`, covers the mechanism rather than only the
+headline: the station follows the surviving front by one spacing per rank killed; the station is
+never inside the enemy; a line whose front rank has been killed restarts the fighting within a few
+hundred ticks and keeps it; pressing forward is allowed exactly when the line has stopped and is
+withdrawn the moment contact returns; the frozen numbers themselves arrive instead of reporting
+movement; HOLD holds; a wiped body is not chased and the living one becomes the target; contact
+stays formation-local; the same seed fights the same battle; frame pacing does not change it; three
+hundred a side resolves by annihilation with the clock raised; the production clock is shown to
+interrupt a live fight rather than a freeze; the journal says what happened; and no soldier ever
+has a non-finite position, crosses the field in a tick, or stands inside another.

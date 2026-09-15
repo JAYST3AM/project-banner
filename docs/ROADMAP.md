@@ -604,3 +604,45 @@ located and not yet proved: `BattleSimulator._attack()` walks the whole roster o
 clear hunting orders, which is O(deaths x army) per tick.
 
 **Not started:** Step 7.9, and any optimisation of the above.
+
+## Step 7.8B - large-battle stalemate hardening (`milestone-07.8b`)
+
+**Done.** Step 7.8's showcase found a formed 300 v 300 battle freezing at half casualties, and
+recorded it with numbers rather than fixing it (D-100). This pass diagnoses it, fixes it at the
+formation layer, and proves the headline case resolves:
+
+- reproduced the freeze headlessly, tick by tick, on the showcase's own battle - and put that
+  deployment in one place (`ShowcaseBattle`) so the watched run, the probe and the test all report
+  the same setup checksum (`600:f8a81f4d`);
+- measured the frozen state rather than describing it: 0 of 298 soldiers within reach, nearest
+  hostile 2.556 units, both bodies' centres **0.050003 units apart**, all six bodies reporting
+  `moving`, 15,616 ticks with no blow struck, and press-forward firing **zero** times in the whole
+  battle;
+- found two nested causes - a body out of contact steering at the enemy's *anchor* (so centres were
+  driven onto each other and the surviving ranks interleaved one lattice spacing apart, just outside
+  melee reach), and a body then unable to express the last 3e-6 units of movement, which left
+  `is_moving()` permanently true and the press-forward rule permanently disabled;
+- fixed both at the level they belong to: the engaged body's station is where the two bodies'
+  *surviving fronts* meet, one spacing per rank lost, and never inside the enemy's centre (D-101),
+  and a step the centre cannot express is an arrival (D-102);
+- established the fixed simulation step in the runtime, because the scene was feeding the simulator
+  the rendered frame delta and the same seed fought a different battle on a different machine
+  (D-103);
+- measured the fix at 20,000 soldiers in interleaved matched windows: **+2.6 ms/tick (+0.7%)** on
+  the torture field and **+9.2 ms/tick (+2.4%)** on the realistic field, after a first version that
+  cost +31.7 ms/tick was made to read the summary the tick already builds (D-104);
+- re-ran the windowed 300 v 300 showcase, which now fights to a decision inside the production
+  battle clock.
+
+**The headline gate:** seed 780780 (the showcase's own) resolves at 611.1 s of battle time - 596
+casualties, the player's army destroyed, 4 enemy soldiers standing, longest silence 24 ticks, zero
+stall windows - and the windowed showcase reaches the same result to the tick. Ten further seeds
+all resolve by annihilation with zero stalemates. Small battles (6 v 6 to 100 v 100) are unchanged
+in shape and all resolve.
+
+**Next measured bottleneck:** unchanged by this milestone, and deliberately not touched - the
+per-soldier update loop at 231.7 ms/tick of a 437.1 ms/tick instrumented tick, of which automatic
+target selection is 104.5 ms. The suspected O(deaths x army) walk in `_attack()` remains a
+hypothesis.
+
+**Not started:** Step 7.9, and any optimisation of the above.

@@ -24,6 +24,9 @@ const AUTOSTART_BATTLE_FLAG := "--autostart-battle"
 ## Run a scripted formation drill through the battle scene's real order methods.
 const AUTOFORMATIONS_FLAG := "--autoformations"
 const BATTLESPEED_PREFIX := "--battlespeed="
+## Dev-only battle journal: "--battlelog" for the default file, "--battlelog=<path>" to name one.
+const BATTLELOG_FLAG := "--battlelog"
+const BATTLELOG_PREFIX := "--battlelog="
 
 
 static func _user_args() -> PackedStringArray:
@@ -129,6 +132,25 @@ static func battle_speed() -> float:
 			var value := float(raw) if raw.is_valid_float() else 1.0
 			return clampf(value, 0.1, 200.0)
 	return 1.0
+
+
+## Whether this run asked for a battle journal. Nothing writes one unless this is true:
+## a long battle is exactly the case where a log is worth having, and exactly the case
+## where a game that writes one unasked would fill a player's disk.
+static func battle_log_requested() -> bool:
+	return _has_flag(BATTLELOG_FLAG)
+
+
+## Where the battle journal should go, or "" for the journal's own default. Meaningless
+## unless [method battle_log_requested] is true.
+static func battle_log_path() -> String:
+	for arg in _user_args():
+		if arg.begins_with(BATTLELOG_PREFIX):
+			return arg.trim_prefix(BATTLELOG_PREFIX)
+	for arg in OS.get_cmdline_args():
+		if arg.begins_with(BATTLELOG_PREFIX):
+			return arg.trim_prefix(BATTLELOG_PREFIX)
+	return ""
 
 
 static func _has_flag(flag: String) -> bool:

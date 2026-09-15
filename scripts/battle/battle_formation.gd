@@ -624,8 +624,24 @@ func advance(delta: float, speed: float) -> void:
 		var arrive := _arrive_radius()
 		if distance > arrive:
 			var step := minf(distance - arrive, maxf(0.0, speed) * delta)
-			anchor += to_target.normalized() * step
-			_slots_dirty = true
+			if step > 0.0:
+				var before := anchor
+				anchor += to_target.normalized() * step
+				if anchor == before:
+					# [b]A step too fine for the centre to express is an arrival.[/b] The
+					# centre is stored in single precision, so near a coordinate of a hundred
+					# the smallest change it can hold is about a hundred-thousandth of a unit -
+					# and a body asked to close the last few millionths of a unit onto its
+					# station cannot move at all. Left alone it then reports itself [i]moving[/i]
+					# for the rest of the battle while standing perfectly still, and
+					# [method is_moving] is what decides whether its soldiers may press
+					# forward to restart a fight that has stopped: a body stuck one rounding
+					# error short of its station can never let them. Measured: a 300 v 300
+					# battle froze for fifteen thousand ticks with every body reporting
+					# `moving` at a distance of 0.050003 units. Arriving moves the centre by
+					# less than the arrive radius, so nothing is teleported. See D-102.
+					anchor = target_anchor
+				_slots_dirty = true
 		else:
 			anchor = target_anchor
 			if order == ORDER_MOVE:

@@ -43,7 +43,8 @@
   },
 
   "battle": {
-    "tick_rate": 30.0,
+    "_comment": "Battle simulation settings. tick_rate is the fixed simulation step the runtime advances the fight at: frames are accumulated and whole ticks are run, so one tick is always 1/tick_rate seconds and the same seed fights the same battle whatever the machine renders at. It is the step every recorded benchmark and showcase in this repository was measured with. A tick is a design decision, not a rendering one.",
+    "tick_rate": 20.0,
     "max_duration_seconds": 600.0,
     "field_width": 100.0,
     "field_height": 60.0,

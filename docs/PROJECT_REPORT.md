@@ -5,14 +5,17 @@ reader (human or AI) who needs to understand, review, or advise on Project Banne
 without access to the repository.
 
 **Repository state:** `github.com/JAYST3AM/project-banner` (public)
-**Revision:** `main` at the Step 7.3 dense battle and overlap scaling — 20 commits, working tree clean
+**Revision:** `main` at Step 7.8B — large-battle stalemate hardening, working tree clean
 **Engine:** Godot 4.7.2-stable, GDScript only
 **Status:** Steps 0–6 of the brief are complete and independently foundation-locked
 (6.5 audit remediation, 6.6 lock), **Step 7 — Tactical Combat 2.0: terrain and formation
-foundation** is complete, **Step 7.1** has hardened its edge cases, **Step 7.2** removed
-the scaling bottleneck Step 7 measured, and **Step 7.3 removed the one that measurement
-left behind**. **The first major checkpoint (the full
-vertical slice) is reached and verified**, on a clean CI runner as well as locally.
+foundation** is complete, and Steps 7.1–7.8 hardened it, removed the scaling bottlenecks
+measurement found, and moved the two hottest of them into a native accelerator.
+**Step 7.8B** fixed the one thing Step 7.8 left behind: a formed 300 v 300 battle that froze at
+half casualties. The same battle now fights to a decision, eleven seeds all resolve, and the
+runtime runs on a fixed simulation step so the same seed fights the same battle on any machine.
+**The first major checkpoint (the full vertical slice) is reached and verified**, on a clean CI
+runner as well as locally.
 
 > This is a snapshot. `docs/CURRENT_STATE.md` in the repository is the living version
 > and is updated every milestone.
@@ -237,6 +240,16 @@ world and one system consuming randomness cannot shift another's results.
 Seeds use a hand-written FNV-1a hash rather than Godot's built-in `hash()`, because
 the built-in makes no cross-version stability guarantee — a campaign seed that
 changed meaning after an engine upgrade would silently rewrite a saved world.
+
+**The battle's own step is fixed (Step 7.8B).** Until then the battle scene handed
+`BattleSimulator.step()` the length of the frame it had just rendered, so the simulation's step
+size *was* the frame time and the same seed could fight a different battle on a different machine
+— a determinism hole in the one place the project leans on it hardest. The scene now runs on
+`BattleClock`: real frame time accumulates, whole steps of one fixed size come out
+(`1 / battle.tick_rate` = 0.05 s, eight ticks at most per frame, no more than half a second of
+un-run time ever queued), and a frame decides how *many* ticks to run and nothing else. Battle
+speed multiplies real time rather than the step. The suite runs one battle at 60 fps and at 20 fps
+and asserts the two reach an identical state, soldier for soldier, at the same tick.
 
 Two systems that need randomness without storing generator state derive it from a
 counter instead:
@@ -1195,6 +1208,39 @@ partition, or the report will confidently print numbers that do not add up.
 milestone three times and nothing detected it. It was found by grepping for duplicated
 headings before adding a fourth copy. Documentation is not verified by any test, and that is
 exactly where a silent error is cheapest to make and most expensive to trust.
+
+### 10.11 The Step 7.8B pass — a battle that could not resume
+
+Step 7.8's showcase found that a formed 300 v 300 battle **froze** at roughly half casualties: 302
+dead, 298 standing, nobody within reach of anybody, and no further casualties for the rest of the
+battle however long the clock was set to. It was recorded rather than fixed, with the numbers
+attached. Step 7.8B reproduced it headlessly, tick by tick, and found two defects nested inside
+each other.
+
+| # | Defect | Why it was invisible | Caught by |
+| --- | --- | --- | --- |
+| 1 | **A body with nobody in contact steered at the enemy's *anchor*.** The rule was written to let a wing that had not arrived keep closing; what it did was drive the two centres onto one another — measured, **0.050003 units apart**. With the centres together, the two bodies' surviving ranks land on one lattice, exactly one spacing apart in the closing axis. Slot spacing is 2.6 units and melee reach is 2.4, so the two masses slid *through* each other without a single soldier ever being in reach: 298 men inside a 23-unit box, `in_contact` false for all six bodies. | Everything was behaving as written. A body out of contact has no line to hold, so closing the whole way is a reasonable instruction — and it is only wrong once the *bodies* have worn down, which takes 400 seconds of fighting to arrange. | `tests/test_battle_hardening.gd` — two engaging centres must never be driven inside one another |
+| 2 | **The body then could not stop, so it could not let anybody move.** The centre sat 0.050003 units from its station — the arrive radius (0.05) plus 3.05e-6 — and a step that fine is below what a single-precision `Vector2` can express at a coordinate of 104. `advance()` computed the movement, applied it, and changed nothing; `is_moving()` therefore reported `moving` for the next fifteen thousand ticks. That mattered because `is_moving()` gates the press-forward rule — the one mechanism that could have restarted the fight. Measured: press-forward fired **zero** times in a 24,000-tick battle. | A body reporting `moving` while standing still is indistinguishable from a body that is about to move. It took a per-tick trace — anchors to nine decimal places, unchanging — to see that the assignment was being absorbed by the arithmetic. | `tests/test_battle_hardening.gd` drives the frozen numbers themselves, and the suite asserts that pressing forward fires when the line has stopped |
+
+**The fix, and what it left alone.** The engaged body's station is now where the two bodies'
+*surviving fronts* meet, one spacing per rank destroyed, and never inside the enemy's centre; and a
+movement too fine for the centre to express counts as an arrival. For two intact bodies the station
+is the old number exactly, so an un-fought battle did not move; formations, slots, spacing,
+ownership, casualties on the roll, facing, targeting, the native kernels and the save format were
+not touched. The same battle now fights to a decision - seed 780780 resolves at 611.1 seconds with
+4 enemy soldiers standing and the player's army destroyed, and eleven seeds all resolve by
+annihilation with zero stalemates.
+
+**The generalisable lesson.** The original freeze was recorded as "the survivors stand on rigid
+slots and nobody is within reach", which is a description of the *symptom* — and it pointed at the
+formation geometry, where the fix does not live. What found the cause was **printing the state
+one tick at a time**: the anchors were not merely close, they were identical to nine decimals, and
+a value that does not change under an assignment is a different kind of bug from a value that
+changes slowly. When a simulation stops, the question is not only "where is everything" but "what
+is each part *doing*" — and here, six bodies were all reporting that they were on their way
+somewhere while standing perfectly still.
+
+---
 
 ## 11. What is *not* implemented
 

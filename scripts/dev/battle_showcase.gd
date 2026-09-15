@@ -59,6 +59,9 @@ var _enemy_unit_type := "spearman"
 ## anything. Raising it is not a change to a combat rule: it lets the same fight run long
 ## enough to produce a winner, and the report says which limit was in force.
 var _max_seconds := 0.0
+## Dev-only battle journal: "" unless the run asked for one with --battlelog[=<path>].
+var _journal_path := ""
+var journal: BattleJournal = null
 
 var config: GameConfig = null
 var catalog: FormationCatalog = null
@@ -133,9 +136,10 @@ func _ready() -> void:
 	catalog = FormationCatalog.load_from()
 	units_catalog = UnitCatalog.load_from()
 	_build_battle()
-	print("showcase: %d v %d deployed, %d formations, field %.0fx%.0f" % [
+	print("showcase: %d v %d deployed, %d formations, field %.0fx%.0f, setup %s" % [
 		simulator.side_count(SIDE_PLAYER), simulator.side_count(SIDE_ENEMY),
-		simulator.formations.size(), FIELD.x, FIELD.y])
+		simulator.formations.size(), FIELD.x, FIELD.y,
+		ShowcaseBattle.setup_checksum(simulator.units)])
 	_started = false
 	_run_start_usec = Time.get_ticks_usec()
 
@@ -166,48 +170,23 @@ func _parse_args() -> void:
 			_enemy_unit_type = arg.substr(14)
 		elif arg.begins_with("--max-seconds="):
 			_max_seconds = maxf(0.0, float(arg.substr(14)))
+		elif arg == "--battlelog":
+			_journal_path = BattleJournal.DEFAULT_PATH
+		elif arg.begins_with("--battlelog="):
+			_journal_path = arg.substr(12)
 
 
-## Build the armies, the ground and the bodies. Everything below goes through the same
-## production constructors the battle scene uses.
+## Build the armies, the ground and the bodies. Everything goes through the production
+## constructors the battle scene uses, and the deployment itself lives in [ShowcaseBattle]
+## because the stalemate regression and the automated probe open this same battle - one
+## definition, so the run that is watched and the run that is measured cannot drift apart.
 func _build_battle() -> void:
-	context = BattleContext.new()
-	context.battle_id = "showcase_%d" % _per_side
-	context.battle_seed = _seed
-	context.terrain_seed = _seed
-	context.enemy_display_name = "Bandits"
-
-	var per_side := _per_side
-	# Three bodies a side, as even as the count allows.
-	var bodies := 3
-	var per_body := int(ceil(float(per_side) / float(bodies)))
-
-	var units: Array[BattleUnit] = []
-	var next_id := 0
-	for side_value in [SIDE_PLAYER, SIDE_ENEMY]:
-		var side := str(side_value)
-		var type_id := _unit_type if side == SIDE_PLAYER else _enemy_unit_type
-		var on_left := side == SIDE_PLAYER
-		for i in per_side:
-			var body_index := mini(bodies - 1, i / per_body)
-			var within := i % per_body
-			var snapshot := _make_snapshot(type_id, side, i)
-			var unit := BattleUnit.from_snapshot(snapshot, side, next_id)
-			next_id += 1
-			units.append(unit)
-			_place_in_block(unit, body_index, within, per_body, on_left)
-
-	simulator = BattleSimulator.new(config, _seed)
-	if _max_seconds > 0.0:
-		simulator.max_duration = _max_seconds
-	simulator.field_size = FIELD
-	simulator.grid.configure(FIELD, simulator.cell_size)
-	simulator.overlap_grid.configure(FIELD, simulator.overlap_cell_size)
-	simulator.add_units(units)
-	simulator.set_terrain_from_context(context, config)
-	terrain = simulator.terrain
-
-	_build_formations(bodies, per_body, units)
+	var built := ShowcaseBattle.build(
+		config, units_catalog, catalog, _per_side, _seed,
+		_unit_type, _enemy_unit_type, _max_seconds)
+	context = built["context"]
+	simulator = built["simulator"]
+	terrain = built["terrain"]
 
 	view = BattleView.new()
 	add_child(view)
@@ -229,90 +208,6 @@ func _build_battle() -> void:
 	ai_enemy = BattleAI.create(config, SIDE_ENEMY)
 
 	_build_hud()
-
-
-func _make_snapshot(type_id: String, side: String, index: int) -> Dictionary:
-	var definition := units_catalog.get_definition(type_id)
-	if definition == null:
-		definition = units_catalog.get_definition("spearman")
-	var level := 1
-	var max_hp := definition.max_hp_at(level, config)
-	return {
-		"soldier_id": "show_%s_%d" % [side, index],
-		"name": "%s %d" % [definition.display_name, index],
-		"unit_type_id": definition.id,
-		"unit_name": definition.display_name,
-		"level": level,
-		"max_hp": max_hp,
-		"hp": max_hp,
-		"attack": definition.attack_at(level, config),
-		"defence": definition.defence,
-		"move_speed": definition.move_speed,
-		"attack_range": definition.attack_range,
-		"attack_cooldown": definition.attack_cooldown,
-		"ranged": definition.ranged,
-		"traits": [],
-	}
-
-
-## Lay one soldier out where its army was drawn up, in a coarse block of its own body's
-## area. Deliberately not on its formation slot: a freshly deployed battle opens with the
-## ranks dressing, and this showcase should open the same way rather than with everyone
-## already standing on their mark.
-func _place_in_block(unit: BattleUnit, body_index: int, within: int, per_body: int, on_left: bool) -> void:
-	var files := 10
-	var ranks := int(ceil(float(per_body) / float(files)))
-	var file := within % files
-	var rank := within / files
-	var spacing := 2.6
-	var body_span := float(files - 1) * spacing
-	var body_depth := float(maxi(0, ranks - 1)) * spacing
-	var centre_y := FIELD.y * 0.5 + (float(body_index) - 1.0) * (body_span + 16.0)
-	var anchor_x := 46.0 if on_left else FIELD.x - 46.0
-	var x := anchor_x - body_depth * 0.5 + float(rank) * spacing if on_left \
-		else anchor_x + body_depth * 0.5 - float(rank) * spacing
-	var y := centre_y - body_span * 0.5 + float(file) * spacing
-	unit.position = Vector2(x, y)
-	unit.facing = Vector2.RIGHT if on_left else Vector2.LEFT
-
-
-## Three bodies a side: centre, left, right. Membership comes from where the army was
-## drawn up - a body owns the soldiers standing in its part of the line - and every body
-## is then given the same orders the production AI would give it: face the enemy, engage.
-func _build_formations(bodies: int, per_body: int, units: Array[BattleUnit]) -> void:
-	for side_value in [SIDE_PLAYER, SIDE_ENEMY]:
-		var side := str(side_value)
-		var opposing_centre := Vector2(FIELD.x - 46.0, FIELD.y * 0.5) if side == SIDE_PLAYER \
-			else Vector2(46.0, FIELD.y * 0.5)
-		for body_index in bodies:
-			var members: Array[int] = []
-			for i in per_body:
-				var unit_index := _unit_index_of(side, body_index, per_body, i, units)
-				if unit_index >= 0:
-					members.append(units[unit_index].id)
-			if members.is_empty():
-				continue
-			var centroid := Vector2.ZERO
-			for unit_id in members:
-				centroid += simulator.find_unit(unit_id).position
-			centroid /= float(members.size())
-			var body := BattleFormation.create(
-				"%s_%s" % [side, BODY_IDS[body_index]], side, centroid,
-				0.0 if side == SIDE_PLAYER else PI, "line", catalog, config)
-			simulator.add_formation(body)
-			simulator.assign_formation(body, members)
-			body.order_face_toward(opposing_centre)
-			body.set_facing(body.desired_facing)
-			body.order_engage()
-			body.ensure_slots()
-
-
-func _unit_index_of(side: String, body_index: int, per_body: int, within: int, units: Array[BattleUnit]) -> int:
-	var offset := 0 if side == SIDE_PLAYER else _per_side
-	var index := offset + body_index * per_body + within
-	if index < 0 or index >= units.size():
-		return -1
-	return index
 
 
 ## ---------- camera --------------------------------------------------------
@@ -443,6 +338,10 @@ func _process(delta: float) -> void:
 		_run_start_usec = Time.get_ticks_usec()
 		_stage = Stage.OPENING
 		_stage_label = "opening"
+		if _journal_path != "":
+			journal = BattleJournal.open(_journal_path)
+			if journal != null:
+				journal.note_start(simulator, _seed)
 		_request_shot("0_opening")
 
 	if simulator.is_running():
@@ -463,6 +362,8 @@ func _process(delta: float) -> void:
 			_ticks_this_frame += 1
 			view.add_events(events)
 			_consume_events(events)
+			if journal != null:
+				journal.observe(simulator)
 
 	if _ticks_this_frame > 0:
 		view.queue_redraw()
@@ -792,6 +693,9 @@ func _finish_run() -> void:
 		_stage = Stage.RESULT
 		_stage_label = "result"
 		_mark_stage()
+		# The battle is over and the journal has nothing left to say about it.
+		if journal != null:
+			journal.close()
 	# The final shot is requested early in the grace period rather than as the last thing
 	# before writing: a capture that never completes (a window that stopped presenting, an
 	# image the driver refused) must not be able to stop the report being written.
@@ -926,7 +830,7 @@ func _build_report() -> Dictionary:
 
 func _report_text(report: Dictionary) -> String:
 	var lines: PackedStringArray = []
-	lines.append("PROJECT BANNER - %d v %d BATTLE SHOWCASE (production build at 738aa814)" % [
+	lines.append("PROJECT BANNER - %d v %d BATTLE SHOWCASE" % [
 		int(report["per_side"]), int(report["per_side"])])
 	lines.append("field %.0fx%.0f   window %dx%d   seed %d   %d ticks/frame   overlay %s   battle clock %.0fs" % [
 		float(report["field"][0]), float(report["field"][1]),

@@ -788,21 +788,30 @@ func _update_formations(delta: float) -> void:
 
 ## Where a body that has been told to close with the enemy wants its centre to be.
 ##
-## Normally it stops a rank's depth short of the enemy centre: a formation decides
-## where the body stands, and whether that puts steel in reach is the soldiers'
-## business.
+## [b]The station is where the two bodies' surviving fronts meet.[/b] A body stops when the
+## ranks it still has are touching the ranks the enemy still has - measured from the
+## forward-most place each body has a living man standing, not from the depth its layout was
+## drawn with. For two intact bodies those are the same number, so nothing about an
+## un-fought battle changes; they part company exactly when casualties have opened the
+## ranks, and there the difference is the whole point. A line whose front rank has been
+## killed has to walk its next rank into the enemy to keep fighting, and it cannot while its
+## centre is held at the depth of a body it no longer has.
 ##
-## The exception is the stalled battle, and it is judged per body rather than per side.
-## If [i]this[/i] formation has nobody in contact - its line broken, a survivor standing
-## in a gap wider than a sword, nobody in it able to reach anybody - then stopping short
-## leaves it standing a few feet from an enemy it cannot touch, forever. So a body that
-## is not itself in contact closes the whole way. Whether the rest of the army is
-## fighting is not this body's business: a wing that has not reached the enemy must be
-## able to close even while the centre is engaged, which is why contact is a property of
-## a formation and not of a side. See D-056.
+## [b]A body never steers inside the enemy.[/b] The station is always at least [member
+## contact_gap] in front of the hostile centre, so a body's centre cannot be driven into -
+## let alone through - the body it is closing on. This is what the previous rule did: an
+## engaged body with nobody in contact aimed at the enemy's [i]anchor[/i] and walked its
+## centre onto it, which left the two bodies' surviving ranks on one lattice a single
+## spacing apart - just outside every melee reach - and froze a 300 v 300 battle with both
+## armies still standing. See D-100.
 ##
-## The check costs one boolean, because the per-soldier reach test already had to be
-## made.
+## [b]Contact is a property of a body, not of a side.[/b] Whether the rest of the army is
+## fighting is not this body's business: a wing that has not reached the enemy closes while
+## the centre is engaged. See D-056.
+##
+## The walk this costs is over the body's own roll, twice - its own front and its target's -
+## and it happens where the body is already walking its roll to work out its pace. See
+## [method _surviving_front].
 func _engage_target_for(formation: BattleFormation) -> Vector2:
 	var target := _nearest_enemy_formation(formation)
 	if target == null:
@@ -811,10 +820,65 @@ func _engage_target_for(formation: BattleFormation) -> Vector2:
 	var distance := to_target.length()
 	if distance <= 0.0001:
 		return formation.anchor
-	if formation.in_contact:
-		var stop := (formation.depth() + target.depth()) * 0.5 + contact_gap
-		return target.anchor - (to_target / distance) * stop
-	return target.anchor
+	var closing := to_target / distance
+	var fronts := _surviving_front(formation, closing) + _surviving_front(target, -closing)
+	var stop := maxf(0.0, fronts) + contact_gap
+	return target.anchor - closing * stop
+
+
+## How far in front of its centre a body still has a place to stand a living man, along
+## [param direction].
+##
+## [b]The body's surviving frontage, not the shape it was deployed in.[/b] Casualties stay on
+## a body's roll on purpose, so that a hole in the line stays a hole - and a hole is not a
+## front. A rank that has been killed contributes nothing here, which is the difference
+## between a formation that keeps fighting as it is worn down and one that stands at a
+## correct distance from a body of men that is no longer there. See D-101.
+##
+## Measured on the slots rather than on where the soldiers are standing: the slot layout is the
+## body's own statement about where its ranks are, and a soldier who has pressed forward on its
+## own should not redefine where the whole body's front is. A body with nobody left standing has
+## no front and answers zero.
+##
+## [b]The living members come from the tick's own summary rather than from the roll.[/b] The
+## pass that counts a body's soldiers has already collected exactly the men this question is
+## about - alive, on this body's side, with their places on the roll - so asking it again per
+## member would be a dictionary probe and a method call per soldier per tick for an answer the
+## battle already holds. It costs one tick of lag on a death, which is a worn rank arriving a
+## fiftieth of a second later than it could have. Measured at twenty thousand soldiers in matched
+## thirty-tick windows: reading the roll itself put 31.7 ms/tick on the formation phase, and this
+## puts 0.9, with the whole tick 2.6 ms/tick slower than the build before the rule existed. See
+## D-104.
+##
+## [b]Arithmetic rather than geometry, deliberately.[/b] A slot is
+## [code]anchor + right * lateral + forward * forward_offset[/code] and both of those offsets are
+## fixed by the soldier's place on the roll, so the projection is
+## [code]lateral * (right . direction) + forward_offset * (forward . direction)[/code] - two
+## scalars hoisted out of the loop and four integer operations per soldier. Building the slot
+## positions and subtracting vectors would be the same answer at several times the cost.
+func _surviving_front(body: BattleFormation, direction: Vector2) -> float:
+	if body.index < 0 or body.index >= _body_member_count.size():
+		return 0.0
+	var count := _body_member_count[body.index]
+	var members: Array[BattleUnit] = _body_members[body.index]
+	if count <= 0 or members == null:
+		return 0.0
+	count = mini(count, members.size())
+	var files := maxi(1, body.file_count)
+	var half_files := float(files - 1) * 0.5
+	var half_ranks := float(body.rank_count - 1) * 0.5
+	var lateral_scale := body.right_vector().dot(direction) * body.spacing
+	var forward_scale := body.forward().dot(direction) * body.spacing
+	var front := -INF
+	for i in count:
+		var place: int = members[i].slot_index
+		if place < 0:
+			continue
+		var projection := (float(place % files) - half_files) * lateral_scale \
+			+ (half_ranks - float(place / files)) * forward_scale
+		if projection > front:
+			front = projection
+	return 0.0 if front == -INF else front
 
 
 ## The nearest opposing body. Bodies are few - one or two a side - so this is a short
