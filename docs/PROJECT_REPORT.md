@@ -1284,6 +1284,11 @@ kills and history preserved, nothing created or lost, one body per living soldie
 and an invariant checker that proves it after the fact. Two thousand randomized transitions - splits,
 merges, deaths, movement - leave no complaint, and the roster and ids are asserted unchanged.
 
+**Verification.** Full suite: **25 suites, 8,785 assertions, 0 failures**, native kernel required;
+persistence write 6/0 and verify 95/0; CI run `35013999526` (job `104532715884`) on
+`38d794198bacb152c0f655b3bb7119dd32986c4c` - all fifteen steps success, including the native build,
+the native separation-pass agreement check and both persistence phases.
+
 **The generalisable lesson.** The optimisation that worked was not a cheaper search but a *smaller
 set of soldiers who needed to search*, and what made that safe was refusing to touch the parts of
 the old architecture that were already right: retention, the cadence, the ladder, the hysteresis

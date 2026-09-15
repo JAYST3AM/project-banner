@@ -1768,7 +1768,9 @@ soldier is in at most one body by construction, and `check_membership_invariants
 afterwards rather than trusting it.
 
 **See also:** D-105 (the rule and its numbers), D-106 (split, merge and the ownership invariants),
-and the engagement benchmark at `scenes/dev/engagement_bench.tscn`.
+and the engagement benchmark at `scenes/dev/engagement_bench.tscn`. Verified by 25 suites and 8,785
+assertions with the native kernel required, persistence write 6/0 and verify 95/0, and CI run
+`35013999526` on `38d794198bacb152c0f655b3bb7119dd32986c4c`.
 
 ## Step 7.8B - large-battle stalemate hardening
 
