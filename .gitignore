@@ -48,3 +48,6 @@ native/**/*.os
 native/**/*.pdb
 # Engine API dumps are generated with --dump-extension-api for verification, never shipped.
 extension_api.json
+
+# Art source assets (licence forbids redistribution; large binaries)
+assets/art_source/
