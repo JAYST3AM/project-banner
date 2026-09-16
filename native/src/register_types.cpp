@@ -1,6 +1,7 @@
 #include "register_types.h"
 
 #include "native_overlap_kernel.h"
+#include "native_soldier_batch.h"
 #include "native_target_query.h"
 
 #include <gdextension_interface.h>
@@ -15,6 +16,7 @@ void initialize_pb_native_module(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(NativeTargetQuery);
 	GDREGISTER_CLASS(NativeOverlapKernel);
+	GDREGISTER_CLASS(NativeSoldierBatch);
 }
 
 void uninitialize_pb_native_module(ModuleInitializationLevel p_level) {
