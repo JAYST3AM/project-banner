@@ -92,7 +92,7 @@ and restart-safe for some time.
 
 ## 5. Where it is right now
 
-**Verified:** 27 suites / 8,944 assertions / 0 failures headless, and a two-process restart check.
+**Verified:** 27 suites / 8,949 assertions / 0 failures headless, and a two-process restart check.
 
 **Committed and audited on `main`:** `b9d3bcc` (gameplay and view: groups move as one / D-108,
 right-click travel / D-109, an honesty pass on the settlement panel, per-suite save isolation in
@@ -100,10 +100,13 @@ right-click travel / D-109, an honesty pass on the settlement panel, per-suite s
 into one draw call), `e7b55d2` (a Godot tool that bakes a rigged 3D model into 8-direction sprite sheets),
 the milestone pair (the kill cleanup, measured at 98.3% of a tick and then made **104×** cheaper / D-110
 and D-111), then `c0ab486` (Step 7.11: the per-soldier loop counted by path and priced by operation /
-D-112) and `d1f47ab` (Step 7.12: the loop's calls removed - the per-body press-forward gate, the native
-mirror's guard, the terrain path / D-113 and D-114). The Step 7.13 slice that carries this brief is the
-formed-soldier focus fast path (D-115), and the turning-body transform was measured, priced and abandoned
-before anything was built on it. Step 7.8's separation pass is locked and untouched.
+D-112), `d1f47ab` (Step 7.12: the loop's calls removed - the per-body press-forward gate, the native
+mirror's guard, the terrain path / D-113 and D-114), `b52fff8` and `4685427` (Step 7.13's first two
+slices: the formed-soldier focus fast path and the measured instrument / D-115 and D-116), `9df01b3` (the
+block view draws the tick's boxes, plus the two load-bearing files the committed tree had been missing /
+D-117) and the native-mirror batch that carries this brief (D-118). The turning-body transform was
+measured, priced and abandoned before anything was built on it. Step 7.8's separation pass is locked and
+untouched.
 
 **Measured next bottlenecks** (from the repository's own profiles — these are the honest candidates
 for the next engineering milestone):
@@ -121,8 +124,16 @@ for the next engineering milestone):
   own arrival epsilon only **1.4 per cent** of soldier-ticks are on a body whose facing changed, which is
   the only case the existing rigid step path does not already cover. About a millisecond a tick is not
   worth a change to the most sensitive path in the game.
-- **The native mirror batch** is still the next boundary-crossing win: one crossing a tick instead of
-  twenty thousand, which needs a method on the C++ side and work against D-095.
+- **The native mirror batch is shipped, and it was smaller than its price said.** One bridge crossing per
+  flush instead of one per moving soldier, with flush-before-query so no search ever reads a stale mirror:
+  **3.2 ms a tick** measured paired at 20,000 soldiers (D-118), against an isolated price that predicted
+  near twenty. The lesson is recorded with it: an isolated price can rank candidates and cannot size them
+  - the same night saw the press-forward cache predicted at 16-18 ms and measure 10.7, and the terrain
+  collapse predicted at 10-16 and measure 21.8. Every slice is chosen on its price and accepted on its
+  paired run.
+- **The per-body focus snapshot is bounded and deferred, not rejected.** It can only remove the focus
+  sub-item (15.4 ms instrumented); the retained check and the due-look pipeline stay per soldier. If it is
+  taken, it should be taken as a measured experiment rather than believed on its arithmetic.
 - **The target-phase instrument costs what it measures - and it is now measured.** That loop carries
   per-soldier `Time.get_ticks_usec()` pairs; gating them behind `PB_TGT_TIMING=off` shows the instrument
   costs about **6.3 ms a tick** at this size (the whole tick 352.6 ms instrumented against 346.3 ms with

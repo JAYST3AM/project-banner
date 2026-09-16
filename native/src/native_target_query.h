@@ -57,6 +57,11 @@ public:
 
 	// --- the two live-state mirrors. Called where the battle changes, not once a tick.
 	void update_position(int slot, float x, float y);
+	// A tick's worth of movement in one crossing: the same guard, the same write and the same order
+	// as calling update_position() per soldier, for a caller that moves thousands of soldiers a tick
+	// and cannot pay the bridge per soldier. The three arrays are parallel; entries past the shortest
+	// are ignored. See D-118.
+	void update_positions(const PackedInt32Array &slots, const PackedFloat32Array &xs, const PackedFloat32Array &ys);
 	// The margin widens the *walk*; it never widens the radius the exact test promises.
 	void set_margin(float margin);
 	void mark_dead(int slot);

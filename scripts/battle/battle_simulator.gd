@@ -114,6 +114,11 @@ var focus_inline_enabled: bool = true
 ## `can_answer_natively()`. On by default and switchable off with `PB_NATIVE_GUARD=call`, for the same
 ## reason as everything else here: a paired run in one build beats a comparison against an old log.
 var native_guard_inlined: bool = true
+## Whether the native mirror's position writes are batched into one call per flush instead of one per
+## moving soldier: appended as soldiers move, written before the next query and once at the end of the
+## step. On is the shipped behaviour; `PB_NATIVE_BATCH=off` restores the per-call path exactly, so the
+## two can be compared in one build. See D-118.
+var native_batch_enabled: bool = true
 ## Whether `_move_toward` applies the terrain speed rule inline instead of calling `_effective_speed`,
 ## and reads the ground through the terrain's one-call fast path instead of its cell-index chain. On by
 ## default, switchable off with `PB_TERRAIN_FAST=off`, which restores the previous path exactly.
@@ -770,6 +775,9 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 			terrain_speed_inline = false
 		if OS.get_environment("PB_NATIVE_GUARD").to_lower() in ["call", "method", "off", "0", "false", "no"]:
 			native_guard_inlined = false
+		native_batch_enabled = config.get_bool("battle.native_batch_enabled", true)
+		if OS.get_environment("PB_NATIVE_BATCH").to_lower() in ["off", "0", "false", "no", "call"]:
+			native_batch_enabled = false
 		if OS.get_environment("PB_PRESS_CACHE").to_lower() in ["off", "0", "false", "no"]:
 			press_forward_cache_enabled = false
 		if OS.get_environment("PB_RIGID_GROUPS").to_lower() in ["off", "0", "false", "no"]:
@@ -784,6 +792,7 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		target_contact_loss_factor = maxf(0.0, config.get_float("battle.target_contact_loss_factor", 1.0))
 	grid = BattleSpatialGrid.new()
 	grid.native_guard_inlined = native_guard_inlined
+	grid.native_batch_enabled = native_batch_enabled
 	grid.configure(field_size, cell_size)
 	# The pass is built as the locked reference here and replaced by the measured best path in
 	# start(), which is the earliest point the army size is known and the last point before a
@@ -1817,6 +1826,11 @@ func step(delta: float) -> Array[Dictionary]:
 		profile["ticks"] = int(profile.get("ticks", 0)) + 1
 	if sample_phases and not sample_mark.is_empty():
 		_sample_tick(sample_mark)
+	if grid != null:
+		# Every move the tick made, written in one call if nothing asked a question first. The
+		# mirror's end-of-tick state is what the next tick's snapshot is compared against, so it
+		# is written here and not left in flight. See D-118.
+		grid.flush_moves()
 	# The tick counter moves last, so every decision taken during this tick saw the same
 	# tick number. This is the only clock the target schedule reads, and it counts
 	# simulation ticks rather than anything measured off a wall.

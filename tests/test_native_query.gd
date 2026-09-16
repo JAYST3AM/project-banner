@@ -40,6 +40,7 @@ func run() -> void:
 	equal(ClassDB.class_exists("NativeTargetQuery"), true,
 		"the accelerator class is registered with the engine")
 	_test_generated_layouts_agree()
+	_test_the_batched_mirror_answers_exactly_as_the_per_call_mirror()
 	_test_boundary_cases_agree()
 	_test_live_state_is_seen_by_both_backends()
 	_test_dead_units_are_never_collected()
@@ -384,3 +385,65 @@ func _formed_battle(mode: int) -> Dictionary:
 	simulator.call("_refresh_focus")
 	simulator.start()
 	return {"simulator": simulator}
+
+
+## The batched mirror against the per-call mirror: one battle, driven twice - the switch off for one of
+## the runs - comparing what every soldier carries as a target, whether he is alive, his health and his
+## place, on every tick. The batching defers writes to its flush points, so this is the test that says a
+## deferred write is never a different answer - including the searches made part-way through a tick,
+## which are the entire reason the flush-before-query rule exists. See D-118.
+func _test_the_batched_mirror_answers_exactly_as_the_per_call_mirror() -> void:
+	section("the batched mirror answers exactly as the per-call mirror")
+	var batched := _drive_mirror_battle(true, 20)
+	var per_call := _drive_mirror_battle(false, 20)
+	equal(int(batched["backend"]), NATIVE_FULL,
+		"the batched run really was on the native backend, or this proves nothing")
+	var trail_batched: Array = batched["trail"]
+	var trail_per_call: Array = per_call["trail"]
+	equal(trail_batched.size(), trail_per_call.size(), "both runs produced a line for every tick")
+	var disagreements := 0
+	var first_difference := -1
+	for tick in mini(trail_batched.size(), trail_per_call.size()):
+		if trail_batched[tick] != trail_per_call[tick]:
+			disagreements += 1
+			if first_difference < 0:
+				first_difference = tick
+	equal(disagreements, 0,
+		"every tick's targets, health and positions are identical (first difference: %d)" % first_difference)
+	equal(int(per_call["flushes"]), 0, "the reference never batched")
+	check(int(batched["flushes"]) > 0, "and the batched run did: %d flushes carrying %d writes" % [
+		int(batched["flushes"]), int(batched["writes"])])
+
+
+## A battle large enough for the native backend, driven for a number of ticks, with one line per tick
+## describing everything a query can change. The two runs get the same fixture, the same seed and the
+## same tick count, so a difference anywhere in the trail is the mirror and nothing else.
+func _drive_mirror_battle(batch: bool, ticks: int) -> Dictionary:
+	var built := ShowcaseBattle.build(
+		GameManager.config(), UnitCatalog.load_from(), FormationCatalog.load_from(), 600, SEED)
+	var simulator: BattleSimulator = built["simulator"]
+	simulator.start()
+	# The grid copied the switch when the battle was configured, so this run sets it on the grid.
+	simulator.grid.native_batch_enabled = batch
+	var units: Array[BattleUnit] = simulator.units
+	var trail: Array[String] = []
+	for tick in ticks:
+		simulator.step(TICK)
+		trail.append(_mirror_trail(units))
+	return {
+		"trail": trail,
+		"flushes": simulator.grid.native_batch_flushes,
+		"writes": simulator.grid.native_batch_writes,
+		"backend": simulator.grid.backend,
+	}
+
+
+## One line describing what a tick decided: each soldier's carried target, whether he is alive, his
+## health and his place, written to four decimals so a drift of a thousandth of a unit still shows.
+func _mirror_trail(units: Array[BattleUnit]) -> String:
+	var parts := PackedStringArray()
+	for unit in units:
+		parts.append("%d:%d:%d:%d:%.4f:%.4f" % [
+			unit.id, unit.auto_target_id, 1 if unit.is_alive() else 0, unit.hp,
+			unit.position.x, unit.position.y])
+	return "|".join(parts)

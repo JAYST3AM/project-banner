@@ -417,6 +417,25 @@ func can_answer_natively() -> bool:
 var native_guard_inlined: bool = true
 
 
+## Whether the mirror's position writes are batched across the bridge - appended to three arrays as
+## soldiers move, written in one native call before the next query, and once at the end of the step -
+## instead of one crossing per soldier. The set of moves in flight is exactly the moves the per-call
+## path has not applied yet, which is what makes the two paths identical rather than merely close: a
+## query flushes first, so no search ever reads a mirror the per-call path would already have updated.
+## On is the shipped behaviour; `PB_NATIVE_BATCH=off` restores the per-call path exactly. See D-118.
+var native_batch_enabled: bool = true
+## Development only: how many flushes carried how many writes, so the batching's own shape can be
+## checked by a test rather than assumed.
+var native_batch_flushes: int = 0
+var native_batch_writes: int = 0
+## The moves made since the last flush, as parallel arrays. Grown, never rebuilt.
+var _pending_slots := PackedInt32Array()
+var _pending_xs := PackedFloat32Array()
+var _pending_ys := PackedFloat32Array()
+var _pending_count: int = 0
+const BATCH_GROWTH := 2048
+
+
 ## A soldier moved. Its cell is deliberately *not* updated: the index is a snapshot of where
 ## everyone stood at the rebuild, and only the position the exact test reads is live.
 func native_moved(unit: BattleUnit) -> void:
@@ -429,7 +448,39 @@ func native_moved(unit: BattleUnit) -> void:
 		return
 	if unit.id >= _slot_of.size():
 		return
-	native_query.call("update_position", _slot_of[unit.id], unit.position.x, unit.position.y)
+	var slot: int = _slot_of[unit.id]
+	if native_batch_enabled:
+		# Appended, not written: the write is one crossing per flush. See D-118.
+		if _pending_count >= _pending_slots.size():
+			var grown := _pending_slots.size() + BATCH_GROWTH
+			_pending_slots.resize(grown)
+			_pending_xs.resize(grown)
+			_pending_ys.resize(grown)
+		_pending_slots[_pending_count] = slot
+		_pending_xs[_pending_count] = unit.position.x
+		_pending_ys[_pending_count] = unit.position.y
+		_pending_count += 1
+		return
+	native_query.call("update_position", slot, unit.position.x, unit.position.y)
+
+
+## Write every move made since the last flush across the bridge in one call.
+##
+## Called before every query - so a search never reads a mirror the per-call path would already have
+## updated - and once at the end of the step, so the tick's end state is written even when nothing
+## asked a question. Entries are applied in the order they were made, which is the order the per-call
+## path applied them in. See D-118.
+func flush_moves() -> void:
+	if _pending_count <= 0:
+		return
+	if native_query != null and _synced and backend != Backend.GDSCRIPT:
+		native_query.call("update_positions",
+			_pending_slots.slice(0, _pending_count),
+			_pending_xs.slice(0, _pending_count),
+			_pending_ys.slice(0, _pending_count))
+		native_batch_flushes += 1
+		native_batch_writes += _pending_count
+	_pending_count = 0
 
 
 ## A soldier died. The reference rechecks liveness on every candidate it walks, so the mirror
@@ -443,6 +494,9 @@ func native_died(unit: BattleUnit) -> void:
 ## The whole query, answered in the accelerator: cells, side, liveness, the exact distance and
 ## the tie-break, with the live state mirrored in by the two hooks above.
 func native_nearest(unit: BattleUnit, side: String, radius: float) -> BattleUnit:
+	# Any move made since the last question is written before this one is asked, so the answer reads
+	# the same mirror the per-call path would have. See D-118.
+	flush_moves()
 	var wanted := _side_bit_of(side) if not side.is_empty() else 0
 	var started := Time.get_ticks_usec() if dev_profile else 0
 	var slot: int = native_query.call("collect_nearest", unit.position.x, unit.position.y, radius, wanted)
@@ -495,6 +549,8 @@ func note_answer(unit: BattleUnit, radius: float, reference: BattleUnit, native:
 ## collected set identical rather than merely similar, and why the order it arrives in
 ## cannot matter: the exact test below keeps the nearest and breaks ties by unit id.
 func _collect_native(position: Vector2, radius: float, side: String, out: Array[BattleUnit]) -> void:
+	# The same rule as native_nearest: a query never reads a mirror with moves still in flight.
+	flush_moves()
 	var wanted := _side_bit_of(side) if not side.is_empty() else 0
 	var started := Time.get_ticks_usec() if dev_profile else 0
 	# The margin the reference adds is added here, so the accelerator needs no margin of its

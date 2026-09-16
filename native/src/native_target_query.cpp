@@ -93,6 +93,17 @@ void NativeTargetQuery::update_position(int slot, float x, float y) {
 	}
 }
 
+void NativeTargetQuery::update_positions(const PackedInt32Array &slots, const PackedFloat32Array &xs, const PackedFloat32Array &ys) {
+	// One crossing, and then the same call per entry that the caller would otherwise have made
+	// across the bridge. Keeping the guard and the write in update_position() rather than
+	// repeating them here is deliberate: one rule, one place, and a disagreement between the two
+	// paths is impossible by construction rather than by review.
+	const int64_t count = MIN(MIN(slots.size(), xs.size()), ys.size());
+	for (int64_t i = 0; i < count; i++) {
+		update_position(slots[i], xs[i], ys[i]);
+	}
+}
+
 void NativeTargetQuery::set_margin(float p_margin) {
 	_margin = p_margin;
 }
@@ -271,6 +282,7 @@ void NativeTargetQuery::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("collect", "px", "py", "radius", "wanted_bit"), &NativeTargetQuery::collect);
 	ClassDB::bind_method(D_METHOD("collect_nearest", "px", "py", "radius", "wanted_bit"), &NativeTargetQuery::collect_nearest);
 	ClassDB::bind_method(D_METHOD("update_position", "slot", "x", "y"), &NativeTargetQuery::update_position);
+	ClassDB::bind_method(D_METHOD("update_positions", "slots", "xs", "ys"), &NativeTargetQuery::update_positions);
 	ClassDB::bind_method(D_METHOD("mark_dead", "slot"), &NativeTargetQuery::mark_dead);
 	ClassDB::bind_method(D_METHOD("set_margin", "margin"), &NativeTargetQuery::set_margin);
 	ClassDB::bind_method(D_METHOD("candidates"), &NativeTargetQuery::candidates);

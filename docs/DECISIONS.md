@@ -3077,3 +3077,55 @@ a live frame is almost entirely the tick.
 living soldier stands inside a box, and that a thinned rank shows as a smaller box. Its first version
 failed on its own fixture - it stepped an unstarted battle, so nothing ticked and the boxes rightly
 stayed still - which is the difference between the rule being tested and the rule being assumed.
+
+
+## D-118 - the native mirror's writes cross the bridge once per flush, not once per soldier
+
+**Context.** Step 7.11 priced the native mirror at 0.998 us a call on the `NATIVE_FULL` backend - about
+twenty milliseconds a tick at twenty thousand movers. Step 7.13's proposal to hand each soldier his
+body's answer was bounded before it was built: it can only remove the focus sub-item, measured at
+15.4 ms instrumented, while the retained-target check (8.5 ms) and the due-look pipeline stay per soldier.
+That bound put it under the reviewer's own switch line ("if the measured result lands under about 20 ms,
+switch priority"), the reviewer agreed with the arithmetic, and ruled the mirror first.
+
+**Decision.** The mirror's position writes are batched. `native_moved` appends the move to three
+preallocated parallel arrays, and one native call - `NativeTargetQuery::update_positions` - writes them
+all at each *flush point*: before every query, and once at the end of the step. The C++ side keeps its
+guard and its write in `update_position` and calls it per entry, so the batched and per-call paths cannot
+disagree about either; the batch is a sanctioned D-095 mirror call site, not an alternate writer, and the
+"three position-write sites" invariant is untouched.
+
+**Why flush-before-query rather than once a tick.** The cell index is a snapshot while the exact test
+reads live positions, so a search made part-way through a tick must see every move made before it.
+Flushing at the flush points makes the writes in flight *exactly* the writes the per-call path has not
+applied yet, in the same order - identical by construction rather than close - and it is what keeps the
+comparison modes (`COMPARE`, `COMPARE_FULL`) usable as the oracle.
+
+**Measured** (paired in one build, `PB_NATIVE_BATCH=off` restoring the per-call path, 20,000 soldiers,
+one seed, `NATIVE_FULL` in both runs): the soldiers phase 153.703 ms against 156.864 ms, the whole tick
+350.570 ms against 352.953 ms - **3.2 ms a tick**, about nine tenths of one per cent.
+
+**A price that was right about the order and wrong about the size - three times in one night.** The
+probe's isolated price for one mirror call was 0.998 us, which predicts about twenty milliseconds for
+twenty thousand movers; this pair says the marginal call in a real tick is nearer a sixth of a
+microsecond, because a tight loop exposes a latency that a loop with other work in it hides. The same gap
+appeared in both directions earlier tonight: the press-forward cache was predicted at 16-18 ms and
+measured 10.7, and the terrain collapse was predicted at 10-16 and measured 21.8. The lesson is not that
+probes lie - it is that an isolated price can *rank* candidates and cannot *size* them, so a slice is
+chosen on its price and accepted on its paired run.
+
+**A note on the price probe's row.** With batching on - which is the shipped default - the probe's
+`native_moved()` row now prices the append rather than the crossing, which is why it reads lower than the
+0.998 us quoted above. The switch is what tells the two apart: `PB_NATIVE_BATCH=off` prices the crossing.
+
+**Proved, not asserted.** `tests/test_native_query.gd` drives one 1,200-unit battle twice - the switch
+off for one run - and compares every soldier's carried target, liveness, health and place on every tick:
+identical, with the batched run's flush and write counts checked and the reference's flushes asserted to
+be zero. The suite's existing compare-mode tests, which answer every automatic search twice and compare
+against the GDScript oracle, now run *under* the batched default - which is the mirror's contents being
+compared after every query rather than assumed equal.
+
+**The snapshot, recorded as bounded and deferred.** Bounded at ~15 ms, deferred in favour of this slice
+on the reviewer's arithmetic. If it is ever taken, it should be taken as a measured experiment rather
+than on its arithmetic: the in-situ discount that made this batch 3.2 ms instead of 20 very likely
+applies to the snapshot's estimate too.
