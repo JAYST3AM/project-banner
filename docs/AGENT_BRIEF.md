@@ -92,7 +92,7 @@ and restart-safe for some time.
 
 ## 5. Where it is right now
 
-**Verified:** 27 suites / 8,949 assertions / 0 failures headless, and a two-process restart check.
+**Verified:** 27 suites / 8,955 assertions / 0 failures headless, and a two-process restart check.
 
 **Committed and audited on `main`:** `b9d3bcc` (gameplay and view: groups move as one / D-108,
 right-click travel / D-109, an honesty pass on the settlement panel, per-suite save isolation in
@@ -126,11 +126,11 @@ for the next engineering milestone):
   worth a change to the most sensitive path in the game.
 - **The native mirror batch is shipped, and it was smaller than its price said.** One bridge crossing per
   flush instead of one per moving soldier, with flush-before-query so no search ever reads a stale mirror:
-  **3.2 ms a tick** measured paired at 20,000 soldiers (D-118), against an isolated price that predicted
-  near twenty. The lesson is recorded with it: an isolated price can rank candidates and cannot size them
-  - the same night saw the press-forward cache predicted at 16-18 ms and measure 10.7, and the terrain
-  collapse predicted at 10-16 and measure 21.8. Every slice is chosen on its price and accepted on its
-  paired run.
+  **3.16 ms off the soldiers phase and 2.38 ms off the whole tick** (about 0.7% of it) measured paired at
+  20,000 soldiers (D-118), against an isolated price that predicted near twenty. The lesson is recorded with
+  it: an isolated price can rank candidates and cannot size them - the same night saw the press-forward
+  cache predicted at 16-18 ms and measure 10.7, and the terrain collapse predicted at 10-16 and measure
+  21.8. Every slice is chosen on its price and accepted on its paired run.
 - **The per-body focus snapshot is bounded and deferred, not rejected.** It can only remove the focus
   sub-item (15.4 ms instrumented); the retained check and the due-look pipeline stay per soldier. If it is
   taken, it should be taken as a measured experiment rather than believed on its arithmetic.

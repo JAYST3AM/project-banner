@@ -41,6 +41,7 @@ func run() -> void:
 		"the accelerator class is registered with the engine")
 	_test_generated_layouts_agree()
 	_test_the_batched_mirror_answers_exactly_as_the_per_call_mirror()
+	_test_the_flush_boundaries_answer_like_the_per_call_path()
 	_test_boundary_cases_agree()
 	_test_live_state_is_seen_by_both_backends()
 	_test_dead_units_are_never_collected()
@@ -447,3 +448,85 @@ func _mirror_trail(units: Array[BattleUnit]) -> String:
 			unit.id, unit.auto_target_id, 1 if unit.is_alive() else 0, unit.hp,
 			unit.position.x, unit.position.y])
 	return "|".join(parts)
+
+
+## The flush boundaries, on a real battle rather than on paper: a soldier moved twice before anything asks
+## a question, and a question asked with those moves still in flight. Both are answered against the
+## per-call path's own answer rather than against a hand-written expectation, so the test cannot agree
+## with the implementation by being written to match it. An auditor asked for exactly these two cases.
+## See D-118.
+func _test_the_flush_boundaries_answer_like_the_per_call_path() -> void:
+	section("the flush boundaries answer like the per-call path")
+	var batched := _flush_boundary_answers(true)
+	var per_call := _flush_boundary_answers(false)
+	equal(int(batched["backend"]), NATIVE_FULL,
+		"the batched probe was on the native backend, or it proves nothing")
+	equal(int(per_call["backend"]), NATIVE_FULL,
+		"and so was the reference, or the two answers are not comparable")
+	equal(int(batched["midflight"]), int(per_call["midflight"]),
+		"a question asked with moves in flight sees where the soldier last stood, on both paths")
+	equal(int(batched["repeat_seen"]), int(per_call["repeat_seen"]),
+		"and the second of two moves to one slot is the one the mirror holds, on both paths")
+	equal(int(per_call["flushes"]), 0, "the reference never batched")
+	check(int(batched["flushes"]) > 0,
+		"and the batched probe did (%d flushes)" % int(batched["flushes"]))
+
+
+## Move one soldier twice with the grid watching, ask the accelerator where he is with those moves still in
+## flight, and report what it answered - the same sequence on both paths.
+##
+## The answer is read through the query rather than through a mirror accessor, because the query is the
+## mirror's only reader: if a deferred write were wrong, the wrong position is what the exact test sees,
+## and the answer is the wrong soldier or nobody. The first move puts him outside the radius and the second
+## inside it, so the two positions produce different answers and the test can tell them apart.
+func _flush_boundary_answers(batch: bool) -> Dictionary:
+	var built := ShowcaseBattle.build(
+		GameManager.config(), UnitCatalog.load_from(), FormationCatalog.load_from(), 600, SEED)
+	var simulator: BattleSimulator = built["simulator"]
+	simulator.start()
+	var grid: BattleSpatialGrid = simulator.grid
+	# The flag first, so the tick below is driven the way this probe means to drive it.
+	grid.native_batch_enabled = batch
+	# Then a tick, because the backend is chosen in start() and applied once a tick inside the grid's own
+	# rebuild - the same trap the price probe hit, and the reason this test asserts the backend rather
+	# than assuming it.
+	simulator.step(TICK)
+	# And the counters start here: what is reported below is this probe's own flushes, not the battle's
+	# first tick.
+	grid.native_batch_flushes = 0
+	grid.native_batch_writes = 0
+	var mover: BattleUnit = null
+	var searcher: BattleUnit = null
+	for unit in simulator.units:
+		if not unit.is_alive():
+			continue
+		if mover == null:
+			mover = unit
+			continue
+		if unit.side != mover.side:
+			searcher = unit
+			break
+	if mover == null or searcher == null:
+		return {"backend": -1, "midflight": -1, "repeat_seen": -1, "flushes": 0}
+	var radius := 8.0
+	var far := searcher.position + Vector2(40.0, 0.0)
+	var near := searcher.position + Vector2(3.0, 0.0)
+	mover.position = far
+	grid.native_moved(mover)
+	mover.position = near
+	grid.native_moved(mover)
+	# Nothing has flushed this on the batched path except the question itself.
+	var answer := grid.native_nearest(searcher, mover.side, radius)
+	var answered_id := answer.id if answer != null else -1
+	# What the same question says once the far position is what the mirror holds, so the two answers can
+	# be told apart at all.
+	mover.position = far
+	grid.flush_moves()
+	var far_answer := grid.native_nearest(searcher, mover.side, radius)
+	var far_id := far_answer.id if far_answer != null else -1
+	return {
+		"backend": grid.backend,
+		"midflight": answered_id,
+		"repeat_seen": 1 if answered_id != far_id else 0,
+		"flushes": grid.native_batch_flushes,
+	}

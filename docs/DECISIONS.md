@@ -3102,8 +3102,11 @@ applied yet, in the same order - identical by construction rather than close - a
 comparison modes (`COMPARE`, `COMPARE_FULL`) usable as the oracle.
 
 **Measured** (paired in one build, `PB_NATIVE_BATCH=off` restoring the per-call path, 20,000 soldiers,
-one seed, `NATIVE_FULL` in both runs): the soldiers phase 153.703 ms against 156.864 ms, the whole tick
-350.570 ms against 352.953 ms - **3.2 ms a tick**, about nine tenths of one per cent.
+one seed, `NATIVE_FULL` in both runs): the soldiers phase 153.703 ms against 156.864 ms and the whole tick
+350.570 ms against 352.953 ms - the phase fell **3.16 ms** and the tick fell **2.38 ms**, about seven
+tenths of one per cent of the tick. An auditor caught the first version of this entry calling 3.2 ms "a
+tick" and dividing a phase saving by a tick total; the two numbers are quoted separately here because they
+are two different claims.
 
 **A price that was right about the order and wrong about the size - three times in one night.** The
 probe's isolated price for one mirror call was 0.998 us, which predicts about twenty milliseconds for
@@ -3124,6 +3127,14 @@ identical, with the batched run's flush and write counts checked and the referen
 be zero. The suite's existing compare-mode tests, which answer every automatic search twice and compare
 against the GDScript oracle, now run *under* the batched default - which is the mirror's contents being
 compared after every query rather than assumed equal.
+
+**Two limits an auditor put on the record, kept rather than argued away.** The equivalence trail compares
+positions to four decimals and once per tick, so it cannot see a difference below a ten-thousandth of a
+unit, or one that appears and disappears inside a single tick; what it does see is every targeting
+decision, which is where a stale mirror would surface. And "the restored files are byte-identical to the
+prior working tree" is not provable from repository history - git never held a blob for them - so the
+claim that stands is the one that can be checked: the committed tree parses and runs, verified by importing
+an export of it in a clean directory.
 
 **The snapshot, recorded as bounded and deferred.** Bounded at ~15 ms, deferred in favour of this slice
 on the reviewer's arithmetic. If it is ever taken, it should be taken as a measured experiment rather

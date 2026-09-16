@@ -874,7 +874,7 @@ than leave a half-verified idea lying around.
 boundary crossing a tick instead of twenty thousand, which needs a method on the C++ side and work
 against D-095.
 
-| 3. the native mirror batched | one bridge crossing per moving soldier (D-118) | `PB_NATIVE_BATCH=off` | soldiers 156.864 -> 153.703 ms, tick 352.953 -> 350.570 ms: **3.2 ms** |
+| 3. the native mirror batched | one bridge crossing per moving soldier (D-118) | `PB_NATIVE_BATCH=off` | soldiers 156.864 -> 153.703 ms and tick 352.953 -> 350.570 ms: **3.16 ms off the phase, 2.38 ms off the tick** |
 
 **The lesson the three slices taught about prices.** An isolated price ranks candidates and does not size
 them: the press-forward cache was predicted at 16-18 ms from its price and measured 10.7; the terrain
