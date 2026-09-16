@@ -98,6 +98,12 @@ var engagement_disengage_ticks: int = ENGAGEMENT_DISENGAGE_TICKS
 ## himself. On by default and switchable off, so a benchmark can run the reference in this same build,
 ## tick for tick - the only honest way to attribute a difference to it. See D-112's consequence.
 var press_forward_cache_enabled: bool = true
+## Whether the target loop's per-soldier sub-item timers run. They are `Time.get_ticks_usec()` reads -
+## about four a soldier a tick - and D-112's own rule for a hot path is counts, not per-soldier timers.
+## On by default so existing logs stay comparable, switchable off with `PB_TGT_TIMING=off`, in which case
+## the phase marks stay and the sub-item breakdown reads zero. See D-116.
+var target_timing_enabled: bool = true
+
 ## Whether the formed-soldier fast path in `_focus_target` is spelled out instead of going through
 ## `_side_index()`, `_focus_unit_of()`, `is_focus_current()` and `is_alive()` - four calls to answer a
 ## question the body already knows. On by default, switchable off with `PB_FOCUS_INLINE=method`, so a
@@ -755,6 +761,9 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		native_guard_inlined = config.get_bool("battle.native_guard_inlined", true)
 		terrain_speed_inline = config.get_bool("battle.terrain_speed_inline", true)
 		focus_inline_enabled = config.get_bool("battle.focus_inline_enabled", true)
+		target_timing_enabled = config.get_bool("battle.target_timing_enabled", true)
+		if OS.get_environment("PB_TGT_TIMING").to_lower() in ["off", "0", "false", "no", "counts"]:
+			target_timing_enabled = false
 		if OS.get_environment("PB_FOCUS_INLINE").to_lower() in ["method", "call", "off", "0", "false", "no"]:
 			focus_inline_enabled = false
 		if OS.get_environment("PB_TERRAIN_FAST").to_lower() in ["off", "0", "false", "no"]:
@@ -2483,9 +2492,9 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 ## fighting does not have to ask the battlefield a question every tick. See D-080, D-085.
 func _resolve_target(unit: BattleUnit) -> BattleUnit:
 	_search_is_immediate = false
-	var retained_mark := Time.get_ticks_usec() if profile_enabled else 0
+	var retained_mark := Time.get_ticks_usec() if profile_enabled and target_timing_enabled else 0
 	var retained := _retained_target(unit)
-	if profile_enabled:
+	if profile_enabled and target_timing_enabled:
 		tgt_us_retained += Time.get_ticks_usec() - retained_mark
 	if retained != null:
 		var reach := unit.attack_range
@@ -2500,7 +2509,7 @@ func _resolve_target(unit: BattleUnit) -> BattleUnit:
 	elif tick_index < unit.next_search_tick:
 		# Nothing remembered, and it is not this soldier's turn to look. The cheap
 		# answer is the one its body already has.
-		var cheap_mark := Time.get_ticks_usec() if profile_enabled else 0
+		var cheap_mark := Time.get_ticks_usec() if profile_enabled and target_timing_enabled else 0
 		var cheap := _focus_target(unit)
 		if profile_enabled:
 			tgt_focus_fallbacks += 1
@@ -2585,9 +2594,9 @@ func _search_for_target(unit: BattleUnit, retained: BattleUnit) -> BattleUnit:
 	# The cheapest look of all is the one that is not worth making. A soldier whose body's
 	# nearest enemy is further away than this soldier could see cannot find anybody by
 	# looking, so it is pointed at the fighting instead and the battlefield is not asked.
-	var proof_mark := Time.get_ticks_usec() if profile_enabled else 0
+	var proof_mark := Time.get_ticks_usec() if profile_enabled and target_timing_enabled else 0
 	var nothing_to_find := _focus_look_finds_nobody(unit)
-	if profile_enabled:
+	if profile_enabled and target_timing_enabled:
 		tgt_us_proof += Time.get_ticks_usec() - proof_mark
 	if nothing_to_find:
 		if profile_enabled:
@@ -2608,11 +2617,11 @@ func _search_for_target(unit: BattleUnit, retained: BattleUnit) -> BattleUnit:
 
 	var local := _nearest_local_enemy(unit)
 	if local != null:
-		var improve_mark := Time.get_ticks_usec() if profile_enabled else 0
+		var improve_mark := Time.get_ticks_usec() if profile_enabled and target_timing_enabled else 0
 		if retained != null and not _clear_improvement(unit, retained, local):
 			local = retained
 		_store_target(unit, local)
-		if profile_enabled:
+		if profile_enabled and target_timing_enabled:
 			tgt_us_improve += Time.get_ticks_usec() - improve_mark
 		if profile_enabled:
 			tgt_successful_searches += 1

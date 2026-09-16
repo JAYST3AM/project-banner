@@ -123,10 +123,11 @@ for the next engineering milestone):
   worth a change to the most sensitive path in the game.
 - **The native mirror batch** is still the next boundary-crossing win: one crossing a tick instead of
   twenty thousand, which needs a method on the C++ side and work against D-095.
-- **The target-phase instrument costs what it measures.** That loop carries per-soldier
-  `Time.get_ticks_usec()` pairs - on the order of fifteen to twenty-five milliseconds a tick at this size.
-  Every paired delta in this project stays sound because both halves carry the same instrument, but the
-  absolute tick is lower than quoted, and the game never profiles. Gating those reads is the next slice.
+- **The target-phase instrument costs what it measures - and it is now measured.** That loop carries
+  per-soldier `Time.get_ticks_usec()` pairs; gating them behind `PB_TGT_TIMING=off` shows the instrument
+  costs about **6.3 ms a tick** at this size (the whole tick 352.6 ms instrumented against 346.3 ms with
+  the timers off). Every paired delta in this project stays sound because both halves carry the same
+  instrument, but the absolute tick is lower than quoted, and the game never profiles. See D-116.
 - **Target selection** was where Step 7.12 stopped and Step 7.13 begins; Step 7.8's formation-driven
   engagement work had already reduced it 79 per cent before either. Its remaining named items at 20,000
   are `focus` (15.4 ms, down from 26.8), `retained` (8.5 ms) and about 32 ms of loop work the counters do

@@ -855,9 +855,11 @@ rather than plausibility.
 | slice | what it removes | switch | measured (20,000 soldiers, one seed) |
 | --- | --- | --- | --- |
 | 1. the formed-soldier focus fast path | four calls per question, for an answer the body already has (D-115) | `PB_FOCUS_INLINE=method` | target phase 72.101 -> 56.410 ms, soldiers 170.411 -> 154.531 ms: **15.7 ms** |
+| 2. the per-soldier sub-item timers gated | two to three timed reads a soldier, instrument inside the thing being measured (D-116) | `PB_TGT_TIMING=off` | whole tick 352.600 -> 346.275 ms: the instrument costs **6.3 ms**; the sub-item breakdown reads zero |
 
-**Where the loop stands.** The soldiers phase at twenty thousand soldiers is now 154.5 ms, down from
-204.4 ms before Step 7.12, and the whole tick 348.9 ms against about 400 ms. The target phase is 56.4 ms
+**Where the loop stands.** The soldiers phase at twenty thousand soldiers is now 154.5 ms instrumented -
+about 151 ms with the instrument's per-soldier timers off, D-116 - down from 204.4 ms before Step 7.12,
+and the whole tick 346.3 ms with the timers off against 352.6 ms with them on. The target phase is 56.4 ms
 of that, having been 72.1 ms.
 
 **What was abandoned, and why it stays in the record.** The turning-body transform - a body's slot

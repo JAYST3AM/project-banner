@@ -3007,3 +3007,33 @@ from the body, and repaired. Zero disagreements.
 a field read rather than a method's worth of dispatch, was designed and not taken: a repair mid-tick
 changes the answer, so the snapshot would need invalidation at the writer, which is a cache with a proof
 obligation. The measured need does not justify that yet.
+
+
+## D-116 - the instrument is measured, and a clean tick is now available
+
+**Context.** The target loop and the soldier loop were instrumented in the D-105 era with per-soldier
+`Time.get_ticks_usec()` pairs - about two to three timed reads a soldier a tick on the paths this battle
+actually takes. Reading the loop for Step 7.13's next item turned them up, and D-112's own rule for a hot
+path is counts, not per-soldier timers.
+
+**Decision.** The four sub-item timers (`tgt_us_retained`, `tgt_us_focus`, `tgt_us_proof`,
+`tgt_us_improve`) are gated behind `battle.target_timing_enabled`, off with `PB_TGT_TIMING=off`. The
+per-soldier *phase* marks stay, so the phase table - which is what every comparison in this project is
+quoted from - is identical with the switch either way.
+
+**Measured, paired in one build** at 20,000 soldiers on one seed: the soldiers phase 156.719 ms with the
+timers against 153.107 ms without, the target phase 57.752 against 54.750, the whole tick 352.600 against
+**346.275** - so the instrument costs about **6.3 ms a tick**.
+
+**What that means for every number already quoted.** The game never profiles, so the shipped tick has
+always been about six milliseconds faster than the instrumented figure. Every *paired* delta in this
+project is unaffected, because both halves of a pair carry the same instrument - that is the whole reason
+the project measures that way - and the timing pair above is itself the proof. The absolute figures in
+this repository's docs, including the ones Steps 7.12 and 7.13 were measured with, are instrumented
+figures; read the clean figure as the instrumented one less about six milliseconds.
+
+**An estimate that was wrong, kept beside the measurement.** Predicting the cost from the call sites gave
+fifteen to twenty-five milliseconds a tick; the measurement says 6.3, because the sub-item timers fire on
+the paths a soldier actually takes rather than on every path. The milestone's method is that a reasoned
+number is a hypothesis and a paired run is the answer, so the wrong estimate is recorded rather than
+quietly dropped.
