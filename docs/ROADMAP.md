@@ -682,3 +682,77 @@ automatic target selection is 104.5 ms.
 
 **Not started:** the Cohort layer (the design is compatible; nothing was built), multi-rate
 simulation, threading, and any optimisation of the phases above.
+
+
+---
+
+## Step 7.9 - the kill-cleanup walk, measured inside real ticks
+
+**What it is.** A measurement milestone. Every death walks the entire roster to clear the explicit
+attack orders that were hunting the soldier who fell, which is O(roster) per death - the last
+suspected quadratic path inside the per-soldier update loop, the largest measured phase. It was
+suspected for two milestones and never proved. It is proved now, and nothing was optimised: this
+project's rule is that a measurement establishes the need before an optimisation is written.
+
+**Measured inside ticks the game ran** (`scenes/dev/death_storm_probe.tscn`, seed 70909, one `step()`
+per row, ordered attackers against one-hit-point enemies):
+
+| soldiers | deaths in that tick | entries inspected | the cleanup | the whole tick | share |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 388 | 388,000 | 36.3 ms | 46.7 ms | **77.8%** |
+| 5,000 | 1,915 | 9,575,000 | 1,027.3 ms | 1,093.5 ms | **93.9%** |
+| 20,000 | 7,542 | 150,840,000 | 23,599.0 ms | 24,003.6 ms | **98.3%** |
+
+**And the scaling**, killing a known number of soldiers at 20,000 through the production `_attack()`
+path: one death 20,000 entries and 4.0 ms, fifty 1,000,000 and 194.8 ms, four hundred 8,000,000 and
+1,596.9 ms. Entries inspected per death equals the roster size exactly at 100, 1,000, 5,000 and
+20,000 soldiers, so the cost is deaths x army. Order density barely moves the time - raising the
+orders cleared at 20,000 from 9,999 to 19,999 left the timing unchanged - because the inspections
+dominate and the clears are free.
+
+Against the measured 437.1 ms tick at twenty thousand soldiers, one death is invisible and a
+front-rank-death tick is entirely this walk. **The order index that would fix it is the next
+milestone**, and this table is its brief. See D-110.
+
+**An independent audit rejected the first version**, and two of its three findings were code: the
+disabled path kept a counter test per roster entry (now two loops, one instrumented and one exactly
+the loop it always was), and the storm's "all living units" workload only ordered one side (now every
+soldier but the victim). Its third finding is why the first table is measured inside `step()`: a storm
+batched by hand can show a total but cannot claim a share of a tick.
+
+**Definition of done:** measured inside real ticks; **26 suites, 8878 assertions, 0 failures**; the two-process restart check 6/0 write and 95/0 verify; the windowed DevFlags loop deploys five against five by name and resolves a battle with no script errors; the probe prints its checksum, its per-size per-density report and its storm-tick table.
+
+**Not touched.** Battle outcomes, targeting cadence, target-search logic, formation-driven engagement,
+explicit-order precedence, movement, separation, balance data, saves, and the locked Step 7.8 overlap
+optimisation and its native kernel. The order-lapse behaviour is asserted by the new tests, so the
+counters cannot have been added by changing it.
+
+
+## Step 7.10 - the order index (`milestone-07.10`)
+
+**What it is.** The fix Step 7.9's measurement asked for. Every death used to walk the whole roster to
+clear the orders hunting the soldier who fell - O(deaths x army), 98.3% of a twenty-thousand-soldier
+tick on a mass-casualty storm. The soldiers holding an order are now chained onto the man they were
+ordered to kill, once a tick, so a death walks its own chain and inspects nobody else.
+
+**Measured, paired, in one build and on one seed** (`scenes/dev/death_storm_probe.tscn`, seed 70909):
+
+| at 20,000 soldiers | Step 7.9 | **Step 7.10** |
+| --- | ---: | ---: |
+| 50 deaths, no orders | 1,000,000 inspections, 160.5 ms | **0 inspections, 0.011 ms** |
+| 50 deaths, every soldier ordered at one man | 1,000,000 inspections, 162.8 ms | **19,999 inspections, 16.2 ms** |
+| a storm tick, 7,542 deaths | 23,599.0 ms of a 24,003.6 ms tick (**98.3%**) | **7.6 ms of a 230.1 ms tick** (**3.3%**) |
+
+The storm tick is **104 times cheaper**. The cost follows the orders rather than the army: one hunter
+costs one inspection at a roster of ten or sixty thousand, which is the exact inverse of Step 7.9.
+
+**The equivalence is proved, not asserted.** The suite performs the reference scan itself and checks
+that the indexed cleanup clears exactly what a full walk would, that every hunter's order lapses, and
+that an order aimed at a living soldier does not move. The behaviour assertions from Step 7.9 are
+unchanged, because the milestone changed what the cleanup costs, not what it does. The chains are
+rebuilt when the tick's index is stale, because the probe and the suites call `_attack()` directly and
+an unbuilt index would have silently cleared nothing - the failure mode the Step 7.5 focus work hit.
+
+**What is verified.** 26 suites / 8,895 assertions / 0 failures headless - the target suite grew from
+268 to 285 with the equivalence, inverse-scaling, chain and no-hunter tests - the two-process restart
+check unchanged, and the windowed DevFlags loop resolving a battle with no script errors. See D-111.

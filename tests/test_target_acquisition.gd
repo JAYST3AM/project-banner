@@ -61,6 +61,13 @@ func run() -> void:
 	_test_immediate_reacquisition_can_be_switched_off()
 	_test_every_soldier_tick_is_accounted_for()
 	_test_the_report_counts_what_it_claims_to()
+	_test_a_kill_inspects_only_the_men_hunting_the_fallen()
+	_test_a_kill_clears_exactly_the_orders_hunting_the_fallen()
+	_test_a_kill_with_no_hunters_clears_nothing_and_inspects_nothing()
+	_test_repeated_deaths_accumulate_the_walk()
+	_test_the_kill_cleanup_is_inert_without_profiling()
+	_test_the_cleanup_follows_the_orders_and_not_the_army()
+	_test_the_index_clears_exactly_what_a_full_scan_would()
 	_complete()
 
 
@@ -1060,3 +1067,198 @@ func _run_signature(seed_value: int, ticks: int) -> Dictionary:
 		"switches": int(report["switches"]),
 		"immediates": int(report["immediate_reacquires"]),
 	}
+
+## ---------- the kill-cleanup walk, and the index that replaced it (Step 7.9, 7.10) ----------
+
+## Kill a soldier through the production attack path, because that is where the cleanup lives. A blow
+## can miss, so the attack is repeated until it lands; only the killing blow enters the cleanup, so
+## the counters report exactly one death however many swings it took.
+func _kill(simulator: BattleSimulator, killer: BattleUnit, victim: BattleUnit) -> void:
+	for i in 500:
+		if not victim.is_alive():
+			return
+		simulator.call("_attack", killer, victim)
+
+
+## Until Step 7.10 every death walked the whole roster to find the orders hunting the fallen soldier,
+## which is O(deaths x army) - 98.3% of a twenty-thousand-soldier tick in a mass-casualty storm (D-110).
+## The walk is now a chain: the soldiers holding an order are chained onto the man they were ordered to
+## kill, once a tick, so a death inspects only its own hunters.
+##
+## These tests therefore assert cost differently than they did in Step 7.9 and assert behaviour exactly
+## as before - the milestone changed what the cleanup costs, not what it does. The equivalence is
+## proved separately, against a reference scan performed here in the test file rather than in the code
+## under test.
+func _test_a_kill_inspects_only_the_men_hunting_the_fallen() -> void:
+	section("a kill inspects its hunters and nobody else")
+	var roster: Array[BattleUnit] = []
+	for i in 12:
+		roster.append(_unit(i, PLAYER if i % 2 == 0 else ENEMY, Vector2(30.0 + float(i), 30.0)))
+	var killer: BattleUnit = roster[0]
+	var victim: BattleUnit = roster[1]
+	victim.hp = 1
+	roster[3].attack_order_target_id = victim.id
+	roster[6].attack_order_target_id = victim.id
+	var simulator := _counting(roster, 4)
+	_kill(simulator, killer, victim)
+	equal(victim.is_alive(), false, "the soldier died, so the cleanup ran")
+	equal(simulator.kill_cleanup_deaths, 1, "one death entered the walk")
+	equal(simulator.kill_cleanup_inspections, 2,
+		"and it inspected the two soldiers who were hunting him, not the twelve in the battle")
+	equal(simulator.kill_cleanup_worst_inspections, 2, "the worst single walk reads the same")
+	equal(simulator.kill_cleanup_clears, 2, "and both orders were cleared")
+	check(simulator.kill_cleanup_usec >= 0, "and the walk's own time was recorded")
+
+
+## The cost of a kill must follow the orders aimed at the fallen soldier, not the size of the army.
+## This is the claim the index exists to make, and it is the exact inverse of what Step 7.9 measured.
+func _test_the_cleanup_follows_the_orders_and_not_the_army() -> void:
+	section("the cleanup's cost follows the orders, not the army")
+	var small := _inspections_for_one_hunter(10)
+	var large := _inspections_for_one_hunter(60)
+	equal(small, 1, "one hunter in a ten-soldier battle is one inspection")
+	equal(large, 1, "one hunter in a sixty-soldier battle is also one inspection")
+	equal(small, large, "so the cost is independent of how many soldiers are on the field")
+
+
+## One kill in a roster of the given size, with exactly one soldier ordered at the victim, reported as
+## entries the cleanup inspected.
+func _inspections_for_one_hunter(size: int) -> int:
+	var roster: Array[BattleUnit] = []
+	for i in size:
+		roster.append(_unit(i, PLAYER if i % 2 == 0 else ENEMY, Vector2(30.0 + float(i) * 0.4, 30.0)))
+	var killer: BattleUnit = roster[0]
+	var victim: BattleUnit = roster[1]
+	victim.hp = 1
+	roster[2].attack_order_target_id = victim.id
+	var simulator := _counting(roster, 4)
+	_kill(simulator, killer, victim)
+	return simulator.kill_cleanup_inspections
+
+
+## The equivalence, proved rather than asserted: the set of orders the indexed cleanup clears is
+## exactly the set a full scan of the roster would clear, and no other order moves. The reference scan
+## lives here, in the test, which is this project's rule for replacing an implementation.
+func _test_the_index_clears_exactly_what_a_full_scan_would() -> void:
+	section("the index clears exactly what a full scan would")
+	var roster: Array[BattleUnit] = []
+	for i in 24:
+		roster.append(_unit(i, PLAYER if i < 12 else ENEMY, Vector2(30.0 + float(i) * 0.4, 30.0)))
+	var killer: BattleUnit = roster[0]
+	var victim: BattleUnit = roster[13]
+	victim.hp = 1
+	# Orders sprayed around: five hunting the victim, and eight hunting other soldiers who live.
+	var hunters: Array[int] = [2, 5, 9, 11, 16]
+	for index in hunters:
+		roster[index].attack_order_target_id = victim.id
+	for index in [3, 4, 7, 10, 15, 17, 20, 22]:
+		roster[index].attack_order_target_id = roster[12].id
+	# The reference: who a full scan would clear, and the state of every other order.
+	var expected_cleared: Array[int] = []
+	var untouched: Dictionary = {}
+	for unit in roster:
+		if unit.attack_order_target_id == victim.id:
+			expected_cleared.append(unit.id)
+		elif unit.attack_order_target_id >= 0:
+			untouched[unit.id] = unit.attack_order_target_id
+	equal(expected_cleared.size(), 5, "five soldiers were hunting the fallen man")
+	var simulator := _counting(roster, 4)
+	_kill(simulator, killer, victim)
+	equal(simulator.kill_cleanup_clears, expected_cleared.size(),
+		"the index cleared exactly as many orders as a scan would have")
+	for index in hunters:
+		equal(roster[index].attack_order_target_id, -1, "hunter %d was released" % index)
+	for index in untouched.keys():
+		equal(roster[index].attack_order_target_id, untouched[index],
+			"an order aimed elsewhere is untouched")
+	equal(simulator.kill_cleanup_inspections, expected_cleared.size(),
+		"and it inspected only those five, not the twenty-four")
+
+
+## A kill clears the orders hunting the fallen soldier, whatever else is going on: the behaviour this
+## cleanup has always had, asserted so the index cannot have been introduced by changing it.
+func _test_a_kill_clears_exactly_the_orders_hunting_the_fallen() -> void:
+	section("a kill clears the orders hunting the fallen soldier and nothing else")
+	var roster: Array[BattleUnit] = []
+	for i in 10:
+		roster.append(_unit(i, PLAYER if i < 5 else ENEMY, Vector2(30.0 + float(i), 30.0)))
+	var killer: BattleUnit = roster[0]
+	var victim: BattleUnit = roster[1]
+	var bystander: BattleUnit = roster[2]
+	var other_quarry: BattleUnit = roster[6]
+	var hunter_one: BattleUnit = roster[3]
+	var hunter_two: BattleUnit = roster[4]
+	var ordered_elsewhere: BattleUnit = roster[5]
+	victim.hp = 1
+	hunter_one.attack_order_target_id = victim.id
+	hunter_two.attack_order_target_id = victim.id
+	ordered_elsewhere.attack_order_target_id = other_quarry.id
+	var simulator := _counting(roster, 4)
+	_kill(simulator, killer, victim)
+	equal(simulator.kill_cleanup_clears, 2, "exactly the two hunters were released")
+	equal(hunter_one.attack_order_target_id, -1, "the first hunter's order lapsed")
+	equal(hunter_two.attack_order_target_id, -1, "so did the second's")
+	equal(ordered_elsewhere.attack_order_target_id, other_quarry.id,
+		"an order aimed at a soldier who is still alive is untouched")
+	equal(bystander.attack_order_target_id, -1, "a soldier who was hunting nobody is untouched")
+
+
+## A death with nobody hunting it costs nothing to clean up, where once it cost a walk of the army.
+func _test_a_kill_with_no_hunters_clears_nothing_and_inspects_nothing() -> void:
+	section("a death nobody was hunting is free to clean up")
+	var roster: Array[BattleUnit] = []
+	for i in 16:
+		roster.append(_unit(i, PLAYER if i % 2 == 0 else ENEMY, Vector2(30.0 + float(i), 30.0)))
+	var killer: BattleUnit = roster[0]
+	var victim: BattleUnit = roster[1]
+	victim.hp = 1
+	var simulator := _counting(roster, 4)
+	_kill(simulator, killer, victim)
+	equal(simulator.kill_cleanup_clears, 0, "nothing was cleared, because nobody was hunting him")
+	equal(simulator.kill_cleanup_inspections, 0, "and nothing was inspected either")
+
+
+## Repeated deaths each clear their own hunters, and the worst single walk is a chain rather than a
+## roster.
+func _test_repeated_deaths_accumulate_the_walk() -> void:
+	section("deaths accumulate the walk, one chain each")
+	var roster: Array[BattleUnit] = []
+	for i in 15:
+		roster.append(_unit(i, PLAYER if i < 8 else ENEMY, Vector2(30.0 + float(i), 30.0)))
+	var killer: BattleUnit = roster[0]
+	var victims: Array[BattleUnit] = [roster[8], roster[9], roster[10]]
+	for victim in victims:
+		victim.hp = 1
+	# One hunter per victim: chains of one, three deaths, three inspections.
+	roster[2].attack_order_target_id = victims[0].id
+	roster[3].attack_order_target_id = victims[1].id
+	roster[4].attack_order_target_id = victims[2].id
+	var simulator := _counting(roster, 4)
+	for victim in victims:
+		_kill(simulator, killer, victim)
+	equal(simulator.kill_cleanup_deaths, 3, "three deaths entered the cleanup")
+	equal(simulator.kill_cleanup_clears, 3, "and each victim's hunter was released")
+	equal(simulator.kill_cleanup_inspections, 3, "with one inspection per chain, not one per death")
+	equal(simulator.kill_cleanup_worst_inspections, 1, "and no single walk was longer than a chain of one")
+
+
+## The instrumentation must cost nothing when it is off, so a battle that is not being measured leaves
+## every one of these counters at zero.
+func _test_the_kill_cleanup_is_inert_without_profiling() -> void:
+	section("with profiling off the kill cleanup reports nothing")
+	var roster: Array[BattleUnit] = []
+	for i in 8:
+		roster.append(_unit(i, PLAYER if i % 2 == 0 else ENEMY, Vector2(30.0 + float(i), 30.0)))
+	var killer: BattleUnit = roster[0]
+	var victim: BattleUnit = roster[1]
+	victim.hp = 1
+	roster[3].attack_order_target_id = victim.id
+	var simulator := _simulator(roster, 4)
+	equal(simulator.profile_enabled, false, "profiling is off, as a real battle runs")
+	_kill(simulator, killer, victim)
+	equal(victim.is_alive(), false, "the kill still happened")
+	equal(roster[3].attack_order_target_id, -1, "and the order still lapsed, profiling or not")
+	equal(simulator.kill_cleanup_deaths, 0, "no death was counted")
+	equal(simulator.kill_cleanup_inspections, 0, "no entry was counted")
+	equal(simulator.kill_cleanup_clears, 0, "no clear was counted")
+	equal(simulator.kill_cleanup_usec, 0, "and no time was recorded")

@@ -2757,3 +2757,96 @@ when it is close enough to count as arrived.
 ---
 
 ---
+
+## D-110: The kill cleanup is measured in a tick, not inferred from a total
+
+**Decision.** Every death walks the entire roster to clear the explicit attack orders that were
+hunting the soldier who fell - `BattleSimulator._attack`, "anyone hunting this unit must pick a new
+quarry". That walk is O(roster) per death, and it was the last suspected quadratic path inside the
+per-soldier update loop, which is the largest measured phase in a large battle. Rather than replace it
+on suspicion, the walk is counted: deaths that enter it, roster entries inspected, orders cleared, the
+largest single walk, and the walk's own elapsed time.
+
+**Measured, inside ticks the game actually ran** (`scenes/dev/death_storm_probe.tscn`, seed 70909,
+one `step()` per row, lines of ordered attackers against one-hit-point enemies):
+
+| soldiers | deaths in that tick | roster entries inspected | the cleanup | the whole tick | the cleanup's share |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 388 | 388,000 | 36.3 ms | 46.7 ms | **77.8%** |
+| 5,000 | 1,915 | 9,575,000 | 1,027.3 ms | 1,093.5 ms | **93.9%** |
+| 20,000 | 7,542 | 150,840,000 | 23,599.0 ms | 24,003.6 ms | **98.3%** |
+
+**And the scaling, measured separately by killing a known number of soldiers** at 20,000: one death
+costs 20,000 entries and 4.0 ms, fifty cost 1,000,000 and 194.8 ms, and four hundred cost 8,000,000 and
+1,596.9 ms. Entries inspected per death equals the roster size exactly at 100, 1,000, 5,000 and 20,000
+soldiers, so the cost is deaths x army and nothing else. Order density barely moves the *time*: the
+same storm with no orders, with a tenth of the army ordered, and with every soldier but the victim
+ordered at one man measured within a few per cent of each other, because the inspections dominate and
+the clears are nearly free - raising the orders cleared at 20,000 from 9,999 to 19,999 left the timing
+unchanged.
+
+**Why it matters.** One death in a large battle is invisible (4 ms against a 437 ms tick). A tick in
+which the front rank dies is not a hitch, it is the entire tick: at 20,000 soldiers the cleanup is
+**98.3%** of it. Twenty thousand soldiers remain a goal rather than a result, and this is now the
+best-evidenced reason why.
+
+**An independent audit rejected the first version of this work, and it was right twice.** It found
+that the "zero profiling work when profiling is disabled" claim was false - the single-loop
+implementation kept a boolean test per roster entry inside the hottest walk in the battle - and that
+the "all living units ordered to one victim" workload only ordered one side while its comment claimed
+the whole roster. Both are fixed: the cleanup is now two loops, one instrumented and one exactly the
+loop it has always been, and the storm orders every soldier but the victim. The audit's third finding
+was about the *first* attempt to demonstrate the cost, and it is the reason the numbers above are
+measured inside `step()`: a storm whose deaths never pass through a tick cannot claim a share of one,
+however carefully the total was summed.
+
+**What is deliberately not done.** The walk is not optimised here. The fix - an order index, so
+clearing an order is a lookup rather than a scan of the army - changes a data structure, and this
+project's rule is that a measurement establishes the need before an optimisation is written. That
+measurement is now in the table above, and the fix is the next milestone with this as its brief.
+
+---
+
+## D-111: The hunters of a fallen soldier are a chain, not a scan
+
+**Decision.** Step 7.9 measured the kill cleanup and found it to be the single most expensive thing in
+a large battle: every death walked the whole roster to clear the orders that were hunting the soldier
+who fell, which is O(deaths x army) - 98.3% of a twenty-thousand-soldier tick, and 24.0 seconds, on a
+mass-casualty storm (D-110). This milestone replaces the walk with a lookup.
+
+**The mechanism.** `BattleSimulator` now keeps an order index: two `PackedInt32Array`s and a head per
+unit, sized when the army is handed over so nothing is allocated afterwards. Every soldier holding an
+attack order is chained onto the man he was ordered to kill, and the chains are rebuilt once a tick
+beside the spatial grid - a snapshot, like every other index in this project, so there is no update
+path and therefore no update path to get wrong. A death walks its own chain, re-checking each
+soldier's order before touching it, so an order cleared since the chains were built is skipped rather
+than assumed away.
+
+**The chains are rebuilt when the tick's index is stale, not only inside `step()`.** The probe and the
+suites call `_attack()` directly, and an index built for a different tick - or not built at all - would
+have silently cleared nothing, which is exactly the failure mode Step 7.5's focus work hit. A stamp
+per tick costs one integer comparison per death.
+
+**Measured, paired, in one build and on one seed** (`scenes/dev/death_storm_probe.tscn`, seed 70909):
+
+| at 20,000 soldiers | Step 7.9 | **Step 7.10** |
+| --- | ---: | ---: |
+| 50 deaths, no orders | 1,000,000 inspections, 160.5 ms | **0 inspections, 0.011 ms** |
+| 50 deaths, every soldier ordered at one man | 1,000,000 inspections, 162.8 ms | **19,999 inspections, 16.2 ms** |
+| a storm tick, 7,542 deaths | 23,599.0 ms of a 24,003.6 ms tick (**98.3%**) | **7.6 ms of a 230.1 ms tick (3.3%)** |
+
+The storm tick is **104 times cheaper** and the cleanup's share of it falls from 98.3% to 3.3%. The
+cost now follows the *orders*, not the army: one hunter costs one inspection whether the roster holds
+ten soldiers or sixty thousand, which is the exact inverse of what Step 7.9 measured.
+
+**The equivalence is proved rather than asserted.** The suite performs the reference scan itself - the
+set of orders a full walk of the roster would have cleared - and asserts that the indexed cleanup
+clears exactly those, that every hunter's order lapses, and that an order aimed at a soldier who is
+still alive does not move. The behaviour assertions from Step 7.9 are unchanged, because the milestone
+changed what the cleanup costs and not what it does.
+
+**What did not change.** The order lapses on the same tick it always did. Battle outcomes, targeting
+cadence, target-search logic, formation-driven engagement, explicit-order precedence, movement,
+separation, balance data, saves, and the locked Step 7.8 overlap optimisation and its native kernel
+are all untouched; the only new work in a tick is one linear pass over the roster that a deployed army
+pays about nothing for, because it only visits soldiers who hold an order.

@@ -555,6 +555,24 @@ per soldier rather than per body. Partial contact, local casualty tracking, loca
 and multirate simulation all have somewhere to live without moving a soldier - none of it was
 built in this milestone, and none of it is blocked.
 
+### The order index (Step 7.10)
+
+Clearing the orders that were hunting a soldier who has just died used to mean walking the whole
+roster once per death. Step 7.9 measured that at **98.3% of a twenty-thousand-soldier tick** on a
+mass-casualty storm, and Step 7.10 replaced it with a chain: `BattleSimulator._order_head` and
+`_order_next` chain every soldier holding an attack order onto the man he was ordered to kill, so a
+death walks its own chain and inspects nobody else.
+
+`_rebuild_order_index()` runs once a tick beside `_rebuild_spatial()`, and only visits soldiers who
+hold an order at all - a deployed army has a handful, an army ordered at one enemy is one chain. It is
+a snapshot, like the spatial grid, so there is no update path to get wrong; and because the probe and
+the suites call `_attack()` directly, the cleanup rebuilds when the tick's index is stale rather than
+trusting a caller that never took a step.
+
+Measured, paired, one build and one seed: a 7,542-death storm tick at twenty thousand soldiers went
+from **24.0 seconds to 0.23**, with the cleanup's share of that tick falling from 98.3% to 3.3%. The
+cost follows the orders rather than the army. See D-111.
+
 ### Proximity: the battlefield index (Step 7.2)
 
 Every proximity question a battle asks goes through one object. `BattleSpatialGrid` is a
@@ -1078,6 +1096,23 @@ thousand. It is a *subscriber* of the funnel above rather than a logger of its o
 through `DebugLogger` and it appends the battle category's entries to a file - and nothing
 constructs one unless a run asks, with `--battlelog` or `--battlelog=<path>`. Release play writes
 nothing to disk.
+
+**The kill-cleanup counters, and the order index they paid for (Step 7.9, 7.10).** Clearing the orders
+that were hunting a soldier who has just died used to walk the whole roster once per death, which
+Step 7.9 measured at **98.3% of a twenty-thousand-soldier tick** on a mass-casualty storm (D-110). The
+walk is now a chain: `_order_head` and `_order_next` chain every soldier holding an order onto the man
+he was ordered to kill, rebuilt once a tick beside the spatial grid, so a death inspects only its own
+hunters (D-111). The counters are `kill_cleanup_deaths`, `kill_cleanup_inspections`,
+`kill_cleanup_clears`, `kill_cleanup_worst_inspections` and `kill_cleanup_usec`, all incremented behind
+`profile_enabled` and reset with the rest.
+
+The probe that exercises them - `scenes/dev/death_storm_probe.tscn` - kills through the production
+`_attack()` path at four roster sizes and three order densities, runs real storm ticks, and prints a
+setup checksum. It measures the shipped chain by default; `--cleanup=walk` re-measures the Step 7.9
+baseline with a reference scan kept in the probe itself, and `--cleanup=both` asserts the two release
+the same soldiers over one setup. Measured: at twenty thousand soldiers a single death costs 4 ms and
+is invisible, a tick in which 7,542 soldiers die costs 24.0 seconds of which **98.3% was the walk**,
+and the same tick with the chain costs **230 ms, 3.3% of it in the cleanup**. See D-110 and D-111.
 
 ---
 

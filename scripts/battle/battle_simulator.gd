@@ -399,6 +399,52 @@ var tgt_focus_proven: int = 0
 ## Explicit player orders honoured, and orders cleared because their quarry died.
 var tgt_explicit_order_uses: int = 0
 var tgt_order_clears: int = 0
+
+## ---------- development-only kill-cleanup counters (Step 7.9) ----------------
+##
+## Every death walks the whole roster to clear the explicit orders that were hunting the soldier who
+## fell - see `_attack`. That walk is O(roster) per death, so a tick that kills a front rank pays for
+## the army once per corpse, and at twenty thousand soldiers with a hundred deaths a tick that is two
+## million visits. It is the last suspected quadratic path in the per-soldier loop, which is the
+## largest measured phase.
+##
+## Whether it is material is a hypothesis, and this milestone measures it rather than assuming it:
+## the counters below count what the walk did (deaths that entered it, roster entries inspected,
+## orders cleared, the largest single walk, and the walk's own elapsed time) so that the report can
+## say whether an army-sized walk per death is worth a different data structure. Nothing is
+## optimised until the numbers say so, and the counts are the primary result: when profiling is on
+## the walk carries one boolean test per entry, so its timing is an upper bound rather than an exact
+## cost. Every counter is incremented behind [member profile_enabled].
+var kill_cleanup_deaths: int = 0
+## Roster entries the cleanup walk inspected, across every death this reset.
+var kill_cleanup_inspections: int = 0
+## Orders cleared by the walk - the work it exists to do.
+var kill_cleanup_clears: int = 0
+## The largest number of entries any single death's walk inspected, because a kill storm's worst
+## case is the number that decides whether this path matters, and an average hides it.
+var kill_cleanup_worst_inspections: int = 0
+## Microseconds the cleanup walks cost in total, as measured inside the walk itself.
+var kill_cleanup_usec: int = 0
+
+## ---------- the order index (Step 7.10) --------------------------------------
+##
+## Which soldiers are hunting which enemy, rebuilt once a tick.
+##
+## Clearing the orders that pointed at a soldier who has just died used to mean walking the whole
+## roster once per death - O(deaths x army), measured at 98.3% of a twenty-thousand-soldier tick in a
+## mass-casualty storm (D-110). The index turns that into a lookup: every soldier holding an order is
+## chained onto the man he was ordered to kill, so a death clears exactly the men who were hunting it
+## and inspects nobody else.
+##
+## Built as a snapshot, once a tick, like every other index in this project - there is no update path,
+## so there is no update path to get wrong. Two integer arrays sized when the army is handed over, so
+## nothing is allocated after [method add_units].
+var _order_head: PackedInt32Array = PackedInt32Array()
+var _order_next: PackedInt32Array = PackedInt32Array()
+## The tick whose orders the chains describe. A direct `_attack()` call outside a tick - which the
+## probe and the suites make - would otherwise be answered by an index built for a different tick, or
+## by no index at all, and would silently clear nothing. Stale means rebuild.
+var _order_index_tick: int = -1
 ## Ticks spent dealing with a remembered opponent rather than looking for one - the whole
 ## point of the milestone, split into the two cases that matter. [b]In reach[/b] is the
 ## fastest path through target handling: the enemy is close enough to be struck, so
@@ -686,6 +732,8 @@ func add_units(p_units: Array[BattleUnit]) -> void:
 	# but not when any one of them looks around. See D-080.
 	var interval := maxi(1, target_reacquisition_ticks)
 	_living_total = 0
+	# The highest unit id in the army, so the order index can be sized to address ids directly.
+	var highest_id := 0
 	for unit in units:
 		_unit_by_id[unit.id] = unit
 		unit.auto_target_id = -1
@@ -695,6 +743,13 @@ func add_units(p_units: Array[BattleUnit]) -> void:
 		unit.next_search_tick = posmod(unit.id, interval)
 		if unit.is_alive():
 			_fastest_speed = maxf(_fastest_speed, unit.move_speed)
+		highest_id = maxi(highest_id, unit.id)
+	# The order index is sized here, with everything else that must not allocate later. Its chains are
+	# addressed by unit id, so it is sized to the highest id in the army rather than to the count.
+	_order_head.resize(highest_id + 1)
+	_order_next.resize(highest_id + 1)
+	_order_head.fill(-1)
+	_order_next.fill(-1)
 
 
 ## The unit index. Exposed for tooling and tests that need to resolve many ids at
@@ -1612,6 +1667,12 @@ func step(delta: float) -> Array[Dictionary]:
 	_rebuild_spatial(delta)
 	_profile_stop("grid", phase)
 
+	# The hunters' chains, once a tick, for the same reason the spatial grid is rebuilt once a tick:
+	# a death must not have to walk the army to find out who was hunting the man who fell. See D-111.
+	phase = _profile_start()
+	_rebuild_order_index()
+	_profile_stop("orders", phase)
+
 	# After the bodies have moved and before anyone asks, so a formation's focus is its
 	# focus for this tick rather than for wherever it stood last tick.
 	phase = _profile_start()
@@ -1717,6 +1778,12 @@ func reset_profile() -> void:
 	tgt_focus_proven = 0
 	tgt_explicit_order_uses = 0
 	tgt_order_clears = 0
+	kill_cleanup_deaths = 0
+	kill_cleanup_inspections = 0
+	kill_cleanup_clears = 0
+	kill_cleanup_worst_inspections = 0
+	kill_cleanup_usec = 0
+	_order_index_tick = -1
 	tgt_retained_in_reach = 0
 	tgt_retained_held = 0
 	tgt_invalid_dead = 0
@@ -2242,9 +2309,38 @@ func _attack(attacker: BattleUnit, target: BattleUnit) -> void:
 			"position": target.position,
 		})
 		# Anyone hunting this unit must pick a new quarry.
-		for unit in units:
-			if unit.attack_order_target_id == target.id:
-				unit.attack_order_target_id = -1
+		#
+		# The hunters are in the order index, chained onto this soldier when the tick's chains were
+		# built, so this clears exactly the men who were hunting him and inspects nobody else. The two
+		# paths - instrumented and not - are separate loops on purpose: a battle that is not being
+		# measured must pay no counter test at all. Rebuilt here if it is not the current tick's
+		# index, because the probe and the suites call this directly rather than through a step.
+		if _order_index_tick != tick_index:
+			_rebuild_order_index()
+		if profile_enabled:
+			var cleanup_mark := Time.get_ticks_usec()
+			var inspected := 0
+			var cleared := 0
+			var hunter := _order_head[target.id] if target.id < _order_head.size() else -1
+			while hunter >= 0:
+				inspected += 1
+				var hound: BattleUnit = find_unit(hunter)
+				if hound != null and hound.attack_order_target_id == target.id:
+					hound.attack_order_target_id = -1
+					cleared += 1
+				hunter = _order_next[hunter]
+			kill_cleanup_deaths += 1
+			kill_cleanup_inspections += inspected
+			kill_cleanup_clears += cleared
+			kill_cleanup_worst_inspections = maxi(kill_cleanup_worst_inspections, inspected)
+			kill_cleanup_usec += Time.get_ticks_usec() - cleanup_mark
+		else:
+			var hunter := _order_head[target.id] if target.id < _order_head.size() else -1
+			while hunter >= 0:
+				var hound: BattleUnit = find_unit(hunter)
+				if hound != null and hound.attack_order_target_id == target.id:
+					hound.attack_order_target_id = -1
+				hunter = _order_next[hunter]
 
 
 ## ---------- target acquisition (Step 7.4) ---------------------------------
@@ -3300,6 +3396,31 @@ func _rebuild_spatial(delta: float) -> void:
 	# half-unit of slack absorbs the separation pushes that happen later in the tick.
 	grid.query_margin = _fastest_speed * absf(delta) + 0.5
 	grid.rebuild(units)
+
+
+## Build this tick's hunter chains: every soldier holding an attack order is chained onto the enemy he
+## was ordered to kill, so a death can clear its hunters by walking one short chain instead of the
+## whole army. One pass over the roster a tick, and only over the soldiers who hold an order at all -
+## a deployed army has a handful, and an army ordered at one enemy has a single chain.
+##
+## A snapshot, like the spatial grid, so there is no update path to get wrong; and an order that was
+## cleared after the chains were built is skipped when the chain is walked, because the walk re-checks
+## each soldier's own order before touching it. See D-111.
+func _rebuild_order_index() -> void:
+	_order_index_tick = tick_index
+	if _order_head.is_empty():
+		return
+	_order_head.fill(-1)
+	for unit in units:
+		var quarry := unit.attack_order_target_id
+		if quarry < 0 or quarry >= _order_head.size():
+			continue
+		if unit.id < 0 or unit.id >= _order_next.size():
+			continue
+		# Push onto the front of the quarry's chain. The order inside a chain never reaches the
+		# result, because every entry in it is cleared.
+		_order_next[unit.id] = _order_head[quarry]
+		_order_head[quarry] = unit.id
 
 
 ## Which implementation answers the automatic target search's spatial queries. See
