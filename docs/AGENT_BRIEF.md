@@ -92,7 +92,7 @@ and restart-safe for some time.
 
 ## 5. Where it is right now
 
-**Verified:** 26 suites / 8,936 assertions / 0 failures headless, and a two-process restart check.
+**Verified:** 27 suites / 8,944 assertions / 0 failures headless, and a two-process restart check.
 
 **Committed and audited on `main`:** `b9d3bcc` (gameplay and view: groups move as one / D-108,
 right-click travel / D-109, an honesty pass on the settlement panel, per-suite save isolation in
@@ -132,9 +132,14 @@ for the next engineering milestone):
   engagement work had already reduced it 79 per cent before either. Its remaining named items at 20,000
   are `focus` (15.4 ms, down from 26.8), `retained` (8.5 ms) and about 32 ms of loop work the counters do
   not yet name.
-- **Rendering at scale is not in any of the simulation measurements** — the benchmark steps the
-  simulation directly. Drawing twenty thousand soldiers is a separate problem nobody has paid for; a
-  render-path spike exists in the tree but is deliberately uncommitted.
+- **Rendering at scale is solved twice over, and it was never the problem.** The game's default renderer
+  is instanced: twenty thousand soldiers at **2.56 ms a frame** (D-107), measured windowed. The block view
+  - the scale ladder's boxes, which is the picture a large battle is meant to be watched at - cost 26-28 ms
+  a frame because it rebuilt its boxes from every living soldier every *frame*; it now rebuilds them once
+  a tick and costs **0.60 ms at cohort zoom and 1.86 ms at century zoom** (D-117), about a tenth of a
+  millisecond above the ground alone. At this size a live frame is essentially the simulation - about
+  290 ms of tick against a millisecond or two of drawing - so a slow large battle is a simulation
+  question, not a rendering one.
 
 The kill cleanup used to stand first on this list as a **suspected O(deaths × army)** walk in
 `BattleSimulator._attack()`. It is no longer suspected: Step 7.9 measured it at 98.3% of a

@@ -221,6 +221,23 @@ func _draw() -> void:
 	_draw_popups()
 
 
+## The boxes [method _draw_groups] draws, and the tick they describe.
+##
+## Rebuilding them walks every living soldier, which is right once a tick and ruinous once a frame:
+## measured on the twenty-thousand-soldier showcase, the block view cost 26 to 28 ms a frame whether
+## it was drawing two hundred boxes or forty-two, against half a millisecond for the ground alone -
+## because it asked where every man stood before drawing each box, and asked again on the next frame
+## with the answer unchanged. A box is the unit of display and the unit of computation: it changes
+## when the battle does, not when the screen does. See D-117.
+var _boxes: Array[Rect2] = []
+var _box_colours: Array[Color] = []
+var _box_tick: int = -1
+var _box_level: int = -1
+## Development only: how many times the boxes have been rebuilt, so the once-a-tick rule can be
+## pinned by a test rather than assumed.
+var box_rebuilds: int = 0
+
+
 ## The army as its groups: one box per century, cohort or legion, in the side's colour. The box is
 ## where that group's living soldiers stand, so it contracts as the ranks thin and the ground shows
 ## through it. Twenty thousand individual marks at this scale is a texture, not a picture; the
@@ -229,17 +246,36 @@ func _draw_groups(level: int) -> void:
 	var step := UnitScale.size_of(level)
 	if step <= 1:
 		return
-	var alive := {}
-	for unit in simulator.units:
-		if unit.is_alive():
-			alive[unit.id] = unit
+	ensure_boxes(level, step)
+	for index in _boxes.size():
+		draw_rect(_boxes[index], _box_colours[index])
+		draw_rect(_boxes[index], _box_colours[index].darkened(0.45), false, 0.7)
+
+
+## Rebuild the boxes if this tick has not built them already, and only then. The drawing above reads
+## whatever is cached, so a frame that changes nothing about the battle draws the same rectangles for
+## the cost of the rectangles.
+func ensure_boxes(level: int, step: int) -> void:
+	if simulator != null and simulator.tick_index == _box_tick and level == _box_level:
+		return
+	_rebuild_boxes(level, step)
+
+
+## Sweep every body's living soldiers into one box per group of [param step] - once a tick, which is
+## what the tick's own summary is for. A body's boxes are its soldiers' own positions, so a thinned
+## rank shows as a smaller box, exactly as when this walked the army per frame.
+func _rebuild_boxes(level: int, step: int) -> void:
+	_boxes.clear()
+	_box_colours.clear()
+	if simulator == null:
+		return
 	for formation in simulator.formations:
 		var colour := COLOR_PLAYER if formation.side == BattleContext.SIDE_PLAYER else COLOR_ENEMY
 		var groups := {}
 		var order: Array[int] = []
 		for i in formation.unit_ids.size():
-			var unit: BattleUnit = alive.get(formation.unit_ids[i])
-			if unit == null:
+			var unit: BattleUnit = _roster_unit(formation.unit_ids[i])
+			if unit == null or not unit.is_alive():
 				continue
 			var index := i / step
 			if groups.has(index):
@@ -251,9 +287,30 @@ func _draw_groups(level: int) -> void:
 				order.append(index)
 		for index in order:
 			var box: Array = groups[index]
-			var rect := Rect2(box[0], box[1] - box[0]).grow(1.1)
-			draw_rect(rect, colour)
-			draw_rect(rect, colour.darkened(0.45), false, 0.7)
+			_boxes.append(Rect2(box[0], box[1] - box[0]).grow(1.1))
+			_box_colours.append(colour)
+	_box_tick = simulator.tick_index
+	_box_level = level
+	box_rebuilds += 1
+
+
+## The boxes currently cached for the frame, and how many there are. Read by tests so the once-a-tick
+## rule and the boxes' correctness can be pinned rather than assumed.
+func box_rects() -> Array[Rect2]:
+	return _boxes
+
+
+func box_count() -> int:
+	return _boxes.size()
+
+
+## A unit by id, preferring the battle's own id-indexed roster over the dictionary: the box rebuild
+## walks every soldier in the army, and that walk - not the rectangles - was the whole cost of the
+## block view. Falls back to the dictionary for a battle that has no roster built.
+func _roster_unit(id: int) -> BattleUnit:
+	if simulator._unit_slots.size() > id and id >= 0:
+		return simulator._unit_slots[id]
+	return simulator.find_unit(id)
 
 
 ## The grouping this camera is drawn at. Close in, the soldiers; further out, first the century they

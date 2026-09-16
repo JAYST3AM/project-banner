@@ -3037,3 +3037,43 @@ fifteen to twenty-five milliseconds a tick; the measurement says 6.3, because th
 the paths a soldier actually takes rather than on every path. The milestone's method is that a reasoned
 number is a hypothesis and a paired run is the answer, so the wrong estimate is recorded rather than
 quietly dropped.
+
+
+## D-117 - the block view draws the tick's boxes, not every soldier every frame
+
+**Context.** Jay's frame for a large battle is a legion in a box: a thousand men are one mark on the
+screen, so a twenty-thousand-man battle is a few dozen marks, and the individuals live in the simulation
+rather than on the screen. The code already carried the ladder (`UnitScale`: soldier, contubernium,
+century, cohort, legion) and the block view (`PB_BLOCK_VIEW=1`), and the game's default renderer is
+instanced (`SoldierField`, 2.56 ms a frame at twenty thousand men, D-107).
+
+**The finding.** The block view cost 26 to 28 ms a frame whether it drew two hundred boxes or forty-two,
+against half a millisecond for the ground alone. The same cost at both zoom levels is what told the
+story: the rectangles were never the cost. `BattleView._draw_groups` rebuilt its boxes from *every living
+soldier in the army* on every frame - asking where twenty thousand men stood in order to draw forty
+boxes, and asking again on the next frame with the answer unchanged.
+
+**Decision.** The boxes are rebuilt once per tick and cached, keyed on the tick index and the drawing
+level; a frame draws whatever is cached. A box is the unit of display and the unit of computation: it
+changes when the battle does, not when the screen does. The rebuild also reads the battle's id-indexed
+roster (`_unit_slots`) instead of resolving each id through the dictionary, the same preference the
+tick's own summary pass already applies.
+
+**Measured on the development machine** (windowed, vsync off, battle frozen after two ticks, 20,000
+soldiers, 1600x900):
+
+| block view | before | after |
+| --- | ---: | ---: |
+| century zoom (200 boxes over 20,000 men) | 27.72 ms - 36 fps | **1.86 ms - 539 fps** |
+| cohort zoom (about 42 boxes over 20,000 men) | 26.24 ms - 38 fps | **0.60 ms - 1656 fps** |
+| ground alone, for the floor | 0.51 ms | 0.48 ms |
+
+So the picture a twenty-thousand-man battle is meant to be watched at costs about a tenth of a
+millisecond more than the empty ground. The remaining cost of a large battle is the simulation - about
+290 ms a tick - not the drawing, and the same measurement run live says so: at twenty thousand soldiers
+a live frame is almost entirely the tick.
+
+**Pinned by test.** `tests/test_battle_view.gd` (new suite) asserts the once-a-tick rule, that every
+living soldier stands inside a box, and that a thinned rank shows as a smaller box. Its first version
+failed on its own fixture - it stepped an unstarted battle, so nothing ticked and the boxes rightly
+stayed still - which is the difference between the rule being tested and the rule being assumed.
