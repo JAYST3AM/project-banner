@@ -2850,3 +2850,42 @@ cadence, target-search logic, formation-driven engagement, explicit-order preced
 separation, balance data, saves, and the locked Step 7.8 overlap optimisation and its native kernel
 are all untouched; the only new work in a tick is one linear pass over the roster that a deployed army
 pays about nothing for, because it only visits soldiers who hold an order.
+
+## D-112 - the per-soldier loop is counted and priced before it is changed
+
+**Context.** Step 7.9 and 7.10 removed the last quadratic path from the per-soldier loop, leaving it the
+largest phase of a tick: 203.1 ms of a 399.0 ms instrumented tick at twenty thousand soldiers in the
+fixed-area benchmark, of which automatic target selection is 72.1 ms. About 131 ms per tick was
+attributed to nothing.
+
+**Decision.** Count which paths the army takes, price each operation in isolation, and only then name
+the fix. Two dev-only instruments, both behind [code]profile_enabled[/code]: per-soldier path counters on
+[code]BattleSimulator[/code] ([code]upd_*[/code] and [code]mv_*[/code], reset with the other counters), and a
+price probe ([code]scripts/dev/unit_price_probe.tscn[/code]) that times one call of each operation over live
+state and a control loop calling an empty function, so the act of calling is separated from the work.
+
+**What the counts say.** At twenty thousand soldiers, per tick: 20,000 soldiers through the loop, 100%
+of them resolving a target, 0% already in reach, 100% formed, 20,000 formation-slot lookups, 20,000
+moves, 20,000 terrain lookups, and **20,000 calls into the native accelerator** - one per moving soldier,
+invisible to any GDScript-side timer.
+
+**What the prices say** (per call, and per tick at those counts): [code]_can_press_forward[/code] 1.4697 us
+and **29.4 ms**; the terrain multiplier 0.9422 us and 18.8 ms; [code]formation_slot()[/code] 0.6661 us and
+13.3 ms; [code]native_moved()[/code] 0.5441 us and 10.9 ms; the range check 0.2279 us and 4.6 ms; the facing
+normalise 0.2071 us and 4.1 ms; and the empty control function 0.2707 us, which is **32.5 ms** of the
+total because six such calls happen per soldier per tick. Together: **81.1 ms of the 131 ms**, with the
+largest single item a side-contact check nobody had suspected - and that check, read, is six field
+reads delivered through four function calls, so what is being paid for is the calling itself.
+
+**Bearing on the locked milestones.** Nothing here changes the game: the counters are inert with
+profiling off, the price probe only reads state, and Step 7.8's separation pass and its native kernel
+are untouched. The counters and the probe are development-only, under [code]scripts/dev[/code] and
+[code]scenes/dev[/code], and a milestone that changes behaviour must delete or switch off anything it no
+longer needs.
+
+**Consequence.** The next milestone has a named target instead of a phase name: cache the side-contact
+fact per side per tick rather than testing it per soldier, apply the body's own step to the soldiers
+already in their places (the rigid-group path widened to dressing, which is where the position,
+terrain and slot arithmetic disappear), and mirror moved soldiers into the accelerator in one call a
+tick rather than twenty thousand.
+

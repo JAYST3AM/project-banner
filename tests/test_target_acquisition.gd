@@ -66,6 +66,10 @@ func run() -> void:
 	_test_a_kill_with_no_hunters_clears_nothing_and_inspects_nothing()
 	_test_repeated_deaths_accumulate_the_walk()
 	_test_the_kill_cleanup_is_inert_without_profiling()
+	_test_per_soldier_counters_are_inert_without_profiling()
+	_test_per_soldier_counters_follow_the_paths()
+	_test_per_soldier_counters_reset_with_the_profile()
+	_test_the_per_soldier_counters_are_exact_on_a_formed_battle()
 	_test_the_cleanup_follows_the_orders_and_not_the_army()
 	_test_the_index_clears_exactly_what_a_full_scan_would()
 	_complete()
@@ -1262,3 +1266,84 @@ func _test_the_kill_cleanup_is_inert_without_profiling() -> void:
 	equal(simulator.kill_cleanup_inspections, 0, "no entry was counted")
 	equal(simulator.kill_cleanup_clears, 0, "no clear was counted")
 	equal(simulator.kill_cleanup_usec, 0, "and no time was recorded")
+
+
+## The per-soldier counters (Step 7.11) must cost nothing when profiling is off, exactly as the
+## kill-cleanup counters do: a battle nobody is measuring leaves every one of them at zero.
+func _test_per_soldier_counters_are_inert_without_profiling() -> void:
+	section("with profiling off the per-soldier counters report nothing")
+	var roster: Array[BattleUnit] = []
+	for i in 8:
+		roster.append(_unit(i, PLAYER if i % 2 == 0 else ENEMY, Vector2(30.0 + float(i), 30.0)))
+	var simulator := _simulator(roster, 4)
+	equal(simulator.profile_enabled, false, "profiling is off, as a real battle runs")
+	simulator.step(TICK)
+	equal(simulator.upd_calls, 0, "no soldier was counted")
+	equal(simulator.upd_targeted, 0, "no target was counted")
+	equal(simulator.upd_in_reach, 0, "no reach was counted")
+	equal(simulator.upd_formed, 0, "no formed path was counted")
+	equal(simulator.upd_slot_lookups, 0, "no slot lookup was counted")
+	equal(simulator.upd_moves, 0, "no move was counted")
+	equal(simulator.mv_normalises, 0, "no normalise was counted")
+	equal(simulator.mv_native_calls, 0, "and no call into the accelerator was counted")
+
+
+## The counters must describe the paths the army actually walked. These soldiers are loose, so the
+## formed counters stay empty; every soldier through the loop is counted once; and the relations that
+## must hold by construction - a subset here, an upper bound there - are the ones asserted.
+func _test_per_soldier_counters_follow_the_paths() -> void:
+	section("the per-soldier counters follow the paths taken")
+	var roster: Array[BattleUnit] = []
+	for i in 10:
+		roster.append(_unit(i, PLAYER if i < 5 else ENEMY, Vector2(30.0 + float(i), 30.0)))
+	var simulator := _counting(roster, 4)
+	simulator.step(TICK)
+	equal(simulator.upd_calls, roster.size(), "every soldier went through the loop once")
+	equal(simulator.tgt_soldier_ticks, simulator.upd_calls,
+		"and the older soldier counter agrees, because it counts the same loop")
+	check(simulator.upd_targeted <= simulator.upd_calls, "targets are a subset of the soldiers")
+	equal(simulator.upd_formed, 0, "none of these soldiers is in a formation")
+	equal(simulator.upd_slot_lookups, 0, "so no slot was ever computed")
+	equal(simulator.upd_rigid_steps, 0, "and no rigid-group step was ever taken")
+	check(simulator.mv_native_calls <= simulator.upd_moves + simulator.upd_rigid_steps,
+		"the accelerator hears about moves and nothing else")
+	check(simulator.mv_normalises <= simulator.upd_moves, "a normalise only happens on a move")
+
+
+## Resetting the profile clears them with everything else, so a second measured run never inherits
+## the first one's counts.
+func _test_per_soldier_counters_reset_with_the_profile() -> void:
+	section("the per-soldier counters reset with the profile")
+	var roster: Array[BattleUnit] = []
+	for i in 6:
+		roster.append(_unit(i, PLAYER if i % 2 == 0 else ENEMY, Vector2(30.0 + float(i), 30.0)))
+	var simulator := _counting(roster, 4)
+	simulator.step(TICK)
+	check(simulator.upd_calls > 0, "the tick was counted")
+	simulator.reset_profile()
+	equal(simulator.upd_calls, 0, "and the reset cleared it")
+	equal(simulator.upd_moves, 0, "along with the moves")
+	equal(simulator.mv_native_calls, 0, "and the calls into the accelerator")
+
+
+## The counters must be *exact*, not merely monotone. Two formed armies that start apart give a fixture
+## where the expected numbers are known rather than bounded: every soldier goes through the loop, every
+## one of these is in a body, nobody is in reach sixty units apart, no terrain means no terrain lookup,
+## and every move tells the grid. An auditor asked for the counters to be pinned rather than assumed.
+func _test_the_per_soldier_counters_are_exact_on_a_formed_battle() -> void:
+	section("the per-soldier counters are exact on a formed battle")
+	var fixture := _formed_army(12, 60.0, 4)
+	var simulator: BattleSimulator = fixture["simulator"]
+	var units: Array[BattleUnit] = fixture["units"]
+	simulator.reset_profile()
+	simulator.step(TICK)
+	equal(simulator.upd_calls, units.size(), "every soldier went through the loop exactly once")
+	equal(simulator.upd_formed, units.size(), "every soldier in these armies is in a body")
+	equal(simulator.upd_in_reach, 0, "and none of them is in reach on a first tick sixty units apart")
+	equal(simulator.upd_slot_lookups, simulator.upd_formed - simulator.upd_pressed_forward,
+		"a slot is computed for every formed soldier that did not press forward, and for nobody else")
+	equal(simulator.mv_terrain_lookups, 0, "this fixture has no terrain, so no terrain lookup ran")
+	equal(simulator.mv_native_calls, simulator.upd_moves + simulator.upd_rigid_steps,
+		"the grid is told about every move and every rigid step, and about nothing else")
+	check(simulator.upd_targeted > 0, "soldiers this close do resolve targets")
+	check(simulator.mv_native_calls > 0, "and their moves reach the grid")

@@ -106,10 +106,12 @@ separation pass is locked and untouched.
 for the next engineering milestone):
 
 - The **per-soldier update loop**: 231.7 ms/tick of a 437.1 ms/tick instrumented tick at 20,000
-  soldiers, of which automatic target selection is 104.5 ms. Roughly **127 ms is unexplained** and is
-  being counted by path in Step 7.11: the facing normalise and the range check for every soldier with a
-  target, the formation slot lookup for every formed soldier, and the call into the native grid for
-  every soldier that moves.
+  soldiers, of which automatic target selection is 104.5 ms. About **127 ms was unexplained and is now
+  counted and priced** (Step 7.11): every soldier resolves a target, takes the formed path, computes a
+  formation slot, reads the terrain under him, and calls the native accelerator - and of the ~131 ms,
+  81.1 ms is named, with the largest single item a six-field-read contact check reached through four
+  function calls. The cost is the *calling*: the fix is fewer calls per soldier, which is D-112 and the
+  next engineering milestone.
 - **Rendering at scale is not in any of the simulation measurements** — the benchmark steps the
   simulation directly. Drawing twenty thousand soldiers is a separate problem nobody has paid for.
 

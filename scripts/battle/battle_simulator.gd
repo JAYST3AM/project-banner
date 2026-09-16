@@ -426,6 +426,42 @@ var kill_cleanup_worst_inspections: int = 0
 ## Microseconds the cleanup walks cost in total, as measured inside the walk itself.
 var kill_cleanup_usec: int = 0
 
+## ---------- development-only per-soldier counters (Step 7.11) ----------------
+##
+## The per-soldier loop is the largest measured phase of a tick - 203.1 ms of a 399.0 ms tick at twenty
+## thousand soldiers in the Step 7.11 profile run - and target selection accounts for 72.1 ms of it. That
+## leaves about 131 ms unexplained inside `_update_unit`, and the suspects are all cheap-looking
+## per-soldier work rather than any one algorithm: a normalise and a range check for every soldier that
+## has a target, a formation slot lookup for every formed soldier, and - the one that cannot be seen from
+## GDScript at all - a call into the native grid for every soldier that moves, because the grid's
+## mirrored positions are true only while these are the only writes of a live soldier's position (D-095).
+##
+## These counters say which paths the army actually takes, because a path that nobody walks cannot be
+## the missing time. They count calls, not microseconds: per-soldier timers would cost more than the
+## work they measure. Together with the probe's price per native call they turn "about 127 ms" into a
+## number that names its cause. Every counter is incremented behind [member profile_enabled].
+var upd_calls: int = 0
+## Soldiers that resolved a target and therefore paid the facing normalise and the range check.
+var upd_targeted: int = 0
+## Soldiers already inside their attack range - the ones that strike instead of walking.
+var upd_in_reach: int = 0
+## Soldiers that took the formed path, and those inside it that pressed forward.
+var upd_formed: int = 0
+var upd_pressed_forward: int = 0
+## Formation slot computations - one per formed soldier per tick, including those the rigid-group
+## path then answers with the body's own step.
+var upd_slot_lookups: int = 0
+## Soldiers that took the rigid-group step (D-108) rather than dressing themselves.
+var upd_rigid_steps: int = 0
+## Calls to `_move_toward`, and the loose soldiers that walked to a player move order.
+var upd_moves: int = 0
+var upd_move_orders: int = 0
+## Inside `_move_toward`: the direction normalise, the calls into the native grid, and the terrain
+## lookups made by `_effective_speed`.
+var mv_normalises: int = 0
+var mv_native_calls: int = 0
+var mv_terrain_lookups: int = 0
+
 ## ---------- the order index (Step 7.10) --------------------------------------
 ##
 ## Which soldiers are hunting which enemy, rebuilt once a tick.
@@ -1784,6 +1820,18 @@ func reset_profile() -> void:
 	kill_cleanup_worst_inspections = 0
 	kill_cleanup_usec = 0
 	_order_index_tick = -1
+	upd_calls = 0
+	upd_targeted = 0
+	upd_in_reach = 0
+	upd_formed = 0
+	upd_pressed_forward = 0
+	upd_slot_lookups = 0
+	upd_rigid_steps = 0
+	upd_moves = 0
+	upd_move_orders = 0
+	mv_normalises = 0
+	mv_native_calls = 0
+	mv_terrain_lookups = 0
 	tgt_retained_in_reach = 0
 	tgt_retained_held = 0
 	tgt_invalid_dead = 0
@@ -2147,8 +2195,13 @@ func overlap_report() -> Dictionary:
 
 func _update_unit(unit: BattleUnit, delta: float) -> void:
 	unit.cooldown_left = maxf(0.0, unit.cooldown_left - delta)
-	if profile_enabled:
+	# Read the profile flag once per soldier rather than once per counter: eight member reads became
+	# one local read, and the guards below test the local. An auditor asked for the off path to have no
+	# per-soldier profiling cost it did not have before, and eight reads of a member is cost.
+	var profiling := profile_enabled
+	if profiling:
 		tgt_soldier_ticks += 1
+		upd_calls += 1
 
 	# An explicit attack order is a player instruction, so it is resolved [i]before[/i]
 	# the automatic search rather than after it. The order is authoritative whenever it
@@ -2166,16 +2219,16 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 		var ordered := find_unit(unit.attack_order_target_id)
 		if ordered != null and ordered.is_alive() and ordered.side != unit.side:
 			target = ordered
-			if profile_enabled:
+			if profiling:
 				tgt_explicit_order_uses += 1
 		else:
 			unit.attack_order_target_id = -1
-			if profile_enabled:
+			if profiling:
 				tgt_order_clears += 1
 
 	if target == null:
 		var target_probe := 0
-		if profile_enabled:
+		if profiling:
 			target_probe = Time.get_ticks_usec()
 		target = _resolve_target(unit)
 		if target_probe > 0:
@@ -2191,10 +2244,14 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 		target = _retaliation_target(unit)
 	if target == null:
 		return
+	if profiling:
+		upd_targeted += 1
 
 	unit.facing = (target.position - unit.position).normalized()
 
 	if unit.position.distance_to(target.position) <= unit.attack_range:
+		if profiling:
+			upd_in_reach += 1
 		# In reach: stand and strike rather than walk into the enemy. This is also the
 		# only place that decides what "in contact" means, which is why the flag is set
 		# here rather than being recomputed later by someone else. It is set on the
@@ -2213,6 +2270,8 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 	# arithmetic rather than deciding anything.
 	if unit.is_formed():
 		var body := unit.formation_ref
+		if profiling:
+			upd_formed += 1
 		# Pressing forward is the one exception, and it is deliberately narrow. A body
 		# that has stopped, has been told to engage, and has nobody on its side
 		# fighting has no line left to hold: the fighting has stopped happening, and
@@ -2220,9 +2279,13 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 		# this side is in contact the dressing wins, which is what stops a battle
 		# dissolving into a crowd.
 		if _can_press_forward(unit, body):
+			if profiling:
+				upd_pressed_forward += 1
 			_move_toward(unit, target.position, delta)
 			return
 		var place := unit.formation_slot()
+		if profiling:
+			upd_slot_lookups += 1
 		# A soldier standing in his place goes where his body goes. The body worked that step out
 		# once, for the whole group, at the top of the tick; making four hundred men each derive the
 		# same displacement - a slot lookup, a distance, a normalise and a terrain lookup apiece -
@@ -2231,6 +2294,8 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 		# See D-108.
 		if rigid_groups_enabled and body.anchor_step != Vector2.ZERO \
 				and unit.position.distance_squared_to(place) <= ARRIVE_EPSILON * ARRIVE_EPSILON:
+			if profiling:
+				upd_rigid_steps += 1
 			_step_with_body(unit, body.anchor_step)
 			return
 		if unit.position.distance_to(place) > ARRIVE_EPSILON:
@@ -2238,6 +2303,8 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 		return
 
 	if unit.has_move_order:
+		if profiling:
+			upd_move_orders += 1
 		_move_toward(unit, unit.move_order, delta)
 		if unit.position.distance_to(unit.move_order) <= 1.0:
 			unit.clear_orders()
@@ -3439,9 +3506,13 @@ func backend_report() -> Dictionary:
 
 
 func _move_toward(unit: BattleUnit, point: Vector2, delta: float) -> void:
+	if profile_enabled:
+		upd_moves += 1
 	var to_point := point - unit.position
 	if to_point.length() <= 0.0001:
 		return
+	if profile_enabled:
+		mv_normalises += 1
 	unit.position += to_point.normalized() * _effective_speed(unit) * delta
 	unit.position = Vector2(
 		clampf(unit.position.x, 0.5, field_size.x - 0.5),
@@ -3452,6 +3523,8 @@ func _move_toward(unit: BattleUnit, point: Vector2, delta: float) -> void:
 		# killing blow lands. The accelerator's mirrored positions are only true because
 		# these two are the only places a soldier's live state changes inside a tick, and
 		# COMPARE_FULL is what proves that. See D-095.
+		if profile_enabled:
+			mv_native_calls += 1
 		grid.native_moved(unit)
 
 
@@ -3464,6 +3537,8 @@ func _step_with_body(unit: BattleUnit, step_vector: Vector2) -> void:
 		clampf(unit.position.y + step_vector.y, 0.5, field_size.y - 0.5)
 	)
 	if grid != null:
+		if profile_enabled:
+			mv_native_calls += 1
 		grid.native_moved(unit)
 
 
@@ -3473,6 +3548,8 @@ func _step_with_body(unit: BattleUnit, step_vector: Vector2) -> void:
 func _effective_speed(unit: BattleUnit) -> float:
 	if terrain == null:
 		return unit.move_speed
+	if profile_enabled:
+		mv_terrain_lookups += 1
 	return unit.move_speed * terrain.move_multiplier_at(unit.position)
 
 

@@ -756,3 +756,57 @@ an unbuilt index would have silently cleared nothing - the failure mode the Step
 **What is verified.** 26 suites / 8,895 assertions / 0 failures headless - the target suite grew from
 268 to 285 with the equivalence, inverse-scaling, chain and no-hunter tests - the two-process restart
 check unchanged, and the windowed DevFlags loop resolving a battle with no script errors. See D-111.
+
+## Step 7.11 - the per-soldier loop, counted by path and priced by operation
+
+**What it is.** A measurement milestone, in the shape Step 7.9 established: count what the per-soldier
+loop actually does, price each operation it performs, and only then name a fix. Nothing changes
+behaviour. Step 7.9 and 7.10 left the per-soldier loop the largest phase of a tick - 203.1 ms of a
+399.0 ms instrumented tick at 20,000 soldiers in the fixed-area benchmark - of which automatic target
+selection is 72.1 ms, leaving about 131 ms attributed to nothing.
+
+**What the army actually does** (the benchmark's own counters, at 20,000 soldiers, per tick):
+
+| path | per tick | share of soldiers |
+| --- | ---: | ---: |
+| through the per-soldier loop | 20,000 | 100% |
+| resolved a target (so paid the facing normalise and the range check) | 20,000 | 100% |
+| already in attack range | 0 | 0% |
+| took the formed path | 20,000 | 100% |
+| computed a formation slot | 20,000 | 100% |
+| moved (a terrain lookup and a native call each) | 20,000 | 100% |
+| **calls into the native accelerator** | **20,000** | one per moving soldier |
+
+A path nobody walks cannot be the missing time, and every path here is walked by every soldier.
+
+**What one call costs** (`scenes/dev/unit_price_probe.tscn`, 200,000 iterations each, live state):
+
+| operation | us per call | per tick at 20,000 |
+| --- | ---: | ---: |
+| an empty control function (the act of calling) | 0.2707 | 5.4 ms |
+| [code]_can_press_forward()[/code] | 1.4697 | **29.4 ms** |
+| the terrain multiplier | 0.9422 | 18.8 ms |
+| [code]formation_slot()[/code] | 0.6661 | 13.3 ms |
+| [code]native_moved()[/code] | 0.5441 | 10.9 ms |
+| the range check | 0.2279 | 4.6 ms |
+| the facing normalise (two square roots) | 0.2071 | 4.1 ms |
+| **together** | | **81.1 ms of the ~131 ms** |
+
+Six such calls happen per soldier per tick, so about 32.5 ms of that total is the act of calling rather
+than the work - which is itself a finding about how a per-soldier loop is written, not a footnote.
+
+**What it means.** The largest single item is a side-contact check run once per formed soldier per tick,
+and it answers a question about the whole *side*, not the soldier - so it belongs to the side, computed
+once. Reading it explains the price: six field reads delivered through four function calls, at roughly
+0.37 us each, which is the measured cost of *calling* rather than of checking. The same is true of the
+next three items, and it is the milestone's real finding: a per-soldier loop of twenty thousand
+soldiers pays for every call it makes, and the way to make it cheaper is to make fewer calls per
+soldier - cache the side-contact answer per body per tick, apply the body's own step to the soldiers
+already in their places (which is where the slot, terrain and position arithmetic disappear), and
+mirror moved soldiers into the accelerator once a tick instead of twenty thousand times. See D-112.
+
+**Not touched.** Battle outcomes, targeting cadence and search, formation-driven engagement, explicit
+order precedence, movement semantics, separation (Step 7.8 is locked), balance data, saves, and the
+native kernel's interface. The counters are inert with profiling off; both instruments live under
+[code]scripts/dev[/code] and [code]scenes/dev[/code].
+

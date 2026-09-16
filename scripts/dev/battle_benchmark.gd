@@ -537,6 +537,23 @@ func _run_battle(
 	}
 	if profile:
 		out["profile"] = simulator.profile.duplicate()
+		# The per-soldier path counters (Step 7.11). Counted, not timed: per-soldier timers would
+		# cost more than the work they measure. `native` is the calls into the accelerator, which
+		# no GDScript-side timer can see - the price of one such call comes from the probe.
+		out["unit_paths"] = {
+			"calls": simulator.upd_calls,
+			"targeted": simulator.upd_targeted,
+			"in_reach": simulator.upd_in_reach,
+			"formed": simulator.upd_formed,
+			"pressed": simulator.upd_pressed_forward,
+			"slots": simulator.upd_slot_lookups,
+			"rigid": simulator.upd_rigid_steps,
+			"moves": simulator.upd_moves,
+			"move_orders": simulator.upd_move_orders,
+			"normalises": simulator.mv_normalises,
+			"native": simulator.mv_native_calls,
+			"terrain": simulator.mv_terrain_lookups,
+		}
 		out["overlap_report"] = simulator.overlap_report()
 		out["overlap_backend"] = simulator.overlap_backend_active
 		out["overlap_backend_report"] = simulator.overlap_backend_report()
@@ -734,6 +751,40 @@ func _print_profile(counts: Array, ticks: int, seed_value: int, budget: float) -
 	print("  it spent choosing targets. The clock costs two reads per soldier, so a profiled")
 	print("  figure is slightly higher than the unprofiled one in the table above - use the")
 	print("  table above for comparisons and this one for attribution.")
+
+	print("")
+	print("=== THE PER-SOLDIER LOOP: which paths the army walked (Step 7.11) ===")
+	print("  Per tick. 'share' is the share of soldiers that took the path, so a path nobody walks")
+	print("  cannot be the missing time. 'native' is calls into the accelerator - one per moving")
+	print("  soldier - which is invisible to any GDScript-side timer and is priced by the probe.")
+	print("%7s | %9s | %7s | %7s | %7s | %7s | %7s | %7s | %7s | %7s" % [
+		"units", "calls", "targeted", "inreach", "formed", "slots", "moves", "native", "terrain", "moves/tick"])
+	print("-".repeat(101))
+	for count_value in counts:
+		var count := int(count_value)
+		var effective := minf(MAX_BUDGET, budget * maxf(1.0, float(count) / 1000.0))
+		var run := _run_battle(count, ticks, seed_value, true, true, effective, true)
+		var done := maxf(1.0, float(run["ticks"]))
+		var paths: Dictionary = run.get("unit_paths", {})
+		if paths.is_empty():
+			continue
+		var calls := float(paths.get("calls", 0)) / done
+		var targeted := float(paths.get("targeted", 0)) / done
+		var in_reach := float(paths.get("in_reach", 0)) / done
+		var formed := float(paths.get("formed", 0)) / done
+		var slots := float(paths.get("slots", 0)) / done
+		var moves := float(paths.get("moves", 0)) / done
+		var native := float(paths.get("native", 0)) / done
+		var terrain := float(paths.get("terrain", 0)) / done
+		print("%7d | %8.0f | %6.0f%% | %6.0f%% | %6.0f%% | %6.0f%% | %6.0f%% | %8.0f | %8.0f | %8.2f" % [
+			count, calls,
+			100.0 * targeted / maxf(1.0, calls), 100.0 * in_reach / maxf(1.0, calls),
+			100.0 * formed / maxf(1.0, calls), 100.0 * slots / maxf(1.0, calls),
+			100.0 * moves / maxf(1.0, calls), native, terrain, moves / done])
+	print("-".repeat(101))
+	print("  'native' is the count that decides the next question: multiply it by the measured")
+	print("  price of one call and the per-soldier loop's unexplained share either has a cause or")
+	print("  does not. Rows with no 'unit_paths' are runs with profiling off.")
 
 	if overlaps.is_empty():
 		return
