@@ -2889,3 +2889,85 @@ already in their places (the rigid-group path widened to dressing, which is wher
 terrain and slot arithmetic disappear), and mirror moved soldiers into the accelerator in one call a
 tick rather than twenty thousand.
 
+
+## D-113 - the press-forward gate is decided by the body, once a step
+
+**Context.** Step 7.11 measured `_can_press_forward` at 1.4697 us a call - the single largest item in
+the per-soldier loop, 29.4 ms a tick at twenty thousand - and reading it showed why: six field reads
+delivered through four function calls, asked once per formed soldier per tick, for an answer that is
+the same for every soldier in the body.
+
+**Decision.** The gate is decided once per body per step, in the tick immediately after the bodies have
+moved and before the soldiers dress (`BattleFormation.press_forward_open`). It holds the two things
+that cannot change during the soldier loop: the order test, and the moving, turning and reforming
+predicates. That they cannot change is verified rather than assumed - the only call the per-soldier
+loop makes into a body is `mark_in_contact`. Contact itself stays live, per soldier, because soldiers
+set it part way through their own loop and freezing it would change behaviour in a way that depends on
+iteration order. An auditor asked for exactly that distinction and for a fixture that would catch a
+regression in it.
+
+**Measured, paired in one build.** `PB_PRESS_CACHE=off` restores the previous code exactly, so the
+comparison is a switch in one build and not a comparison against an older log. At 20,000 soldiers on
+one seed: the soldiers phase falls from **204.365 ms to 193.643 ms** and the whole tick from
+**399.965 ms to 389.244 ms** - **10.7 ms a tick** - with target, formations, grid, focus and overlap
+all flat. The recovery is less than the 16-18 ms the probe's per-call price predicted, because the
+probe prices a call in a tight loop over two objects while the real loop touches twenty thousand
+soldiers between calls: the isolated price is an upper bound and the paired measurement is the number.
+
+**Equivalence is proved, not asserted.** The reference is kept in the same build behind the switch, and
+a test drives one showcase battle twice - forty ticks, both commanders thinking - comparing every
+soldier's answer, every soldier's position, and the number of soldiers allowed to press forward, on
+every tick. The per-tick count is what catches the mid-loop contact case; a frozen contact value would
+move one count and not the other. Zero disagreements.
+
+**Not touched.** Movement semantics, iteration order, separation (Step 7.8 is locked), the rigid-group
+path (D-108), balance data and saves. The flag is development-facing; the shipped default is on.
+
+
+## D-114 - the remaining per-soldier cost is call overhead, so remove the calls
+
+**Context.** Step 7.11 priced the per-soldier loop and found that its cost is dominated by *calling*:
+six measured calls per soldier per tick, with the probe's control loop pricing an empty function at
+0.27 us. Two surviving items were pure overhead of that kind. The native position mirror's guard called
+`can_answer_natively()` - three field reads behind a method - once per moving soldier. And
+`_effective_speed` reached the ground's movement multiplier through five nested calls
+(`_effective_speed` -> `move_multiplier_at` -> `cell_index_at` -> `inside` + `cell_row_at` +
+`cell_col_at`) to do one array read.
+
+**Decision.** Where a per-soldier call's reads are unchanged by inlining - no reordering, no new state,
+no invalidation - spell the reads out and delete the call. This is deliberately *not* the same thing as
+the Step 7.12 slice 1 cache: that one needed a proof that the cached conditions cannot change while the
+soldiers dress. These need no proof of immutability because nothing is held: the same fields are read,
+in the same order, at the same point in the tick. Each change keeps its previous shape in the build as a
+reference (`PB_NATIVE_GUARD=call`, `PB_TERRAIN_FAST=off`), so every before-and-after here is a paired
+run in one build rather than a comparison against an older log.
+
+**Measured, paired in one build**, at 20,000 soldiers on one seed, with every other switch at its
+shipped default:
+
+| change | soldiers phase, shipped | soldiers phase, reference | saving |
+| --- | ---: | ---: | ---: |
+| the native guard spelled out | 190.484 ms | 193.639 ms | **3.2 ms a tick** |
+| the terrain path collapsed | 169.468 ms | 191.260 ms | **21.8 ms a tick** |
+
+The terrain pair's whole-tick figures were 363.925 ms against 386.830 ms. It was measured twice - once
+before and once after the invariant fix described below - and the two pairs agree to 0.3 ms
+(21.5 ms then, 21.8 ms now). Grid, focus and overlap stay flat across both pairs; the formation phase
+moved about 0.7 ms between the terrain runs, which is drift rather than attribution, so the claimed
+saving is the soldiers-phase delta in both rows.
+
+**One invariant the change had to respect, and did.** `test_native_query` counts the write sites for a
+living soldier's position in `battle_simulator.gd` and requires exactly three, because D-095's mirrored
+positions are only true while every write is known and named. The first version of the terrain change
+put a `position +=` inside each branch of the switch - four sites - and the suite failed on it, correctly.
+It is now one write statement fed by whichever path worked out the speed, and the count is back to three.
+
+**What is not changed.** The arithmetic: the same reads, the same order of operations, the same guards
+for points outside the field, the same fallback when there is no terrain. The mirror still receives a
+position for every moving soldier, so D-095's invariant - that those call sites are the only writes of a
+live position - is untouched. No balance data, no saves, and Step 7.8's separation pass remains locked.
+
+**Consequence, and the shape of what is left.** Inlining cannot help the two remaining items, because
+neither is a call being paid for a constant read: the body transform must be *proved* not to drift
+before it may be used, and the native batch replaces twenty thousand boundary crossings a tick with one,
+which is architectural work against D-095 rather than a local change. Both are sequenced after these.

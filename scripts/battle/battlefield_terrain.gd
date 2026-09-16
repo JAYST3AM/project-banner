@@ -205,8 +205,25 @@ func height_at(point: Vector2) -> float:
 	return _heights[index] if index >= 0 else 0.0
 
 
-## The multiplier a unit's move speed is scaled by at this point. One is unpenalised.
+## The movement multiplier for the ground under a point.
+##
+## The hot path is per moving soldier per tick - twenty thousand times at twenty thousand soldiers -
+## and this used to cost five nested calls to do one array read: `_effective_speed`, this method, the
+## cell index, and the two integer divisions inside it. The cell arithmetic is spelled out here instead,
+## reading the same array with the same guards, so the callers that need this once per soldier pay for
+## one call rather than five. [method move_multiplier_via_cells] is the previous shape, kept so the two
+## can be measured against each other in one build. See D-114.
 func move_multiplier_at(point: Vector2) -> float:
+	if point.x < 0.0 or point.y < 0.0 or point.x >= size.x or point.y >= size.y:
+		return 1.0
+	var col := clampi(int(floor(point.x / cell_size)), 0, cols - 1)
+	var row := clampi(int(floor(point.y / cell_size)), 0, rows - 1)
+	return _move[row * cols + col]
+
+
+## The reference: the same multiplier through `cell_index_at`, which is what the engine called before the
+## cell arithmetic was spelled out above. Kept for paired measurement and for callers that are not hot.
+func move_multiplier_via_cells(point: Vector2) -> float:
 	var index := cell_index_at(point)
 	return _move[index] if index >= 0 else 1.0
 

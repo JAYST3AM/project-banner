@@ -2068,3 +2068,36 @@ order precedence, movement semantics, separation (Step 7.8 is locked), balance d
 native kernel's interface. The counters are inert with profiling off; both instruments live under
 [code]scripts/dev[/code] and [code]scenes/dev[/code].
 
+
+## Step 7.12 - the per-soldier loop's calls, part one (in progress)
+
+**What it is.** The fix Step 7.11 asked for, taken in slices, because each slice has to prove it changed
+cost and not behaviour. Three slices so far, each keeping its previous shape in the same build behind a
+switch, so every number below is a paired run rather than a comparison against an older log.
+
+| slice | what it removes | switch | measured at 20,000 soldiers, one seed |
+| --- | --- | --- | --- |
+| 1. the press-forward gate decided per body | three calls per formed soldier (D-113) | `PB_PRESS_CACHE=off` | soldiers 204.365 -> 193.643 ms, tick 399.965 -> 389.244 ms: **10.7 ms** |
+| 2. the native mirror's guard spelled out | one call per moving soldier (D-114) | `PB_NATIVE_GUARD=call` | soldiers 190.484 ms against 193.639 ms: **3.2 ms** |
+| 3. the terrain path collapsed to one call | four calls per moving soldier (D-114) | `PB_TERRAIN_FAST=off` | soldiers 169.468 ms against 191.260 ms: **21.8 ms** |
+
+**Where the loop stands.** The soldiers phase at twenty thousand soldiers has gone from 204.4 ms to
+169.4 ms - about 17 per cent - and the whole tick from about 400 ms to about 363 ms. Target selection,
+the other large phase, was not touched: this milestone is only about what the per-soldier loop spends
+outside it.
+
+**What is proved rather than asserted.** Slice 1's equivalence is a test that drives one showcase battle
+twice, forty ticks with both commanders thinking, comparing every soldier's answer, every soldier's
+position, and the per-tick count of soldiers allowed to press forward - the count being what catches the
+mid-loop contact case. Slices 2 and 3 hold no state, so their equivalence is by construction - the same
+reads, in the same order, at the same point in the tick - and their evidence is the paired measurement.
+An independent reviewer shaped all of this: it asked for the mid-loop fixture, for the reference to stay
+in the build, and for the native case to be established rather than assumed, and it was right each time.
+
+**Not touched.** Movement semantics, iteration order, separation (Step 7.8 is locked), D-108's rigid
+path, balance data and saves. Every switch is development-facing and every shipped default is on.
+
+**Next.** The two items that need proofs rather than inlining: the body transform - a body's slot lattice
+is an exact anchor-centred rigid transform of the previous tick's, verified on real battles to 1.7e-5,
+but it needs a long-battle drift fixture before anything may depend on it - and the native batch, which
+replaces twenty thousand boundary crossings a tick with one and is architectural work against D-095.

@@ -36,6 +36,7 @@ func run() -> void:
 	_test_a_soldiers_own_order_beats_the_gate()
 	_test_a_soldier_replaces_a_dead_opponent()
 	_test_a_body_pushed_apart_disengages()
+	_test_the_press_forward_cache_is_behaviour_identical()
 	_test_the_gate_never_starves_a_soldier()
 	_test_the_dead_do_not_look()
 	_test_a_corpse_body_is_not_a_target()
@@ -101,6 +102,48 @@ func _drive(bundle: Dictionary, ticks: int) -> void:
 		bundle["player_ai"].update(simulator, STEP)
 		bundle["enemy_ai"].update(simulator, STEP)
 		simulator.step(STEP)
+
+
+## The press-forward gate is now decided once per body per step instead of once per soldier. The
+## answers must be identical to the reference it replaced - which stays switchable in the same build -
+## and the two battles must stay in lockstep, tick for tick. A change in behaviour would show up as
+## soldiers standing in different places, which is why positions are compared and not only answers.
+func _test_the_press_forward_cache_is_behaviour_identical() -> void:
+	section("the press-forward cache answers what the reference answers")
+	var cached := _battle(10)
+	var reference := _battle(10)
+	reference["simulator"].press_forward_cache_enabled = false
+	check(cached["simulator"].press_forward_cache_enabled, "the cache is on in the battle that has it")
+	check(not reference["simulator"].press_forward_cache_enabled, "and off in the reference")
+	var compared := 0
+	var disagreements := 0
+	var pressed_disagreements := 0
+	for tick in 40:
+		_drive(cached, 1)
+		_drive(reference, 1)
+		# The counter is compared every tick, which is what catches the mid-loop case an auditor asked
+		# for: a soldier early in the loop marking his body in contact, and a soldier later in the same
+		# loop reading the gate. A frozen contact value would move one of these two numbers and not the
+		# other, even though both battles end the tick in the same state.
+		if cached["simulator"].upd_pressed_forward != reference["simulator"].upd_pressed_forward:
+			pressed_disagreements += 1
+		var cached_units: Array[BattleUnit] = cached["simulator"].units
+		var reference_units: Array[BattleUnit] = reference["simulator"].units
+		for i in mini(cached_units.size(), reference_units.size()):
+			var a: BattleUnit = cached_units[i]
+			var b: BattleUnit = reference_units[i]
+			if a.formation_ref == null or b.formation_ref == null:
+				continue
+			compared += 1
+			if cached["simulator"]._can_press_forward(a, a.formation_ref) \
+					!= reference["simulator"]._can_press_forward(b, b.formation_ref):
+				disagreements += 1
+			if a.position.distance_squared_to(b.position) > 0.000001:
+				disagreements += 1
+	equal(disagreements, 0, "no soldier's press-forward answer or position differed from the reference")
+	equal(pressed_disagreements, 0,
+		"and the number of soldiers allowed to press forward matched on every tick, which is the mid-loop contact case")
+	check(compared > 0, "and soldiers with bodies were actually compared")
 
 
 func _bodies_of(bundle: Dictionary, side: String) -> Array[BattleFormation]:

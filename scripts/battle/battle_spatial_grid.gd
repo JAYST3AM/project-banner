@@ -408,10 +408,26 @@ func can_answer_natively() -> bool:
 	return native_query != null and _synced and backend != Backend.GDSCRIPT
 
 
+## Whether the native mirror's guard is evaluated inline rather than by calling
+## [method can_answer_natively]. This runs once per moving soldier per tick - twenty thousand times at
+## twenty thousand soldiers - and calling a method to ask three field reads is most of what the guard
+## costs. The reads are evaluated at the same moment they always were, so this is not a cache and there
+## is nothing to invalidate. On is the shipped behaviour; off is the reference, so the two can be
+## measured in one build (`PB_NATIVE_GUARD=call`). See D-114.
+var native_guard_inlined: bool = true
+
+
 ## A soldier moved. Its cell is deliberately *not* updated: the index is a snapshot of where
 ## everyone stood at the rebuild, and only the position the exact test reads is live.
 func native_moved(unit: BattleUnit) -> void:
-	if not can_answer_natively() or unit.id >= _slot_of.size():
+	if native_guard_inlined:
+		# The three reads of can_answer_natively() spelled out, in the same order and at the same
+		# point in the tick, so the guard's answer is identical - it is the call that is removed.
+		if native_query == null or not _synced or backend == Backend.GDSCRIPT:
+			return
+	elif not can_answer_natively():
+		return
+	if unit.id >= _slot_of.size():
 		return
 	native_query.call("update_position", _slot_of[unit.id], unit.position.x, unit.position.y)
 

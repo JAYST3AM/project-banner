@@ -515,6 +515,15 @@ func mark_in_contact() -> void:
 	in_contact = true
 
 
+## Whether this body's soldiers may press forward this step, decided once for the body rather than once
+## per soldier. The three things it rests on - the order, and the moving, turning and reforming
+## predicates - cannot change while the soldiers dress, because the only call the per-soldier loop makes
+## into a body is [method mark_in_contact]. Contact itself is deliberately [b]not[/b] folded in here: it
+## is set by soldiers part way through their own loop, so it is read live, per soldier, exactly as it
+## always was. Set by the battlefield once a step, after the bodies move and before the soldiers dress.
+var press_forward_open: bool = false
+
+
 ## Forget last step's contact. Called once per step for every body, after the soldiers
 ## have been updated, so that the orders read at the top of the next step see the state
 ## the fight actually ended the previous one in.

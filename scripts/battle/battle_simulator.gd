@@ -94,6 +94,18 @@ var target_reacquisition_ticks: int = 4
 var engagement_recheck_ticks: int = ENGAGEMENT_RECHECK_TICKS
 ## Ticks a body that has stopped fighting keeps believing it may come back to one.
 var engagement_disengage_ticks: int = ENGAGEMENT_DISENGAGE_TICKS
+## Whether a body decides its press-forward gate once a step instead of every soldier asking for
+## himself. On by default and switchable off, so a benchmark can run the reference in this same build,
+## tick for tick - the only honest way to attribute a difference to it. See D-112's consequence.
+var press_forward_cache_enabled: bool = true
+## Whether the native position mirror spells its guard out inline instead of calling
+## `can_answer_natively()`. On by default and switchable off with `PB_NATIVE_GUARD=call`, for the same
+## reason as everything else here: a paired run in one build beats a comparison against an old log.
+var native_guard_inlined: bool = true
+## Whether `_move_toward` applies the terrain speed rule inline instead of calling `_effective_speed`,
+## and reads the ground through the terrain's one-call fast path instead of its cell-index chain. On by
+## default, switchable off with `PB_TERRAIN_FAST=off`, which restores the previous path exactly.
+var terrain_speed_inline: bool = true
 ## Whether soldiers standing in their places take their body's own step instead of deriving it. On
 ## by default, and switchable off from config or [code]PB_RIGID_GROUPS=off[/code] so that a benchmark
 ## can run the per-soldier architecture in this same build, tick for tick - which is the only honest
@@ -733,6 +745,15 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		retaliation_ticks = maxi(0, int(config.get_int("battle.retaliation_ticks", RETALIATION_TICKS)))
 		engagement_enabled = config.get_bool("battle.engagement_enabled", true)
 		rigid_groups_enabled = config.get_bool("battle.rigid_groups_enabled", true)
+		press_forward_cache_enabled = config.get_bool("battle.press_forward_cache_enabled", true)
+		native_guard_inlined = config.get_bool("battle.native_guard_inlined", true)
+		terrain_speed_inline = config.get_bool("battle.terrain_speed_inline", true)
+		if OS.get_environment("PB_TERRAIN_FAST").to_lower() in ["off", "0", "false", "no"]:
+			terrain_speed_inline = false
+		if OS.get_environment("PB_NATIVE_GUARD").to_lower() in ["call", "method", "off", "0", "false", "no"]:
+			native_guard_inlined = false
+		if OS.get_environment("PB_PRESS_CACHE").to_lower() in ["off", "0", "false", "no"]:
+			press_forward_cache_enabled = false
 		if OS.get_environment("PB_RIGID_GROUPS").to_lower() in ["off", "0", "false", "no"]:
 			rigid_groups_enabled = false
 		# The environment variable is what lets a benchmark or CI hold the layer still - off is
@@ -744,6 +765,7 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		target_immediate_on_contact_loss = config.get_bool("battle.target_immediate_on_contact_loss", true)
 		target_contact_loss_factor = maxf(0.0, config.get_float("battle.target_contact_loss_factor", 1.0))
 	grid = BattleSpatialGrid.new()
+	grid.native_guard_inlined = native_guard_inlined
 	grid.configure(field_size, cell_size)
 	# The pass is built as the locked reference here and replaced by the measured best path in
 	# start(), which is the earliest point the army size is known and the last point before a
@@ -1535,9 +1557,19 @@ func _engagement_per_tick() -> Dictionary:
 func _can_press_forward(unit: BattleUnit, body: BattleFormation) -> bool:
 	if body == null or unit.slot_index < 0:
 		return false
-	if body.order != BattleFormation.ORDER_ENGAGE:
-		return false
-	if body.is_moving() or body.is_turning() or body.is_reforming():
+	if not press_forward_cache_enabled:
+		# The reference, kept switchable so the change can be measured against it in one build rather
+		# than against an older log. This is exactly the code that shipped before the cache.
+		if body.order != BattleFormation.ORDER_ENGAGE:
+			return false
+		if body.is_moving() or body.is_turning() or body.is_reforming():
+			return false
+		return not body.in_contact
+	# The body-level half of this answer - the order, and whether the body is moving, turning or
+	# reforming - is the same for every soldier in it and cannot change while the soldiers dress, so it
+	# is decided once per body per step (see `press_forward_open`) instead of three calls per soldier.
+	# Contact is not cached: soldiers set it part way through their own loop, so it is read live.
+	if not body.press_forward_open:
 		return false
 	return not body.in_contact
 
@@ -1694,6 +1726,14 @@ func step(delta: float) -> Array[Dictionary]:
 	var tick_start := _profile_start()
 	var phase := _profile_start()
 	_update_formations(delta)
+	# One boolean per body per step, before the soldiers dress: the order and the moving/turning/
+	# reforming predicates are the same for every soldier in a body and cannot change while the loop
+	# runs, so deciding them once here removes three calls from every formed soldier's tick. Contact is
+	# deliberately not part of it - soldiers set that themselves during the loop, so it stays live.
+	for body in formations:
+		if press_forward_cache_enabled:
+			body.press_forward_open = body.order == BattleFormation.ORDER_ENGAGE \
+				and not (body.is_moving() or body.is_turning() or body.is_reforming())
 	_profile_stop("formation", phase)
 
 	# One linear pass to index everyone, then every proximity question this tick is
@@ -3513,7 +3553,20 @@ func _move_toward(unit: BattleUnit, point: Vector2, delta: float) -> void:
 		return
 	if profile_enabled:
 		mv_normalises += 1
-	unit.position += to_point.normalized() * _effective_speed(unit) * delta
+	# One write statement, whichever path worked out the speed: the battle moves a soldier's position
+	# in exactly three places, and the suite counts them, because D-095's accelerator mirror is only
+	# true while every write is known. See D-114.
+	var speed := unit.move_speed
+	if terrain_speed_inline:
+		# The same rule as `_effective_speed`, applied without the call: this runs once per moving
+		# soldier per tick.
+		if terrain != null:
+			if profile_enabled:
+				mv_terrain_lookups += 1
+			speed *= terrain.move_multiplier_at(unit.position)
+	else:
+		speed = _effective_speed(unit)
+	unit.position += to_point.normalized() * speed * delta
 	unit.position = Vector2(
 		clampf(unit.position.x, 0.5, field_size.x - 0.5),
 		clampf(unit.position.y, 0.5, field_size.y - 0.5)
@@ -3542,15 +3595,18 @@ func _step_with_body(unit: BattleUnit, step_vector: Vector2) -> void:
 		grid.native_moved(unit)
 
 
-## A soldier's speed over the ground it is standing on. Terrain is read here and
-## nowhere else, so the rule lives in one place and every kind of movement - formed,
-## ordered, or chasing - gets it for free.
+## A soldier's speed over the ground it is standing on.
+##
+## The rule - base speed times the multiplier of the ground under his feet - is stated here for the
+## reference path, and [method _move_toward] applies the identical rule inline for the per-soldier path,
+## which cannot afford a call per soldier to ask it. [method BattlefieldTerrain.move_multiplier_via_cells]
+## is the previous shape, kept so the two paths can be measured against each other in one build.
 func _effective_speed(unit: BattleUnit) -> float:
 	if terrain == null:
 		return unit.move_speed
 	if profile_enabled:
 		mv_terrain_lookups += 1
-	return unit.move_speed * terrain.move_multiplier_at(unit.position)
+	return unit.move_speed * terrain.move_multiplier_via_cells(unit.position)
 
 
 ## Push apart soldiers standing on top of each other, through the separation pass's own

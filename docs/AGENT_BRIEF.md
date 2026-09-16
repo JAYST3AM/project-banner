@@ -92,7 +92,7 @@ and restart-safe for some time.
 
 ## 5. Where it is right now
 
-**Verified:** 26 suites / 8,895 assertions / 0 failures headless, and a two-process restart check.
+**Verified:** 26 suites / 8,929 assertions / 0 failures headless, and a two-process restart check.
 
 **Committed and audited:** the work is now three commits on `main` — `b9d3bcc` (gameplay and view:
 groups move as one / D-108, right-click travel / D-109, an honesty pass on the settlement panel,
@@ -105,15 +105,20 @@ separation pass is locked and untouched.
 **Measured next bottlenecks** (from the repository's own profiles — these are the honest candidates
 for the next engineering milestone):
 
-- The **per-soldier update loop**: 231.7 ms/tick of a 437.1 ms/tick instrumented tick at 20,000
-  soldiers, of which automatic target selection is 104.5 ms. About **127 ms was unexplained and is now
-  counted and priced** (Step 7.11): every soldier resolves a target, takes the formed path, computes a
-  formation slot, reads the terrain under him, and calls the native accelerator - and of the ~131 ms,
-  81.1 ms is named, with the largest single item a six-field-read contact check reached through four
-  function calls. The cost is the *calling*: the fix is fewer calls per soldier, which is D-112 and the
-  next engineering milestone.
+- The **per-soldier update loop**: **under active work**. Step 7.11 priced it and Step 7.12 is removing
+  the calls it found: the press-forward gate, the native mirror's guard and the terrain path have
+  together taken the soldiers phase at 20,000 soldiers **from 204.4 ms to 169.4 ms** (about 17 per cent)
+  and the whole tick from about 400 ms to about 363 ms, each change measured as a paired run with its
+  reference kept in the build behind a switch. Still to come, and both need proofs rather than
+  inlining: the body transform, whose lattice claim is verified to 1.7e-5 but which needs a long-battle
+  drift fixture before it may be used, and the native batch, which turns twenty thousand boundary
+  crossings a tick into one.
+- **Target selection** is the other large phase at this size (72 ms of the 169 ms loop) and has **not**
+  been touched by Step 7.12 - it was already reduced 79 per cent by the Step 7.8 formation-driven
+  engagement work.
 - **Rendering at scale is not in any of the simulation measurements** — the benchmark steps the
-  simulation directly. Drawing twenty thousand soldiers is a separate problem nobody has paid for.
+  simulation directly. Drawing twenty thousand soldiers is a separate problem nobody has paid for; a
+  render-path spike exists in the tree but is deliberately uncommitted.
 
 The kill cleanup used to stand first on this list as a **suspected O(deaths × army)** walk in
 `BattleSimulator._attack()`. It is no longer suspected: Step 7.9 measured it at 98.3% of a
