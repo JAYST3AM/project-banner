@@ -28,6 +28,9 @@ const TOLERANCE := 0.0001
 ## the acceptance tolerance for the transform slice: safely above float error (worst measured 1.7e-5)
 ## and well below the arrival epsilon the dressing path uses.
 const IN_PLACE_TOLERANCE := 0.0001
+## The game's own arrival epsilon, read from the simulator so the coverage figure below is measured
+## against the bound the dressing path actually uses rather than one invented here.
+var _arrive_limit := 0.0
 
 var _per_side := 10
 var _ticks := 400
@@ -36,6 +39,8 @@ var _seed := 780780
 ## events: a rider who stops being one has had to dress, which is the cost the transform is meant to
 ## remove.
 var _was_in_place := {}
+## The same, against the game's arrival epsilon, for the coverage figure.
+var _was_in_place_arrive := {}
 
 
 func _ready() -> void:
@@ -47,6 +52,9 @@ func _ready() -> void:
 		elif argument.begins_with("--seed="):
 			_seed = int(argument.trim_prefix("--seed="))
 	print("=== slot transform probe: %d a side, %d ticks, seed %d ===" % [_per_side, _ticks, _seed])
+	_arrive_limit = BattleSimulator.ARRIVE_EPSILON
+	print("  in-place is judged two ways: %.4f for the drift claim, and the game's arrival epsilon %.4f for coverage" % [
+		IN_PLACE_TOLERANCE, _arrive_limit])
 
 	var built := ShowcaseBattle.build(
 		GameManager.config(), UnitCatalog.load_from(), FormationCatalog.load_from(),
@@ -66,6 +74,8 @@ func _ready() -> void:
 	var worst_off_slot := 0.0
 	var in_place_samples := 0
 	var redress_events := 0
+	var arrive_samples := 0
+	var arrive_redress := 0
 
 	for tick in _ticks:
 		# Capture the lattice and the body's frame before the tick moves anything.
@@ -130,6 +140,15 @@ func _ready() -> void:
 						if _was_in_place.has(unit.id):
 							redress_events += 1
 							_was_in_place.erase(unit.id)
+					# And the same question against the bound the game itself uses, which is what
+					# decides how often a body could hand out a transform at all.
+					if off_slot <= _arrive_limit:
+						arrive_samples += 1
+						_was_in_place_arrive[unit.id] = true
+					else:
+						if _was_in_place_arrive.has(unit.id):
+							arrive_redress += 1
+							_was_in_place_arrive.erase(unit.id)
 
 	print("")
 	print("=== RESULT ===")
@@ -139,6 +158,9 @@ func _ready() -> void:
 	print("  soldiers standing on their old slot: %d, worst error among them: %.9f" % [holding, holding_worst])
 	print("  drift, for the next slice : worst distance from his own place %.9f, in-place samples %d, re-dress events %d" % [
 		worst_off_slot, in_place_samples, redress_events])
+	print("  coverage at the game's epsilon (%.3f): in-place samples %d of %d (%.1f%%), re-dress events %d" % [
+		_arrive_limit, arrive_samples, samples, 100.0 * float(arrive_samples) / maxf(1.0, float(samples)),
+		arrive_redress])
 	if samples > 0 and worst_error <= TOLERANCE:
 		print("  VERDICT: the lattice is a rigid transform of the previous tick's, within %f" % TOLERANCE)
 	else:

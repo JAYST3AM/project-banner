@@ -2971,3 +2971,39 @@ live position - is untouched. No balance data, no saves, and Step 7.8's separati
 neither is a call being paid for a constant read: the body transform must be *proved* not to drift
 before it may be used, and the native batch replaces twenty thousand boundary crossings a tick with one,
 which is architectural work against D-095 rather than a local change. Both are sequenced after these.
+
+
+## D-115 - the focus answer is dispatch removal, not a cache
+
+**Context.** Step 7.12 removed the per-soldier loop's calls and left the target phase deliberately
+untouched, recording that as the line. Step 7.11's price table had put the target phase at 72 ms of a
+169 ms loop, and of that, `focus` - the answer a soldier gets when his look is over or was never due -
+was 26.8 ms. Reading the formed-soldier path showed why: a soldier in a body asked a question his body
+already had the answer to through four calls - `_side_index()`, `_focus_unit_of()`, that function's
+`is_focus_current()`, and the unit's `is_alive()` - for what is one array read and two comparisons.
+
+**Decision.** The formed-soldier fast path is spelled out in `_focus_target`: the body's index bound, its
+focus currency, the reference read and the liveness check, in those guards' own order, evaluated at the
+same point in the tick. Nothing is remembered between calls and nothing is invalidated, so this is
+dispatch removal rather than a cache - where D-113 had to prove four conditions constant through the
+soldier loop, and D-111 had to build an index, this needs no immutability proof at all. The reviewer's
+instruction was to inline the wrapper and dispatch only, and not to fold target selection into a broader
+rewrite: the repair path, the side cache, every search and the retention timers are untouched.
+
+**Measured, paired in one build** at 20,000 soldiers on one seed, one switch apart
+(`PB_FOCUS_INLINE=method` restores the method chain): the target phase 72.101 ms against 56.410 ms, the
+soldiers phase 170.411 ms against 154.531 ms - **15.7 ms a tick** - with grid, formations, the focus
+report and overlap all flat. The focus counters are identical between the two runs, which is the same
+decision trace the phase numbers imply.
+
+**Proved, not asserted.** The reviewer's standard for this one, since it touches who fights whom, was a
+per-tick identity diff. `tests/test_target_acquisition.gd` now drives one formed battle twice - the
+switch off for one run, same seed, same fixture, same tick count - and compares what every soldier
+carries as a target, whether he is alive, his health and his place to four decimals, plus every body's
+watched body, on every tick for twenty-four ticks; and compares how often the focus was asked, answered
+from the body, and repaired. Zero disagreements.
+
+**Considered and deferred.** Handing each body's focus answer to its soldiers once a tick, so the ask is
+a field read rather than a method's worth of dispatch, was designed and not taken: a repair mid-tick
+changes the answer, so the snapshot would need invalidation at the writer, which is a cache with a proof
+obligation. The measured need does not justify that yet.

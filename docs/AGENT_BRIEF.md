@@ -92,30 +92,45 @@ and restart-safe for some time.
 
 ## 5. Where it is right now
 
-**Verified:** 26 suites / 8,929 assertions / 0 failures headless, and a two-process restart check.
+**Verified:** 26 suites / 8,936 assertions / 0 failures headless, and a two-process restart check.
 
-**Committed and audited:** the work is now three commits on `main` — `b9d3bcc` (gameplay and view:
-groups move as one / D-108, right-click travel / D-109, an honesty pass on the settlement panel,
-per-suite save isolation in `user://saves_test`, arrows and correctly-sized damage numbers, a block
-view for formations, terrain baked into one draw call), `e7b55d2` (a Godot tool that bakes a rigged 3D
-model into 8-direction sprite sheets), and the milestone-pair commit that carries this brief (the kill
-cleanup, measured at 98.3% of a tick and then made **104×** cheaper / D-110 and D-111). Step 7.8's
-separation pass is locked and untouched.
+**Committed and audited on `main`:** `b9d3bcc` (gameplay and view: groups move as one / D-108,
+right-click travel / D-109, an honesty pass on the settlement panel, per-suite save isolation in
+`user://saves_test`, arrows and correctly-sized damage numbers, a block view for formations, terrain baked
+into one draw call), `e7b55d2` (a Godot tool that bakes a rigged 3D model into 8-direction sprite sheets),
+the milestone pair (the kill cleanup, measured at 98.3% of a tick and then made **104×** cheaper / D-110
+and D-111), then `c0ab486` (Step 7.11: the per-soldier loop counted by path and priced by operation /
+D-112) and `d1f47ab` (Step 7.12: the loop's calls removed - the per-body press-forward gate, the native
+mirror's guard, the terrain path / D-113 and D-114). The Step 7.13 slice that carries this brief is the
+formed-soldier focus fast path (D-115), and the turning-body transform was measured, priced and abandoned
+before anything was built on it. Step 7.8's separation pass is locked and untouched.
 
 **Measured next bottlenecks** (from the repository's own profiles — these are the honest candidates
 for the next engineering milestone):
 
-- The **per-soldier update loop**: **under active work**. Step 7.11 priced it and Step 7.12 is removing
-  the calls it found: the press-forward gate, the native mirror's guard and the terrain path have
-  together taken the soldiers phase at 20,000 soldiers **from 204.4 ms to 169.4 ms** (about 17 per cent)
-  and the whole tick from about 400 ms to about 363 ms, each change measured as a paired run with its
-  reference kept in the build behind a switch. Still to come, and both need proofs rather than
-  inlining: the body transform, whose lattice claim is verified to 1.7e-5 but which needs a long-battle
-  drift fixture before it may be used, and the native batch, which turns twenty thousand boundary
-  crossings a tick into one.
-- **Target selection** is the other large phase at this size (72 ms of the 169 ms loop) and has **not**
-  been touched by Step 7.12 - it was already reduced 79 per cent by the Step 7.8 formation-driven
-  engagement work.
+- The **per-soldier update loop**: **under active work**. Step 7.11 priced it; Step 7.12 removed the calls
+  it found - the press-forward gate, the native mirror's guard and the terrain path - taking the soldiers
+  phase at 20,000 soldiers **from 204.4 ms to 169.4 ms** and the tick from about 400 ms to about 363 ms,
+  each change measured as a paired run with its reference kept in the build behind a switch. Step 7.13 has
+  started on the **other** large phase: the formed-soldier focus fast path took the target phase from
+  72.1 ms to 56.4 ms and the soldiers phase to **154.5 ms**, proved by a per-tick identity test rather
+  than an argument.
+- **The body transform is abandoned, and its numbers stay in the record.** The lattice claim was verified -
+  a body's slot lattice is an exact anchor-centred rigid transform of the previous tick's, worst error
+  1.7e-5 over 80,000 samples - and then priced for coverage before anything was built on it: at the game's
+  own arrival epsilon only **1.4 per cent** of soldier-ticks are on a body whose facing changed, which is
+  the only case the existing rigid step path does not already cover. About a millisecond a tick is not
+  worth a change to the most sensitive path in the game.
+- **The native mirror batch** is still the next boundary-crossing win: one crossing a tick instead of
+  twenty thousand, which needs a method on the C++ side and work against D-095.
+- **The target-phase instrument costs what it measures.** That loop carries per-soldier
+  `Time.get_ticks_usec()` pairs - on the order of fifteen to twenty-five milliseconds a tick at this size.
+  Every paired delta in this project stays sound because both halves carry the same instrument, but the
+  absolute tick is lower than quoted, and the game never profiles. Gating those reads is the next slice.
+- **Target selection** was where Step 7.12 stopped and Step 7.13 begins; Step 7.8's formation-driven
+  engagement work had already reduced it 79 per cent before either. Its remaining named items at 20,000
+  are `focus` (15.4 ms, down from 26.8), `retained` (8.5 ms) and about 32 ms of loop work the counters do
+  not yet name.
 - **Rendering at scale is not in any of the simulation measurements** — the benchmark steps the
   simulation directly. Drawing twenty thousand soldiers is a separate problem nobody has paid for; a
   render-path spike exists in the tree but is deliberately uncommitted.

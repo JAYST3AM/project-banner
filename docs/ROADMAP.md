@@ -843,3 +843,31 @@ path, balance data and saves. Every switch is development-facing and every shipp
 is an exact anchor-centred rigid transform of the previous tick's, verified on real battles to 1.7e-5,
 but it needs a long-battle drift fixture before anything may depend on it - and the native batch, which
 replaces twenty thousand boundary crossings a tick with one and is architectural work against D-095.
+
+
+## Step 7.13 - the target phase's calls (in progress)
+
+**What it is.** The other large phase. Step 7.12 took the per-soldier loop from 204.4 ms to 169.4 ms and
+left target selection alone, and said so; this milestone starts on it with the same rule: price the
+operation, remove the call, keep the previous shape in the build as a reference, and prove identity
+rather than plausibility.
+
+| slice | what it removes | switch | measured (20,000 soldiers, one seed) |
+| --- | --- | --- | --- |
+| 1. the formed-soldier focus fast path | four calls per question, for an answer the body already has (D-115) | `PB_FOCUS_INLINE=method` | target phase 72.101 -> 56.410 ms, soldiers 170.411 -> 154.531 ms: **15.7 ms** |
+
+**Where the loop stands.** The soldiers phase at twenty thousand soldiers is now 154.5 ms, down from
+204.4 ms before Step 7.12, and the whole tick 348.9 ms against about 400 ms. The target phase is 56.4 ms
+of that, having been 72.1 ms.
+
+**What was abandoned, and why it stays in the record.** The turning-body transform - a body's slot
+lattice is an exact anchor-centred rigid transform of the previous tick's, verified over 80,000 samples
+to 1.7e-5 - was measured for coverage before anything was built on it, and priced out: at the game's own
+arrival epsilon only 1.4 per cent of soldier-ticks are on a body whose facing changed, which is the only
+case the existing rigid step path does not already cover. That is about a millisecond a tick in exchange
+for a change to the most sensitive path in the game, so the reviewer's ruling was to abandon it rather
+than leave a half-verified idea lying around.
+
+**Next.** Whatever else the counters name inside the target phase, then the native mirror batch - one
+boundary crossing a tick instead of twenty thousand, which needs a method on the C++ side and work
+against D-095.

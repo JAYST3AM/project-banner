@@ -98,6 +98,12 @@ var engagement_disengage_ticks: int = ENGAGEMENT_DISENGAGE_TICKS
 ## himself. On by default and switchable off, so a benchmark can run the reference in this same build,
 ## tick for tick - the only honest way to attribute a difference to it. See D-112's consequence.
 var press_forward_cache_enabled: bool = true
+## Whether the formed-soldier fast path in `_focus_target` is spelled out instead of going through
+## `_side_index()`, `_focus_unit_of()`, `is_focus_current()` and `is_alive()` - four calls to answer a
+## question the body already knows. On by default, switchable off with `PB_FOCUS_INLINE=method`, so a
+## benchmark can run the previous shape in this same build. See D-115.
+var focus_inline_enabled: bool = true
+
 ## Whether the native position mirror spells its guard out inline instead of calling
 ## `can_answer_natively()`. On by default and switchable off with `PB_NATIVE_GUARD=call`, for the same
 ## reason as everything else here: a paired run in one build beats a comparison against an old log.
@@ -748,6 +754,9 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		press_forward_cache_enabled = config.get_bool("battle.press_forward_cache_enabled", true)
 		native_guard_inlined = config.get_bool("battle.native_guard_inlined", true)
 		terrain_speed_inline = config.get_bool("battle.terrain_speed_inline", true)
+		focus_inline_enabled = config.get_bool("battle.focus_inline_enabled", true)
+		if OS.get_environment("PB_FOCUS_INLINE").to_lower() in ["method", "call", "off", "0", "false", "no"]:
+			focus_inline_enabled = false
 		if OS.get_environment("PB_TERRAIN_FAST").to_lower() in ["off", "0", "false", "no"]:
 			terrain_speed_inline = false
 		if OS.get_environment("PB_NATIVE_GUARD").to_lower() in ["call", "method", "off", "0", "false", "no"]:
@@ -3298,6 +3307,21 @@ func _foc_end_tick() -> void:
 func _focus_target(unit: BattleUnit) -> BattleUnit:
 	if profile_enabled:
 		foc_target_calls += 1
+	if focus_inline_enabled:
+		# The formed-soldier fast path, spelled out. A soldier in a body almost always asks a
+		# question his body already has the answer to, and he asked it through four calls:
+		# `_side_index`, `_focus_unit_of`, that function's `is_focus_current`, and `is_alive`.
+		# Twenty thousand soldiers pay that every tick for an answer that is one read and two
+		# comparisons wide. The guards below are those functions' guards, in their order, evaluated
+		# at the same point in the tick; nothing is remembered between calls, so there is nothing to
+		# invalidate - this is dispatch removal, not a cache. See D-115.
+		var hot_body := unit.formation_ref
+		if hot_body != null and hot_body.index >= 0 and hot_body.is_focus_current():
+			var hot_directed: BattleUnit = _focus_unit_by_body[hot_body.index]
+			if hot_directed != null and hot_directed.alive and hot_directed.hp > 0:
+				if profile_enabled:
+					foc_formation_hits += 1
+				return hot_directed
 	var index := _side_index(unit.side)
 	if unit.formation_ref != null:
 		var body := unit.formation_ref

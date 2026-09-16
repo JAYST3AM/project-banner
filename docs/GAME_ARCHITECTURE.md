@@ -356,8 +356,11 @@ inside the per-soldier movement path. Out of bounds reads as open ground at zero
 height, which is the forgiving answer and the one that keeps a soldier who has been
 shoved off the field from changing speed for no reason the player can see.
 
-**Where terrain is read:** exactly one place, `BattleSimulator._effective_speed()`, and
-one more for the pace of a body, `BattleSimulator._formation_speed()`. Both multiply a
+**Where terrain is read:** in the shipped path, inline in `BattleSimulator._move_toward()`, which applies
+the speed rule itself. The same rule is stated once as `BattleSimulator._effective_speed()`, which reads
+terrain through `BattlefieldTerrain.move_multiplier_via_cells()`; those two are the reference half of the
+`PB_TERRAIN_FAST` switch, so a benchmark can run the previous shape in the same build. The other reader
+is the pace of a body, `BattleSimulator._formation_speed()`. Both multiply a
 unit's own speed by the ground's modifier, so the rule has one home.
 
 In this milestone terrain affects **movement only**. A defence modifier is where a

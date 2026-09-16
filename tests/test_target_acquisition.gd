@@ -70,6 +70,7 @@ func run() -> void:
 	_test_per_soldier_counters_follow_the_paths()
 	_test_per_soldier_counters_reset_with_the_profile()
 	_test_the_per_soldier_counters_are_exact_on_a_formed_battle()
+	_test_the_focus_fast_path_answers_exactly_as_the_method_chain()
 	_test_the_cleanup_follows_the_orders_and_not_the_army()
 	_test_the_index_clears_exactly_what_a_full_scan_would()
 	_complete()
@@ -1347,3 +1348,67 @@ func _test_the_per_soldier_counters_are_exact_on_a_formed_battle() -> void:
 		"the grid is told about every move and every rigid step, and about nothing else")
 	check(simulator.upd_targeted > 0, "soldiers this close do resolve targets")
 	check(simulator.mv_native_calls > 0, "and their moves reach the grid")
+
+
+## The focus fast path is dispatch removal, and the standard for that is identity rather than
+## plausibility: one formed battle, driven twice, the switch off for one of the runs, comparing what
+## every soldier carried as a target, what every body watched, and where everyone stood, on every tick.
+## The reviewer asked for exactly this - a per-tick identity diff - before any code was written.
+func _test_the_focus_fast_path_answers_exactly_as_the_method_chain() -> void:
+	section("the formed-soldier focus fast path answers exactly as the method chain")
+	var fast := _drive_focus_battle(true, 24)
+	var slow := _drive_focus_battle(false, 24)
+	var trail_fast: Array = fast["trail"]
+	var trail_slow: Array = slow["trail"]
+	equal(trail_fast.size(), trail_slow.size(), "both runs produced a line for every tick asked for")
+	var disagreements := 0
+	var first_disagreement := -1
+	for tick in mini(trail_fast.size(), trail_slow.size()):
+		if trail_fast[tick] != trail_slow[tick]:
+			disagreements += 1
+			if first_disagreement < 0:
+				first_disagreement = tick
+	equal(disagreements, 0,
+		"every tick's targets, watched bodies, health and positions are identical (first difference: %d)"
+			% first_disagreement)
+	equal(int(fast["calls"]), int(slow["calls"]), "the focus was asked exactly as many times")
+	equal(int(fast["hits"]), int(slow["hits"]), "and answered out of the body exactly as many times")
+	equal(int(fast["repairs"]), int(slow["repairs"]), "and had to be repaired exactly as many times")
+	check(int(fast["hits"]) > 0, "the fast path was taken, not merely present")
+	check(int(fast["calls"]) > 0, "and the focus was asked at all")
+
+
+## Drive one formed battle for a number of ticks and keep a line per tick describing everything a
+## targeting decision can change: each soldier's carried target, health and place, and each body's
+## watched body. Both runs get the same fixture, the same seed and the same number of ticks, so a
+## difference anywhere in the trail is the switch and nothing else.
+func _drive_focus_battle(inline_path: bool, ticks: int) -> Dictionary:
+	var fixture := _formed_army(12, 40.0, 3)
+	var simulator: BattleSimulator = fixture["simulator"]
+	var units: Array[BattleUnit] = fixture["units"]
+	simulator.focus_inline_enabled = inline_path
+	simulator.reset_profile()
+	var trail: Array[String] = []
+	for tick in ticks:
+		simulator.step(TICK)
+		trail.append(_focus_trail(simulator, units))
+	return {
+		"trail": trail,
+		"calls": simulator.foc_target_calls,
+		"hits": simulator.foc_formation_hits,
+		"repairs": simulator.foc_formation_repairs,
+	}
+
+
+## One line describing what a tick decided. Positions are written to four decimals - far tighter than
+## any gameplay epsilon, so a drift of a thousandth of a unit still shows as a disagreement - and the
+## bodies are listed by index rather than by name so the line does not depend on naming.
+func _focus_trail(simulator: BattleSimulator, units: Array[BattleUnit]) -> String:
+	var parts := PackedStringArray()
+	for unit in units:
+		parts.append("%d:%d:%d:%d:%.4f:%.4f" % [
+			unit.id, unit.auto_target_id, 1 if unit.is_alive() else 0, unit.hp,
+			unit.position.x, unit.position.y])
+	for body in simulator.formations:
+		parts.append("%d:%s" % [body.index, body.target_formation_id])
+	return "|".join(parts)
