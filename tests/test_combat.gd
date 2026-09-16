@@ -9,6 +9,7 @@ func run() -> void:
 	await _tick()
 	SaveManager.delete_all_saves()
 	_test_damage_and_death()
+	_test_ranged_shots_are_visible()
 	_test_victory_and_walls()
 	_test_result_contents()
 	_test_resolver_applies_consequences()
@@ -152,6 +153,50 @@ func _dead_count(simulator: BattleSimulator) -> int:
 		if not unit.alive:
 			count += 1
 	return count
+
+
+## A ranged attack has to be *visible*: the player counted two archers and saw no arrows, which is
+## indistinguishable from archers that are not working. The shot is drawn, not resolved - the damage
+## stays on the tick it always did - so this asserts the wiring from event to arrow, and that melee
+## does not produce one. See D-110.
+func _test_ranged_shots_are_visible() -> void:
+	section("a ranged attack is drawn as a shot")
+	var config := GameManager.config()
+	var archer := BattleUnit.from_snapshot({
+		"soldier_id": "v_archer", "name": "Archer", "unit_type_id": "archer", "unit_name": "Archer",
+		"level": 1, "max_hp": 40, "hp": 40, "attack": 5, "defence": 1,
+		"move_speed": 5.0, "attack_range": 40.0, "attack_cooldown": 1.0, "ranged": true,
+	}, BattleContext.SIDE_PLAYER, 0)
+	var target := BattleUnit.from_snapshot({
+		"soldier_id": "v_target", "name": "Target", "unit_type_id": "x", "unit_name": "X",
+		"level": 1, "max_hp": 40, "hp": 40, "attack": 0, "defence": 0,
+		"move_speed": 0.0, "attack_range": 1.0, "attack_cooldown": 1.0, "ranged": false,
+	}, BattleContext.SIDE_ENEMY, 1)
+	var simulator := BattleSimulator.new(config, 4242)
+	simulator.add_units([archer, target])
+	archer.position = Vector2(10.0, 10.0)
+	target.position = Vector2(30.0, 10.0)
+
+	var view: Node2D = load("res://scripts/battle/battle_view.gd").new()
+	view.bind(simulator, null)
+	var ranged_hit: Array[Dictionary] = [{
+		"type": "hit", "attacker": archer.id, "target": target.id, "damage": 3,
+		"position": target.position, "ranged": true,
+	}]
+	view.add_events(ranged_hit)
+	equal(view.arrows_in_flight(), 1, "a ranged hit puts an arrow in the air")
+	var melee_hit: Array[Dictionary] = [{
+		"type": "hit", "attacker": archer.id, "target": target.id, "damage": 3,
+		"position": target.position, "ranged": false,
+	}]
+	view.add_events(melee_hit)
+	equal(view.arrows_in_flight(), 1, "a melee hit does not")
+	var a_miss: Array[Dictionary] = [{
+		"type": "miss", "attacker": archer.id, "target": target.id, "position": target.position,
+	}]
+	view.add_events(a_miss)
+	equal(view.arrows_in_flight(), 2, "and a miss is only visible if the shot is")
+	view.free()
 
 
 func _test_victory_and_walls() -> void:

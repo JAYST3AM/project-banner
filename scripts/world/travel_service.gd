@@ -21,13 +21,29 @@ func _init(p_state: CampaignState, p_config: GameConfig) -> void:
 ## ---------- queries ------------------------------------------------------
 
 func is_travelling() -> bool:
-	return state != null and not state.destination_id.is_empty()
+	return state != null and (not state.destination_id.is_empty() or state.destination_is_point)
 
 
 func destination() -> Settlement:
 	if state == null:
 		return null
 	return state.settlement(state.destination_id)
+
+
+## Where the party is marching to. A destination is usually an enterable town, but the player can
+## order a march to any spot on the map, and most of the map is not a town.
+func destination_position() -> Vector2:
+	if state == null:
+		return Vector2.ZERO
+	if state.destination_is_point:
+		return state.destination_point
+	var target := destination()
+	return target.position if target != null else state.world_position
+
+
+## True when the march is to open ground rather than to a settlement.
+func is_marching_to_point() -> bool:
+	return state != null and state.destination_is_point
 
 
 func current_settlement() -> Settlement:
@@ -93,6 +109,7 @@ func is_within_settlement(settlement: Settlement) -> bool:
 func set_destination(settlement_id: String) -> bool:
 	if state == null:
 		return false
+	state.destination_is_point = false
 	var target := state.settlement(settlement_id)
 	if target == null:
 		DebugLogger.warn("travel order for unknown settlement '%s'" % settlement_id, "Travel")
@@ -116,9 +133,28 @@ func set_destination(settlement_id: String) -> bool:
 	return true
 
 
+## March to a spot on the map rather than to a settlement. This is the right-click move order, and
+## it exists because a settlement-only travel order refuses most of the map: any place that cannot
+## be entered - a hamlet, a ruin, a crossroads - could not be marched to at all. See D-109.
+func set_destination_point(point: Vector2) -> bool:
+	if state == null:
+		return false
+	if state.world_position.distance_to(point) <= arrival_radius():
+		return false
+	state.destination_is_point = true
+	state.destination_point = point
+	state.destination_id = ""
+	state.current_settlement_id = ""
+	DebugLogger.info("marching to open ground (%.0f units, ~%.1f game hours)" % [
+		distance_to(point), hours_to_reach(point),
+	], "Travel")
+	return true
+
+
 func clear_destination() -> void:
 	if state != null:
 		state.destination_id = ""
+		state.destination_is_point = false
 
 
 ## Advance travel by [param game_hours]. Returns a small report dictionary:
@@ -131,27 +167,23 @@ func step(game_hours: float) -> Dictionary:
 		"settlement_id": "",
 		"distance_travelled": 0.0,
 	}
-	if state == null or game_hours <= 0.0 or state.destination_id.is_empty():
+	if state == null or game_hours <= 0.0 or not is_travelling():
 		return report
-	var target := destination()
-	if target == null:
-		state.destination_id = ""
-		return report
-
-	var to_target := target.position - state.world_position
+	var target := destination_position()
+	var to_target := target - state.world_position
 	var distance := to_target.length()
 	var radius := arrival_radius()
 
 	if distance <= radius:
-		_arrive(target, report)
+		_finish_travel(report)
 		return report
 
 	var travel := speed_units_per_game_hour() * game_hours
 	if distance - travel <= radius:
 		# Close enough to finish this step exactly on the destination.
 		report["distance_travelled"] = distance
-		state.world_position = target.position
-		_arrive(target, report)
+		state.world_position = target
+		_finish_travel(report)
 		return report
 
 	state.world_position += to_target.normalized() * travel
@@ -173,6 +205,44 @@ func teleport_to(settlement_id: String) -> bool:
 	target.visited = true
 	DebugLogger.info("teleported to %s" % target.name, "Travel")
 	return true
+
+
+## Arriving at whatever the party was marching to. A settlement is entered and marked visited; open
+## ground is simply where the march ends, so the order clears and the clock carries on.
+func _finish_travel(report: Dictionary) -> void:
+	if state.destination_is_point:
+		state.destination_is_point = false
+		report["arrived"] = true
+		report["settlement_id"] = ""
+		# A point order can still land the party on a place - a march aimed at a hamlet, or at a
+		# spot just inside a town's radius. Where the party stands is then that place, and saying so
+		# is what lets the panel offer to open it. Without this a point order left the player
+		# standing on a town with nothing to click.
+		var here := _settlement_at(state.world_position)
+		if here != null:
+			state.current_settlement_id = here.id
+			here.visited = true
+			report["settlement_id"] = here.id
+			DebugLogger.info("arrived at %s on %s" % [here.name, state.clock.full_string()], "Travel")
+			return
+		DebugLogger.info("arrived at open ground on %s" % state.clock.full_string(), "Travel")
+		return
+	var target := destination()
+	if target == null:
+		state.destination_id = ""
+		return
+	_arrive(target, report)
+
+
+## The settlement the party is standing in, if any. The arrival radius is the same test the travel
+## order uses, so "standing there" means one thing in this file.
+func _settlement_at(point: Vector2) -> Settlement:
+	if state == null:
+		return null
+	for settlement in state.settlements.values():
+		if point.distance_to(settlement.position) <= arrival_radius():
+			return settlement
+	return null
 
 
 func _arrive(target: Settlement, report: Dictionary) -> void:

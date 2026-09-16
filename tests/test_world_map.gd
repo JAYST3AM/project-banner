@@ -9,6 +9,7 @@ func run() -> void:
 	SaveManager.delete_all_saves()
 	_test_world_builder()
 	_test_travel()
+	_test_march_to_open_ground()
 	_test_arrival_and_enter()
 	_test_speed_states()
 	_test_world_survives_save_load()
@@ -23,6 +24,81 @@ func _fresh_campaign(name: String, seed_value: int) -> CampaignState:
 	var builder := WorldBuilder.new(state, GameManager.config())
 	builder.build_if_needed()
 	return state
+
+
+## Right click marches the party to any spot on the map, not only to a town it can enter. The order
+## is a real march - it costs game hours - and it ends where it was aimed rather than at a
+## settlement. This is the fix for a player clicking a hamlet and being told it is "not an
+## enterable location" while the party stood still. See D-109.
+func _test_march_to_open_ground() -> void:
+	section("marching to open ground")
+	var state := _fresh_campaign("Point Travel", 4242)
+	var travel := TravelService.new(state, GameManager.config())
+	var start := state.world_position
+	var target := start + Vector2(240.0, 120.0)
+
+	check(travel.set_destination_point(target), "a march to open ground is accepted")
+	check(travel.is_travelling(), "and the party is travelling")
+	check(travel.is_marching_to_point(), "with a point for a destination, not a settlement")
+	approx(travel.distance_to(target), start.distance_to(target), 0.001, "from where it started")
+	approx(travel.hours_to_reach(target), travel.distance_to(target) / travel.speed_units_per_game_hour(),
+		0.001, "and an eta to match its pace")
+
+	var guard := 0
+	while travel.is_travelling() and guard < 5000:
+		travel.step(1.0)
+		guard += 1
+	check(not travel.is_travelling(), "the march finishes")
+	check(state.world_position.distance_to(target) <= travel.arrival_radius(),
+		"and it ends at the spot that was ordered")
+
+	# A place the player cannot enter can still be marched to; the settlement order refuses it,
+	# which is exactly what made the map feel broken.
+	var refused := ""
+	for settlement in state.settlements.values():
+		if not settlement.is_enterable():
+			refused = settlement.id
+			break
+	check(refused != "", "the world has somewhere that cannot be entered")
+	if refused != "":
+		var place := state.settlement(refused)
+		check(not travel.set_destination(refused), "the settlement order refuses to travel there")
+		check(travel.set_destination_point(place.position), "but a march to the same spot is accepted")
+		# Marching onto a place by a point order must leave the party *at* that place: this is what
+		# lights the panel's enter button, and without it a point arrival left the party standing on
+		# a town with nothing to click. See D-109.
+		var settle_guard := 0
+		while travel.is_travelling() and settle_guard < 5000:
+			travel.step(1.0)
+			settle_guard += 1
+		check(state.current_settlement_id == refused, "arriving by a point order stands you in the place")
+		check(place.visited, "and marks it visited")
+
+	# An enterable town reached the same way is enterable on arrival, which is the whole point of
+	# arriving at a town.
+	var town_id := ""
+	for settlement in state.settlements.values():
+		if settlement.is_enterable():
+			town_id = settlement.id
+			break
+	if town_id != "":
+		var town := state.settlement(town_id)
+		check(travel.set_destination_point(town.position), "a march aimed at a town is accepted")
+		var town_guard := 0
+		while travel.is_travelling() and town_guard < 5000:
+			travel.step(1.0)
+			town_guard += 1
+		check(state.current_settlement_id == town_id, "and arriving there stands you in the town")
+		check(travel.is_at_settlement(town_id), "which the panel reads as 'you are here'")
+
+	# The destination is part of the save, so a campaign saved mid-march resumes the same march.
+	check(travel.set_destination_point(state.world_position + Vector2(150.0, 0.0)),
+		"a point destination is set for the save test")
+	var restored := CampaignState.from_dict(state.to_dict(), GameManager.config())
+	check(restored.destination_is_point, "a point destination survives a save")
+	approx(restored.destination_point.distance_to(state.destination_point), 0.0, 0.001,
+		"with its position intact")
+	GameManager.end_campaign()
 
 
 func _test_world_builder() -> void:

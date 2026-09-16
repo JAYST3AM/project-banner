@@ -172,7 +172,9 @@ func refresh() -> void:
 	_set_stat("Speed", _state.clock.speed_name())
 
 	var destination := _state.destination_id
-	if destination.is_empty():
+	if _state.destination_is_point:
+		_set_stat("Destination", "Open ground  (%.1f h)" % _travel.hours_to_reach(_state.destination_point))
+	elif destination.is_empty():
 		_set_stat("Destination", "None")
 	else:
 		var target := _state.settlement(destination)

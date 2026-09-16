@@ -267,3 +267,32 @@ Not started, and the honest candidates for the next performance milestone: the p
 itself (its structure, not its search), the Cohort layer (sub-rolls with their own summaries, which
 would let partial-contact LOD and multirate simulation exist at all), multirate simulation, and
 threading. None of them is blocked by anything above, and none of them is a small change.
+
+## The display layer at twenty thousand, and where the frame actually goes
+
+The showcase grew a field that fits the army - 1674x1004 at twenty thousand a side - and the ground
+under it was being drawn one rectangle per terrain cell. On the standard field that is a few hundred
+cells and invisible; on the grown one it is **105,169 cells, 105,169 draw calls a frame**, which is
+the whole frame budget spent on ground that never changes. The terrain is now baked once into an
+[code]ImageTexture[/code] with one pixel per cell (elevation shading included) and drawn in a single
+call with nearest filtering, so the grain survives: **105,169 draw calls become 1**.
+
+The army itself is drawn by the grouping ladder ([code]UnitScale[/code], D-107): one mark per
+century, cohort or legion depending on the camera's zoom, so twenty thousand soldiers are about two
+hundred boxes rather than twenty thousand marks. Below 6x zoom the individual soldier is not worth a
+mark of his own; the men are still there, and still individual, behind the box.
+
+**The frame is not the problem any more.** Measured on the 12900K / RTX 3080 Ti, block view, ground
+baked:
+
+| soldiers | simulation | frame rate |
+|---|---|---|
+| 2,000 | 31.9 ms/tick | 9.6 fps |
+| 20,000 | ~330 ms/tick | ~3 fps |
+
+Two ticks a frame at two thousand soldiers is 64 ms of *simulation* against 42 boxes of drawing, and
+the frame rate does not move when the ground is reduced to one call. The cost is the per-soldier
+loop - about 16 microseconds per soldier per tick - and it is the same at every zoom. What remains
+is the cohort tranche: one calculation per group of soldiers sharing place and task, and the worker
+pool the native spike already proved bit-identical at 1 and 23 threads. Grouping the display was the
+first half of that idea; grouping the arithmetic is the second.

@@ -2664,3 +2664,96 @@ state; nothing in this design assumes a body is one indivisible blob. A future C
 sub-roll of the same shape - a list of soldier ids, a sub-block of the layout, its own summary -
 and the contact band already works per soldier rather than per body, so partial contact, local
 casualty tracking and local target assignment have somewhere to live without moving a soldier.
+
+## D-107: A battle is counted in Roman sizes, and the same group is the unit of display and compute
+
+Project Banner counts its soldiers in the names soldiers actually counted themselves in, because
+each one is a size rather than a flourish: the **contubernium** is the eight men who shared a tent,
+the **century** is the smallest body that fought as one thing, the **cohort** is the smallest that
+could be detached and still hold a line, and the **legion** is a field army. These live in
+[code]scripts/battle/unit_scale.gd[/code] ([code]class_name UnitScale[/code]).
+
+The ladder is not decoration. It is the level of detail the battle is *drawn* at - close in, the
+soldiers themselves; further out, first the century, then the cohort, then the legion - and it is
+also the group that the simulation would work out once instead of once per man. Display and
+computation use the same grouping, so a box on screen is a promise about the arithmetic behind it:
+the same numbers, not an approximation of them.
+
+Thresholds are camera zooms ([code]SOLDIER_ZOOM[/code] 6, [code]CENTURY_ZOOM[/code] 1.5,
+[code]COHORT_ZOOM[/code] 0.6) rather than world sizes, because what matters is how much screen a
+mark of a given size covers. [code]PB_BLOCK_VIEW=1[/code] refuses to draw individuals at any zoom,
+which is how the large showcases are watched. The men behind the boxes are still persistent
+individuals with their own health, kills and experience; only their drawing is grouped.
+
+## D-108: A group is an entity - shared arithmetic for pose and movement, individual state for everything else
+
+The player's instruction: **merge the group into a single entity**, with the box brackets the player
+chooses before the battle and the ability to break a group apart at runtime down to a single
+soldier. The display half shipped first ([code]UnitScale[/code], D-107): one mark per century,
+cohort or legion. This records the other half and the measured case for it.
+
+**What the per-soldier loop actually costs.** Profiled on the 12900K at 30 ticks, profile on, both
+armies formed (`pb-bench/entity/phase_2k.log`, `phase_20k.log`):
+
+| phase (ms/tick) | 2,000 | 20,000 |
+|---|---|---|
+| soldiers (per-soldier update loop) | 20.1 | 198.3 |
+| of which choosing targets | 7.3 | 72.0 |
+| formations (body steering) | 2.9 | 34.5 |
+| grid (broadphase rebuild) | 4.4 | 44.0 |
+| focus (engagement) | 3.3 | 35.8 |
+| overlap (separation pass) | 3.7 | 45.5 |
+| **total** | **37.1** | **388.2** |
+
+Half the tick is the per-soldier loop. A third of that is choosing targets, which is already gated
+by D-105 and must stay per soldier because it is a decision. The remaining **~126 ms/tick at 20K -
+roughly 6 microseconds per soldier - is pose and movement**: reading a slot, measuring the distance
+to it, and stepping toward it. That is arithmetic about where a group stands, done identically by
+every man in the group, and it is what the entity merge removes.
+
+**The design.** A group - contubernium, century, cohort or legion, at the bracket the player chose -
+holds the shared arithmetic: where it stands, how it is turned, how it moves, how it holds its
+shape. Its soldiers keep everything that is theirs: health, kills, experience, their own opponent,
+and their own fall. The rigid path is exact rather than approximate: when every man of a group is
+dressed, every man's next position is the group's own transform, so the group computes it once and
+the numbers are the same numbers. A man out of place falls back to his own step, as he does now.
+
+**The bracket and the structure.** The grouping ladder is the structure: the player sets it before
+the battle and can break a group apart into the next level down, at any time, down to one soldier.
+Splitting and merging already exist as membership editing (`split_formation()`,
+`merge_formations()`, D-106; 0.27 ms a split at 6K) - the entity layer is what makes the groups
+worth having, because each one is now one calculation rather than a hundred.
+
+**Constraints this must respect.** The Step 7.8 separation pass is locked and is not altered by
+this work; the profile above is the reason the entity merge is worth doing without touching it -
+the overlap pass is 45.5 ms/tick at 20K against 198.3 ms for the soldier loop. Every claim is a
+matched-window, same-build A/B with the switch off restoring the previous architecture tick for
+tick, exactly as D-105 was measured.
+
+## D-109: Right click orders a march to anywhere on the map, not only to a town that can be entered
+
+Travel was settlement-only: an order named a settlement, and anything the player could not *enter*
+was refused with "not an enterable location". Most of the map is not an enterable town, so a player
+clicking a hamlet, a ruin or a crossroads was told the order was impossible while his party stood
+still. That is what "my unit still doesn't move" was.
+
+A destination is now either a settlement or **a point** ([code]destination_point[/code] /
+[code]destination_is_point[/code] on [code]CampaignState[/code], both carried by the save, with a
+default so an older save loads unchanged). [code]TravelService.set_destination_point()[/code] orders
+a march to a spot, [code]destination_position()[/code] is what [code]step()[/code] walks toward, and
+[code]_finish_travel()[/code] separates the two endings: a settlement is entered and marked visited,
+open ground is simply where the march stops.
+
+**The buttons.** Right click is the move order, and it is the only one: a place that can be entered is
+travelled to by its settlement order - so arriving opens it - and every other spot by a point order.
+Left click selects, and does not move the party. The HUD names the destination either way, with the
+hours it will take.
+
+**Why a point and not a nearest-settlement fallback.** Sending the party somewhere it was not told to
+go is worse than refusing the order. The march goes where it was aimed, and the arrival radius says
+when it is close enough to count as arrived.
+
+
+---
+
+---

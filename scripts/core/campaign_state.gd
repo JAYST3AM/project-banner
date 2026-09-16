@@ -30,6 +30,11 @@ var player_party: Party = null
 var world_position: Vector2 = Vector2.ZERO
 var current_settlement_id: String = ""
 var destination_id: String = ""
+## A destination that is not a settlement: the spot on the map the player ordered the party to march
+## to. Travel was settlement-only, which meant an order to march anywhere that is not an enterable
+## town was refused outright - and most of the map is not an enterable town.
+var destination_point: Vector2 = Vector2.ZERO
+var destination_is_point: bool = false
 
 ## soldier_id -> Soldier (every soldier in the world, alive or dead)
 var soldiers: Dictionary = {}
@@ -202,6 +207,8 @@ func party_of(world_party: WorldParty) -> Party:
 
 
 func destination_name() -> String:
+	if destination_is_point:
+		return "open ground"
 	if destination_id.is_empty():
 		return "None"
 	var s := settlement(destination_id)
@@ -255,6 +262,8 @@ func to_dict() -> Dictionary:
 		"world_position": DataUtils.vec2_to(world_position),
 		"current_settlement_id": current_settlement_id,
 		"destination_id": destination_id,
+		"destination_point": DataUtils.vec2_to(destination_point),
+		"destination_is_point": destination_is_point,
 		"soldiers": soldier_data,
 		"settlements": settlement_data,
 		"roads": roads.duplicate(true),
@@ -276,6 +285,8 @@ static func from_dict(data: Dictionary, config: GameConfig) -> CampaignState:
 	state.world_position = DataUtils.vec2_from(data.get("world_position", [0.0, 0.0]))
 	state.current_settlement_id = str(data.get("current_settlement_id", ""))
 	state.destination_id = str(data.get("destination_id", ""))
+	state.destination_point = DataUtils.vec2_from(data.get("destination_point", [0.0, 0.0]))
+	state.destination_is_point = bool(data.get("destination_is_point", false))
 	state.flags = (data.get("flags", {}) as Dictionary).duplicate(true)
 	state._next_soldier_index = int(data.get("next_soldier_index", 1))
 

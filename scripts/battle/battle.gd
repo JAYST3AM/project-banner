@@ -42,6 +42,21 @@ var _formation_counter := 0
 ## Scripted formation drill for automated runs (DevFlags.autoformations()).
 var _drill_enabled := false
 var _drill_step := 0
+## The army's renderer. Non-null when the instanced field is drawing the soldiers, in which
+## case [BattleView] draws only the ground, the overlay, the selection rings, the order lines
+## and the popups. Null means the canvas path is drawing every soldier, which is the fallback -
+## and the thing the measurement compares against. See [SoldierField] and D-107.
+var _field: SoldierField = null
+## The zoom below which health bars and facing pips are dropped: at a zoomed-out camera they
+## are sub-pixel, and they are the two batches whose instances scale with the army.
+var _detail_zoom := 2.5
+## The camera's zoom bounds. The floor has to be low enough that a battlefield scaled for a large
+## army can be seen whole; the ceiling is where a soldier fills a comfortable part of the screen.
+const MIN_ZOOM := 0.4
+const MAX_ZOOM := 26.0
+## Whether the field's detail batches were drawn last frame, so the toggle is applied when it
+## changes rather than every frame.
+var _detail_shown := true
 
 
 func _ready() -> void:
@@ -71,6 +86,7 @@ func _ready() -> void:
 	var formations := BattleSetup.assign_default_formations(_simulator, _config)
 	_ai = BattleAI.create(_config)
 	_view.bind(_simulator, _context)
+	_field = _attach_soldier_field()
 	_formations_built = formations.size()
 
 	var roster: Array[String] = []
@@ -97,9 +113,76 @@ func _ready() -> void:
 
 
 func _focus_camera() -> void:
+	# Fit the ground the battle is fought on, with a little margin. The armies stand in the middle
+	# half of it, so this frames the fight and the ground around it rather than a field-sized void.
 	var size := _simulator.field_size
 	_camera.position = size * 0.5
-	_camera.zoom = Vector2(9.0, 9.0)
+	var window := Vector2(get_viewport().get_visible_rect().size)
+	var fit := minf(window.x / maxf(1.0, size.x), window.y / maxf(1.0, size.y))
+	var zoom := clampf(fit * 0.98, MIN_ZOOM, MAX_ZOOM)
+	_camera.zoom = Vector2(zoom, zoom)
+
+
+## ---------- the army's renderer -------------------------------------------
+
+## Choose and attach the renderer that draws the soldiers. The instanced [SoldierField] is the
+## primary path: it draws the whole army in three draw calls, and the Step 7.9 measurement put
+## twenty thousand soldiers at 2.56 ms a frame against 133.6 ms for the canvas path (see
+## D-107). It is only taken when the engine's own instance-buffer layout could be read back out
+## of the engine, so an engine version that changes that layout falls back to the canvas path
+## rather than to a battlefield of men drawn at each other's coordinates.
+##
+## [code]PB_RENDER_BACKEND=canvas[/code] forces the old path for a paired comparison in one
+## build, which is how the two were measured against each other in the first place.
+func _attach_soldier_field() -> SoldierField:
+	_detail_zoom = _config.get_float("battle.health_bar_min_zoom", 2.5)
+	var requested := OS.get_environment("PB_RENDER_BACKEND")
+	if requested == "canvas":
+		DebugLogger.info("render: canvas path requested (PB_RENDER_BACKEND=canvas)", "Battle")
+		return null
+	if not requested.is_empty() and requested != "instanced":
+		DebugLogger.error(
+			"render: unknown PB_RENDER_BACKEND '%s' - using the canvas path" % requested, "Battle")
+		return null
+	var field := SoldierField.attach(self, _view, _simulator)
+	if field == null or not field.has_usable_buffer():
+		if field != null:
+			field.queue_free()
+		DebugLogger.info(
+			"render: canvas path (the instance buffer layout could not be read back)", "Battle")
+		return null
+	var layout := field.buffer_layout()
+	DebugLogger.info("render: instanced field for %d soldiers - stride %d, origin %d/%d, colour %d" % [
+		_simulator.units.size(), int(layout.get("stride", 0)), int(layout.get("origin_x", -1)),
+		int(layout.get("origin_y", -1)), int(layout.get("color", -1))], "Battle")
+	# The deployed army is drawn before the first tick: [method SoldierField.attach] packs once
+	# so the field does not wait for a frame the battle happens to be running in.
+	var detail := _camera.zoom.x >= _detail_zoom
+	_detail_shown = detail
+	field.show_bars = detail
+	field.show_facing = detail
+	field.pack(_simulator)
+	field.apply()
+	return field
+
+
+## Drop or restore the per-soldier detail batches when the camera crosses the zoom threshold.
+## Bars and pips are the two batches whose instance count scales with the army, and at a
+## zoomed-out camera they are a rectangle a fraction of a pixel wide: a battle seen from above
+## does not need two instances per man to draw something nobody can read.
+func _update_field_detail() -> void:
+	if _field == null:
+		return
+	var detail := _camera.zoom.x >= _detail_zoom
+	if detail == _detail_shown:
+		return
+	_detail_shown = detail
+	_field.show_bars = detail
+	_field.show_facing = detail
+	_field.pack(_simulator)
+	_field.apply()
+	DebugLogger.info("render: per-soldier detail %s at zoom %.2f" % [
+		"on" if detail else "off", _camera.zoom.x], "Battle")
 
 
 ## ---------- HUD ----------------------------------------------------------
@@ -277,6 +360,7 @@ func _process(delta: float) -> void:
 	if _simulator == null:
 		return
 	_update_camera_pan(delta)
+	_update_field_detail()
 	if _simulator.is_running():
 		# The enemy's thinking happens here, above the soldiers and outside the
 		# simulator: the battlefield does not decide anything on its own, so a battle
@@ -297,6 +381,14 @@ func _process(delta: float) -> void:
 			_view.add_events(events)
 			if _journal != null:
 				_journal.observe(_simulator)
+		# The army's instance buffers are rebuilt where the data changed - on a tick - and
+		# handed to the engine straight after. The frames in between draw the buffer the engine
+		# was already given, so what a frame pays for the soldiers is nothing at all, instead of
+		# one canvas command per soldier per overlay. At twenty thousand men that is the
+		# difference between 2.56 ms a frame and 133.6 ms. See [SoldierField] and D-107.
+		if _field != null and ticks > 0:
+			_field.pack(_simulator)
+			_field.apply()
 		_update_formation_drill()
 		_view.queue_redraw()
 		_info_timer += delta
@@ -308,6 +400,13 @@ func _process(delta: float) -> void:
 
 
 ## ---------- camera and input --------------------------------------------
+
+## Whether the player has taken the camera. A scene that drives the camera itself - the showcase
+## follows the fighting stage by stage - has to stop driving the moment the player moves it, or it
+## drags the view back to its own idea of where the battle is every frame. [code]F[/code] hands the
+## camera back.
+var camera_manual: bool = false
+
 
 func _update_camera_pan(delta: float) -> void:
 	var direction := Vector2.ZERO
@@ -321,6 +420,7 @@ func _update_camera_pan(delta: float) -> void:
 		direction.y += 1.0
 	if direction == Vector2.ZERO:
 		return
+	camera_manual = true
 	var speed := _config.get_float("world.camera_pan_speed", 700.0) / maxf(0.2, _camera.zoom.x)
 	_camera.position += direction.normalized() * speed * delta
 	_clamp_camera()
@@ -341,10 +441,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
 		if button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_UP:
+			camera_manual = true
 			_zoom_by(1.12)
 		elif button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			camera_manual = true
 			_zoom_by(1.0 / 1.12)
 		elif button.button_index == MOUSE_BUTTON_MIDDLE:
+			if button.pressed:
+				camera_manual = true
 			_panning = button.pressed
 		elif button.button_index == MOUSE_BUTTON_LEFT:
 			if button.pressed:
@@ -358,6 +462,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var motion := event as InputEventMouseMotion
 		if _panning:
+			camera_manual = true
 			_camera.position -= motion.relative / _camera.zoom
 			_clamp_camera()
 		elif _box_selecting:
@@ -398,6 +503,11 @@ func _handle_key(event: InputEventKey) -> void:
 			_order_stance(BattleFormation.ORDER_ENGAGE)
 		KEY_F3:
 			_toggle_overlay()
+		KEY_F:
+			# Hand the camera back to whoever was driving it, and frame the battle again.
+			camera_manual = false
+			_focus_camera()
+			_hint.text = "Camera framed to the battle."
 		KEY_F4:
 			_view.show_terrain = not _view.show_terrain
 			_hint.text = "Ground rendering %s." % ("on" if _view.show_terrain else "off")
@@ -681,7 +791,7 @@ func _report_formation_consistency() -> void:
 
 
 func _zoom_by(factor: float) -> void:
-	var next := clampf(_camera.zoom.x * factor, 3.0, 26.0)
+	var next := clampf(_camera.zoom.x * factor, MIN_ZOOM, MAX_ZOOM)
 	_camera.zoom = Vector2(next, next)
 
 

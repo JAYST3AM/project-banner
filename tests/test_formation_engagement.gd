@@ -756,7 +756,14 @@ func _test_split_while_approaching() -> void:
 	var anchor_before := body.anchor
 	_drive(bundle, 60)
 	greater(split.anchor.distance_to(anchor_before), 0.0, "the detached half moved somewhere")
+	var apart_early := split.anchor.distance_to(body.anchor)
+	_drive(bundle, 120)
 	var apart := split.anchor.distance_to(body.anchor)
+	# The substance is that the halves part and keep parting. The first measurement matters because
+	# D-108 changed how fast they do it: a soldier standing in his place now moves by his body's
+	# step instead of overshooting toward his slot, so a detached half swings wide more slowly than
+	# it used to. The old assertion read the distance once and demanded more than five units of it.
+	greater(apart, apart_early, "the halves keep separating: %.1f units, then %.1f" % [apart_early, apart])
 	greater(apart, 5.0, "and the two halves are now %.1f units apart" % apart)
 	equal(simulator.check_membership_invariants().size(), 0, "with the invariants still holding")
 

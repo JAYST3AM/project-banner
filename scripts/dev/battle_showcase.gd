@@ -70,7 +70,18 @@ var context: BattleContext = null
 var simulator: BattleSimulator = null
 var terrain: BattlefieldTerrain = null
 var view: BattleView = null
+## The army's renderer: the same instanced path the battle scene uses, so what is watched here
+## is what a player sees. Null only if the instance-buffer layout could not be read back.
+var field: SoldierField = null
 var camera: Camera2D = null
+## Whether the player has taken the camera. The film follows the battle stage by stage; the moment
+## the player pans or zooms it stops, and F hands it back. Without this the showcase is something
+## you watch rather than something you can look at.
+var camera_manual: bool = false
+## Middle mouse button held: dragging the view.
+var _panning: bool = false
+const CAMERA_PAN_SPEED := 700.0
+const CAMERA_ZOOM_STEP := 1.12
 var ai_player: BattleAI = null
 var ai_enemy: BattleAI = null
 
@@ -138,7 +149,7 @@ func _ready() -> void:
 	_build_battle()
 	print("showcase: %d v %d deployed, %d formations, field %.0fx%.0f, setup %s" % [
 		simulator.side_count(SIDE_PLAYER), simulator.side_count(SIDE_ENEMY),
-		simulator.formations.size(), FIELD.x, FIELD.y,
+		simulator.formations.size(), simulator.field_size.x, simulator.field_size.y,
 		ShowcaseBattle.setup_checksum(simulator.units)])
 	_started = false
 	_run_start_usec = Time.get_ticks_usec()
@@ -198,10 +209,25 @@ func _build_battle() -> void:
 	view.show_formation_debug = true
 	view.show_formation_labels = false
 
+	# The same instanced renderer the battle scene uses. Attached after the view, so the army
+	# draws over the ground the view painted and under its selection rings and order lines.
+	# `PB_RENDER_BACKEND=canvas` leaves the view drawing every soldier, which is how the two
+	# paths are compared in one build.
+	if OS.get_environment("PB_RENDER_BACKEND") == "canvas":
+		print("showcase: canvas render path (PB_RENDER_BACKEND=canvas)")
+	else:
+		field = SoldierField.attach(self, view, simulator)
+		if field != null and not field.has_usable_buffer():
+			# No usable instance-buffer layout: the view keeps drawing the soldiers and this
+			# scene keeps measuring something honest rather than men at the wrong coordinates.
+			field.queue_free()
+			field = null
+		print("showcase: %s render path" % ("instanced" if field != null else "canvas (buffer unusable)"))
+
 	camera = Camera2D.new()
 	add_child(camera)
 	camera.make_current()
-	camera.position = FIELD * 0.5
+	camera.position = simulator.field_size * 0.5
 	camera.zoom = _fit_zoom()
 
 	ai_player = BattleAI.create(config, SIDE_PLAYER)
@@ -213,8 +239,9 @@ func _build_battle() -> void:
 ## ---------- camera --------------------------------------------------------
 
 func _fit_zoom() -> Vector2:
+	var size := simulator.field_size
 	var window := Vector2(get_viewport().get_visible_rect().size)
-	var zoom := minf(window.x / (FIELD.x + 8.0), window.y / (FIELD.y + 8.0))
+	var zoom := minf(window.x / (size.x + 8.0), window.y / (size.y + 8.0))
 	return Vector2(zoom, zoom)
 
 
@@ -367,6 +394,13 @@ func _process(delta: float) -> void:
 
 	if _ticks_this_frame > 0:
 		view.queue_redraw()
+		if field != null:
+			# Rebuilt on the tick, handed over once: the frames in between draw what the engine
+			# already has. This is the renderer under measurement, so it is driven the same way
+			# the battle scene drives it.
+			field.pack(simulator)
+			field.apply()
+	_update_camera_pan(delta)
 	_update_camera(delta)
 	_advance_stage()
 	_probe()
@@ -407,8 +441,13 @@ func _consume_events(events: Array[Dictionary]) -> void:
 
 
 func _update_camera(delta: float) -> void:
+	# The player's hands beat the film. Every one of these shots is of a battle that has been
+	# framed for them; the moment they pan or zoom, the follow stops, and F hands it back.
+	if camera_manual:
+		return
+	var size := simulator.field_size
 	var target_zoom := _fit_zoom()
-	var target_position := FIELD * 0.5
+	var target_position := size * 0.5
 	match _stage:
 		Stage.OPENING, Stage.APPROACH:
 			target_zoom = _fit_zoom() * 1.0
@@ -426,6 +465,74 @@ func _update_camera(delta: float) -> void:
 	var weight := clampf(delta * 3.0, 0.0, 1.0)
 	camera.zoom = camera.zoom.lerp(target_zoom, weight)
 	camera.position = camera.position.lerp(target_position, weight)
+
+
+## ---------- camera controls ------------------------------------------------
+
+## Middle mouse drags, the wheel zooms about the pointer, WASD or the arrows pan, and F hands the
+## camera back to the film. Every one of them takes the camera out of the film's hands first, so what
+## the player is looking at stays where they put it.
+func _unhandled_input(event: InputEvent) -> void:
+	if camera == null:
+		return
+	if event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom_camera(CAMERA_ZOOM_STEP)
+		elif button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom_camera(1.0 / CAMERA_ZOOM_STEP)
+		elif button.button_index == MOUSE_BUTTON_MIDDLE:
+			_panning = button.pressed
+			if button.pressed:
+				camera_manual = true
+		return
+	if event is InputEventMouseMotion and _panning:
+		camera_manual = true
+		camera.position -= (event as InputEventMouseMotion).relative / camera.zoom.x
+		_clamp_camera()
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F:
+		camera_manual = false
+		_clamp_camera()
+
+
+## Zoom about the pointer, so the spot being looked at stays under it.
+func _zoom_camera(step: float) -> void:
+	camera_manual = true
+	var before := camera.get_global_mouse_position()
+	var zoom := clampf(camera.zoom.x * step, 0.15, 40.0)
+	camera.zoom = Vector2(zoom, zoom)
+	var after := camera.get_global_mouse_position()
+	camera.position += before - after
+	_clamp_camera()
+
+
+func _update_camera_pan(delta: float) -> void:
+	var direction := Vector2.ZERO
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		direction.x -= 1.0
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		direction.x += 1.0
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		direction.y -= 1.0
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		direction.y += 1.0
+	if direction == Vector2.ZERO:
+		return
+	camera_manual = true
+	camera.position += direction.normalized() * CAMERA_PAN_SPEED / maxf(0.2, camera.zoom.x) * delta
+	_clamp_camera()
+
+
+## Keep the view on the ground. A camera dragged off the field is watching nothing at all.
+func _clamp_camera() -> void:
+	if simulator == null:
+		return
+	var size := simulator.field_size
+	camera.position = Vector2(
+		clampf(camera.position.x, 0.0, size.x),
+		clampf(camera.position.y, 0.0, size.y)
+	)
 
 
 ## Where the fighting is: the mean position of the living, which is stable enough to film

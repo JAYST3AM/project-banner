@@ -257,8 +257,15 @@ func _test_the_report_counts_what_the_backends_did() -> void:
 func _test_the_live_state_hooks_are_the_only_ones() -> void:
 	var mover := FileAccess.open("res://scripts/battle/battle_simulator.gd", FileAccess.READ)
 	var mover_text := mover.get_as_text()
-	equal(mover_text.count(".position = ") + mover_text.count(".position += "), 2,
-		"the battle moves soldiers in exactly two statements, both inside _move_toward")
+	# The invariant this guards is that every write to a living soldier's position is mirrored to
+	# the accelerator, so its indexed state can never disagree. D-108 added a second movement site -
+	# a soldier standing in his place moves by his body's step rather than deriving his own - and
+	# that write is mirrored exactly like the other two. The count moved from two to three; a fourth
+	# site is still a silent wrong answer until it is mirrored and named here.
+	equal(mover_text.count(".position = ") + mover_text.count(".position += "), 3,
+		"the battle moves soldiers in exactly three statements, in _move_toward and _step_with_body")
+	equal(mover_text.count("grid.native_moved(unit)"), 2,
+		"and both movement sites notify the grid, which is what makes the count meaningful")
 	var owner := FileAccess.open("res://scripts/battle/battle_unit.gd", FileAccess.READ)
 	equal(owner.get_as_text().count("alive = false"), 1,
 		"a soldier dies in exactly one statement, mirrored where the killing blow lands")

@@ -10,6 +10,15 @@ signal save_written(slot: int, path: String)
 signal save_failed(slot: int, reason: String)
 
 const SAVE_DIR := "user://saves"
+## Where test runs keep their saves. The test runner points at this for its own process, so a suite
+## that wipes its saves at the start and end of every fixture cannot wipe the campaign the player is
+## partway through. Nothing but the runner sets the switch.
+const TEST_SAVE_DIR := "user://saves_test"
+
+
+## The directory saves live in for this process.
+static func save_dir() -> String:
+	return TEST_SAVE_DIR if not OS.get_environment("PB_TEST_SAVES").is_empty() else SAVE_DIR
 const SLOT_DEFAULT := 1
 const SAVE_VERSION := 1
 
@@ -38,11 +47,11 @@ func _migrate_0_to_1(data: Dictionary) -> Dictionary:
 
 
 func slot_path(slot: int = SLOT_DEFAULT) -> String:
-	return "%s/slot_%d.save" % [SAVE_DIR, slot]
+	return "%s/slot_%d.save" % [save_dir(), slot]
 
 
 func ensure_dir() -> bool:
-	var err := DirAccess.make_dir_recursive_absolute(SAVE_DIR)
+	var err := DirAccess.make_dir_recursive_absolute(save_dir())
 	return err == OK or err == ERR_ALREADY_EXISTS
 
 
@@ -139,7 +148,7 @@ func save_campaign(state: CampaignState, slot: int = SLOT_DEFAULT) -> bool:
 		save_failed.emit(slot, "no campaign state")
 		return false
 	if not ensure_dir():
-		save_failed.emit(slot, "could not create %s" % SAVE_DIR)
+		save_failed.emit(slot, "could not create %s" % save_dir())
 		return false
 
 	state.last_saved_at = Time.get_datetime_string_from_system(false, true)
@@ -230,7 +239,7 @@ func delete_save(slot: int = SLOT_DEFAULT) -> bool:
 	var path := slot_path(slot)
 	if not FileAccess.file_exists(path):
 		return false
-	var dir := DirAccess.open(SAVE_DIR)
+	var dir := DirAccess.open(save_dir())
 	if dir == null:
 		return false
 	var err := dir.remove(path.get_file())
@@ -240,7 +249,7 @@ func delete_save(slot: int = SLOT_DEFAULT) -> bool:
 
 ## Wipes every save in the slot directory. Used by the test suites.
 func delete_all_saves() -> void:
-	var dir := DirAccess.open(SAVE_DIR)
+	var dir := DirAccess.open(save_dir())
 	if dir == null:
 		return
 	dir.list_dir_begin()

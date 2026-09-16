@@ -32,12 +32,24 @@ const ENGAGE_EPSILON := 0.05
 ## where it was told to face.
 const FACING_EPSILON := 0.02
 
+## The deepest a body's ranks may stand before it widens instead. A real line was eight to ten
+## ranks; this is looser than that because a body of three thousand on a field a thousand units
+## wide has to fit across as well as back, and twenty is the depth at which it does. Below this the
+## definition's own frontage is kept exactly as it was.
+const MAX_RANKS := 20
+
 var id: String = ""
 var side: String = BattleContext.SIDE_PLAYER
 var type_id: String = "line"
 
 ## The formation's centre.
 var anchor: Vector2 = Vector2.ZERO
+## The step this body took this tick, when it took a straight one. The group's own arithmetic:
+## its soldiers who are standing in their places go where the group goes, without each deriving the
+## same displacement from a slot lookup, a distance, a normalise and a terrain lookup. Zero when the
+## body is turning, reforming or standing still, in which case every soldier dresses himself exactly
+## as he always did. See D-108.
+var anchor_step: Vector2 = Vector2.ZERO
 ## Current facing, in radians. The direction the front rank looks along.
 var facing: float = 0.0
 ## Where it has been told to face. Kept separate from [member facing] so a turn is
@@ -585,6 +597,14 @@ func _rebuild_slots() -> void:
 		return
 	file_count = mini(count, _max_files)
 	rank_count = int(ceil(float(count) / float(file_count)))
+	# The definition's frontage is the shape a body wants, not a cap on how many men it may hold.
+	# Ten files is square for a hundred men and a thread for three thousand - a body of three
+	# thousand laid out that way is a column eight hundred units long standing where a formation
+	# should be, which is what put soldiers outside their own battlefield. Depth is what stays
+	# bounded, so a body too deep for its file count widens until it is not.
+	if count > _max_files and rank_count > MAX_RANKS:
+		file_count = int(ceil(float(count) / float(MAX_RANKS)))
+		rank_count = int(ceil(float(count) / float(file_count)))
 
 	var fwd := forward()
 	var right := right_vector()

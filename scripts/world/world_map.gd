@@ -286,6 +286,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_panning = button.pressed
 		elif button.pressed and button.button_index == MOUSE_BUTTON_LEFT:
 			_handle_left_click(_view.get_global_mouse_position())
+		elif button.pressed and button.button_index == MOUSE_BUTTON_RIGHT:
+			_handle_right_click(_view.get_global_mouse_position())
 		return
 
 	if event is InputEventMouseMotion and _panning:
@@ -304,6 +306,23 @@ func _handle_left_click(world_point: Vector2) -> void:
 		_deselect()
 		return
 	_select(settlement)
+
+
+## Right click is the move button: anywhere on the map, with or without a settlement under it.
+## A place that can be entered is travelled to by its own order, so arriving there opens it; every
+## other spot - a hamlet, a ruin, a crossroads, open ground - is simply somewhere to march to. This
+## is a real march either way: travel costs game hours and the clock runs while it happens.
+func _handle_right_click(world_point: Vector2) -> void:
+	var settlement := _view.settlement_at(world_point)
+	if settlement != null and settlement.is_enterable():
+		if _travel.set_destination(settlement.id):
+			_hud.set_hint("Marching to %s." % settlement.name)
+		return
+	var point := settlement.position if settlement != null else world_point
+	if _travel.set_destination_point(point):
+		_hud.set_hint("Marching to open ground (%.1f h)." % _travel.hours_to_reach(point))
+	else:
+		_hud.set_hint("Already here.")
 
 
 func _handle_key(event: InputEventKey) -> void:
@@ -367,6 +386,14 @@ func _on_speed_requested(speed_name: String) -> void:
 func _on_travel_requested(settlement_id: String) -> void:
 	var settlement := _state.settlement(settlement_id)
 	if settlement == null:
+		return
+	if not settlement.is_enterable():
+		# A place that cannot be entered is still somewhere to march to. Refusing the order taught
+		# the player nothing about the map; marching there is plainly what the button means.
+		if _travel.set_destination_point(settlement.position):
+			_hud.set_hint("Marching to %s - about %.1f game hours." % [
+				settlement.name, _travel.hours_to_reach(settlement.position),
+			])
 		return
 	if _travel.set_destination(settlement_id):
 		var hours := _travel.hours_to_reach(settlement.position)

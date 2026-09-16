@@ -94,6 +94,11 @@ var target_reacquisition_ticks: int = 4
 var engagement_recheck_ticks: int = ENGAGEMENT_RECHECK_TICKS
 ## Ticks a body that has stopped fighting keeps believing it may come back to one.
 var engagement_disengage_ticks: int = ENGAGEMENT_DISENGAGE_TICKS
+## Whether soldiers standing in their places take their body's own step instead of deriving it. On
+## by default, and switchable off from config or [code]PB_RIGID_GROUPS=off[/code] so that a benchmark
+## can run the per-soldier architecture in this same build, tick for tick - which is the only honest
+## way to attribute a difference to it. See D-108.
+var rigid_groups_enabled: bool = true
 ## Slack beyond the two bodies' reach, for the contact band.
 var engagement_band_slack: float = CONTACT_BAND_SLACK
 ## Whether soldiers are held to their body's engagement at all. On by default, and switchable
@@ -645,6 +650,9 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 			"battle.engagement_nearby_margin", ENGAGEMENT_NEARBY_MARGIN))
 		retaliation_ticks = maxi(0, int(config.get_int("battle.retaliation_ticks", RETALIATION_TICKS)))
 		engagement_enabled = config.get_bool("battle.engagement_enabled", true)
+		rigid_groups_enabled = config.get_bool("battle.rigid_groups_enabled", true)
+		if OS.get_environment("PB_RIGID_GROUPS").to_lower() in ["off", "0", "false", "no"]:
+			rigid_groups_enabled = false
 		# The environment variable is what lets a benchmark or CI hold the layer still - off is
 		# the architecture this milestone replaced, in the same build. See D-105.
 		if OS.get_environment("PB_ENGAGEMENT").to_lower() in ["off", "0", "false", "no"]:
@@ -822,7 +830,13 @@ func _update_formations(delta: float) -> void:
 	for formation in formations:
 		if formation.order == BattleFormation.ORDER_ENGAGE:
 			formation.steer_toward(_engage_target_for(formation))
+		# Whether the step the body is about to take is a straight one. A turning or reforming body
+		# must not hand its soldiers a translation: they would keep their places relative to the
+		# world instead of to the line, which is the opposite of what a wheel is for.
+		var straight := not formation.is_turning() and not formation.is_reforming()
+		var before := formation.anchor
 		formation.advance(delta, _formation_speed(formation))
+		formation.anchor_step = (formation.anchor - before) if straight else Vector2.ZERO
 		formation.ensure_slots()
 		formation.update_cohesion(_unit_by_id, _cohesion_reference(formation))
 
@@ -2142,6 +2156,16 @@ func _update_unit(unit: BattleUnit, delta: float) -> void:
 			_move_toward(unit, target.position, delta)
 			return
 		var place := unit.formation_slot()
+		# A soldier standing in his place goes where his body goes. The body worked that step out
+		# once, for the whole group, at the top of the tick; making four hundred men each derive the
+		# same displacement - a slot lookup, a distance, a normalise and a terrain lookup apiece -
+		# is the group's arithmetic done four hundred times. Anyone out of his place, and every body
+		# that is turning, reforming or standing still, dresses himself exactly as before.
+		# See D-108.
+		if rigid_groups_enabled and body.anchor_step != Vector2.ZERO \
+				and unit.position.distance_squared_to(place) <= ARRIVE_EPSILON * ARRIVE_EPSILON:
+			_step_with_body(unit, body.anchor_step)
+			return
 		if unit.position.distance_to(place) > ARRIVE_EPSILON:
 			_move_toward(unit, place, delta)
 		return
@@ -3307,6 +3331,18 @@ func _move_toward(unit: BattleUnit, point: Vector2, delta: float) -> void:
 		# killing blow lands. The accelerator's mirrored positions are only true because
 		# these two are the only places a soldier's live state changes inside a tick, and
 		# COMPARE_FULL is what proves that. See D-095.
+		grid.native_moved(unit)
+
+
+## Move a soldier who is already in his place by the step his body took. The clamp and the grid
+## notification are the same as [method _move_toward]'s, because the grid's mirrored positions are
+## only true while these remain the only places a live soldier's position is written. See D-095.
+func _step_with_body(unit: BattleUnit, step_vector: Vector2) -> void:
+	unit.position = Vector2(
+		clampf(unit.position.x + step_vector.x, 0.5, field_size.x - 0.5),
+		clampf(unit.position.y + step_vector.y, 0.5, field_size.y - 0.5)
+	)
+	if grid != null:
 		grid.native_moved(unit)
 
 

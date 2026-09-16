@@ -77,8 +77,14 @@ func _build() -> void:
 	box.add_child(_enter_button)
 
 
+## Whether the place on show can be entered. A hamlet or a ruin cannot, and saying so in the panel
+## is the difference between a player learning the map and a player concluding the game is broken.
+var _enterable: bool = true
+
+
 func show_settlement(settlement: Settlement) -> void:
 	_settlement_id = settlement.id
+	_enterable = settlement.is_enterable()
 	_name_label.text = settlement.name
 	_type_label.text = "%s  |  population %d" % [
 		settlement.type_display(),
@@ -91,16 +97,23 @@ func show_settlement(settlement: Settlement) -> void:
 		"Owner:     %s" % owner_text.replace("_", " ").capitalize(),
 		"Recruits:  %s" % recruit_text,
 		"Visited:   %s" % ("yes" if settlement.visited else "no"),
+		"Entry:     %s" % ("open" if _enterable else "no road in - march there, nothing to enter"),
 	])
 	_description.text = settlement.description
 	visible = true
 
 
-## Travel button state depends on where the party currently is.
+## Travel button state depends on where the party currently is, and the enter button also depends on
+## whether there is anything to enter.
 func set_arrival_state(is_here: bool) -> void:
 	_travel_button.disabled = is_here
 	_travel_button.text = "You are here" if is_here else "Travel Here"
+	if not _enterable:
+		_enter_button.disabled = true
+		_enter_button.text = "No entry here"
+		return
 	_enter_button.disabled = not is_here
+	_enter_button.text = "Enter" if is_here else "Enter (march there first)"
 
 
 func hide_panel() -> void:

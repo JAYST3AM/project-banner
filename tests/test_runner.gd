@@ -61,6 +61,9 @@ var _suites_broken: int = 0
 
 
 func _ready() -> void:
+	# Suites wipe their saves at the start and end of every fixture. Point that at a test directory
+	# so a run can never eat the campaign somebody is partway through. See save_manager.save_dir().
+	OS.set_environment("PB_TEST_SAVES", "1")
 	SceneManager.adopt_initial_scene()
 	await get_tree().process_frame
 	await _run_all()

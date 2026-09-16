@@ -60,6 +60,7 @@
     "target_search_max_radius": 32.0,
     "target_reacquisition_ticks": 4,
 		"engagement_enabled": true,
+		"rigid_groups_enabled": true,
 		"engagement_recheck_ticks": 10,
 		"engagement_disengage_ticks": 40,
 		"engagement_band_slack": 2.6,
