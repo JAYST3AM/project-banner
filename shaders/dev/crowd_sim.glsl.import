@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://ysbxkf36lhoj"
+path="res://.godot/imported/crowd_sim.glsl-fa4cefb0ab04857f0c1d00eb53ca1ada.res"
+
+[deps]
+
+source_file="res://shaders/dev/crowd_sim.glsl"
+dest_files=["res://.godot/imported/crowd_sim.glsl-fa4cefb0ab04857f0c1d00eb53ca1ada.res"]
+
+[params]
+
