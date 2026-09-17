@@ -6,7 +6,7 @@
 //
 // One agent per invocation, state resident in the buffers below, one mode per dispatch:
 //   0 clear the grid, the damage, the correction and the counters   1 bin the living into the grid
-//   2 read neighbours: separate hard, measure the proof, strike an enemy within reach
+//   2 read neighbours: separate hard, measure the proof, acquire / keep / release / strike a target
 //   3 walk to your place in the line, take the blows, and never pass through anybody
 //   4 add this round's separation, in fixed-point integers   5 apply it
 // The caller runs 0-3 in order, then 4 and 5 once a round for three rounds, with a barrier
@@ -21,7 +21,19 @@
 //
 // A soldier's place is his body's lattice - anchor, facing, files, ranks, spacing - so a
 // body marches as one thing, its ranks dress, and the gaps the fallen leave stay open.
-// Nothing here is the game's combat: no targeting, no defence, no cooldown, no morale.
+//
+// Target acquisition (Phase 4.3 slice 1). A soldier remembers the opponent it is dealing
+// with (binding 11: target id and its next awareness tick) instead of striking every enemy
+// neighbour in reach. It keeps the opponent while it is alive, hostile and within the retention
+// radius; it looks again on its own staggered cadence (agent id modulo the interval) or at once
+// when a loss was taken inside its own reach; and it releases an opponent that dies or walks out
+// of relevance. Only the acquired opponent is struck. The search is the 3x3 neighbourhood this
+// dispatch already reads for the separation, plus one ring when that finds nobody; ties are broken
+// by the lower agent id so the answer cannot depend on the order the grid binned the men in.
+//
+// The legacy behaviour - every enemy within reach is struck, no opponent is remembered - is kept
+// in this same shader behind a parameter (params.f[17] < 0.5) so a benchmark can run before and
+// after in one build, tick for tick.
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
@@ -35,13 +47,21 @@ layout(set = 0, binding = 2, std430) restrict buffer Cursors { uint c[]; } curso
 layout(set = 0, binding = 3, std430) restrict buffer Slots { uint s[]; } slots;
 // [0] agents, [1] grid width, [2] grid height, [3] cell size, [4] separation radius,
 // [5] dt, [6] field width, [7] field height, [8] walk speed, [9] reach, [10] blow,
-// [11] the most a soldier may be pushed in one tick, [12] the agreed minimum enemy gap.
+// [11] the most a soldier may be pushed in one tick, [12] the agreed minimum enemy gap,
+// [13] the current simulation tick, [14] target reacquisition cadence in ticks,
+// [15] target retention radius, [16] target switch advantage, [17] 1 = target acquisition on
+// (the shipped behaviour), 0 = every enemy in reach struck (the legacy behaviour),
+// [18] target search radius, [19] 1 = an in-reach loss reacquires at once.
 layout(set = 0, binding = 4, std430) restrict buffer Params { float f[]; } params;
 // [0] agents the grid could not hold, [1] neighbour probes, [2] blows landed, [3] fallen,
 // [4] enemy pairs closer than half the separation, [5] closest enemy gap x1000 (min, cleared
 // to a large number), [6] furthest step taken x1000 (max), [7] enemy pairs closer than the
 // agreed physical minimum, [8..13] the same closest-enemy-gap measurement kept per body - the
 // anchors are driven off these, so that a body advances exactly while nobody is in reach of it.
+// [14] target acquisitions, [15] ticks spent retaining a valid target, [16] scheduled looks made
+// while already holding a target, [17] targets released for distance, [18] targets lost to death,
+// [19] losses inside reach that forced an immediate look, [20] looks made on the cadence,
+// [21] target switches, [22] looks that found nobody. The clear pass resets all of them.
 layout(set = 0, binding = 5, std430) restrict buffer Counters { uint c[]; } counters;
 // x = hit points, y = side (0 marches +x, 1 marches -x), z = 1 once fallen.
 layout(set = 0, binding = 6, std430) restrict buffer Meta { vec4 m[]; } meta;
@@ -55,11 +75,23 @@ layout(set = 0, binding = 9, std430) restrict buffer Bodies { vec4 b[]; } bodies
 // zw spare. Integer atomics add the same way whatever the order the neighbours are visited in,
 // which is the whole point: floats summed in binning order made every run diverge from tick two.
 layout(set = 0, binding = 10, std430) restrict buffer Corr { ivec4 c[]; } corr;
+// The opponent each soldier remembers, and when it may look again: x = target agent id (-1 for
+// none), y = the simulation tick its next scheduled look is due, zw spare. Written only by the
+// soldier itself, so no two threads race for it. See the header's target-acquisition note.
+layout(set = 0, binding = 11, std430) restrict buffer Targets { ivec4 t[]; } targets;
 
 layout(push_constant, std430) uniform PC { uint mode; uint a; uint b; uint c; } pc;
 
 const uint SLOT_CAPACITY = 64u;
 const uint DAMAGE_SCALE = 100u;
+// The counter block's size, and the last slot whose value is a per-body "closest enemy" reading
+// (these start at 8 and run to 13, one per body). Everything from 14 up is a target counter that
+// starts at zero. The clear pass covers the whole block: covering too few was a real bug once -
+// the tail was never reset and every "this tick" figure became a running total.
+const uint COUNTER_COUNT = 23u;
+const uint BODY_GAP_BASE = 8u;
+const uint BODY_GAP_SLOTS = 6u;
+const int NO_TARGET = -1;
 // The unit the separation corrections are accumulated in. Fixed-point integers, deliberately:
 // the order neighbours are visited in depends on which thread binned which man first, and a float
 // sum whose value depends on the order it was summed in is a battle that comes out a different
@@ -82,6 +114,13 @@ void main() {
 	float blow = params.f[10];
 	float max_push = params.f[11];
 	float min_enemy = params.f[12];
+	uint tick_now = uint(params.f[13]);
+	uint cadence = uint(max(params.f[14], 1.0));
+	float retention = params.f[15];
+	float switch_adv = params.f[16];
+	bool targeting = params.f[17] > 0.5;
+	float search_radius = params.f[18];
+	bool immediate_loss = params.f[19] > 0.5;
 
 	if (pc.mode == 0u) {
 		uint step = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
@@ -93,11 +132,11 @@ void main() {
 			damage.d[i] = 0u;
 			corr.c[i] = ivec4(0);
 		}
-		if (gid >= n && gid < n + 14u) {
+		if (gid >= n && gid < n + COUNTER_COUNT) {
 			uint slot = gid - n;
 			// The measuring slots start at "nothing seen yet", not at zero: a minimum
 			// distance of zero would read as every soldier standing inside another one.
-			if (slot == 5u || slot >= 8u) {
+			if (slot == 5u || (slot >= BODY_GAP_BASE && slot < BODY_GAP_BASE + BODY_GAP_SLOTS)) {
 				counters.c[slot] = 4294967295u;
 			} else {
 				counters.c[slot] = 0u;
@@ -141,6 +180,56 @@ void main() {
 		ivec2 acc = ivec2(0);
 		uint probes = 0u;
 		bool contact = false;
+		// The opponent this soldier is already dealing with, if any. Cheap by construction:
+		// one index probe and a distance, with no spatial query - which is what makes
+		// retaining an opponent cheaper than finding one, and why this is asked first.
+		int held_id = targets.t[gid].x;
+		uint next_tick = uint(max(targets.t[gid].y, 0));
+		bool has_held = false;
+		bool due = false;
+		float held_d2 = 1.0e30;
+		if (held_id >= 0) {
+			if (uint(held_id) < n) {
+				uint h = uint(held_id);
+				vec2 hdelta = agents.s[h].xy - pos;
+				held_d2 = dot(hdelta, hdelta);
+				if (meta.m[h].y == side) {
+					// Not reachable today - the search only ever returns enemies - but a
+					// remembered answer that has become an ally is refused rather than hit.
+					atomicAdd(counters.c[18], 1u);
+					held_id = NO_TARGET;
+				} else if (meta.m[h].z > 0.5) {
+					// The remembered opponent is dead. If it was inside this soldier's own
+					// reach the loss was taken mid-swing, and the next look is brought
+					// forward off the cadence; otherwise it waits its turn. See D-083.
+					atomicAdd(counters.c[18], 1u);
+					if (immediate_loss && held_d2 <= reach * reach) {
+						due = true;
+						atomicAdd(counters.c[19], 1u);
+					}
+					held_id = NO_TARGET;
+				} else if (held_d2 > retention * retention) {
+					// It walked out of relevance: release it rather than chase it across
+					// the field. The radius is the search ceiling on purpose. See D-082.
+					atomicAdd(counters.c[17], 1u);
+					held_id = NO_TARGET;
+				} else {
+					has_held = true;
+				}
+			} else {
+				atomicAdd(counters.c[18], 1u);
+				held_id = NO_TARGET;
+			}
+		}
+		int prior_valid = has_held ? held_id : NO_TARGET;
+		// Whether this soldier is going to look this tick at all: in reach it holds and never
+		// searches, otherwise it looks when a loss or its own cadence has made it due.
+		bool in_reach = has_held && held_d2 <= reach * reach;
+		bool want_search = targeting && !in_reach && (due || tick_now >= next_tick);
+		// The nearest enemy the local window offers, and its squared distance. Only the
+		// acquisition path reads these; the legacy path never fills them.
+		uint best_cand = 0xFFFFFFFFu;
+		float best_d2 = 1.0e30;
 		for (int oy = -1; oy <= 1; ++oy) {
 			int ny = cy + oy;
 			if (ny < 0 || ny >= int(gh)) {
@@ -183,16 +272,26 @@ void main() {
 							// The same measurement per body. The anchors are driven off this:
 							// a body advances exactly while nobody is in reach of it, which is
 							// the game's "press into the gap" rule with a measured gap instead
-							// of a guessed one. Measuring it by the leading man's x alone got
-							// this wrong: two leading men in different bands read as 2.3 apart
-							// while the nearest real enemy pair stood 3.52 away, past the 3.4
-							// reach - so nobody could fight and nobody could close, and the
-							// battle froze at 228 dead with the two lines staring at each other.
+							// of a guessed one.
 							atomicMin(counters.c[8u + uint(attrs.a[gid].x)], uint(dist * 1000.0));
-						}
-						if (enemy && dist < reach) {
-							atomicAdd(damage.d[other], uint(blow * float(DAMAGE_SCALE)));
-							atomicAdd(counters.c[2], 1u);
+							// The local search the acquisition is built on: the nearest enemy
+							// this 3x3 neighbourhood offers. Ties are broken by the lower
+							// agent id, so the answer cannot depend on the order the grid
+							// happened to bin the men in.
+							if (targeting && d2 <= search_radius * search_radius) {
+								bool better = d2 < best_d2 - 0.000001 \
+									|| (abs(d2 - best_d2) <= 0.000001 && other < best_cand);
+								if (better) {
+									best_cand = other;
+									best_d2 = d2;
+								}
+							}
+							// Legacy: every enemy in reach is struck. Shipped: only the
+							// acquired opponent is, below.
+							if (!targeting && dist < reach) {
+								atomicAdd(damage.d[other], uint(blow * float(DAMAGE_SCALE)));
+								atomicAdd(counters.c[2], 1u);
+							}
 						}
 						// A man standing inside an enemy: the number this milestone has to
 						// keep at zero, or all the "collisions" talk is decoration.
@@ -203,12 +302,116 @@ void main() {
 						contact = true;
 						atomicMin(counters.c[5], 0u);
 						atomicAdd(counters.c[7], 1u);
-						atomicAdd(counters.c[2], 1u);
+						if (!targeting) {
+							atomicAdd(counters.c[2], 1u);
+						}
+					}
+				}
+			}
+		}
+		// The second rung of the look, and only when the first found nobody: a soldier whose
+		// opponent died in front of it should find the rank behind it, and that rank stands
+		// one file back - about five units, past a 3x3 window's guaranteed reach. When a look
+		// is due and the first rung was empty, the ring around it is read as well. Separation
+		// and the collision proof are never taken from this rung; it only answers the search.
+		if (targeting && want_search && best_cand == 0xFFFFFFFFu) {
+			for (int oy = -2; oy <= 2; ++oy) {
+				int ny = cy + oy;
+				if (ny < 0 || ny >= int(gh)) {
+					continue;
+				}
+				for (int ox = -2; ox <= 2; ++ox) {
+					if (abs(ox) <= 1 && abs(oy) <= 1) {
+						continue;
+					}
+					int nx = cx + ox;
+					if (nx < 0 || nx >= int(gw)) {
+						continue;
+					}
+					uint ci = uint(ny) * gw + uint(nx);
+					uint count = min(cursors.c[ci], SLOT_CAPACITY);
+					probes += count;
+					for (uint k = 0u; k < count; ++k) {
+						uint other = slots.s[ci * SLOT_CAPACITY + k];
+						if (other == gid || meta.m[other].y == side) {
+							continue;
+						}
+						vec2 d = pos - agents.s[other].xy;
+						float d2 = dot(d, d);
+						if (d2 > 0.000001 && d2 <= search_radius * search_radius) {
+							bool better = d2 < best_d2 - 0.000001 \
+								|| (abs(d2 - best_d2) <= 0.000001 && other < best_cand);
+							if (better) {
+								best_cand = other;
+								best_d2 = d2;
+							}
+						}
 					}
 				}
 			}
 		}
 		atomicAdd(counters.c[1], probes);
+		if (!targeting) {
+			// The behaviour this slice replaces: every enemy in reach is struck and no
+			// opponent is remembered. Kept in the same shader so the benchmark can run
+			// both halves in one build.
+			pushes.p[gid] = vec4(vec2(acc) / FIXED, contact ? 1.0 : 0.0, 0.0);
+			return;
+		}
+		if (has_held) {
+			atomicAdd(counters.c[15], 1u);
+		}
+		int chosen = held_id;
+		float chosen_d2 = held_d2;
+		if (in_reach) {
+			// An opponent in reach is the fastest path through target handling: it is
+			// kept without asking the battlefield anything, and the cadence does not run.
+			contact = true;
+		} else if (due || tick_now >= next_tick) {
+			if (!due) {
+				atomicAdd(counters.c[20], 1u);
+			}
+			if (has_held) {
+				atomicAdd(counters.c[16], 1u);
+			}
+			if (best_cand != 0xFFFFFFFFu) {
+				bool take = true;
+				if (has_held) {
+					// Hysteresis: a rival has to be clearly closer than the remembered
+					// opponent, or two similar enemies would exchange the answer on
+					// alternate looks. Compared squared. See D-081.
+					take = best_d2 * switch_adv * switch_adv < held_d2;
+				}
+				if (take) {
+					chosen = int(best_cand);
+					chosen_d2 = best_d2;
+				} else {
+					chosen = held_id;
+					chosen_d2 = held_d2;
+				}
+			} else {
+				atomicAdd(counters.c[22], 1u);
+				// Nobody local: a valid remembered opponent is still worth keeping (it is
+				// simply standing beyond the search), and otherwise there is nobody to
+				// strike until the next look.
+				chosen = has_held ? held_id : NO_TARGET;
+				chosen_d2 = held_d2;
+			}
+			next_tick = tick_now + cadence;
+		}
+		if (chosen >= 0 && prior_valid < 0) {
+			atomicAdd(counters.c[14], 1u);
+		} else if (chosen >= 0 && chosen != prior_valid) {
+			atomicAdd(counters.c[21], 1u);
+		}
+		if (chosen >= 0 && chosen_d2 <= reach * reach) {
+			// Strike the acquired opponent - and only it. This is the behaviour change the
+			// slice exists for: the legacy path struck every neighbour inside reach.
+			atomicAdd(damage.d[uint(chosen)], uint(blow * float(DAMAGE_SCALE)));
+			atomicAdd(counters.c[2], 1u);
+			contact = true;
+		}
+		targets.t[gid] = ivec4(chosen, int(next_tick), 0, 0);
 		// z carries "an enemy is on me": the man who is fighting does not walk anywhere. The
 		// correction goes out in world units again, from the fixed-point sum.
 		pushes.p[gid] = vec4(vec2(acc) / FIXED, contact ? 1.0 : 0.0, 0.0);

@@ -108,6 +108,32 @@ out of bounds, so this class of fault cannot come back quietly.
 closing 400 units at 0.3 a tick needs ~1,300). The throughput row stands; the collision row needs a
 longer run.
 
+## Target acquisition, paired (2026-09-18)
+
+Phase 4.3 slice 1 puts the reference's target acquisition into the GPU path: a soldier remembers an
+opponent and strikes only it, instead of striking every enemy neighbour in reach. Both behaviours
+live in one build behind `PB_TGT_MODE=legacy` (or `--tgt-mode=legacy`), so this is a paired run of
+one build rather than a comparison against an older log. Same machine, same seed, same ladder
+settings as above (`--ticks-per-frame=1 --max-fps=0 --seconds=20`), acquisitions on (the shipped
+behaviour) against the legacy path.
+
+| Soldiers | Path | tick | readback | repack | ticks/s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 6,000 | **acquire / keep / release (shipped)** | **0.055 ms** | 0.420 ms | 9.027 ms | 95.1 |
+| 6,000 | legacy (strike every neighbour) | 0.054 ms | 0.404 ms | 8.999 ms | 95.5 |
+| 20,000 | **acquire / keep / release (shipped)** | **0.071 ms** | 0.482 ms | 29.954 ms | 30.8 |
+| 20,000 | legacy (strike every neighbour) | 0.070 ms | 0.489 ms | 30.076 ms | 30.8 |
+
+**What it says.** Acquisition is free at the resolution this instrument can see. The simulation
+tick moves by at most a hundredth of a millisecond, the repack and the throughput are within
+run-to-run noise (well under the 1–8 ms differences the collision and determinism work recorded),
+and the 6,000-soldier run still acquires and retains targets while fighting: 2,010 acquisitions,
+545,159 retained soldier-ticks, 101,376 scheduled re-searches and 189 switches in the run, at about
+0.24 looks per soldier-tick — one look every four ticks, which is the cadence. The GPU has the
+parallelism for the search; the wall is still the CPU repack.
+
+Logs: `F:/VSC Projects/pb-bench/tgt_acq/perf_*_*.log`.
+
 ## Suggested next levers, in order
 
 1. **Scale the deployment to the field** (files and ranks both), so every size is a valid test.

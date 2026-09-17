@@ -3140,3 +3140,60 @@ an export of it in a clean directory.
 on the reviewer's arithmetic. If it is ever taken, it should be taken as a measured experiment rather
 than on its arithmetic: the in-situ discount that made this batch 3.2 ms instead of 20 very likely
 applies to the snapshot's estimate too.
+
+
+## D-119 - the GPU battle remembers its opponents, and the tick advances by the tick
+
+**Context.** The CPU reference's target acquisition - keep an opponent while it is alive and
+relevant, look again on a staggered tick cadence, replace an in-reach loss at once, release a dead
+or out-of-relevance one (D-080..D-083) - was item 3's gap in `docs/CPU_REFERENCE_FEATURE_MATRIX.md`:
+the GPU prototype struck every enemy neighbour in reach each tick and remembered nobody. Phase 4.3
+slice 1 ports the acquisition rules only; the damage model remains slice 2.
+
+**Decision.** The GPU shader carries a target buffer, one `ivec4` a soldier: the remembered
+opponent's agent id and the simulation tick its next look is due. Mode 2 validates that opponent
+(alive, hostile, within reach or the retention radius), keeps it and strikes it, or releases it and
+looks on the soldier's own cadence (`agent index modulo the interval`, the reference's phase rule).
+A loss taken inside the soldier's own reach is brought forward off the cadence; one taken further
+away waits its turn. The shipped cadence is the reference's four ticks and the retention radius its
+32 units. The previous behaviour - every enemy in reach struck, no memory - stays in the same shader
+behind a parameter and is selected with `PB_TGT_MODE=legacy`, so a benchmark is a paired run of one
+build rather than a comparison against an old log.
+
+**Why the tick counter had to move into the tick.** The schedule reads the simulation tick, and the
+tick used to advance once per *frame*. A frame that ran several ticks then gave every one of them
+the same tick number, so the same battle came out differently at different frame rates: the
+determinism gate caught it at tick 300, the first scripted wipe. `_tick` now advances at the end of
+`_run_tick`, once per tick, and the gate passes at 20 / 30 / 60 / 120 / uncapped frames. This is the
+same class of order-dependence the separation fix removed (D-116's era): the simulation's clock must
+be the simulation's, not the renderer's.
+
+**Determinism, three ways.** The search is a minimum over the neighbourhood with ties broken by the
+lower agent id, so the answer cannot depend on the order the grid binned the men in; the target
+buffer is written only by the soldier that owns it, so no two threads race; and the counters are
+integer atomics, order-independent like the collision proof. `pb-bench/determinism_check.sh` passes
+at 1,000 and at 600 soldiers (the second run reaches contact, so acquisition and a post-contact wipe
+are both compared).
+
+**The search is local, and its bound is stated.** The GPU looks in the 3x3 neighbourhood the
+separation already reads, and a second ring when the first finds nobody - about nine units. The
+reference escalates a ladder to 32. The rules are the same; the reach is not. A soldier whose
+opponent dies out of reach waits for a candidate to enter the local search rather than being
+guaranteed a replacement within the cadence, and only an in-reach loss is guaranteed to reacquire at
+once. The rule check reports the split rather than hiding it: 15 of 27 bereaved soldiers found a new
+opponent within a cadence, the rest had none local.
+
+**Measured, paired in one build** at 6,000 and 20,000 soldiers, same seed, the ladder's own settings:
+the tick 0.055 ms against 0.054 and 0.071 against 0.070; the repack 9.027 against 8.999 and 29.954
+against 30.076; throughput 95.1 against 95.5 and 30.8 against 30.8 ticks/s. Acquisition is free at
+the instrument's resolution, and the 6,000 run still does the work: 2,010 acquisitions, 545,159
+retained soldier-ticks, 101,376 scheduled re-searches, for about 0.24 looks per soldier-tick - one
+look every four ticks, which is the cadence doing its job.
+
+**What is not claimed.** The damage model is not ported (still a flat 0.25 hp a strike), and the
+acquisition is not identical to the reference in every internal detail: the radius and the search
+are the bounded difference above, and the GPU has no separate focus fallback or retaliation path
+(those are later slices). What is equivalent is the observable rule set the reference's
+`test_target_acquisition.gd` pins: keep, staggered cadence, immediate in-reach replacement, release,
+and no thrash between similar enemies.
+

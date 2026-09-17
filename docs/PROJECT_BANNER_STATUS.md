@@ -235,3 +235,87 @@ repack (25.3 ms → single digits, before/after measured, presentation only).
 5. The battle contract: identities, events, `BattleContext`, `BattleResolver.apply()`, persistence.
 6. Readability: facing, formation state, order feedback, damage/miss/death events.
 7. Do not build on the dead ends; do not tune constants before the paired reference tests exist.
+
+---
+
+## Session: 2026-09-18 — Phase 4.3 slice 1: target acquisition in the GPU path
+
+**Scope.** The feature matrix's gap, item 3: the GPU prototype struck every enemy neighbour in reach
+each tick and remembered nobody. This slice ports the reference's *target acquisition* rules — keep,
+staggered re-look, immediate in-reach replacement, release — into the GPU battle. The damage model
+(attack, defence, cooldown, variance, retaliation) is slice 2 and is untouched: a strike is still a
+flat 0.25 hp.
+
+### What changed
+
+Three dev-only files, no game code and no existing test touched:
+
+- `shaders/dev/crowd_sim.glsl`: a new target buffer (binding 11) holding each soldier's remembered
+  opponent and its next awareness tick; mode 2 now validates/keeps/releases that opponent, looks on
+  the soldier's own cadence, strikes only the acquired opponent, and reports target counters. The
+  old behaviour stays in the same shader behind a parameter, so the benchmark is a paired run.
+- `scripts/dev/gpu_crowd.gd`: `PB_TGT_MODE=legacy` (or `--tgt-mode=legacy`) switches the behaviour;
+  `--target-cadence=` overrides the shipped four; a targeting report line and an engagement line;
+  and `--rule-checks`, which drives the live GPU sim through the acquisition rules and prints
+  PASS/FAIL (the scene cannot run headless, so this is the only honest GPU-side check).
+- `docs/`: this section, D-119, the feature matrix rows this changes, and the paired baseline.
+
+The tick counter now advances **by the tick** inside `_run_tick`, not by the frame. That was a real
+bug this slice exposed: the awareness schedule reads the tick, and advancing it once per frame let
+several ticks in one frame share a tick number, so the battle depended on the frame rate. The
+determinism gate caught it at tick 300 (the scripted wipe) before any number was quoted.
+
+### Rule checks — `--rule-checks --agents=1200` (log: `pb-bench/tgt_acq/rule_checks.log`)
+
+| Rule | Result |
+| --- | --- |
+| An opponent in reach is kept | PASS — 2,085 soldier-ticks with an in-reach live opponent, 2,085 kept, **0 needless changes** |
+| A loss inside reach is replaced | PASS — 6 of 7 in-reach losses reacquired on the wipe tick, 6 within a cadence, 1 fell, **0 unresolved** |
+| An opponent out of relevance is released | PASS — kept at 4 units, released at 40 beyond the 32-unit radius |
+| Two similar enemies do not thrash | PASS — a rival 0.5 nearer kept the remembered opponent; one 3.5 nearer took it |
+| Staggered schedule | initial look phases over 1,200 soldiers: `[300, 300, 300, 300]` |
+
+**Bounded difference, stated rather than hidden.** The GPU search is the local 3x3 neighbourhood
+plus one ring — about nine units — where the reference escalates a ladder to 32. A soldier whose
+opponent dies *out of reach* therefore waits for a candidate to enter that local search instead of
+being guaranteed a replacement within the cadence; only an in-reach loss is. The check reports this
+split (15 of 27 bereaved found a new opponent within a cadence; the rest had none local).
+
+### Paired performance (one build, switch on vs off)
+
+`--ticks-per-frame=1 --max-fps=0 --seconds=20`, same seed; logs `pb-bench/tgt_acq/perf_*_*.log`.
+
+| Soldiers | Path | tick | readback | repack | ticks/s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 6,000 | acquire/keep/release | 0.055 ms | 0.420 ms | 9.027 ms | 95.1 |
+| 6,000 | legacy | 0.054 ms | 0.404 ms | 8.999 ms | 95.5 |
+| 20,000 | acquire/keep/release | 0.071 ms | 0.482 ms | 29.954 ms | 30.8 |
+| 20,000 | legacy | 0.070 ms | 0.489 ms | 30.076 ms | 30.8 |
+
+Acquisition is free at this instrument's resolution: the tick moves at most a hundredth of a
+millisecond and the rest is within run-to-run noise. The 6,000 run still did the work it claims —
+2,010 acquisitions, 545,159 retained soldier-ticks, 101,376 scheduled re-searches, 189 switches, for
+about 0.24 looks per soldier-tick (one look every four ticks). A screenshot of the contact line is
+at `pb-bench/tgt_acq/battle_1200_1.png`; the engagement report printed beside it reads
+`P0 -> E0 24 | P1 -> E0 2 E1 22 | P2 -> E1 1 E2 24` and the mirror on the enemy side.
+
+### Determinism gate — PASS
+
+`pb-bench/determinism_check.sh` at 1,000 soldiers and again at 600 (contact with targets acquired,
+so the comparison covers acquisition and a wipe after contact), frame rates 20 / 30 / 60 / 120 /
+uncapped, same seed and scripted event: **identical on every traced tick to tick 600** in both runs.
+Logs `pb-bench/tgt_acq/determinism_check*.log`. This is a local GPU check, not a headless one.
+
+### Tests
+
+Reference suite unchanged and green: **27 suites / 8,955 assertions / 0 failures**
+(`godotc --headless --path . res://scenes/dev/tests.tscn -- --require-native`). No headless test was
+added for the GPU rules, because the GPU scene cannot run headless; the rule check is the GPU-side
+evidence and says so.
+
+### Next action
+
+Slice 2: the real damage model — attack / defence / cooldown / variance and retaliation — so a
+strike is no longer flat 0.25 hp. After that the contract slice: identities, events,
+`BattleContext` and `BattleResolver.apply()`.
+

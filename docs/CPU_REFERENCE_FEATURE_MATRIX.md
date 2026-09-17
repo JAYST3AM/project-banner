@@ -117,9 +117,9 @@ worth remembering because each one made the measurement lie:
 
 **Still open (and why this is `PARTIAL`, not `PARITY`):** at 6,000 the worst measured gap is 2.45
 against a 2.47 minimum — six pair-samples out of roughly 48,000, at first contact, 0.02 short. The
-grid's fixed capacity (64 a cell) is still a hard cap in principle, and the run is not yet
-deterministic: atomic binning orders vary between runs, so this is a measured claim at a fixed seed
-and tick rate, not a reproducible one.
+grid's fixed capacity (64 a cell) is still a hard cap in principle. The run is now deterministic:
+the atomic-order dependence that made this a fixed-seed-only claim was fixed and proven by
+`pb-bench/determinism_check.sh` (see section 7).
 
 ## 3. Battle system
 
@@ -128,12 +128,33 @@ and tick rate, not a reproducible one.
 | Deterministic terrain from a seed | Yes | Yes — the production generator, same seed | **PARITY (visual only, see 4)** | `test_terrain` |
 | Deployment / teams | Yes | Yes | **PARITY** | setup log line |
 | Fixed-step clock | Yes, 20 Hz | Yes, 20 Hz (frames free-running) | **PARITY** | fps 1,600+ with `ticks 20.0/s` |
-| Target acquisition (retention, hysteresis, cadence) | Yes | No — strikes every enemy neighbour in reach each tick | **NOT PORTED** | `test_target_acquisition` |
+| Target acquisition (retention, hysteresis, cadence) | Yes | Yes — a soldier remembers an opponent (id + next awareness tick), keeps it while it is alive, hostile and within reach or the retention radius, looks again on its own staggered tick cadence (agent index modulo the interval), replaces an in-reach loss at once, releases a dead or out-of-relevance opponent, and strikes only the acquired opponent | **PARTIAL — measured** | `--rule-checks` on `gpu_crowd.tscn` (see below and D-119); reference suite `test_target_acquisition` |
 | Damage model (attack, defence, cooldown, variance) | Yes | Flat 0.25 hp/attacker/tick | **NOT PORTED** | `test_combat` |
 | Retaliation | Yes | Incidental (everyone strikes) | **NOT PORTED** | `test_target_acquisition` |
 | Battle completion / victory | Yes (victory, defeat, draw, withdrawal) | Partial: a verdict when a side hits zero | **PARTIAL** | `test_battle_outcomes` |
 | Large-battle stalemate regression | Fixed in 7.8B | Reproduced, then fixed the same way (press forward) | **PARTIAL** | casualties grind to 5,645/6,000 vs. freezing at ~200 |
 | Timeout / frozen field | Yes | No | **NOT PORTED** | `test_battle_outcomes` |
+
+**Target acquisition (measured, this machine, 2026-09-18).** The rules run through the live GPU
+simulation with `godotc --path . res://scenes/dev/gpu_crowd.tscn -- --rule-checks --agents=1200`
+(`F:/VSC Projects/pb-bench/tgt_acq/rule_checks.log`). It cannot run headless - the scene simulates on
+the rendering device - so this is a GPU-side probe and not a headless suite; the reference's own
+`tests/test_target_acquisition.gd` remains the headless authority on the CPU path. Four checks:
+
+| Rule | Result |
+| --- | --- |
+| An opponent in reach is kept | PASS - 2,085 soldier-ticks with an in-reach live opponent, 2,085 kept, **0 needless changes** |
+| A loss inside reach is replaced | PASS - of 7 in-reach losses, 6 reacquired on the wipe tick and 6 within a cadence, 1 fell, **0 unresolved**; no bereaved soldier still held the dead opponent |
+| An opponent out of relevance is released | PASS - kept at 4 units, released at 40 beyond the 32-unit radius |
+| Two similar enemies do not thrash | PASS - a rival 0.5 nearer kept the remembered opponent; one 3.5 nearer took it (switch margin 1.25) |
+
+The initial look phases over 1,200 soldiers are `[300, 300, 300, 300]`: the schedule is spread
+across the cadence rather than massed on one tick. **Bounded difference, stated:** the GPU search is
+the local 3x3 neighbourhood plus one ring (about nine units), where the reference escalates a ladder
+to 32. A soldier whose opponent dies out of reach therefore waits for a candidate to come inside
+that local search; only an in-reach loss is guaranteed to reacquire within the cadence. This is
+reported by the check rather than hidden. The damage model is still the flat 0.25 hp a strike it was;
+that is slice 2.
 
 ## 4. Terrain
 
@@ -171,7 +192,7 @@ and tick rate, not a reproducible one.
 | Spatial index for local queries | Yes (native + GDScript grid) | Yes — GPU grid, 32 slots a cell | **PARTIAL** (overflow drops agents) | `overflow` counter |
 | Native C++ hot loops | Yes (3 kernels) | n/a — compute shaders | **PARITY (by other means)** | `native/` builds, CI |
 | Simulation/presentation separation | Yes (fixed 20 Hz) | Yes, since tonight: fixed clock, free frames | **PARITY** | `fps 1,600+ / ticks 20.0` |
-| Deterministic results | Yes — same seed, same battle | **No** — atomic binning orders vary per run | **NOT PORTED** | the reference's own determinism suites |
+| Deterministic results | Yes — same seed, same battle | Yes — same seed, same battle: the separation is fixed-point integer with atomics, each settling round is accumulate-then-apply, and the tick counter advances by the tick (not the frame), so the awareness schedule cannot depend on the frame rate | **VERIFIED (local GPU)** | `pb-bench/determinism_check.sh`: 20/30/60/120/uncapped fps, identical traces to tick 600; not a headless check |
 | Device/renderer diagnostics | Added tonight (`DeviceReport`) | same | **PARITY** | this document's environment block |
 | Test suite | 27 suites / 8,955 assertions | none of its own | **NOT PORTED** | `tests/` |
 
@@ -184,12 +205,14 @@ and tick rate, not a reproducible one.
    this exists.*
 2. **Production-equivalent formation behaviour** (item 2) — orders, turning, dressing, cohesion,
    body target selection, frontage that changes with casualties.
-3. **Targeting and the real damage model** (item 3) — targets, retention, cooldown, defence, misses.
+3. **Targeting and the real damage model** (item 3) — acquisition, retention, cooldown, defence,
+   misses. *Target acquisition is ported and measured (2026-09-18); the damage model — attack,
+   defence, cooldown, variance, retaliation — is slice 2 and is not.*
 4. **Terrain in the simulation** (item 4) — movement multipliers, slowest-member body pace.
 5. **The battle contract** (item 5) — identities, events, `BattleContext`, `BattleResolver.apply()`.
 6. **Readability** (item 6) — facing, events, order feedback — after the systems exist.
-7. **Determinism** — the reference's "same seed, same battle" rule, which the GPU path currently
-   cannot claim.
+7. **Determinism** — the reference's "same seed, same battle" rule. *The GPU path now claims it:
+   the gate passes across frame rates (local GPU check, D-118 and this slice).*
 
 ## Regressions
 

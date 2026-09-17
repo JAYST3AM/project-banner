@@ -75,6 +75,42 @@ const RETENTION := 1.4
 ## How close a body has to be to an advance point to consider itself arrived, in world units.
 const ARRIVED := 1.5
 
+## ---------- target acquisition (Phase 4.3 slice 1) -------------------------
+## A soldier's opponent is remembered while it is alive, hostile and within this radius, and
+## re-chosen on its own staggered cadence. The shipped values are the reference's (D-080..D-083):
+## the cadence is four ticks and the retention radius is the reference's 32 units, kept equal to
+## its search ceiling so a remembered opponent is never released only to be found again. The GPU
+## searches the same 3x3 neighbourhood the separation already reads, so the radius mostly decides
+## whether an opponent that has walked off is released rather than chased.
+const TARGET_CADENCE := 4
+const TARGET_RETENTION := 32.0
+const TARGET_SWITCH_ADVANTAGE := 1.25
+const TARGET_SEARCH_RADIUS := 8.0
+const TARGET_IMMEDIATE_ON_CONTACT_LOSS := true
+## The counter block the shader and this script must agree on. [0..7] and the per-body gaps at
+## [8..13] are the collision proof; the target counters follow them. The clear pass in the shader
+## resets all of them every tick, so these are per-tick counts and the totals below are summed on
+## the CPU.
+const COUNTER_SLOTS := 23
+const PARAM_SLOTS := 20
+const CNT_DROPPED := 0
+const CNT_PROBES := 1
+const CNT_BLOWS := 2
+const CNT_FALLEN := 3
+const CNT_INSIDE_HALF := 4
+const CNT_CLOSEST_GAP := 5
+const CNT_MAX_STEP := 6
+const CNT_BELOW_MINIMUM := 7
+const CNT_ACQUISITIONS := 14
+const CNT_RETENTIONS := 15
+const CNT_RE_SEARCHES := 16
+const CNT_RELEASES_FAR := 17
+const CNT_INVALID_DEAD := 18
+const CNT_IMMEDIATE := 19
+const CNT_SCHEDULED := 20
+const CNT_SWITCHES := 21
+const CNT_EMPTY := 22
+
 ## Formation orders, the same shape as the reference's: a body is either holding, advancing to a
 ## place, or engaging an enemy body. Nothing else changes a body's mind, which is what makes the
 ## choice reviewable - and it is the hierarchy the roadmap asks for: army, then body, then men.
@@ -129,6 +165,10 @@ var oblique := 0.0
 ## band from this tick (advance against hold).
 var wipe_band := -1
 var wipe_at := 0
+## What fraction of the wiped body's living men are killed. 1.0 is the whole body, which is what
+## the order tests want; the acquisition rule check uses a half so the bereaved hunters still have
+## a living opponent in their local window to find.
+var wipe_fraction := 1.0
 var hold_band := -1
 var hold_at := 0
 var advance_band := -1
@@ -147,6 +187,9 @@ var _tick_accumulator := 0.0
 var readback_every := 1
 var max_fps := 0
 var run_seconds := 0.0
+## When the first screenshot is taken, in seconds of wall clock. The default is early; a run whose
+## armies take longer to meet passes a later value so the shot catches the fighting.
+var shot_at := 6.0
 var seed_value := 780780
 var out_dir := "F:/VSC Projects/pb-bench/gpu_crowd"
 ## How far the camera is pushed in past the fit-the-field zoom: at 1.0 the whole field is
@@ -168,6 +211,8 @@ var buf_damage: RID
 var buf_corr: RID
 var buf_attrs: RID
 var buf_bodies: RID
+## The remembered opponent and its next awareness tick, one ivec4 a soldier. See the shader.
+var buf_targets: RID
 var uniform_set: RID
 ## The bodies, ten numbers each: anchor.xy, forward.xy, files, ranks, spacing, engaged.
 ## Advanced on the CPU - six of them - and read by every soldier in the shader.
@@ -237,10 +282,36 @@ var _man_rank := PackedInt32Array()
 var _meta_bytes := PackedByteArray()
 ## The position buffer as last read back, for the determinism checksums.
 var _state_bytes := PackedByteArray()
+## Each soldier's remembered opponent as last read back, and the live count of soldiers each body
+## has engaging each enemy body (bodies x bodies). Both are diagnostics: nothing in the simulation
+## reads them.
+var _targets := PackedInt32Array()
+var _target_engage := PackedInt32Array()
+## Cumulative target counters, summed on the CPU from the shader's per-tick block.
+var _tgt_totals := PackedInt32Array()
 ## Print a state checksum every this many ticks (0 = never). Off unless asked for: it walks the
 ## whole field in GDScript, which is fine in a test and wasted work in a demo.
 var checksum_every := 0
 var _last_checksum_tick := -1
+## The shipped target-acquisition behaviour. `PB_TGT_MODE=legacy` (or `--tgt-mode=legacy`)
+## restores the behaviour this slice replaces - every enemy neighbour inside reach is struck and
+## no opponent is remembered - in the same build, so a benchmark is a paired run rather than a
+## comparison against an older log. This is the project's existing convention. See D-119.
+var target_legacy := false
+## The cadence and the acquisition constants, overridable so a probe or a benchmark can sweep
+## them the way the reference permits. The shipped defaults are the reference's own.
+var target_cadence := TARGET_CADENCE
+var target_retention := TARGET_RETENTION
+var target_switch_advantage := TARGET_SWITCH_ADVANTAGE
+var target_search_radius := TARGET_SEARCH_RADIUS
+var target_immediate := TARGET_IMMEDIATE_ON_CONTACT_LOSS
+## Rule checks: run the acquisition rules through the live GPU simulation, print PASS/FAIL and
+## quit. The scene simulates on the rendering device and cannot run headless, so this is the only
+## honest way to check the GPU rules. The reference's own suite pins the same rules headlessly in
+## `tests/test_target_acquisition.gd`; this scene does not pretend to replace it.
+var rule_checks := false
+## How many ticks to run before the rule checks expect contact. 0 = estimate from the field.
+var rule_advance_ticks := 0
 ## Profile mode: draw no health bars, so the repack can be measured with and without them. Bars are
 ## presentation only; nothing in the simulation reads them, and the report still says how many
 ## would have been drawn.
@@ -288,12 +359,32 @@ func _ready() -> void:
 		push_error("gpu crowd: no rendering device (a headless run has nothing to measure)")
 		return
 	_build()
+	if rule_checks:
+		_frozen = true
+		_run_rule_checks()
+		get_tree().quit(0)
 
 
 func _parse_args() -> void:
+	# The environment switch is read first so an explicit command-line argument can override it,
+	# the way the rest of the project treats PB_* flags.
+	if OS.get_environment("PB_TGT_MODE").to_lower() in ["legacy", "off", "0", "false", "no"]:
+		target_legacy = true
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--agents="):
 			agents = maxi(WORKGROUP, int(arg.substr(9)))
+		elif arg.begins_with("--target-cadence="):
+			target_cadence = maxi(1, int(arg.substr(17)))
+		elif arg.begins_with("--retention="):
+			target_retention = maxf(0.0, float(arg.substr(12)))
+		elif arg.begins_with("--tgt-mode="):
+			target_legacy = arg.substr(11).to_lower() == "legacy"
+		elif arg == "--legacy-targeting":
+			target_legacy = true
+		elif arg == "--rule-checks":
+			rule_checks = true
+		elif arg.begins_with("--rule-advance="):
+			rule_advance_ticks = maxi(0, int(arg.substr(15)))
 		elif arg.begins_with("--ticks-per-frame="):
 			ticks_per_frame = maxi(0, int(arg.substr(18)))
 		elif arg.begins_with("--tick-hz="):
@@ -308,6 +399,8 @@ func _parse_args() -> void:
 			wipe_band = int(arg.substr(12))
 		elif arg.begins_with("--wipe-at="):
 			wipe_at = int(arg.substr(10))
+		elif arg.begins_with("--wipe-fraction="):
+			wipe_fraction = clampf(float(arg.substr(16)), 0.0, 1.0)
 		elif arg.begins_with("--hold-band="):
 			hold_band = int(arg.substr(12))
 		elif arg.begins_with("--hold-at="):
@@ -334,6 +427,8 @@ func _parse_args() -> void:
 			out_dir = arg.substr(6)
 		elif arg.begins_with("--seconds="):
 			run_seconds = maxf(0.0, float(arg.substr(10)))
+		elif arg.begins_with("--shot-at="):
+			shot_at = maxf(0.0, float(arg.substr(10)))
 
 
 func _build() -> void:
@@ -370,14 +465,26 @@ func _build() -> void:
 	buf_push = _storage(PackedByteArray(), agents * 16)
 	buf_cursor = _storage(PackedByteArray(), cells * 4)
 	buf_slots = _storage(PackedByteArray(), cells * SLOT_CAPACITY * 4)
-	buf_params = _storage(_params().to_byte_array(), 13 * 4)
-	buf_counters = _storage(PackedByteArray(), 14 * 4)
+	buf_params = _storage(_params().to_byte_array(), PARAM_SLOTS * 4)
+	buf_counters = _storage(PackedByteArray(), COUNTER_SLOTS * 4)
 	buf_meta = _storage(meta.to_byte_array(), agents * 16)
 	buf_damage = _storage(PackedByteArray(), agents * 4)
 	# The separation correction being accumulated this round, in fixed-point integers: ivec4 a man.
 	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
 	buf_bodies = _storage(_body_state.to_byte_array(), _bodies * 8 * 4)
+	# Every soldier starts with nobody remembered and a look phase taken from its own index, so
+	# the first look is staggered across the cadence rather than massed on tick one. This is the
+	# schedule D-080 requires to be a property of the soldier, not of the moment.
+	var targets := PackedInt32Array()
+	targets.resize(agents * 4)
+	var interval := maxi(1, target_cadence)
+	for i in agents:
+		targets[i * 4 + 0] = -1
+		targets[i * 4 + 1] = i % interval
+	buf_targets = _storage(targets.to_byte_array(), agents * 16)
+	_tgt_totals.resize(COUNTER_SLOTS)
+	_tgt_totals.fill(0)
 
 	var uniforms: Array[RDUniform] = []
 	uniforms.append(_uniform(0, buf_state))
@@ -391,13 +498,15 @@ func _build() -> void:
 	uniforms.append(_uniform(8, buf_attrs))
 	uniforms.append(_uniform(9, buf_bodies))
 	uniforms.append(_uniform(10, buf_corr))
+	uniforms.append(_uniform(11, buf_targets))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
 
 	_build_ground()
 	_build_view()
 	_build_hud()
-	print("gpu crowd: %d soldiers, %d a side | grid %dx%d (cell %.1f) | field %.0fx%.0f | reach %.1f | blow %.2f/attacker" % [
-		agents, agents / 2, grid.x, grid.y, LG_CELL, field.x, field.y, REACH, BLOW])
+	print("gpu crowd: %d soldiers, %d a side | grid %dx%d (cell %.1f) | field %.0fx%.0f | reach %.1f | blow %.2f/attacker | targeting %s (cadence %d, retention %.0f)" % [
+		agents, agents / 2, grid.x, grid.y, LG_CELL, field.x, field.y, REACH, BLOW,
+		"legacy" if target_legacy else "acquire/keep/release", target_cadence, target_retention])
 
 
 ## Both armies drawn up the way the battle scene draws them up: ranks and files of a body's
@@ -575,23 +684,43 @@ func _note_switch(text: String) -> void:
 	print("gpu crowd: target switch | %s" % text)
 
 
-## Destroy an enemy body outright, at a tick the caller chooses. This is how target reassignment is
-## tested: the body that was fighting it must pick a new enemy within a few ticks and carry on,
-## and if it cannot, that is a defect rather than something to discover in a real campaign.
-func _wipe_body(band: int) -> void:
+## Destroy an enemy body - or a fraction of it, when a rule check needs survivors nearby - at a
+## tick the caller chooses. This is how target reassignment is tested: the body that was fighting
+## it must pick a new enemy within a few ticks and carry on, and if it cannot, that is a defect
+## rather than something to discover in a real campaign. A whole-body wipe (`fraction` = 1) is the
+## scripted event the order tests use; the acquisition rule check passes 0.5 so that the men who
+## lose an opponent still have a living enemy in the local window to find.
+func _wipe_body(band: int, fraction: float = 1.0, stripe: bool = false) -> void:
 	_wiped = true
 	var target_body := BODIES_PER_SIDE + band
 	var data := _meta_bytes.to_float32_array()
-	var killed := 0
+	var living := PackedInt32Array()
 	for i in agents:
 		if _man_body[i] == target_body and data[i * 4 + 2] < 0.5:
+			living.append(i)
+	var killed := 0
+	if stripe:
+		# Every other living man, from the front backwards. The men left standing are the
+		# neighbours a bereaved hunter can find at once, which is the case the rule is about.
+		for k in range(living.size() - 1, -1, -2):
+			var i := living[k]
+			data[i * 4 + 0] = 0.0
+			data[i * 4 + 2] = 1.0
+			killed += 1
+	else:
+		var want := living.size() if fraction >= 1.0 else int(ceil(float(living.size()) * clampf(fraction, 0.0, 1.0)))
+		# The front rank is the *highest* rank, and agent index runs up files fastest then ranks, so
+		# the last indices are the men facing the enemy. A partial wipe takes those, which are the
+		# men a hunter is likely to be remembering; a whole-body wipe takes everyone regardless.
+		for k in range(living.size() - 1, maxi(-1, living.size() - 1 - want), -1):
+			var i := living[k]
 			data[i * 4 + 0] = 0.0
 			data[i * 4 + 2] = 1.0
 			killed += 1
 	_meta_bytes = data.to_byte_array()
 	rd.buffer_update(buf_meta, 0, _meta_bytes.size(), _meta_bytes)
-	print("gpu crowd: scripted | %s destroyed at tick %d, %d men - whoever was fighting it must find someone else" % [
-		_body_name(target_body), _tick, killed])
+	print("gpu crowd: scripted | %s destroyed at tick %d, %d of %d men - whoever was fighting it must find someone else" % [
+		_body_name(target_body), _tick, killed, living.size()])
 
 
 ## Order the player's body in this band to hold, at a tick the caller chooses, so advance and hold
@@ -741,14 +870,20 @@ func _advance_bodies() -> void:
 ## round is two passes - accumulate, then apply - because a round that read its neighbours while
 ## writing its own position made every run of the same battle come out differently.
 func _run_tick() -> void:
+	# The cadence reads the simulation tick, so the params buffer is refreshed before every
+	# dispatch. It is one buffer write a tick and it is what makes the schedule deterministic:
+	# no wall clock is ever read to decide when a soldier looks.
+	var params_bytes := _params().to_byte_array()
+	rd.buffer_update(buf_params, 0, params_bytes.size(), params_bytes)
 	var cl := rd.compute_list_begin()
 	var groups_agents := (agents + WORKGROUP - 1) / WORKGROUP
 	var cells := grid.x * grid.y
 	# The clear pass covers the grid cursors, the agents' blow tally and correction, and the
-	# fourteen counters that follow them - hence agents + 14, not agents + 4: too few threads and
-	# the counter block's tail is never reset, which quietly turns every "this tick" figure into a
-	# running total. Two fewer and the anchors would never be told the front had cleared.
-	var clear_threads := maxi(cells, agents + 14)
+	# counter block that follows them - hence agents + COUNTER_SLOTS, not agents + 4: too few
+	# threads and the counter block's tail is never reset, which quietly turns every "this tick"
+	# figure into a running total. Two fewer and the anchors would never be told the front had
+	# cleared.
+	var clear_threads := maxi(cells, agents + COUNTER_SLOTS)
 	var groups_clear := (clear_threads + WORKGROUP - 1) / WORKGROUP
 	for mode in 4:
 		rd.compute_list_bind_compute_pipeline(cl, pipeline)
@@ -764,6 +899,11 @@ func _run_tick() -> void:
 			rd.compute_list_dispatch(cl, groups_agents, 1, 1)
 			rd.compute_list_add_barrier(cl)
 	rd.compute_list_end()
+	# The tick counter moves here, once per tick, so the awareness schedule is a function of the
+	# simulation tick and not of how many ticks a frame happened to run. Advancing it per frame
+	# instead let several ticks in one frame share a tick number, which made the battle depend on
+	# the frame rate.
+	_tick += 1
 
 
 func _process(delta: float) -> void:
@@ -792,14 +932,15 @@ func _process(delta: float) -> void:
 				ticks_now += 1
 	# The tick loop's own cost, measured before anything this frame does with the result.
 	_tick_usec = Time.get_ticks_usec() - started
-	_tick += ticks_now
+	# `_tick` itself is advanced by the tick, inside `_run_tick`, so it is the simulation's clock
+	# and not the frame's.
 	_ticks_window += ticks_now
 	# Scripted events for the order tests, fired at fixed ticks so a run is repeatable: a body
 	# destroyed outright (does its enemy find a new one?), or a body ordered to hold (does it stop
 	# while its neighbours lean in?).
 	if not _frozen:
 		if wipe_band >= 0 and not _wiped and _tick >= wipe_at:
-			_wipe_body(wipe_band)
+			_wipe_body(wipe_band, wipe_fraction)
 		if hold_band >= 0 and not _held and _tick >= hold_at:
 			_hold_body(hold_band)
 		if advance_band >= 0 and not _advanced and _tick >= advance_at:
@@ -814,16 +955,7 @@ func _process(delta: float) -> void:
 			print("gpu crowd: checksum | %s" % _checksums())
 	if _readback_counter >= maxi(1, readback_every):
 		_readback_counter = 0
-		var read_started := Time.get_ticks_usec()
-		var state_bytes := rd.buffer_get_data(buf_state)
-		var meta_bytes := rd.buffer_get_data(buf_meta)
-		_readback_usec = Time.get_ticks_usec() - read_started
-		var pack_started := Time.get_ticks_usec()
-		_pack(state_bytes, meta_bytes)
-		_pack_usec = Time.get_ticks_usec() - pack_started
-		var submit_started := Time.get_ticks_usec()
-		mm.buffer = instances
-		_submit_usec = Time.get_ticks_usec() - submit_started
+		_readback_and_pack()
 		if not _frozen and (_alive.x == 0 or _alive.y == 0):
 			_freeze()
 
@@ -839,7 +971,7 @@ func _process(delta: float) -> void:
 		_frames = 0
 	if _camera != null:
 		_camera.position = _camera.position.lerp(_focus, 0.08)
-	if _shot_taken == 0 and _elapsed > 6.0:
+	if _shot_taken == 0 and _elapsed > shot_at:
 		_shot_taken = 1
 		_save_shot(_shot_taken)
 	elif _shot_taken == 1 and _elapsed > 45.0:
@@ -898,6 +1030,12 @@ func _track_proof() -> void:
 		print("gpu crowd: first oversized step %.2f at tick %d" % [step, _tick])
 	_max_step = maxf(_max_step, step)
 	_dropped_max = maxi(_dropped_max, counters[0])
+	# The target counters are per-tick like the rest of the block; the report quotes totals, so
+	# they are summed here, where the block has just been read for the collision proof anyway.
+	if _tgt_totals.size() < COUNTER_SLOTS:
+		_tgt_totals.resize(COUNTER_SLOTS)
+	for k in range(CNT_ACQUISITIONS, COUNTER_SLOTS):
+		_tgt_totals[k] += counters[k]
 
 
 func _proof_line() -> String:
@@ -930,6 +1068,353 @@ func _report_bodies() -> void:
 			_body_name(b), _order_name(_order[b]), _body_alive[b], _body_cohesion[b],
 			aiming, _body_state[b * 8 + 0], _body_state[b * 8 + 1], rad_to_deg(_heading[b])])
 	print("gpu crowd: bodies | %s" % " | ".join(parts))
+	# What each body's living soldiers are actually engaging, by enemy body: the acquisition
+	# rule's effect on the fight, printed beside the body-level target selection above. In
+	# legacy mode the shader remembers nobody, so every body reads as engaging nobody.
+	var engaging := PackedStringArray()
+	for b in _bodies:
+		var against := PackedStringArray()
+		for e in _bodies:
+			if e / BODIES_PER_SIDE == b / BODIES_PER_SIDE:
+				continue
+			var engaged := _target_engage[b * _bodies + e] if _target_engage.size() >= _bodies * _bodies else 0
+			if engaged > 0:
+				against.append("%s %d" % [_body_name(e), engaged])
+		engaging.append("%s -> %s" % [
+			_body_name(b), " ".join(against) if not against.is_empty() else "nobody"])
+	print("gpu crowd: engaging | %s" % " | ".join(engaging))
+
+
+## The target-acquisition figures: acquisitions, retentions, re-searches and releases, summed
+## over the run, with the average look rate they add up to. Printed every report beside the
+## performance line. In legacy mode the acquisition path never runs and the counters stay zero.
+func _report_targeting() -> void:
+	if target_legacy:
+		print("gpu crowd: targeting | legacy: every enemy neighbour inside reach is struck, no opponent is remembered")
+		return
+	var ticks := maxi(1, _tick)
+	var looks := _tgt_totals[CNT_SCHEDULED] + _tgt_totals[CNT_IMMEDIATE]
+	print("gpu crowd: targeting | acquisitions %d | retentions %d | re-searches %d | releases %d | immediate %d | switches %d | empty looks %d | looks/tick %.0f | %.3f looks per soldier-tick" % [
+		_tgt_totals[CNT_ACQUISITIONS], _tgt_totals[CNT_RETENTIONS], _tgt_totals[CNT_RE_SEARCHES],
+		_tgt_totals[CNT_RELEASES_FAR], _tgt_totals[CNT_IMMEDIATE], _tgt_totals[CNT_SWITCHES],
+		_tgt_totals[CNT_EMPTY], float(looks) / float(ticks),
+		float(looks) / float(maxi(1, agents) * ticks)])
+
+
+## ---------- rule checks ----------------------------------------------------
+## The acquisition rules run through the live GPU simulation and printed as PASS/FAIL. This scene
+## cannot run headless - it simulates on the rendering device - so a headless suite cannot cover
+## the GPU copy of the rules; the reference's own `tests/test_target_acquisition.gd` pins the same
+## rules headlessly on the CPU path, and this is the honest GPU-side counterpart. It is a
+## development probe: run it with `--rule-checks` and it quits when it is done.
+
+## One tick the way the frame loop drives it, with the readback the rule checks inspect.
+func _sim_step_rules() -> void:
+	_advance_bodies()
+	_run_tick()
+	_track_proof()
+	_readback_and_pack()
+
+
+func _any_body_engaged() -> bool:
+	for b in _bodies:
+		if _body_state[b * 8 + 7] > 0.5:
+			return true
+	return false
+
+
+## One soldier's remembered opponent, read straight from the GPU buffer so the checks can see the
+## authoritative answer rather than the last packed diagnostic.
+func _read_target_of(index: int) -> int:
+	var arr := rd.buffer_get_data(buf_targets).to_int32_array()
+	return arr[index * 4 + 0] if arr.size() >= index * 4 + 4 else -1
+
+
+## Stage a solitary pair on the GPU: every other soldier is marked fallen, the two are placed at
+## the given distance apart, and the first remembers the second with a look due immediately. Used
+## by the release and hysteresis checks, which must see one opponent and no crowd.
+func _stage_solitary(s: int, a: int, base: Vector2, distance: float) -> void:
+	var meta := rd.buffer_get_data(buf_meta)
+	var marr := meta.to_float32_array()
+	for i in agents:
+		marr[i * 4 + 2] = 1.0
+		marr[i * 4 + 0] = 100.0
+	marr[s * 4 + 2] = 0.0
+	marr[a * 4 + 2] = 0.0
+	meta = marr.to_byte_array()
+	rd.buffer_update(buf_meta, 0, meta.size(), meta)
+	var state := rd.buffer_get_data(buf_state)
+	var sarr := state.to_float32_array()
+	sarr[s * 4 + 0] = base.x
+	sarr[s * 4 + 1] = base.y
+	sarr[a * 4 + 0] = base.x + distance
+	sarr[a * 4 + 1] = base.y
+	state = sarr.to_byte_array()
+	rd.buffer_update(buf_state, 0, state.size(), state)
+	var tg := rd.buffer_get_data(buf_targets)
+	var tarr := tg.to_int32_array()
+	for i in agents:
+		tarr[i * 4 + 0] = -1
+		tarr[i * 4 + 1] = 0
+	tarr[s * 4 + 0] = a
+	tg = tarr.to_byte_array()
+	rd.buffer_update(buf_targets, 0, tg.size(), tg)
+
+
+## The same staging for three soldiers: s remembers a, while b stands somewhere else. No other
+## soldier is alive, so the local search can only answer with those two.
+func _stage_trio(s: int, a: int, b: int, base: Vector2, a_dist: float, b_dist: float) -> void:
+	var meta := rd.buffer_get_data(buf_meta)
+	var marr := meta.to_float32_array()
+	for i in agents:
+		marr[i * 4 + 2] = 1.0
+		marr[i * 4 + 0] = 100.0
+	marr[s * 4 + 2] = 0.0
+	marr[a * 4 + 2] = 0.0
+	marr[b * 4 + 2] = 0.0
+	meta = marr.to_byte_array()
+	rd.buffer_update(buf_meta, 0, meta.size(), meta)
+	var state := rd.buffer_get_data(buf_state)
+	var sarr := state.to_float32_array()
+	sarr[s * 4 + 0] = base.x
+	sarr[s * 4 + 1] = base.y
+	sarr[a * 4 + 0] = base.x + a_dist
+	sarr[a * 4 + 1] = base.y
+	sarr[b * 4 + 0] = base.x + b_dist
+	sarr[b * 4 + 1] = base.y
+	state = sarr.to_byte_array()
+	rd.buffer_update(buf_state, 0, state.size(), state)
+	var tg := rd.buffer_get_data(buf_targets)
+	var tarr := tg.to_int32_array()
+	for i in agents:
+		tarr[i * 4 + 0] = -1
+		tarr[i * 4 + 1] = 0
+	tarr[s * 4 + 0] = a
+	tg = tarr.to_byte_array()
+	rd.buffer_update(buf_targets, 0, tg.size(), tg)
+
+
+func _run_rule_checks() -> void:
+	print("gpu crowd: rule checks | mode %s | cadence %d | retention %.0f | search %.0f | immediate %s" % [
+		"legacy" if target_legacy else "targeting", target_cadence, target_retention,
+		target_search_radius, str(target_immediate)])
+	# The schedule before any tick: phases taken from the soldier's own index must be spread
+	# across the cadence rather than massed on one tick. See D-080.
+	var phases := PackedInt32Array()
+	phases.resize(maxi(1, target_cadence))
+	for i in agents:
+		phases[i % maxi(1, target_cadence)] += 1
+	print("gpu crowd: rule | staggering: initial look phases over %d soldiers = %s" % [agents, str(phases)])
+
+	var advance := rule_advance_ticks
+	if advance <= 0:
+		advance = int((field.x - field.x * 0.24) / (WALK * DT * 2.0)) + 240
+	for i in advance:
+		_sim_step_rules()
+		if _alive.x > 0 and _alive.y > 0 and _any_body_engaged():
+			break
+	print("gpu crowd: rule | lines met after %d ticks, alive %d v %d" % [_tick, _alive.x, _alive.y])
+	for i in 60:
+		_sim_step_rules()
+	if target_legacy:
+		print("gpu crowd: rule checks | SKIPPED: target acquisition is off in legacy mode")
+		return
+	_check_retention()
+	_check_wipe()
+	_check_release()
+	_check_hysteresis()
+	print("gpu crowd: rule checks | done at tick %d" % _tick)
+
+
+## An opponent that is alive and inside the soldier's reach is kept, and no scheduled look replaces
+## it with a neighbour. The check reads the remembered opponent from the GPU buffer each tick and
+## only counts a soldier whose previous opponent is still alive and still in reach.
+func _check_retention() -> void:
+	var previous := _targets.duplicate()
+	var expected := 0
+	var kept := 0
+	var needless := 0
+	for tick in 120:
+		_sim_step_rules()
+		var meta := _meta_bytes.to_float32_array()
+		var pos := _state_bytes.to_float32_array()
+		for i in agents:
+			var t: int = previous[i]
+			if t < 0 or t >= agents:
+				continue
+			if meta[i * 4 + 2] > 0.5 or meta[t * 4 + 2] > 0.5:
+				continue
+			var dx := pos[i * 4] - pos[t * 4]
+			var dy := pos[i * 4 + 1] - pos[t * 4 + 1]
+			if dx * dx + dy * dy > REACH * REACH:
+				continue
+			expected += 1
+			if _targets[i] == t:
+				kept += 1
+			else:
+				needless += 1
+		previous = _targets.duplicate()
+	var verdict := "PASS" if needless == 0 else "FAIL"
+	print("gpu crowd: rule | acquisition kept while alive and in reach: %s (%d soldier-ticks with an in-reach live opponent, %d kept, %d needless changes)" % [
+		verdict, expected, kept, needless])
+
+
+## A stripe of an enemy body's front rank is destroyed and the men hunting it watched. The hard
+## rule is the reference's: a remembered opponent must not survive a bereaved soldier's tick, and a
+## soldier whose opponent was in reach must replace it rather than stand over the corpse. Out-of-
+## reach losses are reported rather than required to resolve within the cadence, because the GPU's
+## search is the local window (two rungs, about nine units) and not the reference's escalating
+## ladder to 32: a soldier that lost an opponent which was never local has nobody to find until one
+## arrives. The stripe is the scenario's own extension of `--wipe-band`: killing every other man
+## leaves each bereaved hunter a living neighbour, which is the case the rule is actually about.
+func _check_wipe() -> void:
+	var wiped_body := BODIES_PER_SIDE + 1
+	var hunters := PackedInt32Array()
+	var old := PackedInt32Array()
+	var near := PackedByteArray()
+	var pos := _state_bytes.to_float32_array()
+	for i in agents:
+		var t: int = _targets[i]
+		if t >= 0 and t < agents and _man_body[t] == wiped_body:
+			hunters.append(i)
+			old.append(t)
+			var dx := pos[i * 4] - pos[t * 4]
+			var dy := pos[i * 4 + 1] - pos[t * 4 + 1]
+			near.append(1 if dx * dx + dy * dy <= REACH * REACH else 0)
+	if hunters.is_empty():
+		print("gpu crowd: rule | wipe replacement: FAIL (no soldier held an E1 man as its opponent; run more ticks)")
+		return
+	_wipe_body(1, 1.0, true)
+	_sim_step_rules()
+	var meta := _meta_bytes.to_float32_array()
+	# Only the soldiers whose remembered opponent is actually dead are the ones being replaced.
+	var bereaved := PackedInt32Array()
+	for k in hunters.size():
+		if meta[old[k] * 4 + 2] > 0.5:
+			bereaved.append(k)
+	if bereaved.is_empty():
+		print("gpu crowd: rule | wipe replacement: FAIL (the stripe died but no remembered opponent did)")
+		return
+	var resolved := PackedByteArray()
+	resolved.resize(hunters.size())
+	var same_tick := 0
+	var immediate_expected := 0
+	var immediate_same_tick := 0
+	var still_dead_target := 0
+	for k in bereaved:
+		var i := hunters[k]
+		if near[k] == 1:
+			immediate_expected += 1
+		if meta[i * 4 + 2] > 0.5:
+			resolved[k] = 2
+			continue
+		var t: int = _targets[i]
+		if t == old[k]:
+			still_dead_target += 1
+		elif t >= 0:
+			resolved[k] = 1
+			same_tick += 1
+			if near[k] == 1:
+				immediate_same_tick += 1
+	for tick in target_cadence:
+		_sim_step_rules()
+		meta = _meta_bytes.to_float32_array()
+		for k in bereaved:
+			if resolved[k] != 0:
+				continue
+			var i := hunters[k]
+			if meta[i * 4 + 2] > 0.5:
+				resolved[k] = 2
+				continue
+			var t: int = _targets[i]
+			if t >= 0 and t != old[k]:
+				resolved[k] = 1
+	var within := 0
+	var fell := 0
+	var near_within := 0
+	var near_fell := 0
+	var near_unresolved := 0
+	for k in bereaved:
+		if resolved[k] == 1:
+			within += 1
+			if near[k] == 1:
+				near_within += 1
+		elif resolved[k] == 2:
+			fell += 1
+			if near[k] == 1:
+				near_fell += 1
+		elif near[k] == 1:
+			near_unresolved += 1
+	# The hard rule is that a loss taken inside reach is replaced: a soldier whose opponent died
+	# in front of it must not stand over the corpse. The out-of-reach losses are reported rather
+	# than required to resolve within the cadence, because the GPU's search is the local window
+	# (two rungs, about nine units) rather than the reference's escalating ladder to 32: a man who
+	# lost an opponent that was never local has nobody to find until one arrives.
+	var verdict := "PASS" if still_dead_target == 0 and near_unresolved == 0 else "FAIL"
+	print("gpu crowd: rule | wipe replacement: %s (%d soldiers hunted E1, %d lost their opponent; in reach %d reacquired on the wipe tick and %d within a cadence of %d, %d fell, %d unresolved; all bereaved: %d of %d within a cadence, %d fell, %d still holding the dead opponent)" % [
+		verdict, hunters.size(), bereaved.size(), immediate_same_tick, near_within, immediate_expected,
+		near_fell, near_unresolved, within, bereaved.size(), fell, still_dead_target])
+
+
+## An opponent that walks beyond the retention radius is released rather than chased, and no
+## opponent inside the search's own reach is taken again from that distance.
+func _check_release() -> void:
+	var s := -1
+	var a := -1
+	var meta := _meta_bytes.to_float32_array()
+	for i in agents:
+		if meta[i * 4 + 2] > 0.5:
+			continue
+		if int(meta[i * 4 + 1]) == 0 and s < 0:
+			s = i
+		elif int(meta[i * 4 + 1]) == 1 and a < 0:
+			a = i
+	if s < 0 or a < 0:
+		print("gpu crowd: rule | release out of relevance: FAIL (no pair to stage)")
+		return
+	var base := Vector2(field.x * 0.5, field.y * 0.5)
+	_stage_solitary(s, a, base, 4.0)
+	_run_tick()
+	var held := _read_target_of(s)
+	_stage_solitary(s, a, base, target_retention + 8.0)
+	_run_tick()
+	var released := _read_target_of(s)
+	var verdict := "PASS" if held == a and released == -1 else "FAIL"
+	print("gpu crowd: rule | release out of relevance: %s (at 4 units kept as opponent %d; at %.0f units, beyond the %.0f radius, released to %d)" % [
+		verdict, held, target_retention + 8.0, target_retention, released])
+
+
+## Two similar enemies must not exchange the answer. The first stage puts the rival a hair closer
+## than the remembered opponent and a look due; hysteresis must keep the remembered one. The second
+## puts the rival unmistakably closer; the remembered opponent must then be abandoned.
+func _check_hysteresis() -> void:
+	var s := -1
+	var a := -1
+	var b := -1
+	var meta := _meta_bytes.to_float32_array()
+	for i in agents:
+		if meta[i * 4 + 2] > 0.5:
+			continue
+		if int(meta[i * 4 + 1]) == 0 and s < 0:
+			s = i
+		elif int(meta[i * 4 + 1]) == 1:
+			if a < 0:
+				a = i
+			elif b < 0:
+				b = i
+	if s < 0 or a < 0 or b < 0:
+		print("gpu crowd: rule | hysteresis (two similar enemies): FAIL (no trio to stage)")
+		return
+	var base := Vector2(field.x * 0.5, field.y * 0.5)
+	_stage_trio(s, a, b, base, 4.0, 3.5)
+	_run_tick()
+	var hair := _read_target_of(s)
+	_stage_trio(s, a, b, base, 4.0, 0.5)
+	_run_tick()
+	var clear := _read_target_of(s)
+	var verdict := "PASS" if hair == a and clear == b else "FAIL"
+	print("gpu crowd: rule | hysteresis (two similar enemies): %s (a rival 0.5 nearer kept opponent %d; a rival 3.5 nearer took opponent %d)" % [
+		verdict, hair, clear])
 
 
 ## The state checksums for the determinism gate: one hash for the men's positions, one for their
@@ -1005,18 +1490,41 @@ func _report() -> void:
 		_alive.x, _alive.y, _fallen, counters[2], counters[1],
 		-1.0 if counters[5] < 0 else float(counters[5]) / 1000.0,
 		counters[4], _max_inside, _proof_line(), counters[0]])
+	_report_targeting()
+
+
+## Copy the GPU's state back and rebuild the picture. Factored out of `_process` so the rule
+## checks can drive a tick without a rendered frame; the timing marks it sets are unused there.
+func _readback_and_pack() -> void:
+	var read_started := Time.get_ticks_usec()
+	var state_bytes := rd.buffer_get_data(buf_state)
+	var meta_bytes := rd.buffer_get_data(buf_meta)
+	var target_bytes := rd.buffer_get_data(buf_targets)
+	_readback_usec = Time.get_ticks_usec() - read_started
+	var pack_started := Time.get_ticks_usec()
+	_pack(state_bytes, meta_bytes, target_bytes)
+	_pack_usec = Time.get_ticks_usec() - pack_started
+	var submit_started := Time.get_ticks_usec()
+	mm.buffer = instances
+	_submit_usec = Time.get_ticks_usec() - submit_started
 
 
 ## Copy what the GPU produced into the instance buffer the renderer draws: each soldier's
 ## position and colour, the fallen greyed out. This is the whole per-soldier CPU cost of the
 ## picture.
-func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray) -> void:
+func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_bytes: PackedByteArray) -> void:
 	# Kept so a scripted event (the wipe, below) can write the same buffer the picture is drawn
 	# from: the men it kills grey out exactly as if they had fallen in the fight.
 	_meta_bytes = meta_bytes
 	_state_bytes = state_bytes
 	var source := state_bytes.to_float32_array()
 	var meta := meta_bytes.to_float32_array()
+	var target_raw := target_bytes.to_int32_array()
+	# Each soldier's remembered opponent, and how many of each body's living men are engaging
+	# each enemy body. Diagnostics only.
+	_targets.resize(agents)
+	_target_engage.resize(_bodies * _bodies)
+	_target_engage.fill(0)
 	var alive_player := 0
 	var alive_enemy := 0
 	_weakest_hp = 999.0
@@ -1041,6 +1549,8 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray) -> void:
 		var position := Vector2(source[i * 4 + 0], source[i * 4 + 1])
 		var band := mini(BODIES_PER_SIDE - 1, (i % _per_side) / maxi(_per_body, 1))
 		var bi := (0 if i < _per_side else 1) * BODIES_PER_SIDE + band
+		var target := target_raw[i * 4 + 0] if target_raw.size() >= i * 4 + 4 else -1
+		_targets[i] = target
 		instances[base + AT_ORIGIN_X] = position.x
 		instances[base + AT_ORIGIN_Y] = position.y
 		var colour := COLOR_FALLEN
@@ -1074,6 +1584,11 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray) -> void:
 				colour = COLOR_ENEMY
 				alive_enemy += 1
 				front[bi] = minf(front[bi], position.x)
+			# Which enemy body this living man is actually engaging, for the targeting report.
+			# The target must still be alive; a man whose opponent died this tick is counted as
+			# engaging nobody until the next tick replaces it.
+			if target >= 0 and target < agents and meta[target * 4 + 2] < 0.5:
+				_target_engage[bi * _bodies + _man_body[target]] += 1
 			# Two instances a soldier: the background first, then the fill on top of it. Skipped in
 			# the profile mode that exists to measure what they cost - nothing else changes, and
 			# the count of bars says so, so a run cannot be mistaken for a battle without bars.
@@ -1303,7 +1818,10 @@ func _save_shot(index: int) -> void:
 func _params() -> PackedFloat32Array:
 	return PackedFloat32Array([
 		float(agents), float(grid.x), float(grid.y), LG_CELL, SEPARATION,
-		DT, field.x, field.y, WALK, REACH, BLOW, MAX_PUSH, MIN_ENEMY_GAP])
+		DT, field.x, field.y, WALK, REACH, BLOW, MAX_PUSH, MIN_ENEMY_GAP,
+		float(_tick), float(maxi(1, target_cadence)), target_retention,
+		target_switch_advantage, 0.0 if target_legacy else 1.0, target_search_radius,
+		1.0 if target_immediate else 0.0])
 
 
 func _push_constant(mode: int) -> PackedByteArray:
