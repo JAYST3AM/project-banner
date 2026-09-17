@@ -97,6 +97,11 @@ const SLOT_CAPACITY := 64
 ## Rounds re-measure against where everyone now stands, which is how the reference resolves
 ## overlaps. Three clears the front with room to spare; the cost is one extra neighbour pass each.
 const SETTLE_ROUNDS := 3
+## How often cohesion is measured, in ticks. The slot arithmetic it needs costs 6.5 ms of the
+## pack at 20,000 soldiers; nothing in the simulation reads the number, so a quarter of the rate
+## is five samples a second for a fifth of the cost. What it is NOT is a cheaper estimate: the
+## ticks in between keep the last real reading rather than pretending to a fresh one.
+const COHESION_EVERY := 4
 const WORKGROUP := 256
 ## The drawn soldier, in world units: the radius the game's disc uses, rim included.
 const DISC_RADIUS := 1.1
@@ -1027,20 +1032,23 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray) -> void:
 			# The lowest hit points anyone alive is carrying: if the line is locked and nobody is
 			# dying, this is what says whether blows are landing at all or the damage has stopped.
 			_weakest_hp = minf(_weakest_hp, meta[i * 4 + 0])
-			# Cohesion, measured the only way that means anything: how far this man stands from
-			# the place the body's own geometry gives him, built the same way the shader builds
-			# it, so the two can never drift apart.
-			var head := Vector2(_body_state[bi * 8 + 0], _body_state[bi * 8 + 1])
-			var fwd := Vector2(_body_state[bi * 8 + 2], _body_state[bi * 8 + 3])
-			var right := Vector2(-fwd.y, fwd.x)
-			var files := _body_state[bi * 8 + 4]
-			var ranks := _body_state[bi * 8 + 5]
-			var spacing := _body_state[bi * 8 + 6]
-			var place := head \
-				+ right * ((float(_man_file[i]) - (files - 1.0) * 0.5) * spacing) \
-				+ fwd * ((float(_man_rank[i]) - (ranks - 1.0) * 0.5) * spacing)
 			living_men[bi] += 1
-			slot_error[bi] += position.distance_to(place)
+			# Cohesion - how far this man stands from the place the body's geometry gives him -
+			# is measured every fourth tick rather than every one. It costs a slot calculation
+			# and a distance per man (6.5 ms of the pack at 20,000 soldiers, measured), nothing
+			# in the simulation reads it, and at a quarter of the rate it still samples five
+			# times a second: fine for a diagnostic, fine for the morale work to come.
+			if _tick % COHESION_EVERY == 0:
+				var head := Vector2(_body_state[bi * 8 + 0], _body_state[bi * 8 + 1])
+				var fwd := Vector2(_body_state[bi * 8 + 2], _body_state[bi * 8 + 3])
+				var right := Vector2(-fwd.y, fwd.x)
+				var files := _body_state[bi * 8 + 4]
+				var ranks := _body_state[bi * 8 + 5]
+				var spacing := _body_state[bi * 8 + 6]
+				var place := head \
+					+ right * ((float(_man_file[i]) - (files - 1.0) * 0.5) * spacing) \
+					+ fwd * ((float(_man_rank[i]) - (ranks - 1.0) * 0.5) * spacing)
+				slot_error[bi] += position.distance_to(place)
 			focus_sum += position
 			if meta[i * 4 + 1] < 0.5:
 				colour = COLOR_PLAYER
@@ -1077,7 +1085,10 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray) -> void:
 	_body_front = front
 	for b in _bodies:
 		_body_alive[b] = living_men[b]
-		_body_cohesion[b] = slot_error[b] / float(living_men[b]) if living_men[b] > 0 else 0.0
+		if _tick % COHESION_EVERY == 0:
+			# Only on the ticks it was actually measured: the other three keep the last reading,
+			# which is what "sampled five times a second" has to mean if it is to be honest.
+			_body_cohesion[b] = slot_error[b] / float(living_men[b]) if living_men[b] > 0 else 0.0
 	var living := alive_player + alive_enemy
 	if living > 0:
 		_focus = focus_sum / float(living)

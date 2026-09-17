@@ -33,6 +33,33 @@ game's clock, which is what the free frame rate then races ahead of.
 GPU during the whole ladder: **mean 31%, median 26%, peak 57%**; 147 W mean, 231 W peak, SM clock
 1,760 MHz mean.
 
+### Re-measured after formation behaviour (4.2) and the determinism fix
+
+Same ladder, same machine, same settings, current build. Reported against the row above, because a
+number without its before is not a result:
+
+| Soldiers | Ticks/s (peak) | Simulation a tick | Repack a tick | Change |
+| --- | --- | --- | --- | --- |
+| 600 | 814 | 0.05 ms | 0.20 ms | throughput +41%, repack −68% |
+| 2,000 | 317 | 0.06 ms | 1.81 ms | throughput +23%, repack −26% |
+| 6,000 | 103 | 0.06 ms | 7.97 ms | throughput −8%, repack +7% |
+| 12,000 | 53 | 0.08 ms | 16.14 ms | throughput −12%, repack +6% |
+| 20,000 | 33 | 0.08 ms | 27.08 ms | throughput −8%, repack +7% |
+
+What changed, and what each change cost:
+
+- **The determinism fix costs about 0.02 ms a tick.** The separation is now accumulated in
+  fixed-point integers and each settling round is two passes instead of one (six dispatches in
+  place of three). At 20,000 soldiers the simulation went 0.05 → 0.08 ms. It remains roughly four
+  thousand times cheaper than the CPU reference's 346 ms — but it is a real cost and it is recorded
+  as one rather than rounded away.
+- **Small battles got faster.** Cohesion is a slot calculation and a distance per man, which cost
+  6.5 ms of the pack at 20,000 (measured); sampling it every fourth tick, honestly labelled as
+  sampled rather than estimated, halved the repack at 600 and cut it by a quarter at 2,000.
+- **Large battles got about 7% slower on the repack**, from the per-man bookkeeping the formation
+  work added (living counts, front edges, the weakest man). That is the number the repack task
+  starts from.
+
 ## What the numbers say
 
 1. **The simulation is no longer the cost, at any size.** Ten dispatches (clear, bins, probe, walk,
