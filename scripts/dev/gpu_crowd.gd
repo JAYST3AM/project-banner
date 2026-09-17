@@ -241,6 +241,10 @@ var _state_bytes := PackedByteArray()
 ## whole field in GDScript, which is fine in a test and wasted work in a demo.
 var checksum_every := 0
 var _last_checksum_tick := -1
+## Profile mode: draw no health bars, so the repack can be measured with and without them. Bars are
+## presentation only; nothing in the simulation reads them, and the report still says how many
+## would have been drawn.
+var draw_bars := true
 ## How many times a body has changed its mind about who it is fighting, and why - printed rather
 ## than inferred, because "reassignment works" is a claim that needs evidence.
 var _target_switches := 0
@@ -264,6 +268,12 @@ var _step_reported := false
 ## it costs nothing extra. If the line is locked and nobody is dying, this is what says whether
 ## blows are still landing or the damage has stopped.
 var _weakest_hp := 999.0
+## Where the repack's time actually goes, in microseconds, so the optimisation starts from a
+## measurement rather than a guess: the per-soldier loop (state traversal, colours, the two bar
+## quads), the bar buffer hand-off, and the MultiMesh submission.
+var _loop_usec := 0
+var _bars_usec := 0
+var _submit_usec := 0
 
 
 func _ready() -> void:
@@ -310,6 +320,8 @@ func _parse_args() -> void:
 			advance_by = float(arg.substr(13))
 		elif arg.begins_with("--checksum-every="):
 			checksum_every = maxi(0, int(arg.substr(17)))
+		elif arg == "--no-bars":
+			draw_bars = false
 		elif arg.begins_with("--readback-every="):
 			readback_every = maxi(1, int(arg.substr(17)))
 		elif arg.begins_with("--max-fps="):
@@ -809,7 +821,9 @@ func _process(delta: float) -> void:
 		var pack_started := Time.get_ticks_usec()
 		_pack(state_bytes, meta_bytes)
 		_pack_usec = Time.get_ticks_usec() - pack_started
+		var submit_started := Time.get_ticks_usec()
 		mm.buffer = instances
+		_submit_usec = Time.get_ticks_usec() - submit_started
 		if not _frozen and (_alive.x == 0 or _alive.y == 0):
 			_freeze()
 
@@ -984,9 +998,10 @@ func _report() -> void:
 			agents, BODIES_PER_SIDE, fps, ticks_per_second,
 			float(_tick_usec) / 1000.0, float(_readback_usec) / 1000.0, float(_pack_usec) / 1000.0,
 			state_line, _proof_line()]
-	print("gpu crowd: %5.1f fps | %7.1f ticks/s | %d soldiers = %.1fM agent-ticks/s | tick %.2f ms | readback %.2f ms | pack %.2f ms | alive %d v %d | fallen %d | blows %d | probes %d | now %.2f | inside %d (worst %d) | %s | overflow %d" % [
+	print("gpu crowd: %5.1f fps | %7.1f ticks/s | %d soldiers = %.1fM agent-ticks/s | tick %.2f ms | readback %.2f ms | pack %.2f ms (loop %.2f, bars %.2f, submit %.2f) | alive %d v %d | fallen %d | blows %d | probes %d | now %.2f | inside %d (worst %d) | %s | overflow %d" % [
 		fps, ticks_per_second, agents, ticks_per_second * float(agents) / 1000000.0,
 		float(_tick_usec) / 1000.0, float(_readback_usec) / 1000.0, float(_pack_usec) / 1000.0,
+		float(_loop_usec) / 1000.0, float(_bars_usec) / 1000.0, float(_submit_usec) / 1000.0,
 		_alive.x, _alive.y, _fallen, counters[2], counters[1],
 		-1.0 if counters[5] < 0 else float(counters[5]) / 1000.0,
 		counters[4], _max_inside, _proof_line(), counters[0]])
@@ -1018,6 +1033,7 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray) -> void:
 	var slot_error := PackedFloat32Array()
 	living_men.resize(BODIES_PER_SIDE * 2)
 	slot_error.resize(BODIES_PER_SIDE * 2)
+	var loop_started := Time.get_ticks_usec()
 	var focus_sum := Vector2.ZERO
 	var bars := 0
 	for i in agents:
@@ -1058,21 +1074,27 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray) -> void:
 				colour = COLOR_ENEMY
 				alive_enemy += 1
 				front[bi] = minf(front[bi], position.x)
-			# Two instances a soldier: the background first, then the fill on top of it.
-			var lift := position + Vector2(-BAR_WIDTH * 0.5, -DISC_RADIUS - BAR_LIFT)
-			_write_bar(bars, lift, Vector2(BAR_WIDTH, BAR_HEIGHT), Color(0.05, 0.06, 0.07, 0.85))
-			bars += 1
-			var ratio := clampf(meta[i * 4 + 0] / HP_MAX, 0.0, 1.0)
-			var fill := Color(0.45, 0.85, 0.45) if ratio > 0.35 else Color(0.9, 0.35, 0.3)
-			_write_bar(bars, lift + Vector2(BAR_WIDTH * (1.0 - ratio) * 0.5, 0.0),
-				Vector2(maxf(BAR_WIDTH * ratio, 0.05), BAR_HEIGHT), fill)
-			bars += 1
+			# Two instances a soldier: the background first, then the fill on top of it. Skipped in
+			# the profile mode that exists to measure what they cost - nothing else changes, and
+			# the count of bars says so, so a run cannot be mistaken for a battle without bars.
+			if draw_bars:
+				var lift := position + Vector2(-BAR_WIDTH * 0.5, -DISC_RADIUS - BAR_LIFT)
+				_write_bar(bars, lift, Vector2(BAR_WIDTH, BAR_HEIGHT), Color(0.05, 0.06, 0.07, 0.85))
+				bars += 1
+				var ratio := clampf(meta[i * 4 + 0] / HP_MAX, 0.0, 1.0)
+				var fill := Color(0.45, 0.85, 0.45) if ratio > 0.35 else Color(0.9, 0.35, 0.3)
+				_write_bar(bars, lift + Vector2(BAR_WIDTH * (1.0 - ratio) * 0.5, 0.0),
+					Vector2(maxf(BAR_WIDTH * ratio, 0.05), BAR_HEIGHT), fill)
+				bars += 1
 		instances[base + AT_COLOR + 0] = colour.r
 		instances[base + AT_COLOR + 1] = colour.g
 		instances[base + AT_COLOR + 2] = colour.b
 		instances[base + AT_COLOR + 3] = 1.0
+	_loop_usec = Time.get_ticks_usec() - loop_started
+	var submit_started := Time.get_ticks_usec()
 	_bars.buffer = _bar_buffer
 	_bars.visible_instance_count = bars
+	_bars_usec = Time.get_ticks_usec() - submit_started
 	if not _bars_reported:
 		_bars_reported = true
 		print("gpu crowd: bars: instances %d visible %d buffer %d first origin (%.1f, %.1f) size (%.2f, %.2f) colour %.2f" % [
