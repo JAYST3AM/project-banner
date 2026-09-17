@@ -160,6 +160,7 @@ var buf_params: RID
 var buf_counters: RID
 var buf_meta: RID
 var buf_damage: RID
+var buf_corr: RID
 var buf_attrs: RID
 var buf_bodies: RID
 var uniform_set: RID
@@ -229,6 +230,12 @@ var _man_file := PackedInt32Array()
 var _man_rank := PackedInt32Array()
 ## The meta buffer as last read back, so a scripted event can write truthfully into it.
 var _meta_bytes := PackedByteArray()
+## The position buffer as last read back, for the determinism checksums.
+var _state_bytes := PackedByteArray()
+## Print a state checksum every this many ticks (0 = never). Off unless asked for: it walks the
+## whole field in GDScript, which is fine in a test and wasted work in a demo.
+var checksum_every := 0
+var _last_checksum_tick := -1
 ## How many times a body has changed its mind about who it is fighting, and why - printed rather
 ## than inferred, because "reassignment works" is a claim that needs evidence.
 var _target_switches := 0
@@ -296,6 +303,8 @@ func _parse_args() -> void:
 			advance_at = int(arg.substr(13))
 		elif arg.begins_with("--advance-by="):
 			advance_by = float(arg.substr(13))
+		elif arg.begins_with("--checksum-every="):
+			checksum_every = maxi(0, int(arg.substr(17)))
 		elif arg.begins_with("--readback-every="):
 			readback_every = maxi(1, int(arg.substr(17)))
 		elif arg.begins_with("--max-fps="):
@@ -348,6 +357,8 @@ func _build() -> void:
 	buf_counters = _storage(PackedByteArray(), 14 * 4)
 	buf_meta = _storage(meta.to_byte_array(), agents * 16)
 	buf_damage = _storage(PackedByteArray(), agents * 4)
+	# The separation correction being accumulated this round, in fixed-point integers: ivec4 a man.
+	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
 	buf_bodies = _storage(_body_state.to_byte_array(), _bodies * 8 * 4)
 
@@ -362,6 +373,7 @@ func _build() -> void:
 	uniforms.append(_uniform(7, buf_damage))
 	uniforms.append(_uniform(8, buf_attrs))
 	uniforms.append(_uniform(9, buf_bodies))
+	uniforms.append(_uniform(10, buf_corr))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
 
 	_build_ground()
@@ -702,21 +714,23 @@ func _advance_bodies() -> void:
 	rd.buffer_update(buf_bodies, 0, _body_state.to_byte_array().size(), _body_state.to_byte_array())
 
 
-## One tick: clear the grid and the blow tally, rebuild the grid, probe every neighbour (damage,
-## contact, the collision proof), walk and take the blows, then settle the separation as many
-## rounds as it takes to hold the agreed gap. Every pass that reads what the last one wrote gets
-## a barrier between them.
+## One tick: clear the grid, the blow tally and the correction, rebuild the grid, probe every
+## neighbour (damage, contact, the collision proof), walk and take the blows, then settle the
+## separation over three rounds of accumulate-and-apply. Every pass that reads what the last one
+## wrote gets a barrier between them.
 ##
 ## The settling comes last on purpose: the final positions of the tick are the separated ones, so
-## no soldier can end a tick standing inside another, however the walk happened to fall.
+## no soldier can end a tick standing inside another, however the walk happened to fall. And each
+## round is two passes - accumulate, then apply - because a round that read its neighbours while
+## writing its own position made every run of the same battle come out differently.
 func _run_tick() -> void:
 	var cl := rd.compute_list_begin()
 	var groups_agents := (agents + WORKGROUP - 1) / WORKGROUP
 	var cells := grid.x * grid.y
-	# The clear pass covers the grid cursors, the agents' blow tally, and the fourteen counters
-	# that follow them - hence agents + 14, not agents + 4: too few threads and the counter
-	# block's tail is never reset, which quietly turns every "this tick" figure into a running
-	# total. Two fewer and the anchors would never be told the front had cleared.
+	# The clear pass covers the grid cursors, the agents' blow tally and correction, and the
+	# fourteen counters that follow them - hence agents + 14, not agents + 4: too few threads and
+	# the counter block's tail is never reset, which quietly turns every "this tick" figure into a
+	# running total. Two fewer and the anchors would never be told the front had cleared.
 	var clear_threads := maxi(cells, agents + 14)
 	var groups_clear := (clear_threads + WORKGROUP - 1) / WORKGROUP
 	for mode in 4:
@@ -726,11 +740,12 @@ func _run_tick() -> void:
 		rd.compute_list_dispatch(cl, groups_clear if mode == 0 else groups_agents, 1, 1)
 		rd.compute_list_add_barrier(cl)
 	for round in SETTLE_ROUNDS:
-		rd.compute_list_bind_compute_pipeline(cl, pipeline)
-		rd.compute_list_bind_uniform_set(cl, uniform_set, 0)
-		rd.compute_list_set_push_constant(cl, _push_constant(4), 16)
-		rd.compute_list_dispatch(cl, groups_agents, 1, 1)
-		rd.compute_list_add_barrier(cl)
+		for mode in [4, 5]:
+			rd.compute_list_bind_compute_pipeline(cl, pipeline)
+			rd.compute_list_bind_uniform_set(cl, uniform_set, 0)
+			rd.compute_list_set_push_constant(cl, _push_constant(mode), 16)
+			rd.compute_list_dispatch(cl, groups_agents, 1, 1)
+			rd.compute_list_add_barrier(cl)
 	rd.compute_list_end()
 
 
@@ -777,6 +792,9 @@ func _process(delta: float) -> void:
 	if ticks_now > 0:
 		_readback_counter += ticks_now
 		_track_proof()
+		if checksum_every > 0 and _tick / checksum_every != _last_checksum_tick:
+			_last_checksum_tick = _tick / checksum_every
+			print("gpu crowd: checksum | %s" % _checksums())
 	if _readback_counter >= maxi(1, readback_every):
 		_readback_counter = 0
 		var read_started := Time.get_ticks_usec()
@@ -895,6 +913,57 @@ func _report_bodies() -> void:
 	print("gpu crowd: bodies | %s" % " | ".join(parts))
 
 
+## The state checksums for the determinism gate: one hash for the men's positions, one for their
+## hit points and fallen flags, one for the formations' anchors and headings. Printed every
+## `--checksum-every=N` ticks, so two runs of the same seed can be compared tick by tick without
+## dumping a field of six thousand men, and a difference can be attributed to a system rather than
+## to "the battle".
+##
+## Quantised to a thousandth of a unit before hashing, deliberately: two runs that agree to three
+## decimals are the same battle as far as the game is concerned, and a checksum that fires on
+## noise would be worse than none.
+const CHECKSUM_SEED := 0x811C9DC5
+
+
+func _fnv_step(h: int, value: int) -> int:
+	for shift in [0, 8, 16, 24]:
+		h = (h ^ ((value >> shift) & 0xFF)) & 0xFFFFFFFF
+		h = (h * 16777619) & 0xFFFFFFFF
+	return h
+
+
+func _hash_floats(values: PackedFloat32Array, scale: float) -> int:
+	var h := CHECKSUM_SEED
+	for v in values:
+		h = _fnv_step(h, int(round(v * scale)))
+	return h
+
+
+func _hash_ints(values: PackedInt32Array) -> int:
+	var h := CHECKSUM_SEED
+	for v in values:
+		h = _fnv_step(h, v)
+	return h
+
+
+## Everything that decides what happens next: where every man stands, what condition he is in, and
+## where every formation is and which way it faces.
+func _checksums() -> String:
+	var positions := _hash_floats(_state_bytes.to_float32_array(), 1000.0)
+	var condition := _hash_floats(_meta_bytes.to_float32_array(), 100.0)
+	# Every other word of the body state: anchors and headings, not the latched engaged flag.
+	var shape := PackedFloat32Array()
+	for b in _bodies:
+		shape.append(_body_state[b * 8 + 0])
+		shape.append(_body_state[b * 8 + 1])
+		shape.append(_body_state[b * 8 + 2])
+		shape.append(_body_state[b * 8 + 3])
+	var bodies := _hash_floats(shape, 1000.0)
+	var standing := _hash_ints(_body_alive)
+	return "tick %6d  positions %08x  condition %08x  formations %08x  standing %08x" % [
+		_tick, positions, condition, bodies, standing]
+
+
 func _report() -> void:
 	var counters := rd.buffer_get_data(buf_counters).to_int32_array()
 	var fps := float(_frames) / maxf(_frame_delta, 0.0001)
@@ -925,6 +994,7 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray) -> void:
 	# Kept so a scripted event (the wipe, below) can write the same buffer the picture is drawn
 	# from: the men it kills grey out exactly as if they had fallen in the fight.
 	_meta_bytes = meta_bytes
+	_state_bytes = state_bytes
 	var source := state_bytes.to_float32_array()
 	var meta := meta_bytes.to_float32_array()
 	var alive_player := 0

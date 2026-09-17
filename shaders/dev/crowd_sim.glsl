@@ -5,12 +5,19 @@
 // belong to formations.
 //
 // One agent per invocation, state resident in the buffers below, one mode per dispatch:
-//   0 clear the grid, the damage and the counters   1 bin the living into the grid
-//   2 read neighbours: separate hard, and strike an enemy within reach
+//   0 clear the grid, the damage, the correction and the counters   1 bin the living into the grid
+//   2 read neighbours: separate hard, measure the proof, strike an enemy within reach
 //   3 walk to your place in the line, take the blows, and never pass through anybody
-// The caller runs the four in order with a barrier between each, once a tick. The bodies
-// themselves are ten numbers each and are advanced on the CPU, which is where the game
-// keeps them too: a body is a roll of ids plus geometry, and the men are the crowd.
+//   4 add this round's separation, in fixed-point integers   5 apply it
+// The caller runs 0-3 in order, then 4 and 5 once a round for three rounds, with a barrier
+// between every pass, once a tick. The bodies themselves are ten numbers each and are advanced on
+// the CPU, which is where the game keeps them too: a body is a roll of ids plus geometry, and the
+// men are the crowd.
+//
+// 4 and 5 are split apart, and the sums are integers, for one reason: reproducibility. A round
+// that wrote positions while reading its neighbours produced a different battle every run, and a
+// float sum whose value depends on the order the neighbours were visited in did the same. Both
+// were measured, not suspected: two identical runs parted company at tick 2.
 //
 // A soldier's place is his body's lattice - anchor, facing, files, ranks, spacing - so a
 // body marches as one thing, its ranks dress, and the gaps the fallen leave stay open.
@@ -44,11 +51,21 @@ layout(set = 0, binding = 7, std430) restrict buffer Damage { uint d[]; } damage
 layout(set = 0, binding = 8, std430) restrict buffer Attrs { vec4 a[]; } attrs;
 // Two vec4 per body: (anchor.xy, forward.xy) and (files, ranks, spacing, engaged).
 layout(set = 0, binding = 9, std430) restrict buffer Bodies { vec4 b[]; } bodies;
+// The separation correction being accumulated this round, in fixed-point integers (x, y), with
+// zw spare. Integer atomics add the same way whatever the order the neighbours are visited in,
+// which is the whole point: floats summed in binning order made every run diverge from tick two.
+layout(set = 0, binding = 10, std430) restrict buffer Corr { ivec4 c[]; } corr;
 
 layout(push_constant, std430) uniform PC { uint mode; uint a; uint b; uint c; } pc;
 
 const uint SLOT_CAPACITY = 64u;
 const uint DAMAGE_SCALE = 100u;
+// The unit the separation corrections are accumulated in. Fixed-point integers, deliberately:
+// the order neighbours are visited in depends on which thread binned which man first, and a float
+// sum whose value depends on the order it was summed in is a battle that comes out a different
+// war every run - measured, tick 2, with 1,192 of 1,193 ticks differing between two identical
+// runs. Integers add the same way whatever the order.
+const float FIXED = 1024.0;
 
 void main() {
 	uint gid = gl_GlobalInvocationID.x;
@@ -74,6 +91,7 @@ void main() {
 		}
 		for (uint i = gid; i < n; i += step) {
 			damage.d[i] = 0u;
+			corr.c[i] = ivec4(0);
 		}
 		if (gid >= n && gid < n + 14u) {
 			uint slot = gid - n;
@@ -120,7 +138,7 @@ void main() {
 
 	if (pc.mode == 2u) {
 		float side = meta.m[gid].y;
-		vec2 acc = vec2(0.0);
+		ivec2 acc = ivec2(0);
 		uint probes = 0u;
 		bool contact = false;
 		for (int oy = -1; oy <= 1; ++oy) {
@@ -147,7 +165,7 @@ void main() {
 					if (d2 > 0.000001) {
 						float dist = sqrt(d2);
 						if (dist < sep) {
-							acc += (d / dist) * ((sep - dist) * 0.5);
+							acc += ivec2(round((d / dist) * ((sep - dist) * 0.5) * FIXED));
 							// An enemy at body's length, or your own man actually overlapping
 							// you: either way your place is taken and you hold it where you are.
 							if (enemy || dist < sep * 0.9) {
@@ -191,22 +209,27 @@ void main() {
 			}
 		}
 		atomicAdd(counters.c[1], probes);
-		// z carries "an enemy is on me": the man who is fighting does not walk anywhere.
-		pushes.p[gid] = vec4(acc, contact ? 1.0 : 0.0, 0.0);
+		// z carries "an enemy is on me": the man who is fighting does not walk anywhere. The
+		// correction goes out in world units again, from the fixed-point sum.
+		pushes.p[gid] = vec4(vec2(acc) / FIXED, contact ? 1.0 : 0.0, 0.0);
 		return;
 	}
 
 	if (pc.mode == 4u) {
-		// One more relaxation round of the separation, applied straight to the position.
+		// One relaxation round of the separation: every overlap this man is in is added, in
+		// fixed-point integers, into the correction buffer; the round is applied by mode 5.
 		//
-		// Why this exists: with only the single capped correction below, a pressed front
-		// settled at a 1.49-unit gap where the agreed minimum is 2.47 - measured on the proof
-		// run, 275,000 pair-violations and rising. Each man was being pulled by several
-		// neighbours at once and the cap clipped the sum, so the residual never closed.
-		// A round re-measures against where everyone now stands, which is how the reference
-		// resolves overlaps; repeated a few times a tick it closes the residual, and what the
-		// renderer draws is a line that cannot be walked through.
-		vec2 acc = vec2(0.0);
+		// Two things make a round reproducible, and both were measured wrong before:
+		//   * the sum is an integer atomic add, so the order the neighbours are visited in cannot
+		//     change the result - a float sum could, and did: two identical runs diverged from
+		//     tick two;
+		//   * nothing is written to the positions here, so no thread can read a neighbour that
+		//     another thread has half finished moving.
+		//
+		// Why rounds exist at all: with a single capped correction a pressed front settled at a
+		// 1.49-unit gap where the agreed minimum is 2.47 - measured, 275,000 pair-violations and
+		// rising. Each man was pulled by several neighbours at once and the cap clipped the sum,
+		// so the residual never closed. A round re-measures against where everyone now stands.
 		float my_side = meta.m[gid].y;
 		for (int oy = -1; oy <= 1; ++oy) {
 			int ny = cy + oy;
@@ -237,22 +260,36 @@ void main() {
 							// with the solver reporting a clean pass. My own man only takes
 							// half, because we are both trying to leave.
 							float share = (meta.m[other].y != my_side) ? 1.0 : 0.5;
-							acc += (d / dist) * ((sep - dist) * share);
+							vec2 push = (d / dist) * ((sep - dist) * share);
+							atomicAdd(corr.c[gid].x, int(round(push.x * FIXED)));
+							atomicAdd(corr.c[gid].y, int(round(push.y * FIXED)));
 						}
 					} else {
 						// Exactly on top of each other: shove along a fixed axis so the pair
 						// has a direction to separate along at all.
-						acc += vec2(0.01, 0.0);
+						atomicAdd(corr.c[gid].x, int(round(0.01 * FIXED)));
 					}
 				}
 			}
 		}
-		float alen = length(acc);
-		if (alen > max_push) {
-			acc = (acc / alen) * max_push;
+		return;
+	}
+
+	if (pc.mode == 5u) {
+		// Apply the round's accumulated separation and clear it for the next round. The clamp
+		// still bounds one man's correction, so a crowded cell cannot fling anybody across the
+		// field - but the correction itself is now the sum of everything on him, not a sum
+		// clipped one neighbour at a time.
+		vec2 acc = vec2(corr.c[gid].xy) / FIXED;
+		corr.c[gid] = ivec4(0);
+		if (acc != vec2(0.0)) {
+			float alen = length(acc);
+			if (alen > max_push) {
+				acc = (acc / alen) * max_push;
+			}
+			vec2 settled = clamp(pos + acc, vec2(0.0), vec2(fw, fh));
+			agents.s[gid] = vec4(settled, agents.s[gid].zw);
 		}
-		vec2 settled = clamp(pos + acc, vec2(0.0), vec2(fw, fh));
-		agents.s[gid] = vec4(settled, agents.s[gid].zw);
 		return;
 	}
 
