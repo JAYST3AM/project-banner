@@ -34,6 +34,17 @@ func build_if_needed() -> bool:
 	return true
 
 
+## How far the build has got, 0.0 to 1.0, written inside the loop below and read by the loading
+## screen on the main thread. A float written by one thread and read by another is not a contract, but
+## it is a number that is always either the previous count or the current one, which for a progress bar
+## is exactly enough. The owner's words: "loading bar isn't accurate it gets to about %90 and then
+## pauses, then the game loads" - it paused because it was guessing, and now it does not have to.
+var progress := 0.0
+
+## How many settlements exist. The loop below places one per iteration.
+var placing := 0
+
+
 func build() -> void:
 	if state == null:
 		return
@@ -98,7 +109,9 @@ func _build_procedural() -> void:
 
 	var largest: Settlement = null
 	var names: Array[String] = []
+	placing = chosen.size()
 	for i in chosen.size():
+		progress = float(i) / float(maxi(1, chosen.size()))
 		var site := chosen[i]
 		var position: Vector2 = site["position"]
 		var land := sites.world.sample(position)
@@ -300,3 +313,5 @@ func _place_player_party() -> void:
 	state.world_position = start.position
 	state.current_settlement_id = start_id
 	DebugLogger.info("player party placed at %s" % start.name, "WorldBuilder")
+
+

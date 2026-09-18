@@ -58,6 +58,7 @@ func _ready() -> void:
 		var loader := LoadingScreen.new()
 		add_child(loader)
 		loader.set_status("Generating the world")
+		loader.watch(builder)
 		var thread := Thread.new()
 		thread.start(builder.build_if_needed)
 		while thread.is_alive():
@@ -283,7 +284,10 @@ func _on_encounter_retreat() -> void:
 
 func _focus_camera_on_party() -> void:
 	_camera.position = _state.world_position
-	_camera.zoom = Vector2.ONE
+	# Pulled back from 1.0, which showed a 1600-unit slice of a 4096-unit world: the owner's words were
+	# "everything is way too close". 0.55 shows about 2900 units, so a settlement, its neighbours and
+	# the road between them are on screen at once.
+	_camera.zoom = Vector2(0.55, 0.55)
 
 
 func _update_camera_pan(delta: float) -> void:
