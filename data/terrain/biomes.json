@@ -35,45 +35,25 @@
           "name": "Lush",
           "dominant": "456e16",
           "shader": "lush",
-          "variants": [
-            "res://assets/terrain/plains/pixel_lush_2.png",
-            "res://assets/terrain/plains/pixel_lush_3.png",
-            "res://assets/terrain/plains/pixel_lush_4.png",
-            "res://assets/terrain/plains/pixel_lush_5.png"
-          ]
+          "variants": []
         },
         {
           "name": "Dry",
           "dominant": "8d762d",
           "shader": "dry",
-          "variants": [
-            "res://assets/terrain/plains/pixel_dry_2.png",
-            "res://assets/terrain/plains/pixel_dry_3.png",
-            "res://assets/terrain/plains/pixel_dry_4.png",
-            "res://assets/terrain/plains/pixel_dry_5.png"
-          ]
+          "variants": []
         },
         {
           "name": "Worn",
           "dominant": "596728",
           "shader": "worn",
-          "variants": [
-            "res://assets/terrain/plains/pixel_worn_2.png",
-            "res://assets/terrain/plains/pixel_worn_3.png",
-            "res://assets/terrain/plains/pixel_worn_4.png",
-            "res://assets/terrain/plains/pixel_worn_5.png"
-          ]
+          "variants": []
         },
         {
           "name": "Standard",
           "dominant": "4f621a",
           "shader": "standard",
-          "variants": [
-            "res://assets/terrain/plains/pixel_standard_2.png",
-            "res://assets/terrain/plains/pixel_standard_3.png",
-            "res://assets/terrain/plains/pixel_standard_4.png",
-            "res://assets/terrain/plains/pixel_standard_5.png"
-          ]
+          "variants": []
         }
       ],
       "palette": [
@@ -89,7 +69,7 @@
       },
       "props": [],
       "notes": "Four looks rather than four variations of one: Standard, Lush, Dry and Worn differ in colour and wear, so they can later be chosen by moisture, season or region instead of at random. Art is 1254x1254, top-down and painted; props to follow.",
-      "art_source": "Built from the owner's two pixel plains: four looks as colour and light shifts of his art, four variants each by turn and mirror, every one seam-fixed so the ground meets itself - measured 0.00 on all sixteen. The painted plains are out: at map scale their detail turned to mush, and pixel art is the right kind of ground for a map. The owner will replace these with his own fourteen as they arrive; the slots and the convention are already written down in assets/terrain/plains/README_pixel.md."
+      "art_source": "EMPTY. All terrain art deleted by the owner on 2026-09-18 - the ground was wrong in ways five attempts did not fix, and he is sourcing new art himself. The world generation, the field, the shader and the drawing code are all still here and correct: put files back in the variants arrays and the map has ground again."
     }
   ]
 }

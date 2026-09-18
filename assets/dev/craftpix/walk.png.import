@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://77565gifr7fk"
-path="res://.godot/imported/plains_standard_1.png-11a5b8ca7c6365e4416dfb47c2b47451.ctex"
+uid="uid://cl8twdo8s4y7n"
+path="res://.godot/imported/walk.png-3a3d64800ff7f35f6d147711531e3607.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/terrain/plains/plains_standard_1.png"
-dest_files=["res://.godot/imported/plains_standard_1.png-11a5b8ca7c6365e4416dfb47c2b47451.ctex"]
+source_file="res://assets/dev/craftpix/walk.png"
+dest_files=["res://.godot/imported/walk.png-3a3d64800ff7f35f6d147711531e3607.ctex"]
 
 [params]
 
