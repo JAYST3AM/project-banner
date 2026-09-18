@@ -24,8 +24,15 @@ extends Sprite2D
 const FIELD_COLS := 160
 const FIELD_ROWS := 112
 ## How wide a border is, in field cells: the two the owner wanted to test are these two numbers.
-## 0 is a hard line; 3 makes the ground change over about fifty world units.
-const BLEND_WIDTH_CELLS := 3.0
+## 0 is a hard line; 6 makes the ground change over about ninety world units, which after the first
+## showing turned out to be the width that reads as a gradient rather than as a mottle.
+const BLEND_WIDTH_CELLS := 6.0
+## How much of a look a place can be. Kept below one on purpose: a tile that is entirely Dry next
+## to a tile that is entirely Lush is a border, however wide the band between them, and the owner's
+## note on the first showing was that the change between the two was too drastic. Capped, Standard
+## always takes the remainder, so the ground reads as one country with a dry district in it. This is
+## the first number to turn if the looks ever feel too far apart again.
+const LOOK_STRENGTH := 0.75
 ## How far the border wanders from where the noise put it. A straight blend still reads as a
 ## straight line, just a soft one; this bends it.
 const BORDER_WIGGLE := 0.22
@@ -60,8 +67,8 @@ func setup(p_seed: int, land: Rect2, _config: GameConfig) -> void:
 	texture = _white_pixel()
 	scale = land.size
 	_build_material(field, land)
-	print("world terrain: 16 grounds, field %dx%d in %.0f ms | blend %.0f cells, wiggle %.2f | seed %d" % [
-		FIELD_COLS, FIELD_ROWS, generated_ms, BLEND_WIDTH_CELLS, BORDER_WIGGLE, seed_value])
+	print("world terrain: 16 grounds, field %dx%d in %.0f ms | blend %.0f cells, look %.2f, wiggle %.2f | seed %d" % [
+		FIELD_COLS, FIELD_ROWS, generated_ms, BLEND_WIDTH_CELLS, LOOK_STRENGTH, BORDER_WIGGLE, seed_value])
 
 
 static func _white_pixel() -> ImageTexture:
@@ -129,8 +136,9 @@ func _build_field() -> Image:
 			var region := smoothstep(0.42 - half, 0.58 + half, _fbm(x * 1.1, y * 1.1, 29, 2))
 			var worn := wear * 0.85
 			var plain := 1.0 - worn
-			var lush := plain * moisture * region
-			var dry := plain * (1.0 - moisture) * region
+			var lush := plain * moisture * region * LOOK_STRENGTH
+			var dry := plain * (1.0 - moisture) * region * LOOK_STRENGTH
+			worn *= LOOK_STRENGTH
 			# The shader derives Standard as whatever is left over, so this only stops the three
 			# stored weights summing past one and letting the fourth look show through as a hole.
 			var used := lush + dry + worn

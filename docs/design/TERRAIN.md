@@ -36,6 +36,26 @@ showing unless a line says so.
 - **Standing requirement: four looks in use, not two.** The first showing mixed the set's first look
   against its third because one biome had to stand in for two; that is a placeholder, not the plan.
 
+## Dials
+
+Three numbers in `world_terrain.gd` and two constants in `world_map_view.gd`. All were set from the
+first showing on the real map, and all are meant to be turned.
+
+- **`LOOK_STRENGTH` (0.75)** - how much of a look a place can be. The owner's note was that the
+  change between Lush and Dry was too drastic; capped below one, Standard always takes the
+  remainder, so the ground reads as one country with a dry district in it. Raise towards 1 for
+  stronger contrasts between regions, lower for a calmer map.
+- **`BLEND_WIDTH_CELLS` (6)** - how wide the band a look changes across is. 3 read as a mottle;
+  6 reads as a gradient. Raise for softer still.
+- **`TILE_UNITS` (260)** - world units per texture repeat. **Smaller makes the ground busier, not
+  calmer**: the art's own detail (flowers, stones) is shown finer than the roads and labels at small
+  repeats, which is what the grain is. Larger tiles calm it.
+- **Ink, not terrain** - the map's roads and labels were coloured to sit on a flat dark slab, and
+  over painted ground they disappeared. Roads are now **cased** (a dark edge under the line, the
+  trick contour maps have always used) and labels carry an **eight-way outline** instead of one drop
+  shadow. Legibility problems on the map are much more likely to be ink than ground: fix them there
+  first.
+
 ## What the first showing proved
 
 - A biome field from the world seed, a shader mixing two grounds by its weight, and a blend band

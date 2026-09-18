@@ -7,8 +7,13 @@ const COLOR_BG := Color("0e1218")
 const COLOR_LAND := Color("243026")
 const COLOR_GRID := Color("2c3a2e")
 const COLOR_LAND_EDGE := Color("3a4a3c")
-const COLOR_ROAD := Color("6b5b3e")
-const COLOR_TRACK := Color("4a4133")
+## Brightened when the terrain arrived. The old values were picked to read against a flat dark
+## slab, and against painted ground a brown road on brown earth is simply not there.
+const COLOR_ROAD := Color("9a8452")
+const COLOR_TRACK := Color("6a5f49")
+## The dark edge under a road. Casing is what makes a line legible over whatever it crosses - it is
+## the trick contour maps have always used, and the reason the roads vanished without it.
+const COLOR_CASING := Color(0.02, 0.03, 0.04, 0.55)
 const COLOR_TOWN := Color("e8ce8c")
 const COLOR_VILLAGE := Color("b99a5e")
 const COLOR_WILDERNESS := Color("7f8a6a")
@@ -143,9 +148,10 @@ func _draw_roads() -> void:
 		var kind := str(road.get("kind", "road"))
 		var color := COLOR_ROAD if kind == "road" else COLOR_TRACK
 		var width := 5.0 if kind == "road" else 3.0
+		draw_line(a.position, b.position, COLOR_CASING, width + 3.0)
 		draw_line(a.position, b.position, color, width)
 		if kind == "road":
-			draw_line(a.position, b.position, color.lightened(0.18), 1.0)
+			draw_line(a.position, b.position, color.lightened(0.3), 1.0)
 
 
 func _draw_travel_line() -> void:
@@ -227,5 +233,14 @@ func _draw_label(text: String, position: Vector2, color: Color, font_size: int) 
 		return
 	var text_size := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
 	var origin := position - Vector2(text_size.x * 0.5, 0.0)
-	draw_string(_font, origin + Vector2(1.0, 1.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.0, 0.0, 0.0, 0.75))
+	# An eight-way outline rather than one drop shadow. A single offset shadow leaves the letters'
+	# other edges sitting directly on whatever colour happens to be under them, which over painted
+	# ground is the difference between a label and a smudge.
+	var outline := Color(0.02, 0.03, 0.04, 0.9)
+	var offsets: Array[Vector2] = [
+		Vector2(-1.5, 0.0), Vector2(1.5, 0.0), Vector2(0.0, -1.5), Vector2(0.0, 1.5),
+		Vector2(-1.1, -1.1), Vector2(1.1, -1.1), Vector2(-1.1, 1.1), Vector2(1.1, 1.1),
+	]
+	for offset in offsets:
+		draw_string(_font, origin + offset, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, outline)
 	draw_string(_font, origin, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
