@@ -19,7 +19,10 @@ extends RefCounted
 
 ## Settlements this close or closer to each other are one settlement: the closer of the two keeps it.
 ## Roughly a long bowshot times six, which is about an hour's ride at campaign speed.
-const MIN_SPACING := 96.0
+## How close two settlements may stand, in world units. It was 96, which on a 4096-unit world put
+## neighbours about fifty pixels apart at the default zoom - the owner's words: "the settlements need to
+## be spaced out properly". 220 is a good five-minute ride between neighbours and reads as country.
+const MIN_SPACING := 220.0
 ## How far from a candidate its neighbours are compared. Wider than a settlement's footprint, narrow
 ## enough that a range of hills reads as many candidates rather than one.
 const NEIGHBOURHOOD := 24.0

@@ -150,6 +150,38 @@ func _draw_grid(land: Rect2) -> void:
 		y += step
 
 
+## A road's path, in place of the straight line it used to be - the owner asked for "realistic bends
+## and windes" and a map of straight spokes between towns reads as a diagram, not a country.
+##
+## Deterministic, and that matters: the bend is a hash of the two endpoints alone, so the same campaign
+## always bends the same road the same way, a save reloads to the roads it had, and nothing has to be
+## stored. The shape is one long arc - a road going around whatever is in the way - with smaller
+## wiggles at two faster rates, because a single arc reads as a curve and three together read as a road.
+func _road_path(a: Vector2, b: Vector2) -> PackedVector2Array:
+	var span := a.distance_to(b)
+	var path := PackedVector2Array([a, b])
+	if span < 24.0:
+		return path
+	var side := Vector2(b.y - a.y, a.x - b.x).normalized()
+	var bend := _bend_of(a, b)
+	var steps := 14
+	path = PackedVector2Array()
+	for i in steps + 1:
+		var t := float(i) / float(steps)
+		var offset := sin(t * PI) * bend * span * 0.15
+		offset += sin(t * PI * 3.0 + bend * 5.0) * span * 0.030
+		offset += sin(t * PI * 7.0 + bend * 11.0) * span * 0.012
+		path.append(a.lerp(b, t) + side * offset)
+	return path
+
+
+## Which way, and how hard, this particular road bends. A hash of the two ends, so it is a property of
+## the road rather than of the frame it is drawn in.
+func _bend_of(a: Vector2, b: Vector2) -> float:
+	var raw := sin(a.x * 12.9898 + a.y * 78.233 + b.x * 37.719 + b.y * 94.673) * 43758.5453
+	return (raw - floorf(raw)) * 2.0 - 1.0
+
+
 func _draw_roads() -> void:
 	for road in state.roads:
 		var a := state.settlement(str(road.get("a", "")))
@@ -159,10 +191,11 @@ func _draw_roads() -> void:
 		var kind := str(road.get("kind", "road"))
 		var color := COLOR_ROAD if kind == "road" else COLOR_TRACK
 		var width := 5.0 if kind == "road" else 3.0
-		draw_line(a.position, b.position, COLOR_CASING, width + 3.0)
-		draw_line(a.position, b.position, color, width)
+		var path := _road_path(a.position, b.position)
+		draw_polyline(path, COLOR_CASING, width + 3.0)
+		draw_polyline(path, color, width)
 		if kind == "road":
-			draw_line(a.position, b.position, color.lightened(0.3), 1.0)
+			draw_polyline(path, color.lightened(0.3), 1.0)
 
 
 func _draw_travel_line() -> void:

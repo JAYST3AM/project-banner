@@ -14,7 +14,7 @@
     "settlement_interact_radius": 30.0,
     "restock_days": 4,
     "start_settlement_id": "greywatch",
-    "camera_min_zoom": 0.25,
+    "camera_min_zoom": 0.45,
     "camera_max_zoom": 2.2,
     "camera_pan_speed": 1600.0,
     "label_font_size": 15,
