@@ -298,17 +298,31 @@ func step(game_hours: float) -> Dictionary:
 	var to_target := target - state.world_position
 	var distance := to_target.length()
 	var radius := arrival_radius()
+	# Reaching the *end of the route* is arriving. Reaching a waypoint on the way is not - and until
+	# this distinction existed, step() called _finish_travel() at the first bend it passed, so the
+	# party stopped in the middle of a road. The owner: "pathing has gotten weird it stops now."
+	var final_leg := route.size() < 2 or route_leg >= route.size() - 1
 
 	if distance <= radius:
-		_finish_travel(report)
+		if final_leg:
+			_finish_travel(report)
+			return report
+		# Step onto the waypoint and carry on: the journey is not over.
+		route_leg += 1
+		report["moved"] = true
+		report["distance_travelled"] = distance
 		return report
 
 	var travel := speed_units_per_game_hour() * game_hours
 	if distance - travel <= radius:
-		# Close enough to finish this step exactly on the destination.
-		report["distance_travelled"] = distance
 		state.world_position = target
-		_finish_travel(report)
+		report["distance_travelled"] = distance
+		if final_leg:
+			# Close enough to finish this step exactly on the destination.
+			_finish_travel(report)
+			return report
+		route_leg += 1
+		report["moved"] = true
 		return report
 
 	state.world_position += to_target.normalized() * travel

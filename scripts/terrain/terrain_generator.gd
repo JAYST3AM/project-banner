@@ -53,6 +53,9 @@ const RIVER_BED_CELLS := 2.2
 const RIVER_RUN_FACTOR := 1.5
 ## Bins in the height histogram the thresholds are read from.
 const HISTOGRAM_BINS := 128
+## How many cells across the block the local ground mean is taken over. Wider than any channel the
+## generator carves, so a river does not drag the ground it is being compared against down with it.
+const MEAN_BLOCK := 8
 
 
 ## Build [param field]'s channels. Called by [method BattlefieldTerrain._build].
@@ -134,6 +137,12 @@ static func build(
 	cluster.resize(total)
 	var rockiness := PackedFloat32Array()
 	rockiness.resize(total)
+	## How much of a carved channel each cell is. Water is a *local* fact - the bed of a river, not
+	## ground that happens to be low - so it is recorded where it is carved rather than guessed at
+	## from a height line afterwards. A global level would have drowned the low third of every
+	## battlefield whose river ran through a valley.
+	var flows := PackedFloat32Array()
+	flows.resize(total)
 
 	var has_blend := not secondary.is_empty() and field.blend_width_cells > 0.0
 	var blend_width := maxf(1.0, field.blend_width_cells)
@@ -167,7 +176,7 @@ static func build(
 			rockiness[index] = smoothstep(0.58, 0.88, rock_field[index])
 
 	# ---------- pass 2: the landforms -------------------------------------
-	_place_features(heights, cols, rows, seed_value, version, biomes, primary, elevation_amplitude)
+	_place_features(heights, flows, cols, rows, seed_value, version, biomes, primary, elevation_amplitude)
 
 	# ---------- pass 3: the restrained detail -----------------------------
 	for row in rows:
@@ -194,10 +203,11 @@ static func build(
 			var dx := (right - left) / (2.0 * cell)
 			var dy := (down - up) / (2.0 * cell)
 			slope[index3] = sqrt(dx * dx + dy * dy)
-	# The water level and the high-ground line come from percentiles rather than from the lowest and
-	# the tallest cell. A riverbed is deliberately deep, and a range stretched down to reach it put
-	# the high-ground line so low that half the field counted as high ground - which is not a
-	# threshold, it is a bug wearing one.
+	# Thresholds are read from the field's own distribution rather than from its extremes. A riverbed
+	# is deliberately deep and a hill deliberately tall, and a range stretched to reach either of them
+	# made thresholds that counted half the field as high ground - which is not a threshold, it is a
+	# bug wearing one. The histogram counts cells, so "the highest fifth of the field" means exactly
+	# that, on any seed and at any field size.
 	var raw_span := maxf(0.001, tallest - lowest)
 	var histogram := PackedInt32Array()
 	histogram.resize(HISTOGRAM_BINS)
@@ -207,9 +217,7 @@ static func build(
 	var floor_height := _percentile(histogram, lowest, raw_span, total, 0.05)
 	var ceiling_height := _percentile(histogram, lowest, raw_span, total, 0.95)
 	var span := maxf(0.001, ceiling_height - floor_height)
-	var water_level := floor_height + span * water_fraction
-	var high_level := floor_height + span * high_fraction
-	var low_band := water_level + span * 0.12
+	var high_level := _percentile(histogram, lowest, raw_span, total, high_fraction)
 
 	# ---------- pass 5: the channels, per cell ----------------------------
 	var soil_index := PackedInt32Array()
@@ -250,11 +258,15 @@ static func build(
 			var here_wear := clampf(wear[index4], 0.0, 1.0)
 			var here_region := clampf(region[index4], 0.0, 1.0)
 
-			# Water first: the lowest ground is the riverbed, and the ground beside it is wet.
+			# Water and wetness both come from the carved channels: the bed of a river is water,
+			# and its banks are wet enough to be mud and to hold reeds.
+			var flow := flows[index4]
 			var wet := lerpf(wetness_a, wetness_b, mix2)
-			if here_height <= low_band:
-				wet = maxf(wet, clampf(1.0 - (here_height - water_level) / maxf(0.001, low_band - water_level), 0.0, 1.0))
+			if flow > 0.0:
+				wet = maxf(wet, clampf(flow * 1.3, 0.0, 1.0))
 			wetness[index4] = clampf(wet * 0.75 + here_moisture * 0.25, 0.0, 1.0)
+			var is_water := water_enabled and flow >= RIVER_WATER_PROFILE
+			var is_low := flow > 0.2
 
 			# Vegetation: what the biome grows, thinned by slope and crowded out by water.
 			var base_veg := lerpf(veg_a.x, veg_b.x, mix2)
@@ -265,7 +277,7 @@ static func build(
 
 			# Soil: what the ground is made of, chosen by how wet the cell is.
 			var pick := _pick_soil(soil_pick, soil_pick_b, mix2, here_moisture, seed_value, index4)
-			if water_enabled and here_height <= water_level:
+			if is_water:
 				pick = soils.index_of("silt")
 			elif here_slope >= cliff_slope:
 				pick = soils.index_of("rock")
@@ -273,13 +285,13 @@ static func build(
 
 			# Type: the rule the ground follows. Order matters - the strictest ground wins.
 			var slot := open_slot
-			if water_enabled and here_height <= water_level:
+			if is_water:
 				slot = water_slot
 			elif cliffs_enabled and here_slope >= cliff_slope:
 				slot = cliff_slot
 			elif vegetation[index4] >= woods_vegetation:
 				slot = woods_slot
-			elif wetness[index4] >= mud_wetness and here_height <= low_band:
+			elif wetness[index4] >= mud_wetness and is_low:
 				slot = mud_slot
 			elif here_height >= high_level:
 				slot = high_slot
@@ -294,8 +306,10 @@ static func build(
 			var dry := clampf((0.55 - here_moisture) * 2.0, 0.0, 1.0)
 			var unmanaged := clampf((1.0 - here_wear) * here_region, 0.0, 1.0)
 			var w1 := clampf(0.18 + here_wear * 0.22, 0.0, 0.5)
-			var w2 := dry * 0.9 * variant_strength
-			var w3 := unmanaged * 0.85 * variant_strength
+			# Curved, not linear: a reading that only ever reaches the middle of its range would
+			# never outweigh the default ground, and the four looks would be three looks and a wash.
+			var w2 := pow(dry, 0.7) * 0.9 * variant_strength
+			var w3 := pow(unmanaged, 0.8) * 0.85 * variant_strength
 			var sum := w1 + w2 + w3
 			if sum > 1.0:
 				var scale := 1.0 / sum
@@ -342,6 +356,7 @@ static func build(
 ## ridges to a biome cannot move a single hill.
 static func _place_features(
 	heights: PackedFloat32Array,
+	flows: PackedFloat32Array,
 	cols: int,
 	rows: int,
 	seed_value: int,
@@ -357,7 +372,7 @@ static func _place_features(
 	var scale := maxf(0.25, biomes.number(biome_id, "feature_scale", 1.0, "elevation"))
 	var lattice_cols := maxi(MIN_LATTICE, int(ceilf(float(cols) / spacing)))
 	var lattice_rows := maxi(MIN_LATTICE, int(ceilf(float(rows) / spacing)))
-	var base_radius := maxf(1.5, spacing * 0.9 * scale)
+	var base_radius := maxf(1.5, spacing * 0.6 * scale)
 	var amplitude := elevation_amplitude * maxf(0.2, biomes.number(biome_id, "amplitude", 1.0, "elevation"))
 	var placed := {}
 
@@ -389,18 +404,18 @@ static func _place_features(
 				)
 				match family:
 					"hills":
-						_apply_blob(heights, cols, rows, centre, size, strength * 0.75, 1.0, angle, 1.0, 1.0)
+						_apply_blob(heights, cols, rows, centre, size, strength * 0.6, 1.0, angle, 1.0, 1.0)
 					"ridges":
-						_apply_blob(heights, cols, rows, centre, size * 2.2, strength * 0.6, 0.32, angle, 1.4, 1.0)
+						_apply_blob(heights, cols, rows, centre, size * 2.2, strength * 0.5, 0.32, angle, 1.4, 1.0)
 					"valleys":
-						_apply_blob(heights, cols, rows, centre, size * 1.8, strength * 0.55, 0.4, angle, 1.3, -1.0)
+						_apply_blob(heights, cols, rows, centre, size * 1.8, strength * 0.5, 0.4, angle, 1.3, -1.0)
 					"basins":
 						_apply_blob(heights, cols, rows, centre, size * 1.4, strength * 0.4, 1.0, angle, 0.8, -1.0)
 					"cliffs":
 						_apply_scarp(heights, cols, rows, centre, angle, size * 3.2,
 							maxf(0.5, size * 0.18), strength * 0.8)
 					"riverbeds":
-						_carve_river(heights, cols, rows, centre, angle,
+						_carve_river(heights, flows, cols, rows, centre, angle,
 							float(maxi(cols, rows)) * RIVER_RUN_FACTOR, RIVER_BED_CELLS,
 							strength * 0.6, seed_value, lx, ly, family_salt)
 					"clearings":
@@ -484,6 +499,7 @@ static func _apply_scarp(
 ## anything naming either.
 static func _carve_river(
 	heights: PackedFloat32Array,
+	flows: PackedFloat32Array,
 	cols: int,
 	rows: int,
 	start: Vector2,
@@ -503,14 +519,15 @@ static func _carve_river(
 	var previous := start - direction * run_length * 0.5
 	for step in range(steps + 1):
 		var t := float(step) / float(steps)
-		wander += (_hash01(seed_value, salt + 101, lx * 31 + step, ly * 17 + step) - 0.5) * 1.4
+		wander += (_hash01(seed_value, salt + 101, lx * 31 + step, ly * 17 + step) - 0.5) * 0.7
 		var point := start - direction * run_length * 0.5 + direction * (t * run_length) + normal * wander
-		_stamp_channel(heights, cols, rows, previous, point, bed_cells, depth)
+		_stamp_channel(heights, flows, cols, rows, previous, point, bed_cells, depth)
 		previous = point
 
 
 static func _stamp_channel(
 	heights: PackedFloat32Array,
+	flows: PackedFloat32Array,
 	cols: int,
 	rows: int,
 	from: Vector2,
@@ -533,7 +550,9 @@ static func _stamp_channel(
 			if distance > width:
 				continue
 			var profile := 1.0 - (distance / width) * (distance / width)
-			heights[row * cols + col] -= depth * profile
+			var index := row * cols + col
+			heights[index] -= depth * profile
+			flows[index] = maxf(flows[index], profile)
 
 
 ## A clearing: ground levelled toward the mean of what is already there, so formations have somewhere
@@ -760,6 +779,31 @@ static func _sample_field(
 			var c := coarse[y1 * grid_cols + x0]
 			var d := coarse[y1 * grid_cols + x1]
 			out[row * cols + col] = lerpf(lerpf(a, b, tx), lerpf(c, d, tx), ty)
+	return out
+
+
+## A coarse mean of the height field, blocked so that a feature smaller than a block does not move
+## the mean it is being compared against. Used for the local water test.
+static func _local_mean(heights: PackedFloat32Array, cols: int, rows: int, block: int) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(cols * rows)
+	var blocks_x := maxi(1, int(ceilf(float(cols) / float(block))))
+	var blocks_y := maxi(1, int(ceilf(float(rows) / float(block))))
+	var means := PackedFloat32Array()
+	means.resize(blocks_x * blocks_y)
+	for by in blocks_y:
+		for bx in blocks_x:
+			var total := 0.0
+			var count := 0
+			for y in range(by * block, mini(rows, (by + 1) * block)):
+				for x in range(bx * block, mini(cols, (bx + 1) * block)):
+					total += heights[y * cols + x]
+					count += 1
+			means[by * blocks_x + bx] = total / maxf(1.0, float(count))
+	for row in rows:
+		var by2 := mini(blocks_y - 1, row / block)
+		for col in cols:
+			out[row * cols + col] = means[by2 * blocks_x + mini(blocks_x - 1, col / block)]
 	return out
 
 
