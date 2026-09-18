@@ -28,11 +28,14 @@ var _hud_timer := 0.0
 var _pause: PauseMenu = null
 ## The map's ground, drawn as terrain rather than a flat colour.
 var _terrain: WorldTerrain = null
+## Dev switch: run the map without its ground layer, to see what the ground is hiding.
+var _no_ground := false
 var _pause_layer: CanvasLayer = null
 var _debug_timer := 0.0
 
 
 func _ready() -> void:
+	_no_ground = OS.get_cmdline_user_args().has("--no-ground")
 	DebugLogger.info("world map loading", "WorldMap")
 
 	if not GameManager.is_campaign_active():
@@ -51,11 +54,20 @@ func _ready() -> void:
 	_view.bind(_state, _config, _travel)
 	# The ground goes in before the map view and behind it: the view draws roads, settlements and
 	# parties on top of terrain it no longer has to paint itself.
-	_terrain = WorldTerrain.new()
-	_terrain.z_index = -1
-	add_child(_terrain)
-	_terrain.setup(_state.campaign_seed, _view.land_rect(), _config)
-	_view.ground_art = true
+	if not _no_ground:
+		_terrain = WorldTerrain.new()
+		# Under the map view, which draws at -10. The first version of this sat at -1 - above the
+		# view rather than below it - so the ground was painted over the roads, the settlement
+		# rings and the labels, and the map looked like empty terrain with a working UI on top.
+		_terrain.z_index = -20
+		add_child(_terrain)
+		_terrain.setup(_state.campaign_seed, _view.land_rect(), _config)
+		_view.ground_art = true
+	else:
+		# The one-look test for "the towns and roads are gone": with the ground off, are the features
+		# missing, or merely drawn in ink that was chosen for a flat dark slab and cannot read on
+		# painted grass? A switch rather than an edit, so the same build answers both halves.
+		print("world terrain: disabled by --no-ground")
 	_view.queue_redraw()
 
 	_overworld = OverworldService.build(_state, _config)

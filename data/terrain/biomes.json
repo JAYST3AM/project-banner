@@ -39,7 +39,8 @@
             "res://assets/terrain/plains/plains_lush_2.png",
             "res://assets/terrain/plains/plains_lush_3.png",
             "res://assets/terrain/plains/plains_lush_4.png"
-          ]
+          ],
+          "shader": "lush"
         },
         {
           "name": "Dry",
@@ -49,7 +50,8 @@
             "res://assets/terrain/plains/plains_dry_2.png",
             "res://assets/terrain/plains/plains_dry_3.png",
             "res://assets/terrain/plains/plains_dry_4.png"
-          ]
+          ],
+          "shader": "dry"
         },
         {
           "name": "Worn",
@@ -59,7 +61,8 @@
             "res://assets/terrain/plains/plains_worn_2.png",
             "res://assets/terrain/plains/plains_worn_3.png",
             "res://assets/terrain/plains/plains_worn_4.png"
-          ]
+          ],
+          "shader": "worn"
         },
         {
           "name": "Standard",
@@ -69,7 +72,8 @@
             "res://assets/terrain/plains/plains_standard_2.png",
             "res://assets/terrain/plains/plains_standard_3.png",
             "res://assets/terrain/plains/plains_standard_4.png"
-          ]
+          ],
+          "shader": "standard"
         }
       ],
       "palette": [

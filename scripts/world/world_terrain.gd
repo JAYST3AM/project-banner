@@ -2,10 +2,13 @@ class_name WorldTerrain
 extends Sprite2D
 ## The campaign map's ground, as terrain rather than a flat colour.
 ##
-## A field of biome weights is generated from the world seed: one value says how much of the second
-## biome a place is, another is its height. The shader mixes two grounds by the first and shades
-## them by the second, so where two biomes meet the ground changes over a band rather than at a
-## line - and the same weight will drive movement and props when they arrive, so a place cannot
+## A field is generated from the world seed holding three weights - how much Lush, Dry and Worn a
+## place is, with Standard as the remainder - and a height. The shader blends four *looks* by those
+## weights and, inside each look, picks one of four *sub-variants* per texture repeat from a hash of
+## where the repeat is. Sixteen grounds, all of them in use.
+##
+## Where two looks meet the ground changes over a band rather than at a line - which is what meshing
+## means here - and the same field will drive movement and props when they arrive, so a place cannot
 ## look like a forest edge and walk like a field.
 ##
 ## It is a Sprite2D and not a Control on purpose: the map is a Node2D world under a Camera2D, and a
@@ -27,10 +30,12 @@ const BLEND_WIDTH_CELLS := 3.0
 ## straight line, just a soft one; this bends it.
 const BORDER_WIGGLE := 0.22
 ## Texture repeats. Smaller sees the art's detail closer up.
-## One repeat of a ground image per this many world units. Sized so the art is seen at roughly its
+## One repeat of a ground image per this many world units. Smaller means more tiles and the art's
+## detail closer up, which is what the owner asked for - and it only works with mipmaps under the
+## samplers, or a 1254-pixel painting shrunk to a quarter of that aliases into coloured speckle. Sized so the art is seen at roughly its
 ## own resolution on a normal zoom: tiling it small enough to repeat many times across the map
 ## minifies a 1254-pixel painting into speckle, which is exactly what the first attempt looked like.
-const TILE_UNITS := 800.0
+const TILE_UNITS := 260.0
 
 const HEIGHT_OCTAVES := 3
 const BIOME_OCTAVES := 4
@@ -55,27 +60,8 @@ func setup(p_seed: int, land: Rect2, _config: GameConfig) -> void:
 	texture = _white_pixel()
 	scale = land.size
 	_build_material(field, land)
-	print("world terrain: field %dx%d in %.0f ms | blend %.0f cells, wiggle %.2f | seed %d" % [
+	print("world terrain: 16 grounds, field %dx%d in %.0f ms | blend %.0f cells, wiggle %.2f | seed %d" % [
 		FIELD_COLS, FIELD_ROWS, generated_ms, BLEND_WIDTH_CELLS, BORDER_WIGGLE, seed_value])
-
-
-## The two grounds this shows. The plains set's four looks stand in for two biomes until the next
-## set arrives: Standard and Lush behave as one, Dry and Worn as the other. Both are named in the
-## catalogue rather than in this file, so the day the art changes this code does not.
-func _ground_paths() -> Array[String]:
-	var paths: Array[String] = []
-	if FileAccess.file_exists(CATALOGUE):
-		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(CATALOGUE))
-		if typeof(parsed) == TYPE_DICTIONARY:
-			for biome in (parsed as Dictionary).get("biomes", []):
-				var grounds: Array = biome.get("grounds", [])
-				for entry in grounds:
-					var art := str(entry.get("art", ""))
-					if not art.is_empty():
-						paths.append(art)
-	if paths.is_empty():
-		push_error("world terrain: no grounds in %s" % CATALOGUE)
-	return paths
 
 
 static func _white_pixel() -> ImageTexture:
@@ -85,7 +71,6 @@ static func _white_pixel() -> ImageTexture:
 
 
 func _build_material(field: Image, land: Rect2) -> void:
-	var paths := _ground_paths()
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/world/world_ground.gdshader")
 	material.set_shader_parameter("field_map", ImageTexture.create_from_image(field))
@@ -93,33 +78,69 @@ func _build_material(field: Image, land: Rect2) -> void:
 	material.set_shader_parameter("map_origin", land.position)
 	material.set_shader_parameter("map_span", land.size)
 	material.set_shader_parameter("shade_strength", 0.32)
-	# First ground of the first biome, and the dry look of the second as the other side of the
-	# blend: the four looks are one biome's art, so this is a test of the blend rather than of two
-	# real biomes.
-	if paths.size() >= 1:
-		material.set_shader_parameter("ground_a", load(paths[0]))
-	if paths.size() >= 2:
-		material.set_shader_parameter("ground_b", load(paths[min(2, paths.size() - 1)]))
+	for look in _looks():
+		var base := "look_%s" % str(look.get("shader", "")).strip_edges()
+		var variants: Array = look.get("variants", [])
+		for index in variants.size():
+			# look_lush, look_lush_2, look_lush_3, look_lush_4: the first variant keeps the bare
+			# name, so the art maps onto the shader by position with no lookup table in between.
+			var parameter := base if index == 0 else "%s_%d" % [base, index + 1]
+			material.set_shader_parameter(parameter, load(str(variants[index])))
 	self.material = material
 
 
-## R = how much of the second biome is here, G = height. Both from the world seed, both from a
-## positional hash rather than a stateful generator, so the same campaign always grows the same
-## country and cells can be sampled in any order.
+## The four looks as the catalogue lists them: a name, a shader key and four variants each. The
+## catalogue owns the naming, so renaming the art or adding a fifth variant does not touch this
+## file.
+func _looks() -> Array:
+	var looks: Array = []
+	if FileAccess.file_exists(CATALOGUE):
+		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(CATALOGUE))
+		if typeof(parsed) == TYPE_DICTIONARY:
+			for biome in (parsed as Dictionary).get("biomes", []):
+				for entry in biome.get("grounds", []):
+					looks.append(entry)
+	if looks.size() != 4:
+		push_error("world terrain: expected four looks in %s, found %d" % [CATALOGUE, looks.size()])
+	return looks
+
+
+## R = Lush, G = Dry, B = Worn, A = height. All four from the world seed, all from a positional
+## hash rather than a stateful generator, so the same campaign always grows the same country and
+## cells can be sampled in any order.
+##
+## Which look a place gets is decided the way the design says: moisture decides Lush against Dry,
+## wear decides where the ground has been used hard enough to go Worn, and a very slow region field
+## says how much character the land has at all - where it is low, the plain Standard look shows
+## through. Every value is softened over BLEND_WIDTH_CELLS before it becomes a weight, and that
+## band is what the looks mesh across.
 func _build_field() -> Image:
-	var image := Image.create_empty(FIELD_COLS, FIELD_ROWS, false, Image.FORMAT_RGB8)
+	var image := Image.create_empty(FIELD_COLS, FIELD_ROWS, false, Image.FORMAT_RGBA8)
+	var half := maxf(0.0001, BLEND_WIDTH_CELLS / float(FIELD_COLS) * 3.0)
 	for row in FIELD_ROWS:
 		for col in FIELD_COLS:
 			var x := float(col) / float(FIELD_COLS)
 			var y := float(row) / float(FIELD_ROWS)
-			# The border wanders: the biome is sampled from a point nudged sideways by a slower
+			# The borders wander: each field is sampled from a point nudged sideways by a slower
 			# noise, which is what turns a soft straight edge into a coast.
 			var wander := (_fbm(x * 5.4, y * 5.4, 11, 2) - 0.5) * BORDER_WIGGLE
-			var biome := _fbm(x * 3.0 + wander, y * 3.0, 1, BIOME_OCTAVES)
-			var half := maxf(0.0001, BLEND_WIDTH_CELLS / float(FIELD_COLS) * 3.0)
-			var weight := smoothstep(0.5 - half, 0.5 + half, biome)
+			var moisture := smoothstep(0.5 - half, 0.5 + half, _fbm(x * 3.0 + wander, y * 3.0, 1, BIOME_OCTAVES))
+			var wear := smoothstep(0.5 - half, 0.5 + half, _fbm(x * 4.6 + wander, y * 4.6, 17, 3))
+			var region := smoothstep(0.42 - half, 0.58 + half, _fbm(x * 1.1, y * 1.1, 29, 2))
+			var worn := wear * 0.85
+			var plain := 1.0 - worn
+			var lush := plain * moisture * region
+			var dry := plain * (1.0 - moisture) * region
+			# The shader derives Standard as whatever is left over, so this only stops the three
+			# stored weights summing past one and letting the fourth look show through as a hole.
+			var used := lush + dry + worn
+			if used > 1.0:
+				var overflow := 1.0 / used
+				lush *= overflow
+				dry *= overflow
+				worn *= overflow
 			var height := _fbm(x * 1.7, y * 1.7, 23, HEIGHT_OCTAVES)
-			image.set_pixel(col, row, Color(weight, height, 0.0))
+			image.set_pixel(col, row, Color(lush, dry, worn, height))
 	return image
 
 
