@@ -56,6 +56,11 @@ His notes, unresolved:
    catalogued but drawn nowhere - and the per-tile variant picker (a seeded hash choosing among the
    four) is not built. Four looks exist; two are in use.
 
+4. **"Make sure to have 4 next time."** All four looks of a biome in use, not two. That means the
+   shader carrying four ground slots and a weight per look (a splat, not a two-way mix), plus the
+   per-tile picker that chooses a tile's variant from a seeded hash of its position - so a biome is
+   four faces, and so the paving repeats neither across the map nor across the blend.
+
 ## Where the working tree stands
 
 Last commit is `12334bc` (the first terrain showing). Uncommitted and waiting on him:
