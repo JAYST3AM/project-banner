@@ -1,6 +1,5 @@
 {
   "config_version": 1,
-
   "campaign": {
     "starting_gold": 250,
     "max_party_size": 24,
@@ -9,7 +8,6 @@
     "starting_faction_id": "free_companies",
     "default_campaign_name": "A New Banner"
   },
-
   "world": {
     "map_width": 1600.0,
     "map_height": 900.0,
@@ -21,7 +19,6 @@
     "camera_pan_speed": 700.0,
     "label_font_size": 15
   },
-
   "time": {
     "seconds_per_game_hour": 2.0,
     "hours_per_day": 24,
@@ -34,17 +31,15 @@
       "fast": 3.0
     }
   },
-
   "travel": {
     "world_units_per_game_hour": 150.0,
     "arrival_radius": 16.0,
     "party_size_speed_penalty": 0.012,
     "min_speed_fraction": 0.55
   },
-
   "battle": {
-    "_comment": "Battle simulation settings. tick_rate is the fixed simulation step the runtime advances the fight at: frames are accumulated and whole ticks are run, so one tick is always 1/tick_rate seconds and the same seed fights the same battle whatever the machine renders at. It is the step every recorded benchmark and showcase in this repository was measured with. A tick is a design decision, not a rendering one.",
-    "tick_rate": 20.0,
+    "_comment": "Battle simulation settings. tick_rate is the fixed simulation step the runtime advances the fight at: frames are accumulated and whole ticks are run, so one tick is always 1/tick_rate seconds and the same seed fights the same battle whatever the machine renders at. Sixty is the owner's decision (2026-09-18): the fight is watched, and at twenty a second it reads as a slideshow. The battle-scene benchmarks in this repository were measured at twenty and are kept as history, not as a target - see docs/BENCHMARK_CPU_BASELINE.md if a comparison with them is ever wanted. retaliation_ticks, engagement_recheck_ticks and engagement_disengage_ticks are counted in ticks, so they moved with the rate and mean the same number of seconds they did before. A tick is a design decision, not a rendering one.",
+    "tick_rate": 60.0,
     "max_duration_seconds": 600.0,
     "field_width": 100.0,
     "field_height": 60.0,
@@ -59,14 +54,14 @@
     "target_search_escalation": 4.0,
     "target_search_max_radius": 32.0,
     "target_reacquisition_ticks": 4,
-		"engagement_enabled": true,
-		"rigid_groups_enabled": true,
-		"engagement_recheck_ticks": 10,
-		"engagement_disengage_ticks": 40,
-		"engagement_band_slack": 2.6,
-		"engagement_switch_advantage": 1.25,
-		"engagement_nearby_margin": 12.0,
-		"retaliation_ticks": 20,
+    "engagement_enabled": true,
+    "rigid_groups_enabled": true,
+    "engagement_recheck_ticks": 30,
+    "engagement_disengage_ticks": 120,
+    "engagement_band_slack": 2.6,
+    "engagement_switch_advantage": 1.25,
+    "engagement_nearby_margin": 12.0,
+    "retaliation_ticks": 60,
     "target_retention_radius": 32.0,
     "target_switch_advantage": 1.25,
     "target_immediate_on_contact_loss": true,
@@ -76,7 +71,6 @@
     "base_hit_chance": 0.75,
     "defence_mitigation": 0.05
   },
-
   "terrain": {
     "_comment": "Battlefield terrain generation. The same terrain_seed, field size and generation_version always produce the same battlefield. Bump generation_version when the generation rules change, so old seeds are not silently reinterpreted.",
     "cell_size": 4.0,
@@ -84,10 +78,9 @@
     "lattice_cells": 7,
     "elevation_amplitude": 5.0,
     "high_ground_threshold": 0.66,
-    "woods_threshold": 0.60,
+    "woods_threshold": 0.6,
     "rough_threshold": 0.42
   },
-
   "formation": {
     "_comment": "Generic formation tuning. Per-formation-type shape lives in data/formations/formation_types.json; these are the numbers shared by every formation.",
     "base_spacing": 2.6,
@@ -99,7 +92,6 @@
     "enemy_contact_gap": 1.5,
     "settled_cohesion": 0.8
   },
-
   "xp": {
     "participation": 10,
     "per_kill": 20,
@@ -109,7 +101,6 @@
     "level_curve_growth": 1.35,
     "max_level": 40
   },
-
   "progression": {
     "hp_per_level": 3,
     "attack_per_level": 1,
@@ -117,7 +108,6 @@
     "trait_rolls_max": 2,
     "negative_trait_chance": 0.35
   },
-
   "recruitment": {
     "min_age": 17,
     "max_age": 33,
@@ -126,7 +116,6 @@
     "max_recruit_batch": 20,
     "starting_equipment_note": "equipment arrives with the inventory system"
   },
-
   "rewards": {
     "gold_per_defeated_min": 8,
     "gold_per_defeated_max": 14,
@@ -134,7 +123,6 @@
     "loot_rolls_min": 0,
     "loot_rolls_max": 2
   },
-
   "encounters": {
     "trigger_radius": 26.0,
     "cooldown_hours": 3.0,
@@ -142,7 +130,6 @@
     "return_home_radius": 320.0,
     "auto_resolve": false
   },
-
   "debug": {
     "enabled": true,
     "debug_build_only": true
