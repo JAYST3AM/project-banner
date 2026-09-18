@@ -33,47 +33,47 @@
       "grounds": [
         {
           "name": "Lush",
-          "dominant": "456e16",
+          "dominant": "858e4a",
+          "shader": "lush",
           "variants": [
-            "res://assets/terrain/plains/plains_lush_1.png",
-            "res://assets/terrain/plains/plains_lush_2.png",
-            "res://assets/terrain/plains/plains_lush_3.png",
-            "res://assets/terrain/plains/plains_lush_4.png"
-          ],
-          "shader": "lush"
+            "res://assets/terrain/tiles/lush_1.png",
+            "res://assets/terrain/tiles/lush_2.png",
+            "res://assets/terrain/tiles/lush_3.png",
+            "res://assets/terrain/tiles/lush_4.png"
+          ]
         },
         {
           "name": "Dry",
-          "dominant": "8d762d",
+          "dominant": "97734c",
+          "shader": "dry",
           "variants": [
-            "res://assets/terrain/plains/plains_dry_1.png",
-            "res://assets/terrain/plains/plains_dry_2.png",
-            "res://assets/terrain/plains/plains_dry_3.png",
-            "res://assets/terrain/plains/plains_dry_4.png"
-          ],
-          "shader": "dry"
+            "res://assets/terrain/tiles/dry_1.png",
+            "res://assets/terrain/tiles/dry_2.png",
+            "res://assets/terrain/tiles/dry_3.png",
+            "res://assets/terrain/tiles/dry_4.png"
+          ]
         },
         {
           "name": "Worn",
-          "dominant": "596728",
+          "dominant": "56553e",
+          "shader": "worn",
           "variants": [
-            "res://assets/terrain/plains/plains_worn_1.png",
-            "res://assets/terrain/plains/plains_worn_2.png",
-            "res://assets/terrain/plains/plains_worn_3.png",
-            "res://assets/terrain/plains/plains_worn_4.png"
-          ],
-          "shader": "worn"
+            "res://assets/terrain/tiles/worn_1.png",
+            "res://assets/terrain/tiles/worn_2.png",
+            "res://assets/terrain/tiles/worn_3.png",
+            "res://assets/terrain/tiles/worn_4.png"
+          ]
         },
         {
           "name": "Standard",
-          "dominant": "4f621a",
+          "dominant": "6c6c46",
+          "shader": "standard",
           "variants": [
-            "res://assets/terrain/plains/plains_standard_1.png",
-            "res://assets/terrain/plains/plains_standard_2.png",
-            "res://assets/terrain/plains/plains_standard_3.png",
-            "res://assets/terrain/plains/plains_standard_4.png"
-          ],
-          "shader": "standard"
+            "res://assets/terrain/tiles/standard_1.png",
+            "res://assets/terrain/tiles/standard_2.png",
+            "res://assets/terrain/tiles/standard_3.png",
+            "res://assets/terrain/tiles/standard_4.png"
+          ]
         }
       ],
       "palette": [
@@ -88,7 +88,8 @@
         "bias": 0.0
       },
       "props": [],
-      "notes": "Four looks rather than four variations of one: Standard, Lush, Dry and Worn differ in colour and wear, so they can later be chosen by moisture, season or region instead of at random. Art is 1254x1254, top-down and painted; props to follow."
+      "notes": "Four looks rather than four variations of one: Standard, Lush, Dry and Worn differ in colour and wear, so they can later be chosen by moisture, season or region instead of at random. Art is 1254x1254, top-down and painted; props to follow.",
+      "art_source": "ForgottenMemories tileset (64 px fills, four ground looks with four variants each). Campaign map only; the plains paintings stay for battlefield-level ground. Licence unverified - the owner supplied the zip and the terms have not been checked."
     }
   ]
 }

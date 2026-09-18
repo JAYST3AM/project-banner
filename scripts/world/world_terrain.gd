@@ -24,9 +24,10 @@ extends Sprite2D
 const FIELD_COLS := 160
 const FIELD_ROWS := 112
 ## How wide a border is, in field cells: the two the owner wanted to test are these two numbers.
-## 0 is a hard line; 6 makes the ground change over about ninety world units, which after the first
-## showing turned out to be the width that reads as a gradient rather than as a mottle.
-const BLEND_WIDTH_CELLS := 6.0
+## 0 is a hard line; 6 was the width that suited the painted grounds. With the tiles the ground
+## changes character in 64-pixel steps, and a band one tile wide read as a tile edge rather than a
+## blend, so it is 10 now - about a hundred and fifty world units of change.
+const BLEND_WIDTH_CELLS := 10.0
 ## How much of a look a place can be. Kept below one on purpose: a tile that is entirely Dry next
 ## to a tile that is entirely Lush is a border, however wide the band between them, and the owner's
 ## note on the first showing was that the change between the two was too drastic. Capped, Standard
@@ -40,11 +41,13 @@ const BORDER_WIGGLE := 0.22
 ## One repeat of a ground image per this many world units. Smaller means more tiles and the art's
 ## detail closer up, which is what the owner asked for - and it only works with mipmaps under the
 ## samplers, or a 1254-pixel painting shrunk to a quarter of that aliases into coloured speckle. Sized so the art is seen at roughly its
-## own resolution on a normal zoom. 260 was tried first, then 160; the owner looked at both and
-## asked for more tiles each time, which is this number going down. The trade-off to watch: a smaller repeat shows the same
+## own resolution. 260 was tried with the painted grounds, then 160 and 100; the owner asked for
+## more tiles each time, which is this number going down. With the tileset the number is different in
+## kind rather than degree: its fills are 64 px, so a repeat of 64 world units shows each pixel as
+## a pixel at the map's zoom - pixel art is crisp at its own size and soft either side of it. The trade-off to watch: a smaller repeat shows the same
 ## art spread over less ground, so if the ground ever reads soft rather than detailed, the fix is a
 ## finer art set rather than an even smaller repeat.
-const TILE_UNITS := 100.0
+const TILE_UNITS := 64.0
 
 const HEIGHT_OCTAVES := 3
 const BIOME_OCTAVES := 4

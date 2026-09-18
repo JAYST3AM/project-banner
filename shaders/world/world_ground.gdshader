@@ -6,6 +6,9 @@ shader_type canvas_item;
 // repeat to repeat, chosen by a hash of where the repeat is, so the eye never catches the same
 // patch twice even though the same art is under it.
 //
+// Sampled nearest with mipmaps: the tiles are pixel art and want crisp edges, but they are still
+// minified when the camera pulls back, and without mipmaps a pixel-art ground shimmers as it pans.
+//
 // The ground tiles in world space, not screen space: panning and zooming slide over the ground
 // rather than stretching it. The variant hash runs on the same grid as the tiles, which is what
 // keeps one variant per repeat instead of shimmering across it.
@@ -13,22 +16,22 @@ shader_type canvas_item;
 // The height channel is shaded now and will displace geometry later; it comes from the same seed as
 // the weights, so a hill on the map is a hill in the battle fought on it.
 
-uniform sampler2D look_lush : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_lush_2 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_lush_3 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_lush_4 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_dry : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_dry_2 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_dry_3 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_dry_4 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_worn : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_worn_2 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_worn_3 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_worn_4 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_standard : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_standard_2 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_standard_3 : repeat_enable, filter_linear_mipmap;
-uniform sampler2D look_standard_4 : repeat_enable, filter_linear_mipmap;
+uniform sampler2D look_lush : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_lush_2 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_lush_3 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_lush_4 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_dry : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_dry_2 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_dry_3 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_dry_4 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_worn : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_worn_2 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_worn_3 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_worn_4 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_standard : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_standard_2 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_standard_3 : repeat_enable, filter_nearest_mipmap;
+uniform sampler2D look_standard_4 : repeat_enable, filter_nearest_mipmap;
 
 // R, G, B = how much Lush, Dry and Worn this place is. Standard is the remainder, so the four
 // always add to one and no fourth weight has to be stored. A = height.
@@ -67,11 +70,17 @@ void fragment() {
 	float standard = clamp(1.0 - weight.r - weight.g - weight.b, 0.0, 1.0);
 	float variant = variant_at(floor(repeat));
 
+	// The whole point of pixel art is that its motifs are legible, which is also what makes a tiled
+	// ground read as wallpaper: the same flowers land on the same grid every few repeats. Shifting
+	// where in the art each repeat starts - by an amount that belongs to that repeat, so it never
+	// changes while the camera moves - breaks the grid without touching the art.
+	vec2 nudged = repeat + vec2(fract(variant * 7.13), fract(variant * 3.71)) * 0.5;
+
 	vec3 ground = vec3(0.0);
-	ground += weight.r * pick_variant(look_lush, look_lush_2, look_lush_3, look_lush_4, repeat, variant);
-	ground += weight.g * pick_variant(look_dry, look_dry_2, look_dry_3, look_dry_4, repeat, variant);
-	ground += weight.b * pick_variant(look_worn, look_worn_2, look_worn_3, look_worn_4, repeat, variant);
-	ground += standard * pick_variant(look_standard, look_standard_2, look_standard_3, look_standard_4, repeat, variant);
+	ground += weight.r * pick_variant(look_lush, look_lush_2, look_lush_3, look_lush_4, nudged, variant);
+	ground += weight.g * pick_variant(look_dry, look_dry_2, look_dry_3, look_dry_4, nudged, variant);
+	ground += weight.b * pick_variant(look_worn, look_worn_2, look_worn_3, look_worn_4, nudged, variant);
+	ground += standard * pick_variant(look_standard, look_standard_2, look_standard_3, look_standard_4, nudged, variant);
 
 	float shade = 1.0 + (field.a - 0.5) * shade_strength;
 	COLOR = vec4(ground * shade, 1.0);
