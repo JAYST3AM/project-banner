@@ -1,0 +1,18 @@
+{
+  "_comment": "Biomes. The campaign map's ground is data first, exactly as battlefield terrain is: the simulation reads a type and a movement number, the renderer reads a palette and a texture, and neither knows about the other. A BIOME is a look - a ground texture, a palette, a height character and a set of props. A TYPE (data/terrain/terrain_types.json) is a rule - how fast a soldier crosses it. Every biome names the type it behaves as, so adding a snowfield never changes a movement number, and re-balancing movement never changes how anything looks. When biomes meet, a tile carries WEIGHTS (70% grass, 30% forest) and colour, height, prop density and movement all read those weights.",
+
+  "_fields": {
+    "id": "stable key, used by the world generator and by battlefields",
+    "name": "what a player would call it",
+    "type": "the terrain_types.json id whose movement rule this biome follows",
+    "ground": "res:// path to the ground image, or \"\" when it is generated from the palette alone",
+    "ground_scale": "how many world units one repeat of the ground image covers",
+    "palette": ["two to four colours, darkest first: what the height shading darkens and lightens from when there is no ground image"],
+    "height": {"base": "0..1 of the battlefield's height range", "roughness": "0 = flat, 1 = broken", "bias": "-1 hollows, +1 raises"},
+    "props": [
+      {"art": "res:// path", "density": "props per 100 tiles at full weight", "min_weight": "how much of this biome a tile needs before the prop appears at all", "scale": "height in world units", "jitter": "0..1 placement scatter"}
+    ]
+  },
+
+  "biomes": []
+}
