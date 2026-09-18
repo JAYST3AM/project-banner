@@ -72,9 +72,13 @@ with factions and armies still moving while nobody is looking.
   that is a function of distance and speed: three days after the siege began, not during it.
 - This falls out of the design rather than being bolted on: the catch-up already timestamps events,
   so the only new thing is the carrier.
-- Later staff roles are the same shape: a quartermaster changes what supply reaches the army, a cook
-  changes what the men eat. Each is a person the army has or lacks, and each moves a number the
-  player feels. **Open:** whether a messenger is hired, a party role, or found in a settlement.
+- **Staff are soldiers with the right skills and traits, or people hired in a settlement.** *Decided.*
+  A man in the party can be made the messenger, the cook or the quartermaster - the traits and skills
+  the settlement screen already shows are what decide who is worth appointing - and the same people
+  can be hired in a town.
+- Every staff role is the same shape: a quartermaster changes what supply reaches the army, a cook
+  changes what the men eat, a messenger changes what the player knows and when. Each is a person the
+  army has or lacks, and each moves a number the player feels.
 
 ## Streaming, and how "never seen" is achieved
 
@@ -87,8 +91,10 @@ with factions and armies still moving while nobody is looking.
   queue, so a heavy chunk cannot become a hitch.
 - **Hysteresis and a short keep-warm**: a chunk that has just left view stays a few seconds, so a
   player pacing back and forth does not thrash the builder.
-- **Acceptance criterion, in the owner's words**: the game must not freeze on a chunk load, and the
-  player must never see a black screen because of loading.
+- **Acceptance criterion, in the owner's words**: no freeze on a chunk load, no black screen while
+  loading, and a **consistent frame rate with no jitter**. Jitter is the harder half: a budget that
+  is spent unevenly shows as stutter even when the average is good, so the per-frame work is capped
+  and spread rather than run to completion as fast as it can go.
 
 ## What already exists to build on
 

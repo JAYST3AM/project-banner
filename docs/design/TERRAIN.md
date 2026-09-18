@@ -21,8 +21,15 @@ showing unless a line says so.
 
 ## Art
 
-- Four **ground variants per biome**, chosen per tile from a seeded hash of the tile's position, so
-  a tile always shows the same one and neighbours rarely repeat.
+- **Four looks per biome, and four sub-variants inside each look** - sixteen grounds in total.
+  Lush is not one texture but four that look the same and differ slightly, which is what stops the
+  repetition being visible once a player has crossed the map a few times.
+  - *Which look* a tile uses should come from the world (moisture, wear, region, season - the same
+    field that decides the biome), and *which sub-variant* from a seeded hash of the tile's position
+    so a tile always shows the same one and neighbours rarely match.
+  - Sixteen 1254-pixel grounds is roughly 90 MB uncompressed, so they want VRAM compression at
+    import: a real constraint, and the reason to settle the naming (`plains_lush_1..4.png`) before
+    the art is made rather than after.
 - Props: trees, rocks, bushes, reeds - density from the weights, not from a separate pass.
 - **Delivered:** the plains set - Standard, Lush, Dry, Worn. Painted, top-down, 1254x1254, tileable.
   Catalogued in `data/terrain/biomes.json` with palettes sampled from the art.
