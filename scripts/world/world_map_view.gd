@@ -164,13 +164,20 @@ func _road_path(a: Vector2, b: Vector2) -> PackedVector2Array:
 		return path
 	var side := Vector2(b.y - a.y, a.x - b.x).normalized()
 	var bend := _bend_of(a, b)
-	var steps := 14
+	# Forty-eight points, drawn antialiased: fourteen straight hops between wiggles is what "sharp
+	# angles" was - the curve was there, the corners were the segments.
+	var steps := 48
 	path = PackedVector2Array()
 	for i in steps + 1:
 		var t := float(i) / float(steps)
-		var offset := sin(t * PI) * bend * span * 0.15
-		offset += sin(t * PI * 3.0 + bend * 5.0) * span * 0.030
-		offset += sin(t * PI * 7.0 + bend * 11.0) * span * 0.012
+		# A window that is zero at both ends, and this is the fix for roads that "don't actually connect
+		# to some towns": the wiggles used to carry a phase offset, so at t=0 and t=1 they were still
+		# displaced sideways and the road ended a few units short of the settlement it was joining. With
+		# every term multiplied by sin(t * PI), the offset is exactly zero at both towns.
+		var window := sin(t * PI)
+		var offset := window * bend * span * 0.15
+		offset += sin(t * PI * 3.0 + bend * 5.0) * span * 0.032 * window
+		offset += sin(t * PI * 5.0 + bend * 11.0) * span * 0.010 * window
 		path.append(a.lerp(b, t) + side * offset)
 	return path
 
@@ -192,10 +199,10 @@ func _draw_roads() -> void:
 		var color := COLOR_ROAD if kind == "road" else COLOR_TRACK
 		var width := 5.0 if kind == "road" else 3.0
 		var path := _road_path(a.position, b.position)
-		draw_polyline(path, COLOR_CASING, width + 3.0)
-		draw_polyline(path, color, width)
+		draw_polyline(path, COLOR_CASING, width + 3.0, true)
+		draw_polyline(path, color, width, true)
 		if kind == "road":
-			draw_polyline(path, color.lightened(0.3), 1.0)
+			draw_polyline(path, color.lightened(0.3), 1.0, true)
 
 
 func _draw_travel_line() -> void:
