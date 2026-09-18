@@ -138,7 +138,7 @@ func settlement_sites(count: int, centre: Vector2, radius: float) -> Array[Dicti
 	while settled.size() < count and reach <= WorldChunks.WORLD_SIZE * 0.5:
 		for candidate in sites_near(centre, reach):
 			var position: Vector2 = candidate["position"]
-			if _too_close(position, settled):
+			if _too_close(position, kind_for(candidate), settled):
 				continue
 			var site := candidate.duplicate()
 			site["kind"] = kind_for(candidate)
@@ -242,10 +242,9 @@ func _site_score(point: Vector2) -> float:
 	return (region - MIN_REGION) * 2.0 + flatness + (0.5 - absf(height - 0.55))
 
 
-func _too_close(position: Vector2, settled: Array[Dictionary]) -> bool:
+func _too_close(position: Vector2, kind: String, settled: Array[Dictionary]) -> bool:
 	for other in settled:
-		var kind_here := kind_for(candidate)
-		if too_close(position, kind_here, other):
+		if too_close(position, kind, other):
 			return true
 	return false
 
