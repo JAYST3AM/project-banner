@@ -199,7 +199,20 @@ var ticks_per_frame := 0
 ## frame rate at 730, where 144 took the repack to a whole core. The reference game's own step is
 ## 20 Hz and stays 20 Hz - that is a gameplay decision in the reference, not a rendering one, and
 ## this scene uses 60 because it is a look-and-feel test bed, not the campaign's clock.
-var tick_hz := 60.0
+var tick_hz := _config_tick_rate()
+
+
+## The battle clock from the game's own config, so the dev scene and the game it stands in for cannot
+## disagree about what a second of fighting is. Falls back to sixty if the file is unreadable.
+static func _config_tick_rate() -> float:
+	var path := "res://data/config/game_config.json"
+	if FileAccess.file_exists(path):
+		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+		if typeof(parsed) == TYPE_DICTIONARY:
+			var battle: Variant = (parsed as Dictionary).get("battle", {})
+			if typeof(battle) == TYPE_DICTIONARY:
+				return maxf(1.0, float((battle as Dictionary).get("tick_rate", 60.0)))
+	return 60.0
 var _tick_accumulator := 0.0
 var readback_every := 1
 var max_fps := 0

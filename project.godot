@@ -50,8 +50,8 @@ textures/canvas_textures/default_texture_filter=0
 
 [physics]
 
-; Sixty, stated rather than inherited. It is Godot's default, so this changes nothing today - it is
-; here because the battle clock is sixty too (data/config/game_config.json, the owner's decision),
+; Thirty, stated rather than inherited, and following the battle clock in
+; data/config/game_config.json - the owner asked to try half the rate and see what it reads like.
 ; and a rate that matters should be written down where it can be read and disagreed with instead of
 ; being an assumption nobody can find.
-common/physics_ticks_per_second=60
+common/physics_ticks_per_second=30
