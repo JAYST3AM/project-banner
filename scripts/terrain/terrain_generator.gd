@@ -49,13 +49,13 @@ const FEATURE_CAPS := {
 	"clearings": 5,
 }
 ## How wide a river's bed is, in cells, and how much of the field its channel runs across.
-const RIVER_BED_CELLS := 2.2
-const RIVER_RUN_FACTOR := 1.5
+const RIVER_BED_CELLS := 1.4
+const RIVER_RUN_FACTOR := 1.2
 ## Bins in the height histogram the thresholds are read from.
 const HISTOGRAM_BINS := 128
-## How many cells across the block the local ground mean is taken over. Wider than any channel the
-## generator carves, so a river does not drag the ground it is being compared against down with it.
-const MEAN_BLOCK := 8
+## How much of a channel a cell has to be for the bed to hold water. The carve records coverage
+## rather than a flag, so the bank can be wet without being deep.
+const RIVER_WATER_PROFILE := 0.75
 
 
 ## Build [param field]'s channels. Called by [method BattlefieldTerrain._build].
@@ -143,6 +143,11 @@ static func build(
 	## battlefield whose river ran through a valley.
 	var flows := PackedFloat32Array()
 	flows.resize(total)
+	## How much of a scarp face each cell is. A cliff is a deliberate landform, so like water it is
+	## recorded where it was made rather than inferred from a slope afterwards - otherwise every
+	## accident of overlapping hills becomes a cliff face.
+	var scarps := PackedFloat32Array()
+	scarps.resize(total)
 
 	var has_blend := not secondary.is_empty() and field.blend_width_cells > 0.0
 	var blend_width := maxf(1.0, field.blend_width_cells)
@@ -176,7 +181,7 @@ static func build(
 			rockiness[index] = smoothstep(0.58, 0.88, rock_field[index])
 
 	# ---------- pass 2: the landforms -------------------------------------
-	_place_features(heights, flows, cols, rows, seed_value, version, biomes, primary, elevation_amplitude)
+	_place_features(heights, flows, scarps, cols, rows, seed_value, version, biomes, primary, elevation_amplitude)
 
 	# ---------- pass 3: the restrained detail -----------------------------
 	for row in rows:
@@ -267,7 +272,7 @@ static func build(
 			wetness[index4] = clampf(wet * 0.75 + here_moisture * 0.25, 0.0, 1.0)
 			var is_water := water_enabled and flow >= RIVER_WATER_PROFILE
 			var is_low := flow > 0.2
-
+			var is_face := cliffs_enabled and (scarps[index4] > 0.35 or here_slope >= cliff_slope)
 			# Vegetation: what the biome grows, thinned by slope and crowded out by water.
 			var base_veg := lerpf(veg_a.x, veg_b.x, mix2)
 			var tree_density := lerpf(veg_a.y, veg_b.y, mix2)
@@ -279,7 +284,7 @@ static func build(
 			var pick := _pick_soil(soil_pick, soil_pick_b, mix2, here_moisture, seed_value, index4)
 			if is_water:
 				pick = soils.index_of("silt")
-			elif here_slope >= cliff_slope:
+			elif is_face:
 				pick = soils.index_of("rock")
 			soil_index[index4] = maxi(0, pick)
 
@@ -287,7 +292,7 @@ static func build(
 			var slot := open_slot
 			if is_water:
 				slot = water_slot
-			elif cliffs_enabled and here_slope >= cliff_slope:
+			elif is_face:
 				slot = cliff_slot
 			elif vegetation[index4] >= woods_vegetation:
 				slot = woods_slot
@@ -357,6 +362,7 @@ static func build(
 static func _place_features(
 	heights: PackedFloat32Array,
 	flows: PackedFloat32Array,
+	scarps: PackedFloat32Array,
 	cols: int,
 	rows: int,
 	seed_value: int,
@@ -412,8 +418,8 @@ static func _place_features(
 					"basins":
 						_apply_blob(heights, cols, rows, centre, size * 1.4, strength * 0.4, 1.0, angle, 0.8, -1.0)
 					"cliffs":
-						_apply_scarp(heights, cols, rows, centre, angle, size * 3.2,
-							maxf(0.5, size * 0.18), strength * 0.8)
+						_apply_scarp(heights, scarps, cols, rows, centre, angle, size * 1.8,
+							maxf(0.5, size * 0.22), strength * 0.8)
 					"riverbeds":
 						_carve_river(heights, flows, cols, rows, centre, angle,
 							float(maxi(cols, rows)) * RIVER_RUN_FACTOR, RIVER_BED_CELLS,
@@ -469,6 +475,7 @@ static func _apply_blob(
 ## narrow on purpose: a wide one would be a hill.
 static func _apply_scarp(
 	heights: PackedFloat32Array,
+	scarps: PackedFloat32Array,
 	cols: int,
 	rows: int,
 	centre: Vector2,
@@ -489,7 +496,12 @@ static func _apply_scarp(
 				continue
 			var distance := dx * normal.x + dy * normal.y
 			var fade := clampf(1.0 - absf(along) / maxf(1.0, length), 0.0, 1.0)
-			heights[row * cols + col] += height * (smoothstep(-width, width, distance) - 0.5) * (0.35 + 0.65 * fade)
+			var index := row * cols + col
+			heights[index] += height * (smoothstep(-width, width, distance) - 0.5) * (0.35 + 0.65 * fade)
+			# The face itself is recorded, so the cliff is the step in the land rather than whatever
+			# the slope arithmetic happens to make of it afterwards.
+			if absf(distance) <= width:
+				scarps[index] = maxf(scarps[index], (1.0 - absf(distance) / width) * (0.35 + 0.65 * fade))
 
 
 ## A river: a wandering channel across the field, with a bed and banks that fall away from it.
@@ -779,31 +791,6 @@ static func _sample_field(
 			var c := coarse[y1 * grid_cols + x0]
 			var d := coarse[y1 * grid_cols + x1]
 			out[row * cols + col] = lerpf(lerpf(a, b, tx), lerpf(c, d, tx), ty)
-	return out
-
-
-## A coarse mean of the height field, blocked so that a feature smaller than a block does not move
-## the mean it is being compared against. Used for the local water test.
-static func _local_mean(heights: PackedFloat32Array, cols: int, rows: int, block: int) -> PackedFloat32Array:
-	var out := PackedFloat32Array()
-	out.resize(cols * rows)
-	var blocks_x := maxi(1, int(ceilf(float(cols) / float(block))))
-	var blocks_y := maxi(1, int(ceilf(float(rows) / float(block))))
-	var means := PackedFloat32Array()
-	means.resize(blocks_x * blocks_y)
-	for by in blocks_y:
-		for bx in blocks_x:
-			var total := 0.0
-			var count := 0
-			for y in range(by * block, mini(rows, (by + 1) * block)):
-				for x in range(bx * block, mini(cols, (bx + 1) * block)):
-					total += heights[y * cols + x]
-					count += 1
-			means[by * blocks_x + bx] = total / maxf(1.0, float(count))
-	for row in rows:
-		var by2 := mini(blocks_y - 1, row / block)
-		for col in cols:
-			out[row * cols + col] = means[by2 * blocks_x + mini(blocks_x - 1, col / block)]
 	return out
 
 

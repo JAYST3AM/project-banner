@@ -290,7 +290,7 @@ func step(game_hours: float) -> Dictionary:
 	if route.size() < 2 and is_travelling() and destination() != null:
 		build_route(destination())
 	if route.size() >= 2:
-		while route_leg < route.size() - 1 and state.world_position.distance_to(route[route_leg + 1]) < 10.0:
+		while route_leg < route.size() - 1 and state.world_position.distance_to(route[route_leg + 1]) < 2.0:
 			route_leg += 1
 	var target := destination_position()
 	if route.size() >= 2 and route_leg < route.size() - 1:
@@ -314,6 +314,15 @@ func step(game_hours: float) -> Dictionary:
 		return report
 
 	var travel := speed_units_per_game_hour() * game_hours
+	# Never overshoot a waypoint to reach the next one: the party moves toward the point immediately
+	# ahead and no further, which is what keeps it on the curve instead of cutting the corner. The
+	# owner: "like the curvature and everything needs to be followed."
+	if not final_leg and travel >= distance:
+		state.world_position = target
+		route_leg += 1
+		report["moved"] = true
+		report["distance_travelled"] = distance
+		return report
 	if distance - travel <= radius:
 		state.world_position = target
 		report["distance_travelled"] = distance

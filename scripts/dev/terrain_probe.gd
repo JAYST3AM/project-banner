@@ -15,6 +15,21 @@ var _sizes: Array[Vector2] = []
 var _printed_summary := false
 
 
+func _parse_flags() -> void:
+	_biome = ""
+	_sizes = [Vector2(100.0, 60.0), Vector2(316.0, 190.0)]
+	for raw in OS.get_cmdline_user_args():
+		var argument := str(raw)
+		if argument.begins_with("--biome="):
+			_biome = argument.trim_prefix("--biome=")
+		elif argument == "--all-biomes":
+			_biome = "*"
+		elif argument.begins_with("--field="):
+			var parts := argument.trim_prefix("--field=").split("x")
+			if parts.size() == 2:
+				_sizes = [Vector2(float(parts[0]), float(parts[1]))]
+
+
 func _ready() -> void:
 	_parse_flags()
 	var config := GameManager.config()
@@ -23,25 +38,19 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 
-	for size in _sizes:
-		_run(size, config)
+	if _biome == "*":
+		# Every biome, at one size, one line each: the fastest way to see that adding a country is
+		# really a data change. Anything that fails to generate shows up here rather than in a battle.
+		_sizes = [Vector2(100.0, 60.0)]
+		for id in BiomeCatalog.load_from().order:
+			_run(Vector2(100.0, 60.0), config, id)
+	else:
+		for size in _sizes:
+			_run(size, config, _biome)
 
 	print("")
 	print("TERRAIN PROBE COMPLETE")
 	get_tree().quit(0)
-
-
-func _parse_flags() -> void:
-	_biome = ""
-	_sizes = [Vector2(100.0, 60.0), Vector2(316.0, 190.0)]
-	for raw in OS.get_cmdline_user_args():
-		var argument := str(raw)
-		if argument.begins_with("--biome="):
-			_biome = argument.trim_prefix("--biome=")
-		elif argument.begins_with("--field="):
-			var parts := argument.trim_prefix("--field=").split("x")
-			if parts.size() == 2:
-				_sizes = [Vector2(float(parts[0]), float(parts[1]))]
 
 
 func _run(size: Vector2, config: GameConfig) -> void:
@@ -111,9 +120,9 @@ func _run(size: Vector2, config: GameConfig) -> void:
 		print("  channel ranges: VIOLATIONS %s" % str(violations))
 
 	# Determinism, at the only level that matters: a second field from the same seed, cell for cell.
-	var again := BattlefieldTerrain.generate(SEED, size, config, null, null, _biome)
+	var again := BattlefieldTerrain.generate(SEED, size, config, null, null, biome)
 	print("  determinism: %s" % ("identical" if again.signature() == field.signature() else "DIFFERENT"))
-	var other := BattlefieldTerrain.generate(SEED + 1, size, config, null, null, _biome)
+	var other := BattlefieldTerrain.generate(SEED + 1, size, config, null, null, biome)
 	print("  a different seed differs: %s" % ("yes" if other.signature() != field.signature() else "NO"))
 
 	# The maps, printed rather than described: one line per row, one character per cell.

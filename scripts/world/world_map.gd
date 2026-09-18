@@ -29,7 +29,7 @@ var _hud_timer := 0.0
 ## campaign - is the world's business, and because it has to work while the world is stopped.
 var _pause: PauseMenu = null
 ## The map's ground, drawn as terrain rather than a flat colour.
-var _terrain: WorldTerrain = null
+var _terrain: Node2D = null
 ## Dev switch: run the map without its ground layer, to see what the ground is hiding.
 var _no_ground := false
 var _pause_layer: CanvasLayer = null
@@ -102,6 +102,14 @@ func _ready() -> void:
 		# Under the map view, which draws at -10. The first version of this sat at -1 - above the
 		# view rather than below it - so the ground was painted over the roads, the settlement
 		# rings and the labels, and the map looked like empty terrain with a working UI on top.
+		_terrain.z_index = -20
+		add_child(_terrain)
+		_terrain.setup(_state.campaign_seed, _view.land_rect(), _config)
+		_view.ground_art = true
+	elif not _no_ground:
+		# No art, but a map the owner can still read: flat colours per terrain kind, from the same
+		# field. The terrain session's files are untouched; this is a sibling that stands in.
+		_terrain = WorldFlat.new()
 		_terrain.z_index = -20
 		add_child(_terrain)
 		_terrain.setup(_state.campaign_seed, _view.land_rect(), _config)
