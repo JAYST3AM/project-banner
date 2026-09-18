@@ -36,6 +36,18 @@ showing unless a line says so.
 - **Standing requirement: four looks in use, not two.** The first showing mixed the set's first look
   against its third because one biome had to stand in for two; that is a placeholder, not the plan.
 
+## Where the art stands: basic on purpose
+
+*The owner's call, 2026-09-18: "just have basic terrain for now, and change it up once the game's
+more complete."* So the plains set is a placeholder to be replaced later, not art to be polished now.
+Two consequences worth keeping:
+
+- **The sixteen grounds are 1254 px each, and the map uses them at 100 world units a repeat** - roughly
+  a ten-to-one shrink, so most of that resolution is paid for and never seen. Future biomes should be
+  delivered at **512 px**: identical on the campaign map, about 3.5 MB a biome instead of 56.
+- **The current set stays as the source art** for any future close-zoom or battle-level use, and
+  nothing else should be spent on it until the game is further along.
+
 ## Dials
 
 Four numbers: three in `world_terrain.gd`, and the map ink in `world_map_view.gd`. All were set from the
