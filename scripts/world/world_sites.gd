@@ -30,13 +30,13 @@ extends RefCounted
 ## wins and a fort cannot crowd a castle even though forts crowd each other.
 ## The tightest any two sites may be, whatever they are: the smallest figure in SPACING. Kept as its
 ## own name because the tests and callers ask "what is the floor", and the floor is a village's.
-const MIN_SPACING := 150.0
+const MIN_SPACING := 240.0
 
 const SPACING := {
-	"castle": 560.0,
-	"town": 380.0,
-	"fort": 210.0,
-	"village": 150.0,
+	"castle": 620.0,
+	"town": 460.0,
+	"fort": 300.0,
+	"village": 240.0,
 }
 
 

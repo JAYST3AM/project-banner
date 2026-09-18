@@ -19,7 +19,7 @@
     "camera_pan_speed": 1600.0,
     "label_font_size": 15,
     "procedural": true,
-    "settlement_count": 90,
+    "settlement_count": 36,
     "settlement_search_radius": 520.0,
     "_procedural_note": "true generates the world from the seed: sites proposed by the land, named from their own numbers, connected by roads. false uses data/settlements/settlements.json, the authored starting region, which stays useful for tests that want a known map."
   },
@@ -71,6 +71,7 @@
     "target_immediate_on_contact_loss": true,
     "target_contact_loss_factor": 1.0,
     "terrain_seed_salt": 17,
+    "terrain_pace_bounds": true,
     "battle_seed_salt": 91,
     "base_hit_chance": 0.75,
     "defence_mitigation": 0.05
@@ -115,7 +116,7 @@
     "variant_strength": 0.75,
     "rock_vegetation": 0.45,
     "visual_pixels_per_unit": 1.0,
-    "prop_density_scale": 0.6,
+    "prop_density_scale": 1.0,
     "props": true
   },
   "formation": {

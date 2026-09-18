@@ -35,8 +35,30 @@
     "terrain.variants": "the BATTLEFIELD's four ground variants. Same idea as grounds, at battle scale: Lush is not one texture but four that look the same and differ slightly, which is what stops repetition being visible. Which variant a cell shows comes from the field (moisture, wear, region), which sub-variant from a seeded hash of the repeat's position. Empty variant art falls back to the variant's dominant colour, so a biome with no art yet still renders.",
     "terrain.overlays": "up to four detail overlays per biome, painted on the ground by a coverage mask: dark grass, dry grass, dirt, stones, moss, flowers, dead vegetation, trampled ground. The mask is a channel (wetness, slope, wear, vegetation), never a scatter of isolated speckles. The first three become the shader's RGB channels and the fourth its alpha.",
     "terrain.props": "which prop kinds this biome grows and how thickly, per 100 tiles at full weight, with the minimum biome weight a tile needs before the prop appears at all",
-    "prop_kinds": "the shared prop table: art, world size, and what the prop does to a battle (cover, sight line, obstruction). A biome names a kind and tunes its density, so a tree is a tree whether it is standing in plains or in swamp."
+    "prop_kinds": "the shared prop table: art, world size, and what the prop does to a battle (cover, sight line, obstruction). A biome names a kind and tunes its density, so a tree is a tree whether it is standing in plains or in swamp.",
+    "type_looks": "the art for ground whose TYPE has its own look - water, rock and mud. These are shared by every biome rather than listed per biome: a river is a river. Empty art falls back to the type's debug colour, so a look that has not been made yet still renders."
   },
+
+  "type_looks": [
+    {
+      "id": "water",
+      "name": "Water",
+      "art": ["res://assets/terrain/types/water_1.png", "res://assets/terrain/types/water_2.png"],
+      "tile_units": 3.0
+    },
+    {
+      "id": "cliff",
+      "name": "Rock face",
+      "art": ["res://assets/terrain/types/rock_1.png"],
+      "tile_units": 3.0
+    },
+    {
+      "id": "mud",
+      "name": "Mud",
+      "art": ["res://assets/terrain/types/mud_1.png"],
+      "tile_units": 3.0
+    }
+  ],
 
   "prop_kinds": [
     {
