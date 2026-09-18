@@ -36,7 +36,7 @@ static func build(p_state: CampaignState, p_config: GameConfig) -> BattleResolve
 ## [param retreated] overrides everything: the player broke off.
 func build_result(
 	context: BattleContext,
-	simulator: BattleSimulator,
+	simulator,
 	winner_side: String,
 	duration: float,
 	retreated: bool = false
@@ -160,9 +160,12 @@ func _enemy_survivor_entry(unit: BattleUnit, withdrawal: bool) -> Dictionary:
 	}
 
 
-func _fallen_entry(unit: BattleUnit, simulator: BattleSimulator, enemy_name: String) -> Dictionary:
+func _fallen_entry(unit: BattleUnit, simulator, enemy_name: String) -> Dictionary:
 	var killer_name := ""
-	var killer := simulator.find_unit(unit.killed_by_id)
+	# Typed on purpose: the simulator parameter is deliberately untyped so the compute path can be
+	# passed in its place, and an untyped call site would make this inference a compile error under
+	# this project's warnings-are-errors rule.
+	var killer: BattleUnit = simulator.find_unit(unit.killed_by_id)
 	if killer != null:
 		killer_name = killer.display_name
 	var note := "Killed at the hands of %s." % killer_name if not killer_name.is_empty() else "Killed in the fighting."

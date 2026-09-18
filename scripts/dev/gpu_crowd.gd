@@ -7,7 +7,8 @@ extends Node2D
 ## grid, read a soldier's neighbours, push them apart, land blows on the enemy, take the
 ## blows, march. Four dispatches a tick, a readback of the positions and the hit points, one
 ## [MultiMesh] buffer assignment - the idiom [SoldierField] already uses to hand a whole army
-## to the renderer. Nothing in the game calls it.
+## to the renderer. The game-owned battle field subclasses this node to supply campaign
+## soldiers; opening this scene directly remains the standalone probe.
 ##
 ## [b]What it is not.[/b] Not the game's simulation. There is no targeting, no defence, no
 ## cooldown, no terrain effect on movement, no formations with orders, no morale and no
@@ -387,7 +388,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_press_at = button.position
 					_left_held = true
 					var under := _body_at(_uniso(button.position))
-					if _deploying and under >= 0 and under / bodies_per_side == 0:
+					if _deploying and _is_mine(under):
 						_drag_body = under
 						_drag_grab = _uniso(button.position) - _anchor_of(under)
 					else:
@@ -517,6 +518,9 @@ var uniform_set: RID
 ## Advanced on the CPU - six of them - and read by every soldier in the shader.
 var _body_state := PackedFloat32Array()
 var _bodies := 0
+## The owner of each body. The probe has an equal number on both sides, while campaign
+## battles may not; keeping this separate avoids manufacturing empty formations.
+var _body_side := PackedInt32Array()
 
 var field := Vector2(200.0, 120.0)
 var grid := Vector2i(0, 0)
@@ -943,6 +947,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# as a deployment fault (a 27-unit first-tick drag) rather than the turn it is meant to show.
 	var slack := maxf(0.0, field.y - ((bodies_per_side - 1) * band + frontage)) * 0.5
 	_bodies = bodies_per_side * 2
+	_body_side.resize(_bodies)
 	_body_state.resize(_bodies * 8)
 	_heading.resize(_bodies)
 	_order.resize(_bodies)
@@ -952,6 +957,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	_body_cohesion.resize(_bodies)
 	_hold_ordered.resize(_bodies)
 	for b in _bodies:
+		_body_side[b] = b / bodies_per_side
 		_body_alive[b] = 0
 		_hold_ordered[b] = 0
 	for b in _bodies:
@@ -1062,9 +1068,22 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 			_hold_ordered[b] = 1
 
 func _body_room(b: int) -> float:
-	if _body_gap.size() < bodies_per_side * 2:
+	if _body_gap.size() < _bodies:
 		return 9999.0
 	return _body_gap[b]
+
+
+func _side_of_body(b: int) -> int:
+	if b >= 0 and b < _body_side.size():
+		return _body_side[b]
+	# The body's own recorded side - not arithmetic on bodies_per_side, which is a *layout* number
+	# for the developer scene's bands and says nothing about a campaign field, where one side may
+	# have several bodies and the sides are not the same size. This exact line, left as arithmetic,
+	# made every body from b=1 up read as the enemy: a campaign battle built from two defending
+	# bodies and one attacking one resolved in four ticks with one side "empty" and nobody dead.
+	if b >= 0 and b < _body_side.size():
+		return _body_side[b]
+	return 0
 
 
 ## The bodies, once a tick. Six little bodies on the CPU; the shader does the thousand men each of
@@ -1082,7 +1101,11 @@ func _body_room(b: int) -> float:
 ## The name a body is known by in the logs: P for the player's side, E for the enemy's, then the
 ## band down the field. Used by every diagnostic line so a human can follow one body through.
 func _body_name(b: int) -> String:
-	return "%s%d" % ["P" if b / bodies_per_side == 0 else "E", b % bodies_per_side]
+	var ordinal := 0
+	for other in b:
+		if _side_of_body(other) == _side_of_body(b):
+			ordinal += 1
+	return "%s%d" % ["P" if _side_of_body(b) == 0 else "E", ordinal]
 
 
 ## A body changing its mind about who it is fighting is a rare, reviewable event, so it is printed
@@ -1157,12 +1180,12 @@ func _advance_body(band: int, distance: float) -> void:
 
 ## Where this body is fighting, as an index, or -1: what the reassignment tests read.
 func _select_target(b: int) -> void:
-	var side := b / bodies_per_side
+	var side := _side_of_body(b)
 	var mine := Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
 	var best := -1
 	var best_distance := INF
 	for other in _bodies:
-		if other / bodies_per_side == side:
+		if _side_of_body(other) == side:
 			continue
 		if _body_alive[other] <= 0:
 			continue
@@ -1211,7 +1234,7 @@ func _aim_for(b: int) -> Vector2:
 
 func _advance_bodies() -> void:
 	for b in _bodies:
-		var side := b / bodies_per_side
+		var side := _side_of_body(b)
 		# Who are we fighting, if anyone? One selection a tick, retained until it is destroyed or
 		# clearly beaten, and it is what the facing and the engagement below are driven by.
 		_select_target(b)
@@ -1230,7 +1253,7 @@ func _advance_bodies() -> void:
 		if _body_state[b * 8 + 7] < 0.5:
 			var depth := (_body_state[b * 8 + 5] - 1.0) * SEPARATION
 			for other in _bodies:
-				if other / bodies_per_side == side:
+				if _side_of_body(other) == side:
 					continue
 				var other_depth := (_body_state[other * 8 + 5] - 1.0) * SEPARATION
 				# Bodies are metres apart in both axes now that they can face any way, so the
@@ -1440,10 +1463,10 @@ func _track_proof() -> void:
 	# The per-body nearest-enemy distances, as measured by the shader this tick. A sentinel
 	# (nothing seen) reads as "no enemy anywhere near", which is exactly how a body with no men
 	# left, or a body opposite a wiped-out enemy, should behave: walk on.
-	if counters.size() >= BODY_GAP_BASE + bodies_per_side * 2:
+	if counters.size() >= BODY_GAP_BASE + _bodies:
 		var gaps := PackedFloat32Array()
-		gaps.resize(bodies_per_side * 2)
-		for b in bodies_per_side * 2:
+		gaps.resize(_bodies)
+		for b in _bodies:
 			gaps[b] = 9999.0 if counters[BODY_GAP_BASE + b] < 0 else float(counters[BODY_GAP_BASE + b]) / 1000.0
 		_body_gap = gaps
 	var step := float(counters[6]) / 1000.0
@@ -1477,7 +1500,7 @@ func _order_name(o: int) -> String:
 ## places, where the anchor is, and which way it faces. Six lines every few seconds is cheap, and
 ## when a body stops advancing or changes its mind this says why in one look.
 func _report_bodies() -> void:
-	if _body_front.size() < bodies_per_side * 2 or _body_state.size() < _bodies * 8:
+	if _body_front.size() < _bodies or _body_state.size() < _bodies * 8:
 		return
 	var parts := PackedStringArray()
 	for b in _bodies:
@@ -1500,7 +1523,7 @@ func _report_bodies() -> void:
 	for b in _bodies:
 		var against := PackedStringArray()
 		for e in _bodies:
-			if e / bodies_per_side == b / bodies_per_side:
+			if _side_of_body(e) == _side_of_body(b):
 				continue
 			var engaged := _target_engage[b * _bodies + e] if _target_engage.size() >= _bodies * _bodies else 0
 			if engaged > 0:
@@ -1984,16 +2007,16 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 	# Each body's own leading edge, recomputed from where the living actually stand: the anchors
 	# are held against these next tick, so they have to come from the men, not from the slots.
 	var front := PackedFloat32Array()
-	front.resize(bodies_per_side * 2)
-	for b in bodies_per_side * 2:
-		front[b] = -9999.0 if b / bodies_per_side == 0 else 9999.0
+	front.resize(_bodies)
+	for b in _bodies:
+		front[b] = -9999.0 if _side_of_body(b) == 0 else 9999.0
 	# Living men per body, and how far each of them stands from his place in the line. The second
 	# number is the body's cohesion: a body whose men are on their places is a body, one whose men
 	# are strung out behind their slots is a crowd following an anchor.
 	var living_men := PackedInt32Array()
 	var slot_error := PackedFloat32Array()
-	living_men.resize(bodies_per_side * 2)
-	slot_error.resize(bodies_per_side * 2)
+	living_men.resize(_bodies)
+	slot_error.resize(_bodies)
 	var loop_started := Time.get_ticks_usec()
 	var focus_sum := Vector2.ZERO
 	var bars := 0
@@ -2005,8 +2028,7 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 		# the camera stays a pure viewport the player moves over it. The bars lift in picture space,
 		# so they stay level however the ground is turned.
 		var picture := _iso(position)
-		var band := mini(bodies_per_side - 1, (i % _per_side) / maxi(_per_body, 1))
-		var bi := (0 if i < _per_side else 1) * bodies_per_side + band
+		var bi := _man_body[i]
 		var target := target_raw[i * 4 + 0] if target_raw.size() >= i * 4 + 4 else -1
 		_targets[i] = target
 		instances[base + AT_ORIGIN_X] = picture.x
@@ -2034,7 +2056,7 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 					+ fwd * ((float(_man_rank[i]) - (ranks - 1.0) * 0.5) * spacing)
 				slot_error[bi] += position.distance_to(place)
 			focus_sum += position
-			if meta[i * 4 + 1] < 0.5:
+			if _side_of_body(bi) == 0:
 				colour = COLOR_PLAYER
 				alive_player += 1
 				front[bi] = maxf(front[bi], position.x)
@@ -2158,7 +2180,7 @@ func _build_outlines() -> void:
 		var line := Line2D.new()
 		line.width = 0.4
 		line.closed = true
-		line.default_color = COLOR_PLAYER if b / bodies_per_side == 0 else COLOR_ENEMY
+		line.default_color = COLOR_PLAYER if _side_of_body(b) == 0 else COLOR_ENEMY
 		line.z_index = -5
 		add_child(line)
 		_outlines.append(line)
@@ -2519,7 +2541,7 @@ func _forward_of(b: int) -> Vector2:
 
 ## Side 0 is the player's. The enemy answers to the scenario, not to the mouse.
 func _is_mine(b: int) -> bool:
-	return b >= 0 and b / bodies_per_side == 0
+	return b >= 0 and _side_of_body(b) == 0
 
 
 func _living_selection() -> Array[int]:
@@ -2990,7 +3012,7 @@ func _center_on_side(side: int) -> void:
 	var sum := Vector2.ZERO
 	var count := 0
 	for b in _bodies:
-		if b / bodies_per_side != side or _body_alive[b] <= 0:
+		if _side_of_body(b) != side or _body_alive[b] <= 0:
 			continue
 		sum += _anchor_of(b)
 		count += 1

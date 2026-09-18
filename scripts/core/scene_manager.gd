@@ -19,7 +19,7 @@ const SCENES := {
 	"main_menu": "res://scenes/ui/main_menu.tscn",
 	"world_map": "res://scenes/world/world_map.tscn",
 	"settlement": "res://scenes/settlements/settlement.tscn",
-	"battle": "res://scenes/battle/battle.tscn",
+	"battle": "res://scenes/battle/battle_field.tscn",
 	"battle_results": "res://scenes/battle/battle_results.tscn",
 }
 
