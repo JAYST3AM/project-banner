@@ -84,8 +84,8 @@ func _forge_biome(biomes: BiomeCatalog, biome_id: String) -> void:
 		var salt := 1000 + variant_index * 131
 		# How strong the variation inside the tile is: the coarser looks are given more of it, which
 		# is the "slightly rougher, longer-looking vegetation" idea rather than a new texture.
-		var contrast := [0.55, 0.8, 0.7, 1.0][variant_index % 4]
-		var speckle := [0.05, 0.16, 0.1, 0.22][variant_index % 4]
+		var contrast := float([0.55, 0.8, 0.7, 1.0][variant_index % 4])
+		var speckle := float([0.05, 0.16, 0.1, 0.22][variant_index % 4])
 		var tile := _fill_tile(base, palette, contrast, speckle, salt)
 		var sub_count := maxi(1, biomes.variant_art(biome_id, variant_index).size())
 		sub_count = maxi(sub_count, 4)
@@ -451,6 +451,8 @@ func _palette_of(biomes: BiomeCatalog, biome_id: String) -> PackedColorArray:
 func _write_png(image: Image, path: String) -> void:
 	if _report_only:
 		return
+	# Godot will not create a directory on the way to a file it writes, so the forge does.
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(path.get_base_dir()))
 	var error := image.save_png(ProjectSettings.globalize_path(path))
 	if error != OK:
 		push_error("ground forge: could not write %s (error %d)" % [path, error])

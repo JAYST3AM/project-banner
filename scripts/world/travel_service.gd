@@ -280,6 +280,15 @@ func clear_destination() -> void:
 ## Advance travel by [param game_hours]. Returns a small report dictionary:
 ## [code]{"moved": bool, "arrived": bool, "settlement_id": String,
 ## "distance_travelled": float}[/code]
+## The party walks a polyline. That is the whole model, and it is worth saying because everything that
+## made this hard - targets, arrival radii, snapping to waypoints, re-routing on identity - existed only
+## because routing was bolted onto a step that chased a single destination point, and the seams between
+## the two kept showing. The owner, correctly: "the travel on a road should not be this hard."
+##
+## route is a list of world points. A step spends a budget of distance walking along it by arc length:
+## find where the party is on the current segment, walk as far as the budget allows, and carry whatever
+## is left into the next segment. No snapping, no special cases, no radius except the one that ends the
+## journey at its true end.
 func step(game_hours: float) -> Dictionary:
 	var report := {
 		"moved": false,
@@ -289,64 +298,67 @@ func step(game_hours: float) -> Dictionary:
 	}
 	if state == null or game_hours <= 0.0 or not is_travelling():
 		return report
-	# The first step after a destination is set routes through the road network, once. After that the
-	# party walks the route's own points, so its line on the map is the line the map drew.
+
+	# A new destination routes, once. Keyed on identity so every order works rather than only the first.
 	var wanted := destination()
 	if wanted != null and str(wanted.id) != _route_target:
-		# A new destination, or the first: route it now. Re-routing on *identity*, not on emptiness,
-		# is what makes every order work rather than only the first.
 		_route_target = str(wanted.id)
 		route = PackedVector2Array()
 		route_leg = 0
 		build_route(wanted)
-	if route.size() >= 2:
-		while route_leg < route.size() - 1 and state.world_position.distance_to(route[route_leg + 1]) < 2.0:
-			route_leg += 1
+
+	if route.size() < 2:
+		# No route - marching to open ground, or a destination with no road between: a straight walk.
+		return _step_straight(game_hours, report)
+
+	# Never more than a step's worth of distance, however much game time the step was handed.
+	var budget := minf(speed_units_per_game_hour() * game_hours, config.get_float("travel.max_step_units", 24.0))
+	var spent := 0.0
+	var leg := route_leg
+	while budget > 0.0 and leg < route.size() - 1:
+		var a := route[leg]
+		var b := route[leg + 1]
+		var seg := b - a
+		var seg_len := seg.length()
+		if seg_len < 0.0001:
+			leg += 1
+			continue
+		var t := clampf((state.world_position - a).dot(seg) / (seg_len * seg_len), 0.0, 1.0)
+		var to_end := (1.0 - t) * seg_len
+		if budget >= to_end:
+			state.world_position = b
+			budget -= to_end
+			spent += to_end
+			leg += 1
+		else:
+			state.world_position = a.lerp(b, t) + seg.normalized() * budget
+			spent += budget
+			budget = 0.0
+	route_leg = leg
+	report["moved"] = true
+	report["distance_travelled"] = spent
+
+	# Arriving is reaching the end of the route, and only that.
+	if leg >= route.size() - 1 and state.world_position.distance_to(route[route.size() - 1]) <= arrival_radius():
+		_finish_travel(report)
+	return report
+
+
+## A straight walk to the destination, for journeys with no road under them.
+func _step_straight(game_hours: float, report: Dictionary) -> Dictionary:
 	var target := destination_position()
-	if route.size() >= 2 and route_leg < route.size() - 1:
-		target = route[route_leg + 1]
 	var to_target := target - state.world_position
 	var distance := to_target.length()
-	var radius := arrival_radius()
-	# Reaching the *end of the route* is arriving. Reaching a waypoint on the way is not - and until
-	# this distinction existed, step() called _finish_travel() at the first bend it passed, so the
-	# party stopped in the middle of a road. The owner: "pathing has gotten weird it stops now."
-	var final_leg := route.size() < 2 or route_leg >= route.size() - 1
-
-	if distance <= radius:
-		if final_leg:
-			_finish_travel(report)
-			return report
-		# Step onto the waypoint and carry on: the journey is not over.
-		route_leg += 1
-		report["moved"] = true
-		report["distance_travelled"] = distance
+	if distance <= arrival_radius():
+		_finish_travel(report)
 		return report
-
-	# Cap one step's travel. The first step after an order can carry a long block of accumulated game
-	# time and fling the party most of the way to its destination in a single tick - the owner: "first
-	# movement command for some reason it is quick af". A step is a step, however much time it owes.
 	var travel := minf(speed_units_per_game_hour() * game_hours, config.get_float("travel.max_step_units", 24.0))
-	# Never overshoot a waypoint to reach the next one: the party moves toward the point immediately
-	# ahead and no further, which is what keeps it on the curve instead of cutting the corner. The
-	# owner: "like the curvature and everything needs to be followed."
-	if not final_leg and travel >= distance:
-		state.world_position = target
-		route_leg += 1
-		report["moved"] = true
-		report["distance_travelled"] = distance
-		return report
-	if distance - travel <= radius:
+	if travel >= distance:
 		state.world_position = target
 		report["distance_travelled"] = distance
-		if final_leg:
-			# Close enough to finish this step exactly on the destination.
+		if destination() != null:
 			_finish_travel(report)
-			return report
-		route_leg += 1
-		report["moved"] = true
 		return report
-
 	state.world_position += to_target.normalized() * travel
 	report["moved"] = true
 	report["distance_travelled"] = travel
