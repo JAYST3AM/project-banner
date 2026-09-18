@@ -23,6 +23,10 @@ var _speed_before_dialog: int = CampaignClock.Speed.NORMAL
 
 var _panning := false
 var _hud_timer := 0.0
+## The Esc menu. Owned here rather than by the HUD, because what it offers - saving, leaving the
+## campaign - is the world's business, and because it has to work while the world is stopped.
+var _pause: PauseMenu = null
+var _pause_layer: CanvasLayer = null
 var _debug_timer := 0.0
 
 
@@ -54,6 +58,7 @@ func _ready() -> void:
 	_hud.enter_settlement_requested.connect(_on_enter_settlement)
 	_hud.save_requested.connect(_on_save_requested)
 	_hud.menu_requested.connect(_on_menu_requested)
+	_build_pause_menu()
 
 	_dialog = EncounterDialog.new()
 	_hud.add_child(_dialog)
@@ -276,6 +281,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _state == null:
 		return
 
+	# Esc opens the menu. Closing is the menu's own business: while it is open the tree is paused,
+	# and a paused screen does not receive input at all - so the menu, which is set to keep running,
+	# hears the second Esc itself.
+	if event.is_action_pressed("ui_cancel") and _pause != null and not _pause.is_open():
+		_pause.open()
+		get_viewport().set_input_as_handled()
+		return
+
 	if event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
 		if button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -419,11 +432,34 @@ func _on_enter_settlement(settlement_id: String) -> void:
 	SceneManager.change_scene(SETTLEMENT_SCENE_KEY, {"settlement_id": settlement_id})
 
 
+## Built here rather than in the scene file, on its own canvas layer above the HUD: a Control added
+## as a plain child would draw underneath the HUD's own layer and the menu would come up behind the
+## panels it is supposed to cover.
+func _build_pause_menu() -> void:
+	_pause_layer = CanvasLayer.new()
+	_pause_layer.layer = 40
+	add_child(_pause_layer)
+	_pause = PauseMenu.new()
+	_pause_layer.add_child(_pause)
+	_pause.save_requested.connect(_on_save_requested)
+	_pause.menu_requested.connect(_on_menu_requested)
+	_pause.quit_requested.connect(_on_quit_requested)
+
+
+func _on_quit_requested() -> void:
+	DebugLogger.info("quit requested from the pause menu", "WorldMap")
+	get_tree().quit()
+
+
 func _on_save_requested() -> void:
-	if GameManager.save_campaign():
+	var saved := GameManager.save_campaign()
+	if saved:
 		_hud.set_hint("Campaign saved.")
 	else:
 		_hud.set_hint("Save failed - see the log.")
+	# The HUD's line is behind the menu when the menu is what asked, so the menu says it too.
+	if _pause != null and _pause.is_open():
+		_pause.set_status("Campaign saved." if saved else "Save failed - see the log.")
 
 
 func _on_menu_requested() -> void:
