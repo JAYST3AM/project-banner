@@ -3,15 +3,19 @@
 Everything talked through and not yet done, shortest honest form. The detail lives in
 `TERRAIN.md` and `WORLD_GENERATION.md`; this is the single list to read instead of both.
 
-## Waiting on the owner
+## Where his answers landed
 
-- **The 30 Hz contact fix** - the solver's step cap does not scale with the clock, so contact loosens
-  at thirty. One line; offered, not taken.
-- **Individual-soldier targeting** - unit-level attack orders already work. Aiming at one man in a
-  formation is a new feature and his pick.
-- **The next biome's art** - plains is in and meshing; the second biome is what a real blend needs.
-- **What two off-screen armies do when they meet** - resolved at observation, or invented by the
-  catch-up. His call.
+- **The 30 Hz contact fix - done.** It was not the step cap, though that is scaled too now: it is how
+  often neighbours are re-measured, so the settle rounds scale with the clock. At thirty ticks the
+  collision proof went from 1,578 pair-ticks below the separation floor to **16** - tighter than the
+  64 it read at sixty.
+- **Two off-screen armies meeting - invented by the catch-up**, not left for an observer.
+- **The order of the world - agreed** (below).
+- **Messengers and staff - agreed.**
+- **Focus: the campaign.** The battle UI is to be worked on later, at his word.
+- **Still his to decide:** individual-soldier targeting (explained, unanswered), and the next biome's
+  art - recommended: **woodland floor**, because it is the largest contrast to plains in both colour
+  and texture, which is exactly what makes a blend worth looking at.
 
 ## The world, in the order it wants building
 

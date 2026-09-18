@@ -42,6 +42,12 @@ const WALK := 6.0
 ## The most a soldier may be pushed by the separation in one tick. It has to be able to beat
 ## the step he was walking: a collision that loses to a walk is a soldier walking through his
 ## neighbour, which is exactly what it looked like before this was raised.
+## The furthest a body may be pushed in one tick, in world units. It is a *per-tick* limit, which is
+## why it is scaled by the clock where it is handed to the shader: at a slower tick a longer time
+## passes between corrections, so the cap has to travel further. Set for sixty ticks a second, which
+## is why the arithmetic below leaves it untouched at that rate and doubles it at thirty. Without
+## this, contact loosened at thirty ticks - 1,578 pair-ticks below the separation floor against 64
+## at sixty - because a body could not be pushed out of another's space in the time one tick allows.
 const MAX_PUSH := 0.6
 ## The agreed physical minimum between two enemies, in world units: the separation distance
 ## with a five per cent tolerance. The proof run records the closest enemy gap on every tick
@@ -146,6 +152,15 @@ const SLOT_CAPACITY := 64
 ## Rounds re-measure against where everyone now stands, which is how the reference resolves
 ## overlaps. Three clears the front with room to spare; the cost is one extra neighbour pass each.
 const SETTLE_ROUNDS := 3
+
+
+## The settle rounds this clock needs. Three were tuned at sixty ticks a second; at a slower tick a
+## body crosses twice the ground between one chance to correct and the next, so the same number of
+## rounds leaves overlaps standing. Measured at thirty ticks: 1,578 pair-ticks below the separation
+## floor against 64 at sixty - and scaling the step cap did not move it (1,720), which is what proved
+## the constraint is how often neighbours are re-measured, not how far one body may be pushed.
+func settle_rounds() -> int:
+	return SETTLE_ROUNDS * maxi(1, roundi(60.0 / maxf(1.0, tick_hz)))
 ## How often cohesion is measured, in ticks. The slot arithmetic it needs costs 6.5 ms of the
 ## pack at 20,000 soldiers; nothing in the simulation reads the number, so a quarter of the rate
 ## is five samples a second for a fifth of the cost. What it is NOT is a cheaper estimate: the
@@ -1279,7 +1294,7 @@ func _run_tick() -> void:
 		rd.compute_list_set_push_constant(cl, _push_constant(mode), 16)
 		rd.compute_list_dispatch(cl, groups_clear if mode == 0 else groups_agents, 1, 1)
 		rd.compute_list_add_barrier(cl)
-	for round in SETTLE_ROUNDS:
+	for round in settle_rounds():
 		for mode in [4, 5]:
 			rd.compute_list_bind_compute_pipeline(cl, pipeline)
 			rd.compute_list_bind_uniform_set(cl, uniform_set, 0)
@@ -2232,7 +2247,7 @@ func _save_shot(index: int) -> void:
 func _params() -> PackedFloat32Array:
 	return PackedFloat32Array([
 		float(agents), float(grid.x), float(grid.y), LG_CELL, SEPARATION,
-		DT, field.x, field.y, WALK, REACH, BLOW, MAX_PUSH, MIN_ENEMY_GAP,
+		DT, field.x, field.y, WALK, REACH, BLOW, MAX_PUSH * (60.0 / maxf(1.0, tick_hz)), MIN_ENEMY_GAP,
 		float(_tick), float(maxi(1, target_cadence)), target_retention,
 		target_switch_advantage, 0.0 if target_legacy else 1.0, target_search_radius,
 		1.0 if target_immediate else 0.0,

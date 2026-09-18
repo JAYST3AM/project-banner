@@ -105,9 +105,10 @@ the shape the lazy catch-up needs. An extension of that path, not a rewrite.
 
 ## Open
 
-1. Whether the coarse catch-up may **invent** outcomes (a battle between two off-screen armies), or
-   whether such things resolve the moment they are next observed. The owner is happy with the
-   approach; the sub-rule is his to make.
+1. ~~Whether the coarse catch-up may invent outcomes.~~ **Decided: it may invent them.** Two
+   off-screen armies that meet are resolved by the catch-up, not left waiting for an observer. The
+   bar stays the one above - believable, not pure - so an invented result has to be one a player
+   would have accepted had they watched it.
 2. Chunk size - and therefore what a "region" is for simulation purposes.
 3. How the player's own region is defined while travelling: a radius, or the region they stand in.
 4. When messengers arrive, and what they cost.
