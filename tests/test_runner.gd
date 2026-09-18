@@ -24,6 +24,10 @@ const PASS := "pass"
 const FAIL := "fail"
 const BROKEN := "broken"
 
+## No suite legitimately takes this long - every one of them finishes in a couple of seconds - so a
+## suite still going when this expires is stuck, not slow.
+const SUITE_DEADLINE_S := 90
+
 const SUITES: Array[String] = [
 	"res://tests/test_core_services.gd",
 	"res://tests/test_campaign_flow.gd",
@@ -60,6 +64,8 @@ var _checks: int = 0
 var _suites_reported: int = 0
 var _suites_expected: int = 0
 var _suites_broken: int = 0
+## True while the current suite is inside its deadline; the watchdog checks it before firing.
+var _deadline_armed: bool = false
 
 
 func _ready() -> void:
@@ -141,6 +147,17 @@ func _run_all() -> void:
 		print("  !! %d of %d suites never reported a result" % [missing, _suites_expected])
 
 
+## The watchdog fired: say which suite, say what it means, and end the process with a code that is
+## not a pass. Rerunning the named suite alone will show it green, which is the signature of state
+## left behind by whatever ran before it.
+func _on_suite_deadline(suite_name: String) -> void:
+	print("")
+	print("  !! suite '%s' is stuck: still running after %d seconds" % [suite_name, SUITE_DEADLINE_S])
+	print("  !! it passes alone, if it passes alone, so look at what the suites before it leave behind")
+	print("  !! ending the run here rather than pretending it was slow")
+	get_tree().quit(2)
+
+
 func _suite_names() -> Array[String]:
 	var names: Array[String] = []
 	for path in SUITES:
@@ -168,7 +185,18 @@ func evaluate(path: String) -> Dictionary:
 	suite.runner = self
 	suite.suite_name = path.get_file().get_basename()
 
+	# A watchdog, because a hung suite cannot be interrupted: GDScript has no way to cancel a
+	# coroutine awaiting something that will never arrive. What it can do is refuse to hang the whole
+	# run in silence. A suite that stalls now costs a named result in ninety seconds, instead of
+	# fifteen minutes of nothing and a report that says only "three suites started".
+	_deadline_armed = true
+	var suite_name := suite.suite_name
+	var watchdog := get_tree().create_timer(float(SUITE_DEADLINE_S))
+	watchdog.timeout.connect(func() -> void:
+		if _deadline_armed:
+			_on_suite_deadline(suite_name))
 	await suite.run()
+	_deadline_armed = false
 
 	# Order matters. A suite that aborted mid-run still carries whatever assertions
 	# it got through, and those all passed - checking failure count first would call
