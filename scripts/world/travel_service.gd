@@ -159,6 +159,43 @@ func is_within_settlement(settlement: Settlement) -> bool:
 ## path by hops is found instantly and, because roads are faster, the fewest-road route is usually the
 ## quickest one too.
 ## The closest settlement to where the party stands, for joining the road network from open country.
+## What a route costs in game hours: every leg at the speed the ground gives it. Road legs carry the
+## road bonus because being on a road is exactly what the ground check reports; everything else is
+## sampled from the field at the leg's midpoint, so a marsh costs more than open country and a route
+## through one is priced accordingly.
+func _hours_for(points: PackedVector2Array, along_roads: bool) -> float:
+	var hours := 0.0
+	var base := maxf(1.0, speed_units_per_game_hour())
+	for i in points.size() - 1:
+		var a := points[i]
+		var b := points[i + 1]
+		var span := a.distance_to(b)
+		if span <= 0.001:
+			continue
+		var factor := _ground_factor_at(a.lerp(b, 0.5))
+		if along_roads:
+			# The road bonus belongs to the road route and nowhere else - without this the road was
+			# priced as if it were open country and the straight line won every comparison.
+			factor = maxf(factor, config.get_float("travel.road_speed_bonus", 1.4))
+		hours += span / (base * maxf(0.05, factor))
+	return hours
+
+
+## The ground's factor at a point, without disturbing the party's own reading of where it stands.
+func _ground_factor_at(point: Vector2) -> float:
+	if _world == null:
+		_world = WorldChunks.build(state.campaign_seed)
+	var here: Dictionary = _world.sample(point)
+	var height := float(here.get("height", 0.5))
+	var wear := float(here.get("wear", 0.0))
+	var moisture := float(here.get("moisture", 0.5))
+	if height < config.get_float("travel.water_height", 0.335):
+		return config.get_float("travel.water_speed_factor", 0.30)
+	if height < config.get_float("travel.marsh_height", 0.375):
+		return config.get_float("travel.marsh_speed_factor", 0.55)
+	return 1.1 if wear > 0.5 else (0.9 if moisture > 0.6 else 1.0)
+
+
 func nearest_settlement() -> Settlement:
 	var best: Settlement = null
 	var best_distance := INF
@@ -223,7 +260,20 @@ func build_route(to: Settlement) -> void:
 			points.append(point)
 		previous = node
 	points.append(to.position)
-	route = points
+
+	# Both ways are now costed, and the cheaper one wins. A road is faster per unit, not always shorter:
+	# a road that loops half the map to save forty per cent of your speed is a worse journey than walking
+	# straight, and the owner's point exactly - "the player ignores going over terrain all together, even
+	# when it makes sense to follow the terrain instead of the road."
+	var direct := PackedVector2Array([state.world_position, to.position])
+	var road_hours := _hours_for(points, true)
+	var direct_hours := _hours_for(direct, false)
+	if direct_hours < road_hours:
+		route = direct
+		print("travel: straight over the land, %.1f h against %.1f by road" % [direct_hours, road_hours])
+	else:
+		route = points
+		print("travel: along the roads, %.1f h against %.1f straight" % [road_hours, direct_hours])
 
 
 func set_destination(settlement_id: String) -> bool:

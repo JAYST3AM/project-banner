@@ -34,6 +34,8 @@ var _clock: BattleClock = null
 ## Dev-only: the transitions of a long battle, written down. Null unless the run asked for a
 ## journal with --battlelog. See [BattleJournal].
 var _journal: BattleJournal = null
+## The marks the fight leaves on the ground. Event-driven and pooled, never per-soldier.
+var _decals: BattlefieldDecals = null
 ## The enemy's commander. Formation-level thinking, kept out of the simulator.
 var _ai: BattleAI = null
 var _formations_built := 0
@@ -83,6 +85,13 @@ func _ready() -> void:
 	# the same field every time it is replayed. It is built before the armies are formed
 	# because where the armies end up standing is a question about the ground.
 	_simulator.set_terrain_from_context(_context, _config)
+	# The ground the fight is about to be fought on, and the marks it is about to be given. The pool
+	# is sized from the ground rather than from the army: a bigger battlefield holds more marks, and
+	# a long battle on a small one fills the pool and starts merging instead of growing.
+	_decals = BattlefieldDecals.create(
+		int(_config.get_float("battle.decal_capacity", 2048.0)),
+		BattleSetup.field_size(_config))
+	_view.decals = _decals
 	var formations := BattleSetup.assign_default_formations(_simulator, _config)
 	_ai = BattleAI.create(_config)
 	_view.bind(_simulator, _context)
@@ -379,6 +388,7 @@ func _process(delta: float) -> void:
 			_ai.update(_simulator, _clock.step)
 			var events := _simulator.step(_clock.step)
 			_view.add_events(events)
+			_paint_ground_marks(events)
 			if _journal != null:
 				_journal.observe(_simulator)
 		# The army's instance buffers are rebuilt where the data changed - on a tick - and
@@ -512,11 +522,38 @@ func _handle_key(event: InputEventKey) -> void:
 			_view.show_terrain = not _view.show_terrain
 			_hint.text = "Ground rendering %s." % ("on" if _view.show_terrain else "off")
 			_view.queue_redraw()
+		KEY_T:
+			# The terrain's own channels, drawn over the ground: the picture the generator's numbers
+			# make. Development only - nothing about the battle changes with it.
+			_view.terrain_debug_mode = TerrainOverlay.next_mode(_view.terrain_debug_mode)
+			_hint.text = "Terrain: %s. %s" % [
+				TerrainOverlay.label(_view.terrain_debug_mode),
+				TerrainOverlay.legend(_simulator.terrain, _view.terrain_debug_mode)]
+			_view.queue_redraw()
 		_:
 			return
 
 
 ## ---------- formation orders ---------------------------------------------
+
+## Every mark the battle paints on the ground, painted where the fighting happened.
+##
+## Event-driven and bounded: a hit paints blood, a death paints more of it, and the pool merges
+## everything that lands on top of what is already there. Nothing here walks the army or the field, so
+## the cost is one record per blow rather than one per soldier per tick. See [BattlefieldDecals].
+func _paint_ground_marks(events: Array[Dictionary]) -> void:
+	if _decals == null or events.is_empty():
+		return
+	var tick := _simulator.tick_index
+	for event in events:
+		var kind := str(event.get("type", ""))
+		var position: Vector2 = DataUtils.vec2_from(event.get("position", [0.0, 0.0]))
+		if kind == "death":
+			BattlefieldDecals.paint_death(_decals, position, tick)
+		elif kind == "hit":
+			BattlefieldDecals.paint_hit(_decals, position, tick, float(event.get("damage", 1.0)))
+	_view.queue_redraw()
+
 
 ## Every selected soldier still on their feet.
 func _living_selection() -> Array[int]:

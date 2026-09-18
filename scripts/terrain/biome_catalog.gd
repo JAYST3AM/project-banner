@@ -22,6 +22,9 @@ var biomes: Dictionary = {}
 var order: Array[String] = []
 ## The shared prop table: a tree is a tree in any biome, and a biome tunes its density.
 var prop_kinds: Dictionary = {}
+## The shared looks for ground whose *type* has one: water, rock, mud. Not per biome - a river is a
+## river - and empty when nobody has drawn one yet, which the renderer falls back from.
+var type_looks: Dictionary = {}
 var load_errors: Array[String] = []
 
 
@@ -35,8 +38,19 @@ func _read(path: String) -> void:
 	biomes.clear()
 	order.clear()
 	prop_kinds.clear()
+	type_looks.clear()
 	load_errors.clear()
 	var data := GameData.load_json(path)
+	for raw in data.get("type_looks", []) as Array:
+		if typeof(raw) != TYPE_DICTIONARY:
+			load_errors.append("type look entry is not an object")
+			continue
+		var look := raw as Dictionary
+		var look_id := str(look.get("id", ""))
+		if look_id.is_empty():
+			load_errors.append("type look has no id")
+			continue
+		type_looks[look_id] = look
 	for raw in data.get("prop_kinds", []) as Array:
 		if typeof(raw) != TYPE_DICTIONARY:
 			load_errors.append("prop kind entry is not an object")
@@ -242,6 +256,12 @@ func props(id: String) -> Array:
 ## The shared definition of a prop kind: art, size, and what it does to a battle.
 func prop_kind(kind_id: String) -> Dictionary:
 	var record: Variant = prop_kinds.get(kind_id, null)
+	return record as Dictionary if typeof(record) == TYPE_DICTIONARY else {}
+
+
+## The shared look for a type that needs one: water, rock, mud.
+func type_look(type_id: String) -> Dictionary:
+	var record: Variant = type_looks.get(type_id, null)
 	return record as Dictionary if typeof(record) == TYPE_DICTIONARY else {}
 
 
