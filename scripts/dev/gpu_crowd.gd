@@ -181,8 +181,12 @@ var _advanced := false
 ## the frame rate is doing. `--ticks-per-frame=N` overrides it with a fixed number of ticks
 ## per rendered frame, which is the stress setting, not the game's.
 var ticks_per_frame := 0
-## The battle's clock, in ticks a second: the same fixed step the game's own battles use.
-var tick_hz := 20.0
+## The battle clock, in ticks a second, when `--ticks-per-frame` is not overriding it. The owner's
+## call, made after measuring: 60 costs 0.4 M soldier-ticks a second at 6,000 soldiers and holds the
+## frame rate at 730, where 144 took the repack to a whole core. The reference game's own step is
+## 20 Hz and stays 20 Hz - that is a gameplay decision in the reference, not a rendering one, and
+## this scene uses 60 because it is a look-and-feel test bed, not the campaign's clock.
+var tick_hz := 60.0
 var _tick_accumulator := 0.0
 var readback_every := 1
 var max_fps := 0
@@ -196,6 +200,193 @@ var out_dir := "F:/VSC Projects/pb-bench/gpu_crowd"
 ## visible and a six-thousand-man army is a dot matrix, which is not what a battle looks
 ## like. The camera follows the fighting once it starts.
 var zoom_factor := 2.5
+
+# ---- The view: an isometric camera, Total War fashion -------------------------------------------
+#
+# The projection is view-only. The simulation lives in the flat x/y plane and never learns about
+# any of this: positions are turned about the field's middle and laid down as 2:1 diamonds for the
+# picture, and the ground sprite is given the same transform so the two cannot disagree.
+const PITCH_MIN := 0.15
+const PITCH_MAX := 1.0
+const PAN_SPEED := 260.0
+const ZOOM_MIN := 0.4
+const ZOOM_MAX := 8.0
+const ZOOM_STEP := 1.14
+const TILT_STEP := 0.02
+const YAW_DRAG := 0.006
+var yaw := 0.0
+var squash := 0.5
+## The flat, top-down view this scene started with, kept because a comparison shot is evidence.
+var flat_view := false
+var _camera_zoom := 1.0
+var _zoom_target := 1.0
+var _follow_action := true
+var _rotating := false
+var _panning := false
+var _last_mouse := Vector2.ZERO
+const TILT_DRAG := 0.004
+var _view_root: Node2D = null
+## A world point a scripted camera should look at (`--cam-at=x,y`), or INF for none.
+var cam_at := Vector2(INF, INF)
+
+
+## A world point's offset from the field's middle, in the picture: turned by the view's orbit, then
+## laid down as 2:1 diamonds. Everything drawn standing *on* the ground uses this, and the field's
+## middle is the picture's origin - the camera is what moves over it, which is why nothing here
+## needs to know where the camera is. (It did, in the first version of this, and panning cancelled
+## itself out on screen: the offset was measured from the camera and the camera was drawn at the
+## offset. The field's middle is a fixed thing; the camera is not.)
+func _iso(point: Vector2) -> Vector2:
+	var q := point - field * 0.5
+	if flat_view:
+		return q
+	var angle := -yaw
+	var turned := Vector2(q.x * cos(angle) - q.y * sin(angle), q.x * sin(angle) + q.y * cos(angle))
+	return Vector2(turned.x - turned.y, (turned.x + turned.y) * squash)
+
+
+## A viewport position back into the flat world - for the wheel's zoom-at-the-cursor, and for
+## anything that later wants to click a soldier. The exact inverse of _iso, in the same order.
+func _uniso(screen: Vector2) -> Vector2:
+	var zoom := _picture_scale()
+	var view_centre := Vector2(get_viewport().get_visible_rect().size) * 0.5
+	var s := (screen - view_centre) / maxf(zoom, 0.0001) + _camera.position
+	if flat_view:
+		return s + field * 0.5
+	var flat := Vector2((s.x + s.y / squash) * 0.5, (s.y / squash - s.x) * 0.5)
+	var angle := yaw
+	var back := Vector2(flat.x * cos(angle) - flat.y * sin(angle), flat.x * sin(angle) + flat.y * cos(angle))
+	return back + field * 0.5
+
+
+## How many screen pixels one unit of picture space is worth at the current zoom.
+func _picture_scale() -> float:
+	var window := Vector2(get_viewport().get_visible_rect().size)
+	var fit := minf(window.x / (field.x + 8.0), window.y / (field.y + 8.0))
+	return fit * _camera_zoom * zoom_factor
+
+
+## The same projection as an affine transform, for the one thing that cannot be repositioned point
+## by point: the ground sprite. World space in, picture space out (origin at the field's middle).
+func _view_transform() -> Transform2D:
+	if flat_view:
+		return Transform2D(0.0, -field * 0.5)
+	var basis := Transform2D(Vector2(1.0, squash), Vector2(-1.0, squash), Vector2.ZERO)
+	var spin := Transform2D(-yaw, Vector2.ZERO)
+	var combined := basis * spin
+	var centre := field * 0.5
+	return Transform2D(combined.x, combined.y, -(combined * centre))
+
+
+## The camera, once a frame. Panning is in *view* directions - W is up the screen, not up the field -
+## which is what the games this is modelled on do, and the only thing that stays sane once the map
+## can be turned. Zoom is smoothed so a wheel notch is a movement rather than a jump, and the
+## fighting is followed until the player takes the view in hand.
+func _update_camera(delta: float) -> void:
+	if _camera == null:
+		return
+	var pan := Vector2.ZERO
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		pan.x -= 1.0
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		pan.x += 1.0
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		pan.y -= 1.0
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		pan.y += 1.0
+	if pan != Vector2.ZERO:
+		_follow_action = false
+		_camera.position += pan.normalized() * (PAN_SPEED * delta / maxf(_camera_zoom, 0.05))
+	if _follow_action:
+		_camera.position = _camera.position.lerp(_iso(_focus), clampf(delta * 2.0, 0.0, 1.0))
+	_camera_zoom = lerpf(_camera_zoom, _zoom_target, clampf(delta * 12.0, 0.0, 1.0))
+	_camera.zoom = Vector2.ONE * _picture_scale()
+	if _view_root != null:
+		_view_root.transform = _view_transform()
+
+
+## Zoom toward the cursor: the ground under the pointer stays under the pointer. That is the gesture
+## every strategy game has, and the reason _uniso exists at all. The correction is solved for the
+## zoom the player is going to end up at, not the one they are passing through.
+func _zoom_at(screen: Vector2, factor: float) -> void:
+	var wanted := clampf(_zoom_target * factor, ZOOM_MIN, ZOOM_MAX)
+	if is_equal_approx(wanted, _zoom_target):
+		return
+	var anchor := _uniso(screen)
+	var old_scale := _picture_scale()
+	_zoom_target = wanted
+	var new_scale := _picture_scale() * (wanted / maxf(_camera_zoom, 0.0001))
+	var here := _iso(anchor)
+	_camera.position = here - (here - _camera.position) * (old_scale / maxf(new_scale, 0.0001))
+
+
+## Tilt the ground: how much of its depth is laid into the screen's vertical. 0.5 is 2:1 diamonds,
+## 1.0 is looking straight down, and 0.15 is looking across it nearly at eye level.
+func _tilt(delta: float) -> void:
+	squash = clampf(squash + delta, PITCH_MIN, PITCH_MAX)
+
+
+## The controls, deliberately the ones the genre has taught everyone: the wheel zooms at the cursor,
+## the middle button turns the map, Q and E snap a quarter turn, the brackets tilt it, and F frames
+## the field again (which also hands the camera back to the fighting).
+func _unhandled_input(event: InputEvent) -> void:
+	if _camera == null:
+		return
+	if event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.pressed:
+			match button.button_index:
+				MOUSE_BUTTON_WHEEL_UP:
+					_zoom_at(button.position, ZOOM_STEP)
+				MOUSE_BUTTON_WHEEL_DOWN:
+					_zoom_at(button.position, 1.0 / ZOOM_STEP)
+				MOUSE_BUTTON_RIGHT:
+					# The orbit: drag right or left to swing the map around its middle, drag up or
+					# down to tilt it. One button for both axes is what "orbit" means, and the
+					# right button is where every game of this kind puts it.
+					_rotating = true
+					_last_mouse = button.position
+				MOUSE_BUTTON_MIDDLE:
+					# The other half of the convention: middle drags the ground itself.
+					_panning = true
+					_last_mouse = button.position
+		else:
+			match button.button_index:
+				MOUSE_BUTTON_RIGHT:
+					_rotating = false
+				MOUSE_BUTTON_MIDDLE:
+					_panning = false
+	elif event is InputEventMouseMotion and _rotating:
+		var motion := event as InputEventMouseMotion
+		yaw = wrapf(yaw + motion.relative.x * YAW_DRAG, -PI, PI)
+		# Up on the screen is further from the ground: drag up to look down on it, drag down to look
+		# across it towards the horizon.
+		_tilt(motion.relative.y * TILT_DRAG)
+		_last_mouse = motion.position
+	elif event is InputEventMouseMotion and _panning:
+		var motion := event as InputEventMouseMotion
+		_follow_action = false
+		_camera.position -= motion.relative / maxf(_picture_scale(), 0.0001)
+		_last_mouse = motion.position
+	elif event is InputEventKey and (event as InputEventKey).pressed and not (event as InputEventKey).echo:
+		match (event as InputEventKey).keycode:
+			KEY_Q:
+				yaw = wrapf(yaw + PI * 0.25, -PI, PI)
+			KEY_E:
+				yaw = wrapf(yaw - PI * 0.25, -PI, PI)
+			KEY_BRACKETLEFT:
+				_tilt(-TILT_STEP * 3.0)
+			KEY_BRACKETRIGHT:
+				_tilt(TILT_STEP * 3.0)
+			KEY_F:
+				_follow_action = true
+				_zoom_target = 1.0
+				_camera.position = _iso(_focus)
+			KEY_SPACE:
+				_follow_action = not _follow_action
+			KEY_I:
+				flat_view = not flat_view
+				print("gpu crowd: view | %s" % ("flat, looking straight down" if flat_view else "isometric"))
 
 var rd: RenderingDevice
 var shader: RID
@@ -413,6 +604,21 @@ func _parse_args() -> void:
 			advance_by = float(arg.substr(13))
 		elif arg.begins_with("--checksum-every="):
 			checksum_every = maxi(0, int(arg.substr(17)))
+		elif arg.begins_with("--yaw-deg="):
+			yaw = deg_to_rad(float(arg.substr(10)))
+		elif arg.begins_with("--pitch="):
+			squash = clampf(float(arg.substr(8)), PITCH_MIN, PITCH_MAX)
+		elif arg.begins_with("--cam-zoom="):
+			_zoom_target = clampf(float(arg.substr(11)), ZOOM_MIN, ZOOM_MAX)
+		elif arg.begins_with("--cam-at="):
+			# A world point to look at, applied once the camera exists; a scripted camera also
+			# takes the view out of the fighting's hands, because a test that drifts is not a test.
+			var parts := arg.substr(9).split(",")
+			if parts.size() == 2:
+				cam_at = Vector2(float(parts[0]), float(parts[1]))
+				_follow_action = false
+		elif arg == "--top-down":
+			flat_view = true
 		elif arg == "--no-bars":
 			draw_bars = false
 		elif arg.begins_with("--readback-every="):
@@ -504,6 +710,15 @@ func _build() -> void:
 	_build_ground()
 	_build_view()
 	_build_hud()
+	if cam_at != Vector2(INF, INF):
+		# A scripted camera looks at a world point named in world terms; the camera lives in
+		# picture space, so this is where the two are married.
+		_camera.position = _iso(cam_at)
+		print("gpu crowd: view | scripted camera at world (%.0f, %.0f), yaw %.0f deg, pitch %.2f, zoom %.2f" % [
+			cam_at.x, cam_at.y, rad_to_deg(yaw), squash, _zoom_target])
+	else:
+		print("gpu crowd: view | %s, yaw %.0f deg, pitch %.2f (right-drag orbits, wheel zooms at the cursor, middle-drag pans, WASD pans, Q/E quarter turn, [ ] tilts, F frames, I toggles flat)" % [
+			"flat" if flat_view else "isometric", rad_to_deg(yaw), squash])
 	print("gpu crowd: %d soldiers, %d a side | grid %dx%d (cell %.1f) | field %.0fx%.0f | reach %.1f | blow %.2f/attacker | targeting %s (cadence %d, retention %.0f)" % [
 		agents, agents / 2, grid.x, grid.y, LG_CELL, field.x, field.y, REACH, BLOW,
 		"legacy" if target_legacy else "acquire/keep/release", target_cadence, target_retention])
@@ -969,8 +1184,7 @@ func _process(delta: float) -> void:
 			_report_bodies()
 		_frame_delta = 0.0
 		_frames = 0
-	if _camera != null:
-		_camera.position = _camera.position.lerp(_focus, 0.08)
+	_update_camera(delta)
 	if _shot_taken == 0 and _elapsed > shot_at:
 		_shot_taken = 1
 		_save_shot(_shot_taken)
@@ -1547,12 +1761,17 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 	for i in agents:
 		var base := i * STRIDE
 		var position := Vector2(source[i * 4 + 0], source[i * 4 + 1])
+		# Where he stands in the world, and where that lands in the picture. The simulation only
+		# ever hears about the first; the view is the second, measured from the field's middle, so
+		# the camera stays a pure viewport the player moves over it. The bars lift in picture space,
+		# so they stay level however the ground is turned.
+		var picture := _iso(position)
 		var band := mini(BODIES_PER_SIDE - 1, (i % _per_side) / maxi(_per_body, 1))
 		var bi := (0 if i < _per_side else 1) * BODIES_PER_SIDE + band
 		var target := target_raw[i * 4 + 0] if target_raw.size() >= i * 4 + 4 else -1
 		_targets[i] = target
-		instances[base + AT_ORIGIN_X] = position.x
-		instances[base + AT_ORIGIN_Y] = position.y
+		instances[base + AT_ORIGIN_X] = picture.x
+		instances[base + AT_ORIGIN_Y] = picture.y
 		var colour := COLOR_FALLEN
 		if meta[i * 4 + 2] < 0.5:
 			# The lowest hit points anyone alive is carrying: if the line is locked and nobody is
@@ -1593,7 +1812,7 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 			# the profile mode that exists to measure what they cost - nothing else changes, and
 			# the count of bars says so, so a run cannot be mistaken for a battle without bars.
 			if draw_bars:
-				var lift := position + Vector2(-BAR_WIDTH * 0.5, -DISC_RADIUS - BAR_LIFT)
+				var lift := picture + Vector2(-BAR_WIDTH * 0.5, -DISC_RADIUS - BAR_LIFT)
 				_write_bar(bars, lift, Vector2(BAR_WIDTH, BAR_HEIGHT), Color(0.05, 0.06, 0.07, 0.85))
 				bars += 1
 				var ratio := clampf(meta[i * 4 + 0] / HP_MAX, 0.0, 1.0)
@@ -1659,11 +1878,16 @@ func _build_view() -> void:
 	var camera := Camera2D.new()
 	add_child(camera)
 	camera.make_current()
-	camera.position = field * 0.5
+	# The picture's origin is the field's middle, so the camera starts there and moves over the
+	# picture: panning, zooming and orbiting are three things done to the camera, and the terrain,
+	# the men and their bars are all drawn in picture space without ever being told about it.
+	camera.position = Vector2.ZERO
 	var window := Vector2(get_viewport().get_visible_rect().size)
 	var zoom := minf(window.x / (field.x + 8.0), window.y / (field.y + 8.0))
 	camera.zoom = Vector2(zoom, zoom) * zoom_factor
 	_camera = camera
+	_camera_zoom = 1.0
+	_zoom_target = 1.0
 	_focus = field * 0.5
 
 
@@ -1786,7 +2010,12 @@ func _build_ground() -> void:
 	sprite.scale = Vector2(field.x / float(cols), field.y / float(rows))
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	sprite.z_index = -20
-	add_child(sprite)
+	# The ground is the one thing drawn as a plane rather than a point per soldier, so it gets the
+	# projection as an honest affine transform - the same one _iso() applies point by point, built
+	# from the same two constants, so the men cannot end up standing beside their own ground.
+	_view_root = Node2D.new()
+	add_child(_view_root)
+	_view_root.add_child(sprite)
 
 
 ## A corner panel in the game's own styling, so what the picture is and what it costs can be
