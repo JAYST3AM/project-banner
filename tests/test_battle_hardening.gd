@@ -587,11 +587,26 @@ func _test_same_seed_same_battle() -> void:
 
 ## Frames in, whole ticks out. Pacing decides how many ticks a frame runs and nothing else:
 ## not the size of a tick, and not the battle.
+## The battle's own rate and step, as the battle data states them.
+##
+## These used to be the literals 20.0 and 0.05, and that was a test measuring yesterday's number
+## rather than the behaviour it exists to protect: when the owner moved the battle clock from twenty
+## to sixty, three assertions failed while the clock was working perfectly. The clock's whole job is
+## to take the step from the data, so the test reads the data - and a designer moving the rate now
+## moves the expectation with it, which is the point.
+func _data_rate() -> float:
+	return _config().get_float("battle.tick_rate", 60.0)
+
+
+func _data_step() -> float:
+	return 1.0 / maxf(1.0, _data_rate())
+
+
 func _test_frame_pacing_does_not_change_a_battle() -> void:
 	section("frame pacing does not change a battle")
 	var clock := BattleClock.create(_config())
-	approx(clock.step, STEP, 0.0001, "the fixed step comes from the battle data")
-	approx(clock.rate(), 20.0, 0.001, "and the data's rate is the rate the design is measured at")
+	approx(clock.step, _data_step(), 0.0001, "the fixed step comes from the battle data")
+	approx(clock.rate(), _data_rate(), 0.001, "and the clock's rate is the rate the data states")
 
 	# The same real time, fed in as many small frames and as a few large ones.
 	var many := BattleClock.create(_config())
@@ -614,7 +629,7 @@ func _test_frame_pacing_does_not_change_a_battle() -> void:
 	approx(float(fast_ticks), float(many_ticks) * 4.0, 4.0,
 		"four times the battle speed is four times the ticks, not four times the step (%d vs %d)" % [
 			fast_ticks, many_ticks * 4])
-	approx(fast.step, STEP, 0.0001, "and the step is untouched by it")
+	approx(fast.step, _data_step(), 0.0001, "and the step is untouched by it")
 
 	# And the battle itself: the same run, paced two different ways, compared at the same
 	# tick rather than at the same wall clock.

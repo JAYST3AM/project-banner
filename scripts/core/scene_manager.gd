@@ -96,7 +96,14 @@ func _apply_change() -> void:
 		return
 
 	var instance := packed.instantiate()
+	# The scene being replaced: the one this manager made, or - when the game was started straight
+	# into a scene, which is how every dev scene and a screen being photographed is run - whatever the
+	# tree is showing. Without the second half, a directly-started scene is never freed: the menu the
+	# owner was looking at stayed up over the world map it had just opened, because nothing had ever
+	# claimed it.
 	var previous := _managed_scene
+	if previous == null:
+		previous = get_tree().current_scene
 
 	_payload = payload
 	_has_payload = true
