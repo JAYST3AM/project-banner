@@ -21,6 +21,7 @@ GameData="*res://scripts/core/game_data.gd"
 SaveManager="*res://scripts/core/save_manager.gd"
 SceneManager="*res://scripts/core/scene_manager.gd"
 GameManager="*res://scripts/core/game_manager.gd"
+FpsOverlay="*res://scripts/ui/fps_overlay.gd"
 
 [debug]
 

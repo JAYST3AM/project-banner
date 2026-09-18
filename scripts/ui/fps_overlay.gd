@@ -1,0 +1,81 @@
+extends CanvasLayer
+## The frame rate, in the corner, on by default.
+##
+## Not a debug panel: the owner asks this machine for frames and wants to see them arriving, and a
+## number that only appears after finding a hotkey is a number nobody reads. It shows the *cap* as
+## well as the rate, because "it is stuck at sixty" is a complaint about the cap rather than about
+## the machine, and the two look identical when all you can see is a rate.
+##
+## Frames are counted here and the rate is worked out over a window rather than read from
+## Engine.get_frames_per_second(), so the number moves when the machine does instead of when the
+## engine decides to sample it.
+
+## How long a reading covers. A quarter of a second is long enough to be steady and short enough
+## that a stall shows up while it is still happening.
+const SAMPLE_SECONDS := 0.25
+
+var _label: Label = null
+var _frames := 0
+var _elapsed := 0.0
+## The worst single frame in the window, in milliseconds: a good average with a bad tail is what a
+## hitch looks like from the inside.
+var _worst_ms := 0.0
+
+
+func _ready() -> void:
+	layer = 100
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_build()
+
+
+func _build() -> void:
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
+	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	panel.position = Vector2(12.0, 12.0)
+	add_child(panel)
+	_label = UiTheme.label("", 13, UiTheme.TEXT)
+	panel.add_child(_label)
+
+
+func _process(delta: float) -> void:
+	_frames += 1
+	_elapsed += delta
+	_worst_ms = maxf(_worst_ms, delta * 1000.0)
+	if _elapsed < SAMPLE_SECONDS:
+		return
+	var fps := float(_frames) / _elapsed
+	var ms := _elapsed * 1000.0 / float(_frames)
+	_label.text = "%s   ·   %.2f ms   ·   %s" % [
+		_rate_text(fps), ms, _limit_text()]
+	_label.add_theme_color_override("font_color", _rate_colour(fps))
+	_frames = 0
+	_elapsed = 0.0
+	_worst_ms = 0.0
+
+
+func _rate_text(fps: float) -> String:
+	return "%.0f fps" % fps
+
+
+## The colour says one thing: is the machine keeping up with the screen it is drawing to. Sixty is
+## the line because that is the commonest refresh rate and the game's own clock is not tied to it.
+func _rate_colour(fps: float) -> Color:
+	if fps >= 60.0:
+		return UiTheme.TEXT
+	return Color(0.95, 0.75, 0.35) if fps >= 30.0 else Color(0.95, 0.35, 0.30)
+
+
+## What is holding the rate where it is. An uncapped engine and a capped one look the same from a
+## frame rate alone, and the difference decides whether the machine or a setting owns the number.
+func _limit_text() -> String:
+	var parts: Array[String] = []
+	# The project's setting, not the window's report: the window says it is following the display
+	# while the engine is plainly running free, and a line that contradicts the number beside it is
+	# worse than no line. Measured: three hundred and forty-three frames a second under a "vsync
+	# on" label.
+	var vsync := int(ProjectSettings.get_setting("display/window/vsync/vsync_mode", 0))
+	parts.append("vsync off" if vsync == DisplayServer.VSYNC_DISABLED else "vsync on")
+	var cap := Engine.max_fps
+	parts.append("uncapped" if cap <= 0 else "cap %d" % cap)
+	return "   ·   ".join(parts)
