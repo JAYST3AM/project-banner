@@ -452,18 +452,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_O:
 				_set_formation(_selected, "loose")
 			KEY_K:
-				# The switch between a battle that fights itself and one that waits to be told.
-				# "A lot of movement I did not order" is the honest complaint against automatic
-				# behaviour, and the answer is to make the automatic behaviour optional rather
-				# than to argue for it.
-				_manual = not _manual
-				for b in _bodies:
-					if _is_mine(b) and _body_alive[b] > 0:
-						_order[b] = Order.HOLD if _manual else Order.ENGAGE
-						_hold_ordered[b] = 1 if _manual else 0
-						if not _manual:
-							_order_target[b] = -1
-				print("gpu crowd: your side %s" % ("holds until ordered (autonomy off)" if _manual else "fights on its own (autonomy on)"))
+				_set_autonomy(not _manual)
 			KEY_F1:
 				if _help_panel != null:
 					_help_panel.visible = not _help_panel.visible
@@ -713,6 +702,12 @@ func _parse_args() -> void:
 			bodies_per_side = 4
 			if not _agents_given:
 				agents = bodies_per_side * 2 * 150
+		elif arg.begins_with("--shot-at="):
+			# When the screenshot is taken, in seconds. Six is right for a deployment; a battle
+			# that has to march into contact first wants longer.
+			shot_at = float(arg.substr(10))
+		elif arg == "--trace":
+			trace_orders = true
 		elif arg == "--manual":
 			# Autonomy off from the first tick: nothing on the player's side moves until it is
 			# told to. The only way to test input honestly.
@@ -2291,6 +2286,8 @@ var _line_files := 0
 ## chooses between the same shapes the campaign offers.
 var _shapes := {}
 ## Scripted orders waiting for their tick: what a test uses in place of a hand on the mouse.
+## Whether to echo every scripted order with the state it found: a test wants it, a battle does not.
+var trace_orders := false
 var _script_queue: Array = []
 ## Whether --agents was given by hand: the skirmish preset only picks a size when nobody else did.
 var _agents_given := false
@@ -2627,6 +2624,20 @@ func _place_body(b: int, world: Vector2) -> void:
 	_body_state[b * 8 + 1] = want.y
 
 
+## The switch between a battle that fights itself and one that waits to be told. "A lot of movement
+## I did not order" is the honest complaint against automatic behaviour, and the answer is to make
+## the automatic behaviour optional rather than to argue for it.
+func _set_autonomy(on: bool) -> void:
+	_manual = not on
+	for b in _bodies:
+		if _is_mine(b) and _body_alive[b] > 0:
+			_order[b] = Order.ENGAGE if on else Order.HOLD
+			_hold_ordered[b] = 0 if on else 1
+			if on:
+				_order_target[b] = -1
+	print("gpu crowd: your side %s" % ("fights on its own (autonomy on)" if on else "holds until ordered (autonomy off)"))
+
+
 func _start_battle() -> void:
 	if not _deploying:
 		return
@@ -2649,6 +2660,10 @@ func _apply_scripted_input() -> void:
 	if _tick < int(entry[0]):
 		return
 	_script_queue.remove_at(0)
+	if trace_orders:
+		print("gpu crowd: [script] tick %d  %s  manual=%s  order[0]=%s  selected=%d  alive P0=%d P1=%d" % [
+			_tick, str(entry[1]), str(_manual), _order_name(_order[0]), _selected.size(),
+			_body_alive[0], _body_alive[1]])
 	match str(entry[1]):
 		"select":
 			_selected.clear()
@@ -2672,6 +2687,8 @@ func _apply_scripted_input() -> void:
 			_group_recall(int(entry[2]))
 		"start":
 			_start_battle()
+		"autonomy":
+			_set_autonomy(bool(entry[2]))
 
 
 ## Parses one scripted order: --at=TICK:select=0,1 / move=120,300 / attack=1 / hold / engage /
@@ -2710,6 +2727,10 @@ func _parse_script(arg: String) -> void:
 		_script_queue.append([when, "recall", int(body.substr(7))])
 	elif body == "start":
 		_script_queue.append([when, "start", 0])
+	elif body == "autonomy=off":
+		_script_queue.append([when, "autonomy", false])
+	elif body == "autonomy=on":
+		_script_queue.append([when, "autonomy", true])
 
 
 ## The controls, on the screen rather than in a log. A battle you cannot work out how to command is
