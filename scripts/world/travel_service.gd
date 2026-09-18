@@ -210,9 +210,20 @@ func nearest_settlement() -> Settlement:
 	return best
 
 
+## The cost grid and its pathfinder. Built by the map once per campaign; the travel service only reads
+## it. With no grid there is no pathfinding and journeys walk straight, which is also what a test with no
+## world gets.
+var costs: TravelCosts = null
+
+
 func build_route(to: Settlement) -> void:
 	route = PackedVector2Array()
 	route_leg = 0
+	if costs != null and costs.is_ready() and to != null:
+		# One path, priced by the ground and by the roads, with no comparison to make: a road is cheap
+		# cells and a marsh is dear ones, and the pathfinder has one job.
+		route = costs.path_between(state.world_position, to.position)
+		return
 	var from := current_settlement()
 	if from == null:
 		# Out in the wild: head for the nearest town, which puts the party onto the network instead of

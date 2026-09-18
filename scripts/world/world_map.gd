@@ -14,6 +14,7 @@ const SETTLEMENT_SCENE_KEY := "settlement"
 var _state: CampaignState = null
 var _config: GameConfig = null
 var _travel: TravelService = null
+var _costs: TravelCosts = null
 var _debug: DebugPanel = null
 var _overworld: OverworldService = null
 var _encounters: EncounterService = null
@@ -95,6 +96,11 @@ func _ready() -> void:
 		builder.build_if_needed()
 
 	_travel = TravelService.new(_state, _config)
+	# One pathfinder for the campaign: 4,096 cells at 64 units each, about 136 milliseconds once
+	# measured, and every order after this is an A* over a grid that is already priced.
+	_costs = TravelCosts.new()
+	_costs.build(_state.campaign_seed, _config, _state.roads, _state.settlements)
+	_travel.costs = _costs
 	_view.bind(_state, _config, _travel)
 	# The ground goes in before the map view and behind it: the view draws roads, settlements and
 	# parties on top of terrain it no longer has to paint itself.
