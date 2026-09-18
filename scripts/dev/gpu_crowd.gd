@@ -464,6 +464,9 @@ func _unhandled_input(event: InputEvent) -> void:
 						if not _manual:
 							_order_target[b] = -1
 				print("gpu crowd: your side %s" % ("holds until ordered (autonomy off)" if _manual else "fights on its own (autonomy on)"))
+			KEY_F1:
+				if _help_panel != null:
+					_help_panel.visible = not _help_panel.visible
 			KEY_P:
 				_clock_paused = not _clock_paused
 				print("gpu crowd: %s" % ("paused" if _clock_paused else "running"))
@@ -833,6 +836,7 @@ func _build() -> void:
 	_build_ground()
 	_build_view()
 	_build_hud()
+	_build_help()
 	if cam_at != Vector2(INF, INF):
 		# A scripted camera looks at a world point named in world terms; the camera lives in
 		# picture space, so this is where the two are married.
@@ -842,7 +846,9 @@ func _build() -> void:
 	else:
 		print("gpu crowd: view | %s, yaw %.0f deg, pitch %.2f (right-drag orbits, wheel zooms at the cursor, middle-drag pans, WASD pans, Q/E quarter turn, [ ] tilts, F frames, I toggles flat)" % [
 			"flat" if flat_view else "isometric", rad_to_deg(yaw), squash])
-		print("gpu crowd: command | left-click select (shift adds), drag a box, right-click ground to move, right-click an enemy to attack, H hold, U engage, L/C/O line-column-loose, Ctrl+1..5 group, 1..5 recall, Space starts the battle, P pauses" if _deploying else \
+	if _deploying:
+		_center_on_side(0)
+	print("gpu crowd: command | left-click select (shift adds), drag a box, right-click ground to move, right-click an enemy to attack, H hold, U engage, L/C/O line-column-loose, Ctrl+1..5 group, 1..5 recall, Space starts the battle, P pauses" if _deploying else \
 			"gpu crowd: command | left-click select (shift adds), drag a box, right-click ground to move, right-click an enemy to attack, H hold, U engage, L/C/O line-column-loose, Ctrl+1..5 group, 1..5 recall, Space follows the fighting, P pauses")
 	print("gpu crowd: %d soldiers, %d a side | grid %dx%d (cell %.1f) | field %.0fx%.0f | reach %.1f | blow %.2f/attacker | targeting %s (cadence %d, retention %.0f)" % [
 		agents, agents / 2, grid.x, grid.y, LG_CELL, field.x, field.y, REACH, BLOW,
@@ -2605,6 +2611,8 @@ func _update_marks() -> void:
 	_paint.lines = lines
 	_paint.rects = rects
 	_paint.queue_redraw()
+	if _hint_label != null:
+		_hint_label.text = _hint_text()
 
 
 ## Deployment. The battle begins as a plan: the player may drag his formations into place, and the
@@ -2702,3 +2710,123 @@ func _parse_script(arg: String) -> void:
 		_script_queue.append([when, "recall", int(body.substr(7))])
 	elif body == "start":
 		_script_queue.append([when, "start", 0])
+
+
+## The controls, on the screen rather than in a log. A battle you cannot work out how to command is
+## a battle you cannot test, and the keys had been living in the console where nobody reads them.
+##
+## Two layers, because they answer different questions: the panel is the reference - everything the
+## scene answers to, grouped the way a commander thinks about it - and the line under the battle is
+## the next move, which changes as the player picks things up and puts them down.
+##
+## The rows are data, not code: adding a binding is adding a row, and the panel styles itself.
+const HELP_ROWS := [
+	["IN YOUR HANDS", ""],
+	["left-click", "pick up a unit  ·  shift adds one  ·  drag open ground to box several"],
+	["right-click", "ground: march there      an enemy unit: attack it"],
+	["right-drag", "orbit the camera  (a tap commands, a drag looks)"],
+	["ORDERS", ""],
+	["H  /  U", "hold position  /  engage at will"],
+	["K", "the whole side: fights on its own  /  holds until ordered"],
+	["L  C  O", "line  ·  column  ·  loose"],
+	["ctrl+1-5", "save the selection as a group   ·   1-5 calls it back"],
+	["THE BATTLE", ""],
+	["space", "begin  (and after that, follow the fighting)"],
+	["P", "stop and start the battle clock"],
+	["THE CAMERA", ""],
+	["wheel", "zoom at the cursor  ·  middle-drag pans  ·  WASD pans"],
+	["Q  /  E", "quarter turn     [ ]  tilts     F  frames the field"],
+	["I", "the flat top-down view, for comparison"],
+	["F1", "hide or show this panel"],
+]
+
+var _help_panel: PanelContainer = null
+var _hint_label: Label = null
+
+
+func _build_help() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 21
+	add_child(layer)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
+	panel.anchor_top = 1.0
+	panel.anchor_bottom = 1.0
+	panel.offset_left = 12.0
+	panel.offset_top = -418.0
+	panel.offset_right = 446.0
+	panel.offset_bottom = -12.0
+	layer.add_child(panel)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 2)
+	panel.add_child(column)
+	var title := UiTheme.label("COMMANDING A BATTLE", 12, UiTheme.ACCENT)
+	column.add_child(title)
+	for row in HELP_ROWS:
+		var heading: String = row[0]
+		var body: String = row[1]
+		if body.is_empty():
+			var gap := Control.new()
+			gap.custom_minimum_size = Vector2(0, 6)
+			column.add_child(gap)
+			column.add_child(UiTheme.label(heading, 11, UiTheme.GOLD))
+			continue
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 10)
+		column.add_child(line)
+		var key := UiTheme.label(heading, 12, UiTheme.ACCENT)
+		key.custom_minimum_size = Vector2(96, 0)
+		key.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		line.add_child(key)
+		line.add_child(UiTheme.label(body, 12, UiTheme.TEXT))
+	_help_panel = panel
+
+	# The line under the battle: what to do next, said once, where the eye already is.
+	var hint_panel := PanelContainer.new()
+	hint_panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
+	hint_panel.anchor_left = 0.0
+	hint_panel.anchor_right = 1.0
+	hint_panel.anchor_top = 1.0
+	hint_panel.anchor_bottom = 1.0
+	hint_panel.offset_left = 462.0
+	hint_panel.offset_right = -12.0
+	hint_panel.offset_top = -46.0
+	hint_panel.offset_bottom = -12.0
+	layer.add_child(hint_panel)
+	_hint_label = UiTheme.label("", 13, UiTheme.TEXT)
+	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_panel.add_child(_hint_label)
+
+
+## What the player should do next, given what is in his hand and what stage the battle is at. This
+## is the half of the UI that a reference panel cannot do: it knows the state.
+func _hint_text() -> String:
+	var held := _living_selection().size()
+	if _deploying:
+		if held > 0:
+			return "%d unit%s in your hand — drag to place %s, Space begins the battle" % [
+				held, "s" if held != 1 else "", "them" if held != 1 else "it"]
+		return "Left-click a unit, or drag a box around several, then drag them into place"
+	if held == 0:
+		return "Left-click a unit, or drag a box around several"
+	if _manual:
+		return "%d unit%s in your hand — right-click ground to march, an enemy to attack  ·  K lets them fight on their own" % [
+			held, "s" if held != 1 else ""]
+	return "%d unit%s in your hand, fighting on its own — right-click to redirect  ·  K takes control back" % [
+		held, "s" if held != 1 else ""]
+
+
+## Put the camera on a side's own army. The field's middle is empty ground - the armies stand at its
+## edges - so a deployment that opens looking at the middle looks at nothing at all, which is what
+## the first screenshot of this screen showed.
+func _center_on_side(side: int) -> void:
+	var sum := Vector2.ZERO
+	var count := 0
+	for b in _bodies:
+		if b / bodies_per_side != side or _body_alive[b] <= 0:
+			continue
+		sum += _anchor_of(b)
+		count += 1
+	if count > 0:
+		_camera.position = _iso(sum / float(count))
+		_follow_action = false
