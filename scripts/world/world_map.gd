@@ -26,6 +26,8 @@ var _hud_timer := 0.0
 ## The Esc menu. Owned here rather than by the HUD, because what it offers - saving, leaving the
 ## campaign - is the world's business, and because it has to work while the world is stopped.
 var _pause: PauseMenu = null
+## The map's ground, drawn as terrain rather than a flat colour.
+var _terrain: WorldTerrain = null
 var _pause_layer: CanvasLayer = null
 var _debug_timer := 0.0
 
@@ -47,6 +49,14 @@ func _ready() -> void:
 
 	_travel = TravelService.new(_state, _config)
 	_view.bind(_state, _config, _travel)
+	# The ground goes in before the map view and behind it: the view draws roads, settlements and
+	# parties on top of terrain it no longer has to paint itself.
+	_terrain = WorldTerrain.new()
+	_terrain.z_index = -1
+	add_child(_terrain)
+	_terrain.setup(_state.campaign_seed, _view.land_rect(), _config)
+	_view.ground_art = true
+	_view.queue_redraw()
 
 	_overworld = OverworldService.build(_state, _config)
 	_overworld.spawn_if_needed()

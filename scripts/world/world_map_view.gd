@@ -26,6 +26,10 @@ var selected_id: String = ""
 var hovered_id: String = ""
 
 var _font: Font = null
+## Set while the terrain layer is drawing the ground. The flat fill and the grid were written for a
+## map with no artwork - the grid says so itself - and painting them over real ground would be
+## drawing the placeholder on top of the thing it stood in for.
+var ground_art := false
 
 
 func _ready() -> void:
@@ -38,6 +42,12 @@ func bind(p_state: CampaignState, p_config: GameConfig, p_travel: TravelService)
 	config = p_config
 	travel = p_travel
 	queue_redraw()
+
+
+## The rectangle the land occupies. Public because the terrain layer sits exactly here, and two
+## copies of this arithmetic would eventually disagree.
+func land_rect() -> Rect2:
+	return Rect2(Vector2(24.0, 24.0), map_size() - Vector2(48.0, 48.0))
 
 
 func map_size() -> Vector2:
@@ -91,22 +101,15 @@ func settlement_color(settlement: Settlement) -> Color:
 func _draw() -> void:
 	var size := map_size()
 
-	# Backdrop
-	draw_rect(Rect2(Vector2.ZERO, size), COLOR_BG)
-	var land := Rect2(Vector2(24.0, 24.0), size - Vector2(48.0, 48.0))
-	draw_rect(land, COLOR_LAND)
+	# Backdrop, and the land beneath the terrain: both are skipped once the terrain layer is
+	# drawing, because a backdrop painted by a node at z zero covers a ground node at z minus one.
+	if not ground_art:
+		draw_rect(Rect2(Vector2.ZERO, size), COLOR_BG)
+	var land := land_rect()
+	if not ground_art:
+		draw_rect(land, COLOR_LAND)
+		_draw_grid(land)
 	draw_rect(land, COLOR_LAND_EDGE, false, 2.0)
-
-	# Grid: purely a sense-of-scale aid while the map has no artwork.
-	var step := 100.0
-	var x := land.position.x
-	while x <= land.end.x:
-		draw_line(Vector2(x, land.position.y), Vector2(x, land.end.y), COLOR_GRID, 1.0)
-		x += step
-	var y := land.position.y
-	while y <= land.end.y:
-		draw_line(Vector2(land.position.x, y), Vector2(land.end.x, y), COLOR_GRID, 1.0)
-		y += step
 
 	if state == null:
 		return
@@ -116,6 +119,19 @@ func _draw() -> void:
 	_draw_settlements()
 	_draw_world_parties()
 	_draw_player_party()
+
+
+## Purely a sense-of-scale aid while the map has no artwork.
+func _draw_grid(land: Rect2) -> void:
+	var step := 100.0
+	var x := land.position.x
+	while x <= land.end.x:
+		draw_line(Vector2(x, land.position.y), Vector2(x, land.end.y), COLOR_GRID, 1.0)
+		x += step
+	var y := land.position.y
+	while y <= land.end.y:
+		draw_line(Vector2(land.position.x, y), Vector2(land.end.x, y), COLOR_GRID, 1.0)
+		y += step
 
 
 func _draw_roads() -> void:
