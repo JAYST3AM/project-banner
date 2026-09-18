@@ -189,11 +189,11 @@
       "height": {"base": 0.45, "roughness": 0.25, "bias": 0.0},
       "terrain": {
         "elevation": {"base": 0.45, "amplitude": 1.0, "roughness": 0.3, "bias": -0.05, "feature_scale": 1.0},
-        "features": {"hills": 0.3, "ridges": 0.12, "valleys": 0.22, "basins": 0.12, "cliffs": 0.0, "riverbeds": 0.16, "clearings": 0.3, "spacing": 7.0, "flat": 0.6},
+        "features": {"hills": 0.3, "ridges": 0.12, "valleys": 0.22, "basins": 0.12, "cliffs": 0.0, "riverbeds": 0.06, "clearings": 0.3, "spacing": 7.0, "flat": 0.6},
         "detail": 0.16,
         "moisture": 0.45,
         "wetness": 0.06,
-        "vegetation": {"base": 0.2, "trees": 0.04, "bushes": 0.14, "rocks": 0.03},
+        "vegetation": {"base": 0.2, "trees": 0.5, "bushes": 0.2, "rocks": 0.03},
         "soils": [{"id": "grass", "weight": 10}, {"id": "dirt", "weight": 1.5}, {"id": "silt", "weight": 0.6}],
         "movement": {"vegetation_drag": 0.14, "wetness_drag": 0.28, "slope_penalty": 0.55},
         "variant_scale": 4.0,
