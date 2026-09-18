@@ -955,6 +955,18 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 ## their x read as "2.3 apart, no room" while the nearest real enemy pair stood 3.52 away - past
 ## the 3.4 reach. Nobody could fight and nobody could close: 228 dead, then two lines staring at
 ## each other for ever.
+	# A deployment is a plan, not a press: every body stands where it was put until the player
+	# says go. Without this the formations advance and start killing each other while the player
+	# is still deciding, which is both a bad battle and a bad test of one - measured, the
+	# deployment screen was already landing 2,200 blows a second.
+	if _deploying:
+		for b in _bodies:
+			# An *ordered* hold, not the other kind: a body that is merely holding because it has
+			# nothing to fight stands up again the moment an enemy appears, which is how the
+			# deployment screen came to be landing blows while the player was still placing men.
+			_order[b] = Order.HOLD
+			_hold_ordered[b] = 1
+
 func _body_room(b: int) -> float:
 	if _body_gap.size() < bodies_per_side * 2:
 		return 9999.0
