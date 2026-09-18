@@ -90,21 +90,26 @@ static func fold(position: Vector2) -> Vector2:
 ## from, so that a place cannot look like one thing and behave like another.
 func sample(position: Vector2) -> Dictionary:
 	var p := fold(position)
-	# Sampled in *world fractions*, not in cells, and that is not a detail. The first version divided
+	# Sampled in *world fractions*, not in cells, and that is not a detail. Frequencies are whole
+	# numbers of cycles across the whole world, so three made one biome thirteen hundred units wide -
+	# wider than the screen - and a player could only ever stand inside one, which is why the ground
+	# read as uniform speckle no matter where they rode. Ten puts a few biomes on every screen. The first version divided
 	# by the cell size and carried the map's old frequencies across unchanged, which put a terrain
 	# feature every five world units: hills five units apart, and almost nowhere flat enough for the
 	# world to want to build anything. Frequencies here are features across the whole world, and they
 	# are whole numbers because the lattice period at each octave is the frequency times two to the
-	# octave - an integer, which is what makes the wrap exact rather than merely close.
+	# octave - an integer, which is what makes the wrap exact rather than merely close. Moisture ten,
+	# wear twelve, height five and the continental split four: four fields at four scales, so a rider
+	# crosses a coast, a worn county and a hill country without any of them looking like noise.
 	var x := p.x / WORLD_SIZE
 	var y := p.y / WORLD_SIZE
 	# The borders wander, as they do on the map: each field is sampled from a point nudged sideways
 	# by a slower noise, which turns a soft straight edge into a coast.
 	var wander := (_fbm(x, y, 11, 2, 2.0) - 0.5) * 0.22
-	var moisture := _fbm(x + wander * 0.06, y, 1, 4, 3.0)
-	var wear := _fbm(x + wander * 0.06, y, 17, 3, 5.0)
-	var region := _fbm(x, y, 29, 2, 1.0)
-	var height := _fbm(x, y, 23, 3, 2.0)
+	var moisture := _fbm(x + wander * 0.06, y, 1, 4, 10.0)
+	var wear := _fbm(x + wander * 0.06, y, 17, 3, 12.0)
+	var region := _fbm(x, y, 29, 2, 4.0)
+	var height := _fbm(x, y, 23, 3, 5.0)
 	return {
 		"lush": moisture * region,
 		"dry": (1.0 - moisture) * region,

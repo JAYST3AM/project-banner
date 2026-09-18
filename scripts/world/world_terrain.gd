@@ -23,7 +23,7 @@ extends Sprite2D
 ## 0 is a hard line; 6 was the width that suited the painted grounds. With the tiles the ground
 ## changes character in 64-pixel steps, and a band one tile wide read as a tile edge rather than a
 ## blend, so it is 10 now - about a hundred and fifty world units of change.
-const BLEND_WIDTH_CELLS := 10.0
+const BLEND_WIDTH_CELLS := 24.0
 ## How much of a look a place can be. Kept below one on purpose: a tile that is entirely Dry next
 ## to a tile that is entirely Lush is a border, however wide the band between them, and the owner's
 ## note on the first showing was that the change between the two was too drastic. Capped, Standard
@@ -36,11 +36,17 @@ const LOOK_STRENGTH := 0.75
 ## samplers, or a 1254-pixel painting shrunk to a quarter of that aliases into coloured speckle. Sized so the art is seen at roughly its
 ## own resolution. 260 was tried with the painted grounds, then 160 and 100; the owner asked for
 ## more tiles each time, which is this number going down. With the tileset the number is different in
-## kind rather than degree: its fills are 64 px, so a repeat of 64 world units shows each pixel as
-## a pixel at the map's zoom - pixel art is crisp at its own size and soft either side of it. The trade-off to watch: a smaller repeat shows the same
+## own resolution. 260 was tried with the painted grounds, then 160 and 100; the owner asked for
+## more tiles each time and liked it, and 100 is where the paintings sat when he said so. When his
+## pixel plains land, they are 1024 px and want a repeat nearer 256. The trade-off to watch: a smaller repeat shows the same
 ## art spread over less ground, so if the ground ever reads soft rather than detailed, the fix is a
 ## finer art set rather than an even smaller repeat.
-const TILE_UNITS := 64.0
+## How far apart the field's samples are. The biomes change over hundreds of units, not tens, so
+## sampling twice the world's cell size costs a quarter of the build time and loses nothing visible -
+## on a 4096-unit world that is 256x256 cells in about a fifth of a second.
+const FIELD_STEP := WorldChunks.CELL_SIZE * 2.0
+
+const TILE_UNITS := 320.0
 
 const CATALOGUE := "res://data/terrain/biomes.json"
 
@@ -125,14 +131,14 @@ func _looks() -> Array:
 ## place can look like one thing and behave like another. One source of truth, at the world's own cell
 ## size.
 func _build_field(land: Rect2) -> Image:
-	var cols := int(ceil(land.size.x / WorldChunks.CELL_SIZE)) + 1
-	var rows := int(ceil(land.size.y / WorldChunks.CELL_SIZE)) + 1
+	var cols := int(ceil(land.size.x / FIELD_STEP)) + 1
+	var rows := int(ceil(land.size.y / FIELD_STEP)) + 1
 	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
 	var world := WorldChunks.build(seed_value)
 	var half := maxf(0.0001, BLEND_WIDTH_CELLS / float(maxi(cols, rows)) * 3.0)
 	for row in rows:
 		for col in cols:
-			var point := land.position + Vector2(float(col), float(row)) * WorldChunks.CELL_SIZE
+			var point := land.position + Vector2(float(col), float(row)) * FIELD_STEP
 			var here := world.sample(point)
 			var moisture := smoothstep(0.5 - half, 0.5 + half, float(here["moisture"]))
 			var wear := smoothstep(0.5 - half, 0.5 + half, float(here["wear"]))

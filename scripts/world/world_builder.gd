@@ -19,6 +19,12 @@ func _init(p_state: CampaignState, p_config: GameConfig) -> void:
 
 
 ## Returns true when the world was built, false when it already existed.
+## Whether this campaign has a world yet. The map asks before it shows a loading screen, so a loaded
+## save does not flash one for a build that will not happen.
+func needs_build() -> bool:
+	return state != null and state.settlements.is_empty()
+
+
 func build_if_needed() -> bool:
 	if state == null:
 		return false
@@ -77,13 +83,14 @@ func build() -> void:
 func _build_procedural() -> void:
 	var seed_value := int(state.campaign_seed)
 	var count := config.get_int("world.settlement_count", 14)
-	var radius := config.get_float("world.settlement_search_radius", 520.0)
+	var radius := config.get_float("world.settlement_search_radius", 2900.0)
 	# The middle of the campaign's map, because the world is drawn as one map today; when the map
 	# becomes a window on a bigger world, this becomes wherever the campaign began.
-	var centre := Vector2(
-		config.get_float("world.map_width", 1600.0) * 0.5,
-		config.get_float("world.map_height", 900.0) * 0.5
-	)
+	# The middle of the world, and a radius that reaches its corners diagonally: 90 settlements over
+	# 4096 units is one every four hundred or so, so country is never empty and the roads that connect
+	# them are never far off. The old 520-unit radius was sized for a 1600x900 map, which is why a
+	# party standing at y 4060 could see nothing but grass.
+	var centre := Vector2(WorldChunks.WORLD_SIZE, WorldChunks.WORLD_SIZE) * 0.5
 	var sites := WorldSites.build(seed_value)
 	var started := Time.get_ticks_usec()
 	var chosen := sites.settlement_sites(count, centre, radius)

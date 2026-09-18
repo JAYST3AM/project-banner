@@ -56,7 +56,10 @@ func bind(p_state: CampaignState, p_config: GameConfig, p_travel: TravelService)
 ## The rectangle the land occupies. Public because the terrain layer sits exactly here, and two
 ## copies of this arithmetic would eventually disagree.
 func land_rect() -> Rect2:
-	return Rect2(Vector2(24.0, 24.0), map_size() - Vector2(48.0, 48.0))
+	# The world, not the campaign's old map rectangle. The simulation walks WorldChunks: a party was
+	# found at y 4060 on ground the map did not draw, which is how the world's own settlements ended up
+	# outside the slab everything else was laid out on.
+	return Rect2(Vector2.ZERO, Vector2(WorldChunks.WORLD_SIZE, WorldChunks.WORLD_SIZE))
 
 
 func map_size() -> Vector2:

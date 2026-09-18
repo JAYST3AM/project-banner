@@ -22,6 +22,8 @@ var _dialog_party_id: String = ""
 var _speed_before_dialog: int = CampaignClock.Speed.NORMAL
 
 var _panning := false
+## Middle-drag panning on the campaign map.
+var _map_drag := false
 var _hud_timer := 0.0
 ## The Esc menu. Owned here rather than by the HUD, because what it offers - saving, leaving the
 ## campaign - is the world's business, and because it has to work while the world is stopped.
@@ -46,9 +48,24 @@ func _ready() -> void:
 	_state = GameManager.campaign
 	_config = GameManager.config()
 
-	# A fresh campaign has no world yet; a loaded save already does.
+	# A fresh campaign has no world yet; a loaded save already does. Building it takes about five
+	# seconds - ninety settlements, their names, their trade and the roads between them - and it used
+	# to happen right here on the main thread, so the game could not draw a frame of it and the owner
+	# felt a load spike. Now it runs on a thread behind a loading screen that can actually animate,
+	# and this function waits for it while the frames keep coming.
 	var builder := WorldBuilder.new(_state, _config)
-	builder.build_if_needed()
+	if builder.needs_build():
+		var loader := LoadingScreen.new()
+		add_child(loader)
+		loader.set_status("Generating the world")
+		var thread := Thread.new()
+		thread.start(builder.build_if_needed)
+		while thread.is_alive():
+			await get_tree().process_frame
+		thread.wait_to_finish()
+		loader.finish()
+	else:
+		builder.build_if_needed()
 
 	_travel = TravelService.new(_state, _config)
 	_view.bind(_state, _config, _travel)
@@ -281,12 +298,17 @@ func _update_camera_pan(delta: float) -> void:
 	_clamp_camera()
 
 
+## Keep the camera over the world. It used to be clamped to the campaign's old 1600x900 map
+## rectangle, so a party standing at y 4060 of a 4096-unit world could pan to the edge of the map and
+## no further - the owner felt that as "camera felt weird like I was limited by the area I can move
+## around". The limit is the world's own size now, with a margin so the edge of the land can sit in
+## the middle of the screen rather than pinned to a corner.
 func _clamp_camera() -> void:
-	var size := _view.map_size()
-	var margin := 200.0
+	var margin := 160.0
+	var whole := Vector2(WorldChunks.WORLD_SIZE, WorldChunks.WORLD_SIZE)
 	_camera.position = Vector2(
-		clampf(_camera.position.x, -margin, size.x + margin),
-		clampf(_camera.position.y, -margin, size.y + margin)
+		clampf(_camera.position.x, -margin, whole.x + margin),
+		clampf(_camera.position.y, -margin, whole.y + margin)
 	)
 
 
@@ -301,6 +323,21 @@ func _zoom_by(factor: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _state == null:
+		return
+	# Middle-drag pans, and Home returns to the party. The keyboard pan was always there, but the
+	# camera was clamped to the campaign's old 1600x900 rectangle on a 4096-unit world, so a party
+	# outside it could not be followed: every pan was clamped straight back and the map felt stuck.
+	# The clamp is the world now, and a mouse is what a hand reaches for on a map.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE:
+		_map_drag = event.pressed
+		return
+	if event is InputEventMouseMotion and _map_drag:
+		_camera.position -= event.relative / maxf(0.05, _camera.zoom.x)
+		_clamp_camera()
+		return
+	if event is InputEventKey and event.pressed and event.keycode == KEY_HOME:
+		_focus_camera_on_party()
+		_hud.set_hint("Back over the party.")
 		return
 
 	# Esc opens the menu. Closing is the menu's own business: while it is open the tree is paused,
