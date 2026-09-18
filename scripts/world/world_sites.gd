@@ -19,10 +19,32 @@ extends RefCounted
 
 ## Settlements this close or closer to each other are one settlement: the closer of the two keeps it.
 ## Roughly a long bowshot times six, which is about an hour's ride at campaign speed.
-## How close two settlements may stand, in world units. It was 96, which on a 4096-unit world put
-## neighbours about fifty pixels apart at the default zoom - the owner's words: "the settlements need to
-## be spaced out properly". 220 is a good five-minute ride between neighbours and reads as country.
-const MIN_SPACING := 380.0
+## How close two settlements may stand, by kind, in world units.
+##
+## The owner's rule, in his words: "not the same spacing for everything, obviously towns would settle
+## decent distance from other settlements, but forts may be closer to cities that are poi's". So this is
+## not one number: a castle keeps a county to itself, a town wants room to farm, and a fort is a
+## smaller thing - it can sit close to the town it serves, which is the relationship he is describing.
+##
+## Two sites are too close when *either* of them would mind, so the larger of the two expectations
+## wins and a fort cannot crowd a castle even though forts crowd each other.
+## The tightest any two sites may be, whatever they are: the smallest figure in SPACING. Kept as its
+## own name because the tests and callers ask "what is the floor", and the floor is a village's.
+const MIN_SPACING := 150.0
+
+const SPACING := {
+	"castle": 560.0,
+	"town": 380.0,
+	"fort": 210.0,
+	"village": 150.0,
+}
+
+
+## Whether this candidate is too near that site, given what each of them is.
+func too_close(position: Vector2, kind: String, other: Dictionary) -> bool:
+	var mine := float(SPACING.get(kind, 150.0))
+	var theirs := float(SPACING.get(str(other.get("kind", "village")), 150.0))
+	return _wrapped_distance(position, other["position"]) < minf(mine, theirs)
 ## How far from a candidate its neighbours are compared. Wider than a settlement's footprint, narrow
 ## enough that a range of hills reads as many candidates rather than one.
 const NEIGHBOURHOOD := 24.0
@@ -222,7 +244,8 @@ func _site_score(point: Vector2) -> float:
 
 func _too_close(position: Vector2, settled: Array[Dictionary]) -> bool:
 	for other in settled:
-		if _wrapped_distance(position, other["position"]) < MIN_SPACING:
+		var kind_here := kind_for(site)
+		if too_close(position, kind_here, other):
 			return true
 	return false
 
