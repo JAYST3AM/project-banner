@@ -54,7 +54,7 @@ func setup(seed_value: int, land: Rect2, _config: GameConfig) -> void:
 	var pixel := Image.create_empty(1, 1, false, Image.FORMAT_RGBA8)
 	pixel.set_pixel(0, 0, Color.WHITE)
 	_sprite = Sprite2D.new()
-	_sprite.centred = false
+	_sprite.centered = false
 	_sprite.texture = ImageTexture.create_from_image(pixel)
 	_sprite.position = land.position
 	_sprite.scale = land.size
