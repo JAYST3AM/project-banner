@@ -71,6 +71,16 @@ layout(set = 0, binding = 7, std430) restrict buffer Damage { uint d[]; } damage
 // Read from the game's own unit definitions rather than invented here, so a spearman in this scene
 // is the spearman the campaign fields: attack 7, defence 4, reach 2.4, a blow every 1.5 seconds.
 layout(set = 0, binding = 12, std430) restrict buffer Stats { vec4 s[]; } stats;
+// What each soldier has done, and who did for him. x = kills credited to him, y = hundredths of a
+// hit point he has dealt, z = the lowest-numbered attacker to strike him *this tick*, w = the blow
+// that killed him, NO_KILLER while he lives.
+//
+// z is cleared every tick on purpose: a wound taken early in a fight must not be mistaken for the
+// lethal one later. x and y are a man's own slots and he writes them himself - except for a kill,
+// which is credited by the *dying* man's thread, because only there is it known that a blow was
+// the lethal one. That credit is an atomic add into a count, so the order the threads ran in cannot
+// change the total: the same rule that keeps the separation deterministic.
+layout(set = 0, binding = 13, std430) restrict buffer Tallies { uvec4 t[]; } tallies;
 // x = the body this soldier belongs to, y = his file, z = his rank.
 layout(set = 0, binding = 8, std430) restrict buffer Attrs { vec4 a[]; } attrs;
 // Two vec4 per body: (anchor.xy, forward.xy) and (files, ranks, spacing, engaged).
@@ -117,6 +127,7 @@ const uint BODY_GAP_SLOTS = 60u;
 // the fronts stood 2.05 apart with 24,314 pairs under the agreed minimum. The base is now named in
 // both places and the fault cannot recur silently.
 const int NO_TARGET = -1;
+const uint NO_KILLER = 0xFFFFFFFFu;
 // The unit the separation corrections are accumulated in. Fixed-point integers, deliberately:
 // the order neighbours are visited in depends on which thread binned which man first, and a float
 // sum whose value depends on the order it was summed in is a battle that comes out a different
@@ -161,6 +172,13 @@ void main() {
 		}
 		for (uint i = gid; i < n; i += step) {
 			damage.d[i] = 0u;
+			// The attacker of this tick's blow is cleared every tick - it is a reading, not a
+			// record. The tallies themselves are set once, at the start of the battle.
+			if (tick_now == 0u) {
+				tallies.t[i] = uvec4(0u, 0u, NO_KILLER, NO_KILLER);
+			} else {
+				tallies.t[i].z = NO_KILLER;
+			}
 			corr.c[i] = ivec4(0);
 		}
 		if (gid >= n && gid < n + COUNTER_COUNT) {
@@ -467,6 +485,10 @@ void main() {
 				}
 				if (landed) {
 					atomicAdd(damage.d[uint(chosen)], uint(damage_taken * float(DAMAGE_SCALE)));
+					// His own tally, and who struck the man he struck. The lowest id wins a tie so
+					// that two attackers in one tick resolve the same way in every run.
+					tallies.t[gid].y += uint(damage_taken * float(DAMAGE_SCALE));
+					atomicMin(tallies.t[uint(chosen)].z, gid);
 					atomicAdd(counters.c[2], 1u);
 				} else {
 					atomicAdd(counters.c[23], 1u);
@@ -562,6 +584,15 @@ void main() {
 	// mode 3: take the blows, then walk to your place in the line.
 	vec4 me = meta.m[gid];
 	if (me.x - float(damage.d[gid]) / float(DAMAGE_SCALE) <= 0.0) {
+		// He died of this tick's wounds, so the man recorded against him is the man who did it.
+		// The credit lands on the killer's own counter, written from here because only the
+		// dying thread knows the blow was the lethal one. It is a count, added atomically, so
+		// the order of threads cannot change it.
+		uint killer = tallies.t[gid].z;
+		if (killer != NO_KILLER && killer < uint(params.f[0])) {
+			atomicAdd(tallies.t[killer].x, 1u);
+			tallies.t[gid].w = killer;
+		}
 		meta.m[gid] = vec4(0.0, me.y, 1.0, 0.0);
 		agents.s[gid] = vec4(pos, vec2(0.0));
 		atomicAdd(counters.c[3], 1u);

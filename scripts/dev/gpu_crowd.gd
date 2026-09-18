@@ -503,6 +503,7 @@ var buf_cursor: RID
 var buf_slots: RID
 var buf_params: RID
 var buf_counters: RID
+var buf_tallies: RID
 var buf_meta: RID
 var buf_damage: RID
 var buf_corr: RID
@@ -525,6 +526,8 @@ var instances := PackedFloat32Array()
 var _tick := 0
 var _tick_usec := 0
 var _readback_usec := 0
+## Four ints a man, straight from the tallies buffer: see [method tally].
+var _tallies := PackedInt32Array()
 var _pack_usec := 0
 var _frame_delta := 0.0
 var _frames := 0
@@ -840,6 +843,10 @@ func _build() -> void:
 	buf_stats = _storage(_stats.to_byte_array(), agents * 16)
 	buf_meta = _storage(meta.to_byte_array(), agents * 16)
 	buf_damage = _storage(PackedByteArray(), agents * 4)
+	# Kills, damage dealt and who did for each of the fallen: four uints a man, matching the
+	# shader's uvec4 to the byte. The campaign's resolver needs all three to write its result, and
+	# this is where a whole battle stops being only a picture and becomes an outcome.
+	buf_tallies = _storage(PackedByteArray(), agents * 16)
 	# The separation correction being accumulated this round, in fixed-point integers: ivec4 a man.
 	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
@@ -871,6 +878,7 @@ func _build() -> void:
 	uniforms.append(_uniform(10, buf_corr))
 	uniforms.append(_uniform(11, buf_targets))
 	uniforms.append(_uniform(12, buf_stats))
+	uniforms.append(_uniform(13, buf_tallies))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
 
 	_build_ground()
@@ -1389,6 +1397,17 @@ func _process(delta: float) -> void:
 		print("gpu crowd: final | %d soldiers | ticks %d | blows %d | fallen %d | overflow %d" % [
 			agents, _tick, counters[2], counters[3], counters[0]])
 		print("gpu crowd: collision proof | %s" % _proof_line())
+		# The outcome side of the same reading: every kill the tallies credit must be a man who
+		# actually fell, or the campaign would be told a story the field does not support.
+		var fallen := _fallen
+		# w, not z: z is *this tick's* attacker and is cleared every tick by design, so a man
+		# who fell long ago reads -1 there. The killer's id is kept in w.
+		var attributed := 0
+		for i in agents:
+			if tally(i).w >= 0:
+				attributed += 1
+		print("gpu crowd: outcome | fallen %d, kills credited %d, attributed %d | damage dealt %d hundredths" % [
+			fallen, kills_credited(), attributed, _damage_dealt_total()])
 		get_tree().quit(0)
 
 
@@ -1901,10 +1920,38 @@ func _report() -> void:
 
 ## Copy the GPU's state back and rebuild the picture. Factored out of `_process` so the rule
 ## checks can drive a tick without a rendered frame; the timing marks it sets are unused there.
+## What a man has done and who did for him, from the tallies buffer: x = his kills, y = hundredths
+## of a hit point he has dealt, z = the blow that killed him or -1 while he lives. This is the
+## outcome the campaign's resolver wants, and the reason the compute path can produce a BattleResult
+## rather than only a picture.
+func tally(index: int) -> Vector4i:
+	if index < 0 or index >= _tallies.size() / 4:
+		return Vector4i.ZERO
+	return Vector4i(_tallies[index * 4], _tallies[index * 4 + 1], _tallies[index * 4 + 2], _tallies[index * 4 + 3])
+
+
+## Every hundredth of a hit point dealt, summed - the other half of the same reading.
+func _damage_dealt_total() -> int:
+	var total := 0
+	var count := _tallies.size() / 4
+	for i in count:
+		total += _tallies[i * 4 + 1]
+	return total
+
+
+func kills_credited() -> int:
+	var total := 0
+	var count := _tallies.size() / 4
+	for i in count:
+		total += _tallies[i * 4]
+	return total
+
+
 func _readback_and_pack() -> void:
 	var read_started := Time.get_ticks_usec()
 	var state_bytes := rd.buffer_get_data(buf_state)
 	var meta_bytes := rd.buffer_get_data(buf_meta)
+	_tallies = rd.buffer_get_data(buf_tallies).to_int32_array()
 	var target_bytes := rd.buffer_get_data(buf_targets)
 	_readback_usec = Time.get_ticks_usec() - read_started
 	var pack_started := Time.get_ticks_usec()
