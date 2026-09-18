@@ -1,0 +1,86 @@
+{
+  "_comment": "Soil, the surface a cell is made of. A type (data/terrain/terrain_types.json) says what ground DOES - how fast it is crossed, whether it can be crossed, how much it blocks sight. A soil says what ground IS MADE OF - what it dries to, what it churns into when it is wet, which detail overlay the renderer paints on it, and a small movement modifier of its own. The two are independent on purpose: a wood (type) can stand on gravel (soil), and a bog is a soil and a wetness, not a fifth kind of terrain. A cell's final movement multiplier is composed from its type, its soil, its vegetation, its wetness and its slope once, at generation time, and cached - see BattlefieldTerrain._resolve_move().",
+  "_fields": {
+    "id": "stable key, written into the per-cell soil array",
+    "name": "what a player would call it",
+    "move_modifier": "multiplied onto the type's multiplier; keep these close to 1.0 so a soil seasons the ground rather than re-writing the rule",
+    "moisture": "0..1, what this soil is like when wet - the generator prefers soils whose moisture matches the cell's",
+    "overlay": "the detail overlay this soil wears by default (see the biome's overlays list)",
+    "colour": "debug overlay colour only"
+  },
+
+  "soils": [
+    {
+      "id": "grass",
+      "name": "Grass",
+      "description": "The default ground of a green country.",
+      "move_modifier": 1.0,
+      "moisture": 0.35,
+      "overlay": "none",
+      "colour": "4f621a"
+    },
+    {
+      "id": "dirt",
+      "name": "Bare dirt",
+      "description": "Where the turf is gone - worn tracks, camps, the ground around a village.",
+      "move_modifier": 0.98,
+      "moisture": 0.3,
+      "overlay": "dirt",
+      "colour": "6b5a3a"
+    },
+    {
+      "id": "mudflat",
+      "name": "Mud",
+      "description": "Dirt holding water. Heavy to walk on and worse to charge over.",
+      "move_modifier": 0.88,
+      "moisture": 0.85,
+      "overlay": "mud",
+      "colour": "4a3f2c"
+    },
+    {
+      "id": "silt",
+      "name": "River silt",
+      "description": "The soft, pale ground a river leaves when it has been somewhere and gone.",
+      "move_modifier": 0.94,
+      "moisture": 0.7,
+      "overlay": "sand",
+      "colour": "8a7a55"
+    },
+    {
+      "id": "sand",
+      "name": "Sand",
+      "description": "Loose and bright. Easy enough to cross, hard to hold a line on.",
+      "move_modifier": 0.95,
+      "moisture": 0.15,
+      "overlay": "sand",
+      "colour": "a89653"
+    },
+    {
+      "id": "gravel",
+      "name": "Gravel",
+      "description": "Loose stone. Footing is uncertain but the ground drains.",
+      "move_modifier": 0.96,
+      "moisture": 0.1,
+      "overlay": "stones",
+      "colour": "6a675f"
+    },
+    {
+      "id": "rock",
+      "name": "Bare rock",
+      "description": "Bedrock at the surface. Nothing grows here and nothing digs in.",
+      "move_modifier": 0.92,
+      "moisture": 0.05,
+      "overlay": "stones",
+      "colour": "5b574e"
+    },
+    {
+      "id": "snow",
+      "name": "Snow",
+      "description": "Old snow, packed enough to walk on and deep enough to slow the step.",
+      "move_modifier": 0.9,
+      "moisture": 0.6,
+      "overlay": "snow_drift",
+      "colour": "cfd6dd"
+    }
+  ]
+}

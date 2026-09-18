@@ -46,7 +46,7 @@ const LOOK_STRENGTH := 0.75
 ## on a 4096-unit world that is 256x256 cells in about a fifth of a second.
 const FIELD_STEP := WorldChunks.CELL_SIZE * 2.0
 
-const TILE_UNITS := 256.0
+const TILE_UNITS := 64.0
 
 const CATALOGUE := "res://data/terrain/biomes.json"
 

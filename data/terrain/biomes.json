@@ -1,11 +1,11 @@
 {
-  "_comment": "Biomes. The campaign map's ground is data first, exactly as battlefield terrain is: the simulation reads a type and a movement number, the renderer reads a palette and a texture, and neither knows about the other. A BIOME is a look - a ground texture, a palette, a height character and a set of props. A TYPE (data/terrain/terrain_types.json) is a rule - how fast a soldier crosses it. Every biome names the type it behaves as, so adding a snowfield never changes a movement number, and re-balancing movement never changes how anything looks. When biomes meet, a tile carries WEIGHTS (70% grass, 30% forest) and colour, height, prop density and movement all read those weights.",
+  "_comment": "Biomes. Ground is data first: the simulation reads a type and a movement number, the renderer reads a palette and a texture, and neither knows about the other. A BIOME is a country - its looks, its palette, how its land lies and what grows on it. A TYPE (data/terrain/terrain_types.json) is a rule - how fast a soldier crosses it - and a SOIL (data/terrain/soils.json) is the material underfoot. Every biome names the type its ground behaves as, so adding a snowfield never changes a movement number and re-balancing movement never changes how anything looks. When biomes meet, a tile carries WEIGHTS (70% grass, 30% forest) and colour, height, prop density, cover and movement all read those weights. Adding a biome is a block in this file: nothing in the generator knows the name of any one of them.",
   "_fields": {
     "id": "stable key, used by the world generator and by battlefields",
     "name": "what a player would call it",
-    "type": "the terrain_types.json id whose movement rule this biome follows",
-    "grounds": "four looks, each with four sub-variants: the look comes from the world (moisture, wear, region - the same field that decides the biome) and the sub-variant from a seeded hash of the tile's position. A tile always shows the same one, neighbours rarely match, and the four inside a look are rolled, mirrored or tone-shifted copies of one another - never cropped or resampled, because those break the seam.",
-    "ground_scale": "how many world units one repeat of a ground image covers (a knob: tune when it is on screen)",
+    "type": "the terrain_types.json id whose movement rule this biome's ground follows",
+    "grounds": "the CAMPAIGN MAP's four looks, each with four sub-variants: the look comes from the world (moisture, wear, region - the same field that decides the biome) and the sub-variant from a seeded hash of the tile's position. A tile always shows the same one, neighbours rarely match, and the four inside a look are rolled, mirrored or tone-shifted copies of one another - never cropped or resampled, because those break the seam.",
+    "ground_scale": "how many world units one repeat of a campaign ground image covers",
     "palette": [
       "two to four colours, darkest first: what the height shading darkens and lightens from when there is no ground image"
     ],
@@ -14,16 +14,165 @@
       "roughness": "0 = flat, 1 = broken",
       "bias": "-1 hollows, +1 raises"
     },
-    "props": [
-      {
-        "art": "res:// path",
-        "density": "props per 100 tiles at full weight",
-        "min_weight": "how much of this biome a tile needs before the prop appears at all",
-        "scale": "height in world units",
-        "jitter": "0..1 placement scatter"
-      }
-    ]
+    "terrain": "the BATTLEFIELD's own generation block. Everything the field generator reads lives here so a biome can be tuned - or written from scratch - without touching code.",
+    "terrain.elevation": {
+      "base": "0..1, the height the country sits at before anything is added to it",
+      "amplitude": "multiplier on the config's elevation_amplitude: how tall this country's land gets",
+      "roughness": "0 = table flat, 1 = broken ground. This is the LARGE scale - the base relief",
+      "bias": "-1 sinks the country into hollows, +1 lifts it onto a plateau",
+      "feature_scale": "multiplier on feature sizes: 1.0 is the default footprint, 2.0 doubles every hill"
+    },
+    "terrain.features": "how often each landform appears, per feature lattice cell. The lattice is spaced by feature_spacing cells, so these are densities, not counts, and they mean the same thing on a 100x60 field and on a 633x380 one.",
+    "terrain.detail": "0..1, the restrained smaller-scale variation laid on afterwards. Kept low on purpose: a battlefield that is noisy everywhere is a battlefield formations cannot use.",
+    "terrain.moisture": "0..1, what the ground is like - decides wetness, soil choice and the variant weights",
+    "terrain.vegetation": "base density 0..1 plus per-kind densities (trees, bushes, rocks) that the cover and prop passes read",
+    "terrain.soils": "which soils this biome may choose from, and their weights",
+    "terrain.movement": {
+      "vegetation_drag": "how much vegetation slows a body at full density",
+      "wetness_drag": "how much standing water slows a body at full wetness",
+      "slope_penalty": "how much a 1.0 (45 degree) slope costs, before the type and soil numbers are applied"
+    },
+    "terrain.variants": "the BATTLEFIELD's four ground variants. Same idea as grounds, at battle scale: Lush is not one texture but four that look the same and differ slightly, which is what stops repetition being visible. Which variant a cell shows comes from the field (moisture, wear, region), which sub-variant from a seeded hash of the repeat's position. Empty variant art falls back to the variant's dominant colour, so a biome with no art yet still renders.",
+    "terrain.overlays": "up to four detail overlays per biome, painted on the ground by a coverage mask: dark grass, dry grass, dirt, stones, moss, flowers, dead vegetation, trampled ground. The mask is a channel (wetness, slope, wear, vegetation), never a scatter of isolated speckles. The first three become the shader's RGB channels and the fourth its alpha.",
+    "terrain.props": "which prop kinds this biome grows and how thickly, per 100 tiles at full weight, with the minimum biome weight a tile needs before the prop appears at all",
+    "prop_kinds": "the shared prop table: art, world size, and what the prop does to a battle (cover, sight line, obstruction). A biome names a kind and tunes its density, so a tree is a tree whether it is standing in plains or in swamp."
   },
+
+  "prop_kinds": [
+    {
+      "id": "tree",
+      "name": "Tree",
+      "art": ["res://assets/terrain/props/tree_1.png", "res://assets/terrain/props/tree_2.png", "res://assets/terrain/props/tree_3.png"],
+      "scale": 7.0,
+      "cover": 0.5,
+      "los_blocking": 0.85,
+      "obstacle_radius": 1.0,
+      "blocks_movement": false,
+      "cluster": {"count": [3, 9], "radius": 11.0}
+    },
+    {
+      "id": "bush",
+      "name": "Bush",
+      "art": ["res://assets/terrain/props/bush_1.png", "res://assets/terrain/props/bush_2.png"],
+      "scale": 2.0,
+      "cover": 0.3,
+      "los_blocking": 0.15,
+      "obstacle_radius": 0.5,
+      "blocks_movement": false,
+      "cluster": {"count": [2, 6], "radius": 7.0}
+    },
+    {
+      "id": "rock",
+      "name": "Boulder",
+      "art": ["res://assets/terrain/props/rock_1.png", "res://assets/terrain/props/rock_2.png"],
+      "scale": 2.4,
+      "cover": 0.35,
+      "los_blocking": 0.3,
+      "obstacle_radius": 0.8,
+      "blocks_movement": true,
+      "cluster": {"count": [2, 5], "radius": 8.0}
+    },
+    {
+      "id": "log",
+      "name": "Fallen log",
+      "art": ["res://assets/terrain/props/log_1.png"],
+      "scale": 1.4,
+      "cover": 0.25,
+      "los_blocking": 0.1,
+      "obstacle_radius": 0.6,
+      "blocks_movement": true,
+      "cluster": {"count": [1, 3], "radius": 6.0}
+    },
+    {
+      "id": "stump",
+      "name": "Stump",
+      "art": ["res://assets/terrain/props/stump_1.png"],
+      "scale": 1.2,
+      "cover": 0.15,
+      "los_blocking": 0.0,
+      "obstacle_radius": 0.5,
+      "blocks_movement": false,
+      "cluster": {"count": [2, 5], "radius": 6.0}
+    },
+    {
+      "id": "fence",
+      "name": "Broken fence",
+      "art": ["res://assets/terrain/props/fence_1.png"],
+      "scale": 2.0,
+      "cover": 0.2,
+      "los_blocking": 0.25,
+      "obstacle_radius": 0.7,
+      "blocks_movement": true,
+      "cluster": {"count": [2, 4], "radius": 14.0}
+    },
+    {
+      "id": "ruin",
+      "name": "Ruin",
+      "art": ["res://assets/terrain/props/ruin_1.png"],
+      "scale": 3.5,
+      "cover": 0.5,
+      "los_blocking": 0.7,
+      "obstacle_radius": 1.0,
+      "blocks_movement": true,
+      "cluster": {"count": [1, 3], "radius": 9.0}
+    },
+    {
+      "id": "crop",
+      "name": "Standing crop",
+      "art": ["res://assets/terrain/props/crop_1.png"],
+      "scale": 1.2,
+      "cover": 0.1,
+      "los_blocking": 0.05,
+      "obstacle_radius": 0.0,
+      "blocks_movement": false,
+      "cluster": {"count": [8, 20], "radius": 12.0}
+    },
+    {
+      "id": "hay",
+      "name": "Hay",
+      "art": ["res://assets/terrain/props/hay_1.png"],
+      "scale": 1.6,
+      "cover": 0.3,
+      "los_blocking": 0.2,
+      "obstacle_radius": 0.8,
+      "blocks_movement": true,
+      "cluster": {"count": [1, 4], "radius": 10.0}
+    },
+    {
+      "id": "debris",
+      "name": "Debris",
+      "art": ["res://assets/terrain/props/debris_1.png"],
+      "scale": 0.9,
+      "cover": 0.1,
+      "los_blocking": 0.0,
+      "obstacle_radius": 0.3,
+      "blocks_movement": false,
+      "cluster": {"count": [3, 8], "radius": 9.0}
+    },
+    {
+      "id": "reed",
+      "name": "Reeds",
+      "art": ["res://assets/terrain/props/reed_1.png"],
+      "scale": 1.8,
+      "cover": 0.25,
+      "los_blocking": 0.15,
+      "obstacle_radius": 0.3,
+      "blocks_movement": false,
+      "cluster": {"count": [6, 16], "radius": 12.0}
+    },
+    {
+      "id": "cactus",
+      "name": "Cactus",
+      "art": ["res://assets/terrain/props/cactus_1.png"],
+      "scale": 2.6,
+      "cover": 0.2,
+      "los_blocking": 0.15,
+      "obstacle_radius": 0.6,
+      "blocks_movement": true,
+      "cluster": {"count": [1, 4], "radius": 10.0}
+    }
+  ],
+
   "biomes": [
     {
       "id": "plains",
@@ -31,45 +180,370 @@
       "type": "open",
       "ground_scale": 24.0,
       "grounds": [
-        {
-          "name": "Lush",
-          "dominant": "456e16",
-          "shader": "lush",
-          "variants": []
-        },
-        {
-          "name": "Dry",
-          "dominant": "8d762d",
-          "shader": "dry",
-          "variants": []
-        },
-        {
-          "name": "Worn",
-          "dominant": "596728",
-          "shader": "worn",
-          "variants": []
-        },
-        {
-          "name": "Standard",
-          "dominant": "4f621a",
-          "shader": "standard",
-          "variants": []
-        }
+        {"name": "Lush", "dominant": "456e16", "shader": "lush", "variants": []},
+        {"name": "Dry", "dominant": "8d762d", "shader": "dry", "variants": []},
+        {"name": "Worn", "dominant": "596728", "shader": "worn", "variants": []},
+        {"name": "Standard", "dominant": "4f621a", "shader": "standard", "variants": []}
       ],
-      "palette": [
-        "38430f",
-        "4f621a",
-        "7a7a2c",
-        "a08f45"
-      ],
-      "height": {
-        "base": 0.45,
-        "roughness": 0.25,
-        "bias": 0.0
+      "palette": ["38430f", "4f621a", "7a7a2c", "a08f45"],
+      "height": {"base": 0.45, "roughness": 0.25, "bias": 0.0},
+      "terrain": {
+        "elevation": {"base": 0.45, "amplitude": 1.0, "roughness": 0.3, "bias": -0.05, "feature_scale": 1.0},
+        "features": {"hills": 0.3, "ridges": 0.12, "valleys": 0.22, "basins": 0.12, "cliffs": 0.0, "riverbeds": 0.16, "clearings": 0.3, "spacing": 7.0, "flat": 0.6},
+        "detail": 0.16,
+        "moisture": 0.45,
+        "wetness": 0.06,
+        "vegetation": {"base": 0.2, "trees": 0.04, "bushes": 0.14, "rocks": 0.03},
+        "soils": [{"id": "grass", "weight": 10}, {"id": "dirt", "weight": 1.5}, {"id": "silt", "weight": 0.6}],
+        "movement": {"vegetation_drag": 0.14, "wetness_drag": 0.28, "slope_penalty": 0.55},
+        "variant_scale": 4.0,
+        "overlay_scale": 3.0,
+        "variants": [
+          {
+            "name": "Lush",
+            "dominant": "456e16",
+            "shader": "lush",
+            "art": [
+              "res://assets/terrain/biomes/plains/base/plains_lush_1.png",
+              "res://assets/terrain/biomes/plains/base/plains_lush_2.png",
+              "res://assets/terrain/biomes/plains/base/plains_lush_3.png",
+              "res://assets/terrain/biomes/plains/base/plains_lush_4.png"
+            ]
+          },
+          {
+            "name": "Patchy",
+            "dominant": "4f621a",
+            "shader": "patchy",
+            "art": [
+              "res://assets/terrain/biomes/plains/base/plains_patchy_1.png",
+              "res://assets/terrain/biomes/plains/base/plains_patchy_2.png",
+              "res://assets/terrain/biomes/plains/base/plains_patchy_3.png",
+              "res://assets/terrain/biomes/plains/base/plains_patchy_4.png"
+            ]
+          },
+          {
+            "name": "Dry",
+            "dominant": "8d762d",
+            "shader": "dry",
+            "art": [
+              "res://assets/terrain/biomes/plains/base/plains_dry_1.png",
+              "res://assets/terrain/biomes/plains/base/plains_dry_2.png",
+              "res://assets/terrain/biomes/plains/base/plains_dry_3.png",
+              "res://assets/terrain/biomes/plains/base/plains_dry_4.png"
+            ]
+          },
+          {
+            "name": "Wild",
+            "dominant": "596728",
+            "shader": "wild",
+            "art": [
+              "res://assets/terrain/biomes/plains/base/plains_wild_1.png",
+              "res://assets/terrain/biomes/plains/base/plains_wild_2.png",
+              "res://assets/terrain/biomes/plains/base/plains_wild_3.png",
+              "res://assets/terrain/biomes/plains/base/plains_wild_4.png"
+            ]
+          }
+        ],
+        "overlays": [
+          {"id": "dirt", "name": "Dirt", "art": ["res://assets/terrain/overlays/dirt_1.png", "res://assets/terrain/overlays/dirt_2.png"], "source": "wear", "strength": 0.8},
+          {"id": "dry_grass", "name": "Dry grass", "art": ["res://assets/terrain/overlays/dry_grass_1.png", "res://assets/terrain/overlays/dry_grass_2.png"], "source": "dryness", "strength": 0.7},
+          {"id": "dark_grass", "name": "Dark grass", "art": ["res://assets/terrain/overlays/dark_grass_1.png", "res://assets/terrain/overlays/dark_grass_2.png"], "source": "moisture", "strength": 0.6},
+          {"id": "stones", "name": "Stones", "art": ["res://assets/terrain/overlays/stones_1.png", "res://assets/terrain/overlays/stones_2.png"], "source": "slope", "strength": 0.7}
+        ],
+        "props": [
+          {"kind": "tree", "density": 5.0, "min_weight": 0.3, "max_slope": 0.5},
+          {"kind": "bush", "density": 11.0, "min_weight": 0.15, "max_slope": 0.6},
+          {"kind": "rock", "density": 3.0, "min_weight": 0.2, "max_slope": 0.7},
+          {"kind": "log", "density": 1.5, "min_weight": 0.25, "max_slope": 0.5},
+          {"kind": "debris", "density": 3.5, "min_weight": 0.1, "max_slope": 0.8},
+          {"kind": "hay", "density": 1.5, "min_weight": 0.5, "max_slope": 0.3},
+          {"kind": "crop", "density": 3.0, "min_weight": 0.6, "max_slope": 0.25},
+          {"kind": "fence", "density": 0.8, "min_weight": 0.6, "max_slope": 0.3}
+        ]
       },
       "props": [],
-      "notes": "Four looks rather than four variations of one: Standard, Lush, Dry and Worn differ in colour and wear, so they can later be chosen by moisture, season or region instead of at random. Art is 1254x1254, top-down and painted; props to follow.",
-      "art_source": "EMPTY. All terrain art deleted by the owner on 2026-09-18 - the ground was wrong in ways five attempts did not fix, and he is sourcing new art himself. The world generation, the field, the shader and the drawing code are all still here and correct: put files back in the variants arrays and the map has ground again."
+      "notes": "Four looks rather than four variations of one: Standard, Lush, Dry and Worn differ in colour and wear, so they can later be chosen by moisture, season or region instead of at random. The battlefield's four variants are the same idea at battle scale - Lush, Patchy, Dry, Wild.",
+      "art_source": "EMPTY. All terrain art deleted by the owner on 2026-09-18 - the ground was wrong in ways five attempts did not fix, and he is sourcing new art himself. The world generation, the field, the shader and the drawing code are all still here and correct: put files back in the variants arrays and the map has ground again. The battlefield's own variant and overlay art is generated placeholder art (scripts/dev/ground_forge.gd) in the meantime - named, catalogued and ready to be replaced file for file."
+    },
+    {
+      "id": "forest",
+      "name": "Forest",
+      "type": "woods",
+      "ground_scale": 24.0,
+      "grounds": [
+        {"name": "Deep", "dominant": "2c3d22", "shader": "lush", "variants": []},
+        {"name": "Thin", "dominant": "46603a", "shader": "dry", "variants": []},
+        {"name": "Cleared", "dominant": "57693a", "shader": "worn", "variants": []},
+        {"name": "Edge", "dominant": "38502c", "shader": "standard", "variants": []}
+      ],
+      "palette": ["1f2b18", "2c3d22", "46603a", "6b7a45"],
+      "height": {"base": 0.5, "roughness": 0.45, "bias": 0.1},
+      "terrain": {
+        "elevation": {"base": 0.5, "amplitude": 1.2, "roughness": 0.45, "bias": 0.1, "feature_scale": 1.15},
+        "features": {"hills": 0.35, "ridges": 0.2, "valleys": 0.25, "basins": 0.15, "cliffs": 0.05, "riverbeds": 0.12, "clearings": 0.45, "spacing": 7.0, "flat": 0.35},
+        "detail": 0.22,
+        "moisture": 0.62,
+        "wetness": 0.12,
+        "vegetation": {"base": 0.62, "trees": 0.55, "bushes": 0.3, "rocks": 0.05},
+        "soils": [{"id": "grass", "weight": 5}, {"id": "dirt", "weight": 2}, {"id": "mudflat", "weight": 1}],
+        "movement": {"vegetation_drag": 0.3, "wetness_drag": 0.3, "slope_penalty": 0.6},
+        "variant_scale": 4.0,
+        "overlay_scale": 3.0,
+        "variants": [
+          {"name": "Deep", "dominant": "2c3d22", "shader": "lush", "art": []},
+          {"name": "Thin", "dominant": "46603a", "shader": "dry", "art": []},
+          {"name": "Cleared", "dominant": "57693a", "shader": "worn", "art": []},
+          {"name": "Edge", "dominant": "38502c", "shader": "standard", "art": []}
+        ],
+        "overlays": [
+          {"id": "leaf_litter", "name": "Leaf litter", "art": [], "source": "wear", "strength": 0.8},
+          {"id": "moss", "name": "Moss", "art": [], "source": "moisture", "strength": 0.7},
+          {"id": "dark_grass", "name": "Dark grass", "art": [], "source": "moisture", "strength": 0.6},
+          {"id": "dirt", "name": "Dirt", "art": [], "source": "slope", "strength": 0.6}
+        ],
+        "props": [
+          {"kind": "tree", "density": 42.0, "min_weight": 0.25, "max_slope": 0.55},
+          {"kind": "bush", "density": 18.0, "min_weight": 0.15, "max_slope": 0.7},
+          {"kind": "log", "density": 5.0, "min_weight": 0.2, "max_slope": 0.6},
+          {"kind": "stump", "density": 4.0, "min_weight": 0.2, "max_slope": 0.6},
+          {"kind": "rock", "density": 4.0, "min_weight": 0.25, "max_slope": 0.7},
+          {"kind": "debris", "density": 8.0, "min_weight": 0.1, "max_slope": 0.8}
+        ]
+      },
+      "props": [],
+      "notes": "Configured, generating and measured, but with no art yet: the battlefield falls back to the variant's dominant colour. Proves the architecture takes a second biome without a line of new code."
+    },
+    {
+      "id": "highlands",
+      "name": "Highlands",
+      "type": "high_ground",
+      "ground_scale": 24.0,
+      "grounds": [
+        {"name": "Crag", "dominant": "5f6152", "shader": "lush", "variants": []},
+        {"name": "Heather", "dominant": "6d6a46", "shader": "dry", "variants": []},
+        {"name": "Moor", "dominant": "55603f", "shader": "worn", "variants": []},
+        {"name": "Slope", "dominant": "6b6f55", "shader": "standard", "variants": []}
+      ],
+      "palette": ["3d4034", "55603f", "6d6a46", "8d8a6a"],
+      "height": {"base": 0.68, "roughness": 0.75, "bias": 0.45},
+      "terrain": {
+        "elevation": {"base": 0.68, "amplitude": 1.6, "roughness": 0.8, "bias": 0.45, "feature_scale": 1.4},
+        "features": {"hills": 0.7, "ridges": 0.5, "valleys": 0.3, "basins": 0.08, "cliffs": 0.22, "riverbeds": 0.08, "clearings": 0.15, "spacing": 8.0, "flat": 0.2},
+        "detail": 0.24,
+        "moisture": 0.4,
+        "wetness": 0.1,
+        "vegetation": {"base": 0.25, "trees": 0.06, "bushes": 0.18, "rocks": 0.22},
+        "soils": [{"id": "gravel", "weight": 6}, {"id": "rock", "weight": 4}, {"id": "grass", "weight": 4}, {"id": "dirt", "weight": 2}],
+        "movement": {"vegetation_drag": 0.16, "wetness_drag": 0.25, "slope_penalty": 0.75},
+        "variant_scale": 4.0,
+        "overlay_scale": 3.0,
+        "variants": [
+          {"name": "Crag", "dominant": "5f6152", "shader": "lush", "art": []},
+          {"name": "Heather", "dominant": "6d6a46", "shader": "dry", "art": []},
+          {"name": "Moor", "dominant": "55603f", "shader": "worn", "art": []},
+          {"name": "Slope", "dominant": "6b6f55", "shader": "standard", "art": []}
+        ],
+        "overlays": [
+          {"id": "stones", "name": "Stones", "art": [], "source": "slope", "strength": 0.9},
+          {"id": "scree", "name": "Scree", "art": [], "source": "slope", "strength": 0.8},
+          {"id": "dirt", "name": "Dirt", "art": [], "source": "wear", "strength": 0.6},
+          {"id": "moss", "name": "Moss", "art": [], "source": "moisture", "strength": 0.5}
+        ],
+        "props": [
+          {"kind": "rock", "density": 16.0, "min_weight": 0.15, "max_slope": 0.9},
+          {"kind": "bush", "density": 7.0, "min_weight": 0.2, "max_slope": 0.7},
+          {"kind": "tree", "density": 7.0, "min_weight": 0.3, "max_slope": 0.5},
+          {"kind": "debris", "density": 6.0, "min_weight": 0.1, "max_slope": 0.9}
+        ]
+      },
+      "props": [],
+      "notes": "The biome that tests the slope side of the system: high roughness, cliffs, and a movement penalty that comes mostly from the land rather than from the type."
+    },
+    {
+      "id": "swamp",
+      "name": "Swamp",
+      "type": "mud",
+      "ground_scale": 24.0,
+      "grounds": [
+        {"name": "Mire", "dominant": "3c4430", "shader": "lush", "variants": []},
+        {"name": "Sedge", "dominant": "4d5136", "shader": "dry", "variants": []},
+        {"name": "Black water", "dominant": "333c2c", "shader": "worn", "variants": []},
+        {"name": "Bank", "dominant": "5a5c3c", "shader": "standard", "variants": []}
+      ],
+      "palette": ["232b1e", "333c2c", "4d5136", "6c6b45"],
+      "height": {"base": 0.22, "roughness": 0.2, "bias": -0.5},
+      "terrain": {
+        "elevation": {"base": 0.22, "amplitude": 0.6, "roughness": 0.25, "bias": -0.5, "feature_scale": 1.1},
+        "features": {"hills": 0.05, "ridges": 0.05, "valleys": 0.35, "basins": 0.5, "cliffs": 0.0, "riverbeds": 0.4, "clearings": 0.1, "spacing": 6.0, "flat": 0.5},
+        "detail": 0.12,
+        "moisture": 0.88,
+        "wetness": 0.55,
+        "vegetation": {"base": 0.5, "trees": 0.15, "bushes": 0.18, "rocks": 0.02},
+        "soils": [{"id": "mudflat", "weight": 8}, {"id": "silt", "weight": 4}, {"id": "grass", "weight": 2}],
+        "movement": {"vegetation_drag": 0.25, "wetness_drag": 0.55, "slope_penalty": 0.4},
+        "variant_scale": 4.0,
+        "overlay_scale": 3.0,
+        "variants": [
+          {"name": "Mire", "dominant": "3c4430", "shader": "lush", "art": []},
+          {"name": "Sedge", "dominant": "4d5136", "shader": "dry", "art": []},
+          {"name": "Black water", "dominant": "333c2c", "shader": "worn", "art": []},
+          {"name": "Bank", "dominant": "5a5c3c", "shader": "standard", "art": []}
+        ],
+        "overlays": [
+          {"id": "mud", "name": "Mud", "art": [], "source": "wetness", "strength": 0.9},
+          {"id": "moss", "name": "Algae", "art": [], "source": "wetness", "strength": 0.7},
+          {"id": "dark_grass", "name": "Dark grass", "art": [], "source": "moisture", "strength": 0.7},
+          {"id": "stones", "name": "Stones", "art": [], "source": "slope", "strength": 0.5}
+        ],
+        "props": [
+          {"kind": "reed", "density": 26.0, "min_weight": 0.2, "max_slope": 0.4, "allow_wet": true},
+          {"kind": "tree", "density": 9.0, "min_weight": 0.3, "max_slope": 0.35, "allow_wet": true},
+          {"kind": "bush", "density": 8.0, "min_weight": 0.2, "max_slope": 0.5, "allow_wet": true},
+          {"kind": "log", "density": 3.0, "min_weight": 0.25, "max_slope": 0.4, "allow_wet": true},
+          {"kind": "debris", "density": 5.0, "min_weight": 0.1, "max_slope": 0.6}
+        ]
+      },
+      "props": [],
+      "notes": "The wet end of the system: mud type, near-saturated wetness, and props that are allowed to stand in water while the rest are not."
+    },
+    {
+      "id": "arid",
+      "name": "Arid",
+      "type": "rough",
+      "ground_scale": 24.0,
+      "grounds": [
+        {"name": "Dune", "dominant": "b09455", "shader": "lush", "variants": []},
+        {"name": "Hardpan", "dominant": "8f7a4e", "shader": "dry", "variants": []},
+        {"name": "Scrub", "dominant": "7d7443", "shader": "worn", "variants": []},
+        {"name": "Gravel", "dominant": "9c8a63", "shader": "standard", "variants": []}
+      ],
+      "palette": ["5c4a2c", "7d7443", "a08f5f", "c4b184"],
+      "height": {"base": 0.4, "roughness": 0.3, "bias": -0.1},
+      "terrain": {
+        "elevation": {"base": 0.4, "amplitude": 0.9, "roughness": 0.3, "bias": -0.1, "feature_scale": 1.3},
+        "features": {"hills": 0.25, "ridges": 0.18, "valleys": 0.2, "basins": 0.25, "cliffs": 0.08, "riverbeds": 0.06, "clearings": 0.5, "spacing": 9.0, "flat": 0.55},
+        "detail": 0.14,
+        "moisture": 0.08,
+        "wetness": 0.0,
+        "vegetation": {"base": 0.06, "trees": 0.01, "bushes": 0.06, "rocks": 0.12},
+        "soils": [{"id": "sand", "weight": 7}, {"id": "gravel", "weight": 3}, {"id": "rock", "weight": 2}, {"id": "dirt", "weight": 2}],
+        "movement": {"vegetation_drag": 0.1, "wetness_drag": 0.2, "slope_penalty": 0.5},
+        "variant_scale": 4.0,
+        "overlay_scale": 3.0,
+        "variants": [
+          {"name": "Dune", "dominant": "b09455", "shader": "lush", "art": []},
+          {"name": "Hardpan", "dominant": "8f7a4e", "shader": "dry", "art": []},
+          {"name": "Scrub", "dominant": "7d7443", "shader": "worn", "art": []},
+          {"name": "Gravel", "dominant": "9c8a63", "shader": "standard", "art": []}
+        ],
+        "overlays": [
+          {"id": "sand", "name": "Sand", "art": [], "source": "dryness", "strength": 0.9},
+          {"id": "dry_grass", "name": "Dry grass", "art": [], "source": "dryness", "strength": 0.6},
+          {"id": "stones", "name": "Stones", "art": [], "source": "slope", "strength": 0.7},
+          {"id": "dirt", "name": "Dirt", "art": [], "source": "wear", "strength": 0.5}
+        ],
+        "props": [
+          {"kind": "rock", "density": 11.0, "min_weight": 0.15, "max_slope": 0.8},
+          {"kind": "cactus", "density": 5.0, "min_weight": 0.3, "max_slope": 0.5},
+          {"kind": "debris", "density": 7.0, "min_weight": 0.1, "max_slope": 0.8},
+          {"kind": "bush", "density": 3.0, "min_weight": 0.35, "max_slope": 0.5}
+        ]
+      },
+      "props": [],
+      "notes": "The dry end: moisture near zero, sand and gravel soils, and the variant weights that the shader reads are the ones that make the ground read as sand rather than as grass."
+    },
+    {
+      "id": "tundra",
+      "name": "Tundra",
+      "type": "rough",
+      "ground_scale": 24.0,
+      "grounds": [
+        {"name": "Snow", "dominant": "c8d2d8", "shader": "lush", "variants": []},
+        {"name": "Thaw", "dominant": "9aa6a4", "shader": "dry", "variants": []},
+        {"name": "Moss", "dominant": "7f8a78", "shader": "worn", "variants": []},
+        {"name": "Ice", "dominant": "b3c2cc", "shader": "standard", "variants": []}
+      ],
+      "palette": ["6a7472", "7f8a78", "9aa6a4", "cfd6dd"],
+      "height": {"base": 0.5, "roughness": 0.4, "bias": 0.15},
+      "terrain": {
+        "elevation": {"base": 0.5, "amplitude": 1.1, "roughness": 0.4, "bias": 0.15, "feature_scale": 1.2},
+        "features": {"hills": 0.35, "ridges": 0.25, "valleys": 0.2, "basins": 0.2, "cliffs": 0.1, "riverbeds": 0.1, "clearings": 0.35, "spacing": 8.0, "flat": 0.45},
+        "detail": 0.16,
+        "moisture": 0.5,
+        "wetness": 0.18,
+        "vegetation": {"base": 0.14, "trees": 0.03, "bushes": 0.08, "rocks": 0.1},
+        "soils": [{"id": "snow", "weight": 7}, {"id": "rock", "weight": 3}, {"id": "gravel", "weight": 2}, {"id": "grass", "weight": 2}],
+        "movement": {"vegetation_drag": 0.12, "wetness_drag": 0.3, "slope_penalty": 0.65},
+        "variant_scale": 4.0,
+        "overlay_scale": 3.0,
+        "variants": [
+          {"name": "Snow", "dominant": "c8d2d8", "shader": "lush", "art": []},
+          {"name": "Thaw", "dominant": "9aa6a4", "shader": "dry", "art": []},
+          {"name": "Moss", "dominant": "7f8a78", "shader": "worn", "art": []},
+          {"name": "Ice", "dominant": "b3c2cc", "shader": "standard", "art": []}
+        ],
+        "overlays": [
+          {"id": "snow_drift", "name": "Drift", "art": [], "source": "wear", "strength": 0.9},
+          {"id": "frost", "name": "Frost", "art": [], "source": "wetness", "strength": 0.7},
+          {"id": "stones", "name": "Stones", "art": [], "source": "slope", "strength": 0.7},
+          {"id": "dirt", "name": "Bare earth", "art": [], "source": "slope", "strength": 0.5}
+        ],
+        "props": [
+          {"kind": "rock", "density": 7.0, "min_weight": 0.15, "max_slope": 0.85},
+          {"kind": "bush", "density": 4.0, "min_weight": 0.3, "max_slope": 0.6},
+          {"kind": "tree", "density": 4.0, "min_weight": 0.35, "max_slope": 0.5},
+          {"kind": "debris", "density": 5.0, "min_weight": 0.1, "max_slope": 0.85}
+        ]
+      },
+      "props": [],
+      "notes": "Snow is a soil, not a special case: the ground is still open or rough, and the difference is in what it is made of and what the variant weights say."
+    },
+    {
+      "id": "coastal",
+      "name": "Coastal",
+      "type": "open",
+      "ground_scale": 24.0,
+      "grounds": [
+        {"name": "Shore", "dominant": "a89653", "shader": "lush", "variants": []},
+        {"name": "Dune grass", "dominant": "7f8a4a", "shader": "dry", "variants": []},
+        {"name": "Salt flat", "dominant": "9a9a86", "shader": "worn", "variants": []},
+        {"name": "Marsh", "dominant": "5f6b45", "shader": "standard", "variants": []}
+      ],
+      "palette": ["4a5a3a", "5f6b45", "a89653", "cfc9a8"],
+      "height": {"base": 0.25, "roughness": 0.2, "bias": -0.35},
+      "terrain": {
+        "elevation": {"base": 0.25, "amplitude": 0.55, "roughness": 0.2, "bias": -0.35, "feature_scale": 1.0},
+        "features": {"hills": 0.12, "ridges": 0.1, "valleys": 0.3, "basins": 0.35, "cliffs": 0.06, "riverbeds": 0.45, "clearings": 0.4, "spacing": 7.0, "flat": 0.6},
+        "detail": 0.12,
+        "moisture": 0.7,
+        "wetness": 0.3,
+        "vegetation": {"base": 0.3, "trees": 0.05, "bushes": 0.12, "rocks": 0.06},
+        "soils": [{"id": "sand", "weight": 6}, {"id": "silt", "weight": 5}, {"id": "grass", "weight": 4}, {"id": "gravel", "weight": 2}],
+        "movement": {"vegetation_drag": 0.15, "wetness_drag": 0.35, "slope_penalty": 0.45},
+        "variant_scale": 4.0,
+        "overlay_scale": 3.0,
+        "variants": [
+          {"name": "Shore", "dominant": "a89653", "shader": "lush", "art": []},
+          {"name": "Dune grass", "dominant": "7f8a4a", "shader": "dry", "art": []},
+          {"name": "Salt flat", "dominant": "9a9a86", "shader": "worn", "art": []},
+          {"name": "Marsh", "dominant": "5f6b45", "shader": "standard", "art": []}
+        ],
+        "overlays": [
+          {"id": "sand", "name": "Sand", "art": [], "source": "dryness", "strength": 0.8},
+          {"id": "silt", "name": "Silt", "art": [], "source": "wetness", "strength": 0.7},
+          {"id": "dry_grass", "name": "Dry grass", "art": [], "source": "dryness", "strength": 0.6},
+          {"id": "stones", "name": "Shingle", "art": [], "source": "slope", "strength": 0.6}
+        ],
+        "props": [
+          {"kind": "reed", "density": 13.0, "min_weight": 0.2, "max_slope": 0.4, "allow_wet": true},
+          {"kind": "rock", "density": 6.0, "min_weight": 0.15, "max_slope": 0.8},
+          {"kind": "bush", "density": 5.0, "min_weight": 0.2, "max_slope": 0.6},
+          {"kind": "tree", "density": 4.0, "min_weight": 0.3, "max_slope": 0.45},
+          {"kind": "debris", "density": 6.0, "min_weight": 0.1, "max_slope": 0.8}
+        ]
+      },
+      "props": [],
+      "notes": "The riverland end: low ground, high wetness, silt soils and a riverbed feature that actually carries water rather than merely dipping."
     }
   ]
 }

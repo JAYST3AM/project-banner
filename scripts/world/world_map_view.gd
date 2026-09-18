@@ -190,10 +190,16 @@ func _bend_of(a: Vector2, b: Vector2) -> float:
 
 
 func _draw_roads() -> void:
+	var visible := _visible_world_rect()
 	for road in state.roads:
 		var a := state.settlement(str(road.get("a", "")))
 		var b := state.settlement(str(road.get("b", "")))
 		if a == null or b == null:
+			continue
+		# A road is drawn if its own box touches the view. Rect2.expand() builds it from the two ends,
+		# which for a road that bends is a cheap approximation of its extent and always a safe one.
+		var span := Rect2(a.position, Vector2.ZERO).expand(b.position)
+		if not visible.intersects(span):
 			continue
 		var kind := str(road.get("kind", "road"))
 		var color := COLOR_ROAD if kind == "road" else COLOR_TRACK
@@ -214,11 +220,22 @@ func _draw_travel_line() -> void:
 	draw_dashed_line(state.world_position, target.position, COLOR_PLAYER.darkened(0.1), 2.0, 10.0)
 
 
+## The slice of the world the camera can actually see, plus a margin so a label does not pop in and
+## out at the edge. The owner's rule, from the world design: anything not in vision is data, not
+## drawing. At ninety settlements and a 1600-unit view that is about ten drawn instead of ninety.
+func _visible_world_rect() -> Rect2:
+	var screen := get_viewport_rect().grow(240.0)
+	return get_global_transform_with_canvas().affine_inverse() * screen
+
+
 func _draw_settlements() -> void:
 	var font_size := label_font_size()
+	var visible := _visible_world_rect()
 	for key in state.settlements.keys():
 		var settlement := state.settlements[key] as Settlement
 		if settlement == null:
+			continue
+		if not visible.has_point(settlement.position):
 			continue
 		var color := settlement_color(settlement)
 		var radius := _settlement_radius(settlement.type)

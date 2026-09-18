@@ -1,5 +1,15 @@
 {
-  "_comment": "Battlefield terrain types. Terrain is simulation data first: the battle reads these numbers, and the renderer only colours cells for the benefit of the player. move_multiplier is applied to a unit's move speed while it stands in a cell of that type - it is the first and, for this milestone, the only gameplay effect of terrain. Combat modifiers (cover, elevation advantage) are a later milestone and belong in this same table when they arrive.",
+  "_comment": "Battlefield terrain types. A TYPE is a rule, not a look: how fast a body of men crosses this ground, whether it can cross it at all, how much cover it offers and how much of a sight line it stops. Terrain is simulation data first - the battle reads these numbers and the visual layer is generated from the same cells. Soil (data/terrain/soils.json) and biome (data/terrain/biomes.json) are the other two axes: a cell is a TYPE crossed with a SOIL inside a BIOME, and the movement multiplier the battle finally reads is composed from all three at generation time - see BattlefieldTerrain._resolve_move(). Adding a type is a row in this table, not a code change.",
+  "_fields": {
+    "id": "stable key, written into the per-cell type array",
+    "name": "what a player would call it",
+    "description": "one line, for the debug overlay and for whoever adds the next biome",
+    "move_multiplier": "how much of a unit's speed survives crossing a cell of this type (1.0 = nothing lost)",
+    "traversable": "false means no formation may stand or walk here; the traversability map is built from this, from slope and from obstacles",
+    "cover": "0..1, how much protection the ground itself gives a soldier standing in it",
+    "los_blocking": "0..1, how opaque this ground is to a sight line drawn across it (a wood is a thicket, not a wall; a cliff is a wall)",
+    "colour": "debug overlay colour only - the renderer draws art, never this"
+  },
 
   "terrain_types": [
     {
@@ -7,6 +17,9 @@
       "name": "Open ground",
       "description": "Clear, level ground. Nothing in the way of a formation.",
       "move_multiplier": 1.0,
+      "traversable": true,
+      "cover": 0.0,
+      "los_blocking": 0.0,
       "colour": "3f4a33"
     },
     {
@@ -14,13 +27,19 @@
       "name": "Rough ground",
       "description": "Broken, tussocked earth that slows a body of men without stopping them.",
       "move_multiplier": 0.78,
+      "traversable": true,
+      "cover": 0.15,
+      "los_blocking": 0.05,
       "colour": "4d4c36"
     },
     {
       "id": "woods",
       "name": "Light woods",
-      "description": "Scattered trees. Ranks cannot keep their dressing in here.",
+      "description": "Scattered trees. Ranks cannot keep their dressing in here, and a sight line through it is a guess.",
       "move_multiplier": 0.6,
+      "traversable": true,
+      "cover": 0.45,
+      "los_blocking": 0.7,
       "colour": "2f4030"
     },
     {
@@ -28,7 +47,40 @@
       "name": "High ground",
       "description": "Rising ground that takes the sting out of an uphill advance.",
       "move_multiplier": 0.86,
+      "traversable": true,
+      "cover": 0.1,
+      "los_blocking": 0.0,
       "colour": "59633f"
+    },
+    {
+      "id": "mud",
+      "name": "Mud",
+      "description": "Water standing in the soil. Men cross it slowly and ranks come apart in it.",
+      "move_multiplier": 0.55,
+      "traversable": true,
+      "cover": 0.05,
+      "los_blocking": 0.0,
+      "colour": "4a3f2c"
+    },
+    {
+      "id": "water",
+      "name": "Water",
+      "description": "Deep enough that no formation crosses it. A river is a wall with a current.",
+      "move_multiplier": 0.05,
+      "traversable": false,
+      "cover": 0.0,
+      "los_blocking": 0.0,
+      "colour": "33506b"
+    },
+    {
+      "id": "cliff",
+      "name": "Cliff",
+      "description": "A rock face. Nothing formed crosses it, and it stops a sight line dead.",
+      "move_multiplier": 0.05,
+      "traversable": false,
+      "cover": 0.55,
+      "los_blocking": 1.0,
+      "colour": "6b625a"
     }
   ]
 }
