@@ -154,10 +154,30 @@ func is_within_settlement(settlement: Settlement) -> bool:
 ## the map draws. Breadth-first over the road edges: the network has a few dozen nodes, so a shortest
 ## path by hops is found instantly and, because roads are faster, the fewest-road route is usually the
 ## quickest one too.
+## The closest settlement to where the party stands, for joining the road network from open country.
+func nearest_settlement() -> Settlement:
+	var best: Settlement = null
+	var best_distance := INF
+	for key in state.settlements.keys():
+		var candidate := state.settlements[key] as Settlement
+		if candidate == null:
+			continue
+		var d := state.world_position.distance_to(candidate.position)
+		if d < best_distance:
+			best_distance = d
+			best = candidate
+	return best
+
+
 func build_route(to: Settlement) -> void:
 	route = PackedVector2Array()
 	route_leg = 0
 	var from := current_settlement()
+	if from == null:
+		# Out in the wild: head for the nearest town, which puts the party onto the network instead of
+		# ignoring it. Without this the route was never built unless the party was already standing in a
+		# settlement, and the owner saw exactly that: "still don't follow the roads."
+		from = nearest_settlement()
 	if from == null or to == null or from.id == to.id:
 		return
 	var edges := {}

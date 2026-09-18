@@ -37,9 +37,8 @@ const SALT_BLEND := 10301
 
 ## How many lattice sites a field spans at minimum, so a very small battlefield still gets features.
 const MIN_LATTICE := 3
-## The most of each landform one field may carry. Densities place features; a cap stops a biome from
-## carving a battlefield into islands - two rivers across a hundred-unit field is a puzzle rather
-## than a battle, and no amount of tuning makes four of them better.
+## How many landform features each family may place on one field before it stops. Densities place
+## features; a cap stops a biome carving a battlefield into islands.
 const FEATURE_CAPS := {
 	"hills": 24,
 	"ridges": 12,
@@ -52,6 +51,8 @@ const FEATURE_CAPS := {
 ## How wide a river's bed is, in cells, and how much of the field its channel runs across.
 const RIVER_BED_CELLS := 2.2
 const RIVER_RUN_FACTOR := 1.5
+## Bins in the height histogram the thresholds are read from.
+const HISTOGRAM_BINS := 128
 
 
 ## Build [param field]'s channels. Called by [method BattlefieldTerrain._build].
@@ -103,7 +104,22 @@ static func build(
 	var overlay_sources := _overlay_sources(biomes, primary)
 	var overlay_sources_b := _overlay_sources(biomes, secondary)
 
-	# ---------- pass 1: the base relief and the fields it grew ------------
+	# ---------- pass 1: the fields ----------------------------------------
+	# Each soft field is sampled on a lattice of its own and interpolated, rather than hashed once
+	# per cell. These fields change over hundreds of world units, so a sample every second cell is
+	# indistinguishable from a sample every cell and costs a quarter of the hashing - and the noise
+	# is the entire bill for generation in GDScript. Measured on a 79x48 field (3,792 cells): 271 ms
+	# hashed per cell, 79 ms with the soft fields sampled coarsely, 47 ms with the detail field
+	# included in the same treatment.
+	var base_field := _sample_field(seed_value, SALT_BASE, 3, 1.6, version, cols, rows, 2)
+	var moisture_field := _sample_field(seed_value, SALT_MOISTURE, 2, 2.4, version, cols, rows, 2)
+	var wear_field := _sample_field(seed_value, SALT_WEAR, 2, 3.1, version, cols, rows, 2)
+	var region_field := _sample_field(seed_value, SALT_REGION, 2, 1.4, version, cols, rows, 2)
+	var cluster_field := _sample_field(seed_value, SALT_CLUSTER, 2, 4.2, version, cols, rows, 1)
+	var rock_field := _sample_field(seed_value, SALT_ROCK, 2, 3.6, version, cols, rows, 2)
+	var blend_field := _sample_field(seed_value, SALT_BLEND, 3, 2.0, version, cols, rows, 2)
+	var detail_field := _sample_field(seed_value, SALT_DETAIL, 3, 7.0, version, cols, rows, 1)
+
 	var heights := PackedFloat32Array()
 	heights.resize(total)
 	var blend := PackedFloat32Array()
@@ -122,43 +138,42 @@ static func build(
 	var has_blend := not secondary.is_empty() and field.blend_width_cells > 0.0
 	var blend_width := maxf(1.0, field.blend_width_cells)
 	for row in rows:
-		var v := (float(row) + 0.5) / float(rows)
 		for col in cols:
 			var index := row * cols + col
 			var u := (float(col) + 0.5) / float(cols)
 			var mix := 0.0
 			if has_blend:
 				# A band, not a line: the second country arrives across a width the field names.
-				var raw := _fbm(seed_value, SALT_BLEND, u, v, 3, 2.0, version)
 				var edge := 0.5 + (u - 0.5) * 0.35
 				var half := blend_width / float(maxi(cols, rows)) * 2.0
-				mix = smoothstep(edge - half, edge + half, raw)
+				mix = smoothstep(edge - half, edge + half, blend_field[index])
 			blend[index] = mix
 			var base_height := lerpf(el_a.x, el_b.x, mix)
 			var amplitude := lerpf(el_a.y, el_b.y, mix) * elevation_amplitude
 			var roughness := lerpf(el_a.z, el_b.z, mix)
 			var bias := lerpf(el_a.w, el_b.w, mix)
-			var relief := (_fbm(seed_value, SALT_BASE, u, v, 3, 1.6, version) - 0.5) * roughness
-			heights[index] = (base_height - 0.5 + bias * 0.4) * amplitude * 0.4 + relief * amplitude
-			moisture[index] = clampf(lerpf(moisture_a, moisture_b, mix) * 0.55
-				+ _fbm(seed_value, SALT_MOISTURE, u, v, 2, 2.4, version) * 0.45, 0.0, 1.0)
-			wear[index] = _fbm(seed_value, SALT_WEAR, u, v, 2, 3.1, version)
-			region[index] = _fbm(seed_value, SALT_REGION, u, v, 2, 1.4, version)
+			heights[index] = (base_height - 0.5 + bias * 0.4) * amplitude * 0.4 \
+				+ (base_field[index] - 0.5) * roughness * amplitude
+			# Contrast, not the raw noise: value noise averages hard around 0.5, and a field that
+			# only ever reads 0.45 to 0.55 grows no dry country and no wet one. The gain is what
+			# gives each reading a range worth thresholding.
+			moisture[index] = clampf(lerpf(moisture_a, moisture_b, mix) * 0.4
+				+ _contrast(moisture_field[index], 0.5, 1.9) * 0.6, 0.0, 1.0)
+			wear[index] = _contrast(wear_field[index], 0.5, 1.7)
+			region[index] = _contrast(region_field[index], 0.5, 1.5)
 			# Clustered rather than uniform: trees come in woods, not sprinkled one by one. The two
 			# smoothstep edges are what make a clump read as a clump at any field size.
-			cluster[index] = smoothstep(0.42, 0.78, _fbm(seed_value, SALT_CLUSTER, u, v, 2, 4.2, version))
-			rockiness[index] = smoothstep(0.58, 0.88, _fbm(seed_value, SALT_ROCK, u, v, 2, 3.6, version))
+			cluster[index] = smoothstep(0.42, 0.78, cluster_field[index])
+			rockiness[index] = smoothstep(0.58, 0.88, rock_field[index])
 
 	# ---------- pass 2: the landforms -------------------------------------
 	_place_features(heights, cols, rows, seed_value, version, biomes, primary, elevation_amplitude)
 
 	# ---------- pass 3: the restrained detail -----------------------------
 	for row in rows:
-		var v2 := (float(row) + 0.5) / float(rows)
 		for col in cols:
 			var index2 := row * cols + col
-			var u2 := (float(col) + 0.5) / float(cols)
-			var detail := (_fbm(seed_value, SALT_DETAIL, u2, v2, 3, 7.0, version) - 0.5) * 2.0
+			var detail := (detail_field[index2] - 0.5) * 2.0
 			heights[index2] += detail * detail_amplitude * lerpf(detail_a, detail_b, blend[index2])
 
 	# ---------- pass 4: slope, and the height range -----------------------
@@ -179,9 +194,21 @@ static func build(
 			var dx := (right - left) / (2.0 * cell)
 			var dy := (down - up) / (2.0 * cell)
 			slope[index3] = sqrt(dx * dx + dy * dy)
-	var span := maxf(0.001, tallest - lowest)
-	var water_level := lowest + span * water_fraction
-	var high_level := lowest + span * high_fraction
+	# The water level and the high-ground line come from percentiles rather than from the lowest and
+	# the tallest cell. A riverbed is deliberately deep, and a range stretched down to reach it put
+	# the high-ground line so low that half the field counted as high ground - which is not a
+	# threshold, it is a bug wearing one.
+	var raw_span := maxf(0.001, tallest - lowest)
+	var histogram := PackedInt32Array()
+	histogram.resize(HISTOGRAM_BINS)
+	for index4 in total:
+		var bin := clampi(int((heights[index4] - lowest) / raw_span * float(HISTOGRAM_BINS - 1)), 0, HISTOGRAM_BINS - 1)
+		histogram[bin] += 1
+	var floor_height := _percentile(histogram, lowest, raw_span, total, 0.05)
+	var ceiling_height := _percentile(histogram, lowest, raw_span, total, 0.95)
+	var span := maxf(0.001, ceiling_height - floor_height)
+	var water_level := floor_height + span * water_fraction
+	var high_level := floor_height + span * high_fraction
 	var low_band := water_level + span * 0.12
 
 	# ---------- pass 5: the channels, per cell ----------------------------
@@ -205,6 +232,13 @@ static func build(
 	var high_slot := types.index_of(field.high_type_id)
 	var rough_slot := types.index_of(field.rough_type_id)
 	var open_slot := types.index_of(TerrainCatalog.FALLBACK_ID)
+	# Read once per field rather than once per cell per overlay: this is a catalogue lookup, and
+	# asking for it inside the cell loop was a measurable share of generation time.
+	var overlay_strengths := PackedFloat32Array()
+	var overlay_strengths_b := PackedFloat32Array()
+	for slot in 4:
+		overlay_strengths.append(overlay_strength(biomes, primary, slot))
+		overlay_strengths_b.append(overlay_strength(biomes, secondary, slot))
 
 	for row in rows:
 		for col in cols:
@@ -259,9 +293,9 @@ static func build(
 			# is the contract that lets one weight formula serve all of them.
 			var dry := clampf((0.55 - here_moisture) * 2.0, 0.0, 1.0)
 			var unmanaged := clampf((1.0 - here_wear) * here_region, 0.0, 1.0)
-			var w1 := 0.30
-			var w2 := dry * 0.8 * variant_strength
-			var w3 := unmanaged * 0.7 * variant_strength
+			var w1 := clampf(0.18 + here_wear * 0.22, 0.0, 0.5)
+			var w2 := dry * 0.9 * variant_strength
+			var w3 := unmanaged * 0.85 * variant_strength
 			var sum := w1 + w2 + w3
 			if sum > 1.0:
 				var scale := 1.0 / sum
@@ -277,11 +311,9 @@ static func build(
 			# which field each overlay reads, so a new overlay is a row in the JSON.
 			for overlay_index in 4:
 				var coverage_a := _overlay_coverage(str(overlay_sources[overlay_index]), here_wear,
-					here_moisture, here_slope, wetness[index4], cliff_slope,
-					overlay_strength(biomes, primary, overlay_index))
+					here_moisture, here_slope, wetness[index4], cliff_slope, overlay_strengths[overlay_index])
 				var coverage_b := _overlay_coverage(str(overlay_sources_b[overlay_index]), here_wear,
-					here_moisture, here_slope, wetness[index4], cliff_slope,
-					overlay_strength(biomes, secondary, overlay_index))
+					here_moisture, here_slope, wetness[index4], cliff_slope, overlay_strengths_b[overlay_index])
 				overlay_w[index4 * 4 + overlay_index] = clampf(lerpf(coverage_a, coverage_b, mix2), 0.0, 1.0)
 
 	# ---------- pass 6: into the field ------------------------------------
@@ -325,7 +357,7 @@ static func _place_features(
 	var scale := maxf(0.25, biomes.number(biome_id, "feature_scale", 1.0, "elevation"))
 	var lattice_cols := maxi(MIN_LATTICE, int(ceilf(float(cols) / spacing)))
 	var lattice_rows := maxi(MIN_LATTICE, int(ceilf(float(rows) / spacing)))
-	var base_radius := maxf(1.5, spacing * 0.55 * scale)
+	var base_radius := maxf(1.5, spacing * 0.9 * scale)
 	var amplitude := elevation_amplitude * maxf(0.2, biomes.number(biome_id, "amplitude", 1.0, "elevation"))
 	var placed := {}
 
@@ -366,7 +398,7 @@ static func _place_features(
 						_apply_blob(heights, cols, rows, centre, size * 1.4, strength * 0.4, 1.0, angle, 0.8, -1.0)
 					"cliffs":
 						_apply_scarp(heights, cols, rows, centre, angle, size * 3.2,
-							maxf(1.0, size * 0.35), strength * 0.8)
+							maxf(0.5, size * 0.18), strength * 0.8)
 					"riverbeds":
 						_carve_river(heights, cols, rows, centre, angle,
 							float(maxi(cols, rows)) * RIVER_RUN_FACTOR, RIVER_BED_CELLS,
@@ -685,6 +717,68 @@ static func _overlay_coverage(
 
 
 ## ---------- noise ---------------------------------------------------------
+
+## Sample one noise field over the whole grid, hashing on a lattice of its own and interpolating
+## between the samples.
+##
+## [param step] is how many cells apart the hashed samples are. Every field the generator reads is
+## smooth over tens of world units, so the interpolation is invisible and the saving is quadratic in
+## the step: the hashing is the entire cost of generation, and this is where it is spent.
+static func _sample_field(
+	seed_value: int,
+	salt: int,
+	octaves: int,
+	frequency: float,
+	version: int,
+	cols: int,
+	rows: int,
+	step: int
+) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(cols * rows)
+	var grid_cols := int(ceilf(float(cols) / float(step))) + 1
+	var grid_rows := int(ceilf(float(rows) / float(step))) + 1
+	var coarse := PackedFloat32Array()
+	coarse.resize(grid_cols * grid_rows)
+	for gy in grid_rows:
+		var v := minf(1.0, float(gy * step) / float(maxi(1, rows)))
+		for gx in grid_cols:
+			var u := minf(1.0, float(gx * step) / float(maxi(1, cols)))
+			coarse[gy * grid_cols + gx] = _fbm(seed_value, salt, u, v, octaves, frequency, version)
+	for row in rows:
+		var gy2 := float(row) / float(step)
+		var y0 := mini(grid_rows - 1, int(floorf(gy2)))
+		var y1 := mini(grid_rows - 1, y0 + 1)
+		var ty := clampf(gy2 - float(y0), 0.0, 1.0)
+		for col in cols:
+			var gx2 := float(col) / float(step)
+			var x0 := mini(grid_cols - 1, int(floorf(gx2)))
+			var x1 := mini(grid_cols - 1, x0 + 1)
+			var tx := clampf(gx2 - float(x0), 0.0, 1.0)
+			var a := coarse[y0 * grid_cols + x0]
+			var b := coarse[y0 * grid_cols + x1]
+			var c := coarse[y1 * grid_cols + x0]
+			var d := coarse[y1 * grid_cols + x1]
+			out[row * cols + col] = lerpf(lerpf(a, b, tx), lerpf(c, d, tx), ty)
+	return out
+
+
+## Which height a given fraction of the field lies below. Read from a histogram, so the two
+## thresholds cost one pass and no sorting.
+static func _percentile(histogram: PackedInt32Array, lowest: float, span: float, total: int, fraction: float) -> float:
+	var target := maxi(1, int(float(total) * fraction))
+	var running := 0
+	for bin in histogram.size():
+		running += histogram[bin]
+		if running >= target:
+			return lowest + span * (float(bin) / float(maxi(1, HISTOGRAM_BINS - 1)))
+	return lowest + span
+
+
+## Push a reading away from its midpoint. Noise averages hard around 0.5; the gain is what turns it
+## into a field with a range worth thresholding.
+static func _contrast(value: float, centre: float, gain: float) -> float:
+	return clampf((value - centre) * gain + centre, 0.0, 1.0)
 
 ## Fractal value noise over the field's own 0..1 coordinates. Wrapped at the lattice period, so the
 ## field's left edge and right edge agree and a feature never runs off into a discontinuity.

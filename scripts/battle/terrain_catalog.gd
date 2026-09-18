@@ -81,6 +81,27 @@ func colour(id: String) -> Color:
 	return Color(raw) if Color.html_is_valid(raw) else Color("3f4a33")
 
 
+## How much protection the ground itself gives. The per-cell cover the simulation reads is composed
+## at generation from this, from the vegetation growing on the cell and (when props arrive) from what
+## is standing on it - see BattlefieldTerrain.refresh_maps_of_cell.
+func cover(id: String) -> float:
+	var record := define(id)
+	return clampf(float(record.get("cover", 0.0)), 0.0, 1.0)
+
+
+## How opaque this ground is to a sight line drawn across it: 0 is clear, 1 is a wall.
+func los_blocking(id: String) -> float:
+	var record := define(id)
+	return clampf(float(record.get("los_blocking", 0.0)), 0.0, 1.0)
+
+
+## Whether a formation may stand or walk here at all. False for water and cliff faces - and note that
+## it is not the whole story: the traversability map also refuses ground that is merely too steep.
+func traversable(id: String) -> bool:
+	var record := define(id)
+	return bool(record.get("traversable", true))
+
+
 ## Index of a type in declaration order - what the per-cell arrays store, so a cell
 ## costs one integer rather than a string.
 func index_of(id: String) -> int:

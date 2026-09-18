@@ -36,8 +36,31 @@ var _pause_layer: CanvasLayer = null
 var _debug_timer := 0.0
 
 
+## Whether data/terrain/biomes.json names any ground images that exist. Empty arrays mean the map has
+## no ground to draw, which is a state the owner put it in deliberately.
+func _ground_has_art() -> bool:
+	var catalogue := "res://data/terrain/biomes.json"
+	if not FileAccess.file_exists(catalogue):
+		return false
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(catalogue))
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return false
+	for biome in (parsed.get("biomes", []) as Array):
+		for ground in (biome.get("grounds", []) as Array):
+			var variants: Array = ground.get("variants", [])
+			for path in variants:
+				if ResourceLoader.exists(str(path)):
+					return true
+	return false
+
+
 func _ready() -> void:
 	_no_ground = OS.get_cmdline_user_args().has("--no-ground")
+	# And no ground if the catalogue has no art for it. The art was deleted on the owner's instruction
+	# and the shader drew white without it; skipping the ground entirely is the honest picture of a map
+	# that has none, and it costs nothing when art comes back - the check passes and the ground returns.
+	if not _no_ground:
+		_no_ground = not _ground_has_art()
 	DebugLogger.info("world map loading", "WorldMap")
 
 	if not GameManager.is_campaign_active():
