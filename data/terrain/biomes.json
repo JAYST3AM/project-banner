@@ -36,10 +36,10 @@
           "dominant": "456e16",
           "shader": "lush",
           "variants": [
-            "res://assets/terrain/plains/plains_lush_1.png",
-            "res://assets/terrain/plains/plains_lush_2.png",
-            "res://assets/terrain/plains/plains_lush_3.png",
-            "res://assets/terrain/plains/plains_lush_4.png"
+            "res://assets/terrain/plains/pixel_lush_2.png",
+            "res://assets/terrain/plains/pixel_lush_3.png",
+            "res://assets/terrain/plains/pixel_lush_4.png",
+            "res://assets/terrain/plains/pixel_lush_5.png"
           ]
         },
         {
@@ -47,10 +47,10 @@
           "dominant": "8d762d",
           "shader": "dry",
           "variants": [
-            "res://assets/terrain/plains/plains_dry_1.png",
-            "res://assets/terrain/plains/plains_dry_2.png",
-            "res://assets/terrain/plains/plains_dry_3.png",
-            "res://assets/terrain/plains/plains_dry_4.png"
+            "res://assets/terrain/plains/pixel_dry_2.png",
+            "res://assets/terrain/plains/pixel_dry_3.png",
+            "res://assets/terrain/plains/pixel_dry_4.png",
+            "res://assets/terrain/plains/pixel_dry_5.png"
           ]
         },
         {
@@ -58,10 +58,10 @@
           "dominant": "596728",
           "shader": "worn",
           "variants": [
-            "res://assets/terrain/plains/plains_worn_1.png",
-            "res://assets/terrain/plains/plains_worn_2.png",
-            "res://assets/terrain/plains/plains_worn_3.png",
-            "res://assets/terrain/plains/plains_worn_4.png"
+            "res://assets/terrain/plains/pixel_worn_2.png",
+            "res://assets/terrain/plains/pixel_worn_3.png",
+            "res://assets/terrain/plains/pixel_worn_4.png",
+            "res://assets/terrain/plains/pixel_worn_5.png"
           ]
         },
         {
@@ -69,10 +69,10 @@
           "dominant": "4f621a",
           "shader": "standard",
           "variants": [
-            "res://assets/terrain/plains/plains_standard_1.png",
-            "res://assets/terrain/plains/plains_standard_2.png",
-            "res://assets/terrain/plains/plains_standard_3.png",
-            "res://assets/terrain/plains/plains_standard_4.png"
+            "res://assets/terrain/plains/pixel_standard_2.png",
+            "res://assets/terrain/plains/pixel_standard_3.png",
+            "res://assets/terrain/plains/pixel_standard_4.png",
+            "res://assets/terrain/plains/pixel_standard_5.png"
           ]
         }
       ],
@@ -89,7 +89,7 @@
       },
       "props": [],
       "notes": "Four looks rather than four variations of one: Standard, Lush, Dry and Worn differ in colour and wear, so they can later be chosen by moisture, season or region instead of at random. Art is 1254x1254, top-down and painted; props to follow.",
-      "art_source": "The plains paintings, 1254 px each, four looks by four variants. The owner's pixel plains replace them when complete: plains_pixel_1..4 Lush, 5..8 Dry, 9..12 Worn, 13..16 Standard, and swapping them is a change to this file alone. The ForgottenMemories tileset is not in use - the owner does not want it - and its cut fills remain in assets/terrain/tiles/ marked as unused."
+      "art_source": "Built from the owner's two pixel plains: four looks as colour and light shifts of his art, four variants each by turn and mirror, every one seam-fixed so the ground meets itself - measured 0.00 on all sixteen. The painted plains are out: at map scale their detail turned to mush, and pixel art is the right kind of ground for a map. The owner will replace these with his own fourteen as they arrive; the slots and the convention are already written down in assets/terrain/plains/README_pixel.md."
     }
   ]
 }
