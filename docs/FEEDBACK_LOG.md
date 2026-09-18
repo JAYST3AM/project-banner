@@ -12,6 +12,13 @@ hour: "I want the terrain smaller" was read as an approval and four changes went
 shader's samplers, four import files, and a new `--no-ground` switch. He was right to call it out.
 Feature requests are not approvals. An approval is an approval.
 
+## Standing requirements
+
+- **Minimum 60 fps at all times, with a consistent rate and no jitter** - "remember this, this is
+  very important". An acceptance test on every change that touches a frame, and the reason work
+  gets capped and spread rather than run to completion.
+- **Nothing changes until he says go.** A feature request is not an approval.
+
 ## Where the thinking lives
 
 Topic notes, kept apart from this log so a decision has one home:

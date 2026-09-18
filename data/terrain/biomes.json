@@ -4,7 +4,7 @@
     "id": "stable key, used by the world generator and by battlefields",
     "name": "what a player would call it",
     "type": "the terrain_types.json id whose movement rule this biome follows",
-    "grounds": "one to four res:// paths with a name and the dominant colour sampled from the art. The first is the default; the generator picks one per tile from a seeded hash of the tile's position, so a tile always shows the same one and neighbours rarely repeat. At a biome border, whichever variants the two tiles chose are what blend.",
+    "grounds": "four looks, each with four sub-variants: the look comes from the world (moisture, wear, region - the same field that decides the biome) and the sub-variant from a seeded hash of the tile's position. A tile always shows the same one, neighbours rarely match, and the four inside a look are rolled, mirrored or tone-shifted copies of one another - never cropped or resampled, because those break the seam.",
     "ground_scale": "how many world units one repeat of a ground image covers (a knob: tune when it is on screen)",
     "palette": [
       "two to four colours, darkest first: what the height shading darkens and lightens from when there is no ground image"
@@ -32,24 +32,44 @@
       "ground_scale": 24.0,
       "grounds": [
         {
-          "art": "res://assets/terrain/plains/plains_standard.png",
-          "name": "Standard",
-          "dominant": "4f621a"
-        },
-        {
-          "art": "res://assets/terrain/plains/plains_lush.png",
           "name": "Lush",
-          "dominant": "456e16"
+          "dominant": "456e16",
+          "variants": [
+            "res://assets/terrain/plains/plains_lush_1.png",
+            "res://assets/terrain/plains/plains_lush_2.png",
+            "res://assets/terrain/plains/plains_lush_3.png",
+            "res://assets/terrain/plains/plains_lush_4.png"
+          ]
         },
         {
-          "art": "res://assets/terrain/plains/plains_dry.png",
           "name": "Dry",
-          "dominant": "8d762d"
+          "dominant": "8d762d",
+          "variants": [
+            "res://assets/terrain/plains/plains_dry_1.png",
+            "res://assets/terrain/plains/plains_dry_2.png",
+            "res://assets/terrain/plains/plains_dry_3.png",
+            "res://assets/terrain/plains/plains_dry_4.png"
+          ]
         },
         {
-          "art": "res://assets/terrain/plains/plains_worn.png",
           "name": "Worn",
-          "dominant": "596728"
+          "dominant": "596728",
+          "variants": [
+            "res://assets/terrain/plains/plains_worn_1.png",
+            "res://assets/terrain/plains/plains_worn_2.png",
+            "res://assets/terrain/plains/plains_worn_3.png",
+            "res://assets/terrain/plains/plains_worn_4.png"
+          ]
+        },
+        {
+          "name": "Standard",
+          "dominant": "4f621a",
+          "variants": [
+            "res://assets/terrain/plains/plains_standard_1.png",
+            "res://assets/terrain/plains/plains_standard_2.png",
+            "res://assets/terrain/plains/plains_standard_3.png",
+            "res://assets/terrain/plains/plains_standard_4.png"
+          ]
         }
       ],
       "palette": [
