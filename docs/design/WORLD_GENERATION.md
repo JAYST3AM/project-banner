@@ -6,10 +6,14 @@ with factions and armies still moving while nobody is looking.
 
 ## Decided
 
-- **The map is endless.** Not finite. What that costs in frames, gameplay and AI is below.
+- **The world is gigantic and wraps.** Walking or sailing one way far enough brings you round to
+  where you started: the illusion of a globe. There is a limit, but the player should never
+  meaningfully reach it.
 - **All four simulate**: parties, factions, economy **and** culture.
-- **Streaming must be invisible.** The player should never see the map rendering while travelling:
-  it is always built ahead of them. And what is not in view is reduced to data, to save frames.
+- **Streaming must be invisible**: no freeze while a chunk loads, and never a black screen.
+- **News travels by messenger.** What happens in the world reaches the player only if somebody
+  carries word of it - and staff roles are a later layer of the same idea (messengers now,
+  quartermasters and cooks later).
 - Carried over from the terrain conversation: the campaign map owns terrain, a battlefield is a
   window of it, and biomes blend by weight.
 
@@ -24,38 +28,67 @@ with factions and armies still moving while nobody is looking.
   crossing, a hilltop, a coast - and rules turn a site into a town, fort or castle from its faction,
   its region and its age. Each site's layout comes from its own seed, so the same town always looks
   the same and can be entered, which is what the settlement screens already do.
-- **The simulation never cares what is drawn, and off-screen is never frozen.** A world that exists
-  only where the player is looking is not a world.
+- **Off-screen is never frozen.** A world that exists only where the player is looking is not a
+  world.
 
-## Endless, and what it actually costs
+## The wrapping world
 
-- **Frames: nothing special.** Endlessness is a huge coordinate space with chunks generated from a
-  positional hash; no memory is spent on ground nobody has visited. Chunked and view-streamed, an
-  endless map costs what a large finite one costs.
-- **The simulation is the real cost, and it is solved by not running everywhere.** Regions are
-  simulated in full near the player and **lazily caught up** elsewhere: each region remembers when it
-  was last simulated, and when the player returns it is advanced in one step by the time that passed.
-  An army that was marching three days ago is now three days down its road - because its position is
-  a function of time, not the sum of thousands of ticks.
+- Walking far enough in one direction returns you where you started: coordinates wrap and the local
+  view never has to know. On the ground it reads as a globe; the map is a torus, which is the
+  flat-land version of "there is no edge".
+- **The requirement that makes it seamless:** the noise and the biome field must be **periodic** -
+  sampled on a lattice whose period is the world's size. A non-periodic field meets its own
+  beginning with a visible seam, and that is the one artefact a wrapping world cannot hide.
+- **What it costs:** a modulo in the chunk index, and nothing else. With a bonus: on a wrapping
+  world every distance is bounded - no two places are more than half a world apart - so the lazy
+  catch-up can never accumulate unbounded state.
+- **What it changes in play:** circumnavigation becomes a real journey, trade can go the long way
+  round, and "the world is round" can be something a player discovers rather than is told.
+
+## Travel across new ground, and what it actually costs
+
+- **The cost is the rate at which the player crosses *new* ground, not the size of the world.** An
+  endless map costs nothing in total, and leaving ground that has already been generated is the same
+  arithmetic in reverse - a chunk is freed. What matters is that new chunks are built faster than
+  the player reaches them, and the gap there is enormous: a chunk is roughly two milliseconds of
+  work, a rider crosses one in about a minute.
+- **The simulation is the real cost, and it is solved by not running everywhere.** Regions simulate
+  in full near the player and are **lazily caught up** elsewhere: each region remembers when it was
+  last simulated, and is advanced in one step by the time that passed. An army three days down its
+  road is three days down its road because its position is a function of time, not the sum of
+  thousands of ticks. **The bar is believability** - arrivals on roads, no teleporting, outcomes a
+  player would accept - not simulation purity.
 - **AI and NPCs carry schedules, not steering.** An off-screen party holds a route and an arrival
   time; a faction holds a queue of dated intentions ("besiege X on day 12"). Nothing needs a
   per-frame update to keep moving, and nothing freezes when it leaves the screen.
-- **Gameplay: infinite ground means conquest has no end**, so what makes the world matter has to be
-  local - reputation, supply, season, the region underfoot - while the far world is texture. Borders
-  still exist, as fronts rather than as walls.
+- **Gameplay: what makes the world matter has to be local** - reputation, supply, season, the region
+  underfoot - while the far world is texture. Borders become fronts rather than walls.
+
+## News, and who carries it
+
+- Events in the world - a siege, a harvest, a death, an army on the move - are timestamped where
+  they happen and reach the player as **news**, not as truth.
+- **Without a messenger the player knows only what he can see.** With one, word arrives with a delay
+  that is a function of distance and speed: three days after the siege began, not during it.
+- This falls out of the design rather than being bolted on: the catch-up already timestamps events,
+  so the only new thing is the carrier.
+- Later staff roles are the same shape: a quartermaster changes what supply reaches the army, a cook
+  changes what the men eat. Each is a person the army has or lacks, and each moves a number the
+  player feels. **Open:** whether a messenger is hired, a party role, or found in a settlement.
 
 ## Streaming, and how "never seen" is achieved
 
 - **A pre-render ring in front of the camera**, sized by travel speed rather than by the screen: two
-  or three screens of ground built *ahead*, because a camera crosses ground faster than a queue can
-  build it. That margin is what makes it invisible; raw speed is not.
+  or three screens of ground built *ahead*. That margin is what makes it invisible; raw speed is not.
 - **Three rings of detail**: full (mesh, props, buildings), coarse (flat ground, labels), and
-  **unloaded - data only**. Meshes and props are freed when out of view; the arrays stay, because
-  they are kilobytes and the simulation needs them.
-- **Built to a time budget, not a chunk count**: about two milliseconds a frame off a priority queue,
-  so a heavy chunk cannot become a hitch.
+  unloaded - data only. **The coarse ring is the fallback**: if a chunk is not built yet the player
+  sees coarse ground and a label, never a hole and never a black screen.
+- **Built to a time budget, not a chunk count**: about two milliseconds a frame off a priority
+  queue, so a heavy chunk cannot become a hitch.
 - **Hysteresis and a short keep-warm**: a chunk that has just left view stays a few seconds, so a
   player pacing back and forth does not thrash the builder.
+- **Acceptance criterion, in the owner's words**: the game must not freeze on a chunk load, and the
+  player must never see a black screen because of loading.
 
 ## What already exists to build on
 
@@ -67,6 +100,8 @@ the shape the lazy catch-up needs. An extension of that path, not a rewrite.
 ## Open
 
 1. Whether the coarse catch-up may **invent** outcomes (a battle between two off-screen armies), or
-   whether such things resolve the moment they are next observed.
+   whether such things resolve the moment they are next observed. The owner is happy with the
+   approach; the sub-rule is his to make.
 2. Chunk size - and therefore what a "region" is for simulation purposes.
 3. How the player's own region is defined while travelling: a radius, or the region they stand in.
+4. When messengers arrive, and what they cost.
