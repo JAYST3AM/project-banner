@@ -50,8 +50,14 @@ const MIN_ENEMY_GAP := SEPARATION * 0.95
 ## How many formations a side deploys with by default. The count is the knob that makes a battle
 ## small enough for a person to command: three a side is a legion each, four or five is a skirmish
 ## a player can actually pick up and place before it starts.
+## The smallest battle the scene will run: thirty men against thirty. It is a test of commands,
+## not of crowds, and the floor used to be a compute workgroup - sixty-four - which quietly turned
+## a thirty-a-side run into a thirty-two-a-side one.
+const MIN_AGENTS := 60
 const DEFAULT_BODIES_PER_SIDE := 3
 var bodies_per_side := DEFAULT_BODIES_PER_SIDE
+## Men in one unit. Read by the size presets; the deployment divides the army by the unit count.
+var per_unit := 0
 ## The frontage of one body, in files. A thousand men in forty files is twenty-five ranks:
 ## a legion that reads as a block, not a queue.
 const BODY_FILES := 40
@@ -643,7 +649,7 @@ func _parse_args() -> void:
 		target_legacy = true
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--agents="):
-			agents = maxi(WORKGROUP, int(arg.substr(9)))
+			agents = maxi(MIN_AGENTS, int(arg.substr(9)))
 			_agents_given = true
 		elif arg.begins_with("--target-cadence="):
 			target_cadence = maxi(1, int(arg.substr(17)))
@@ -688,6 +694,16 @@ func _parse_args() -> void:
 		elif arg.begins_with("--bodies="):
 			# How many formations a side: the size of the battle the player is asked to command.
 			bodies_per_side = clampi(int(arg.substr(9)), 1, 30)
+		elif arg.begins_with("--per-unit="):
+			# How many men stand in one unit. The other half of a battle's size: thirty units of
+			# thirty is eighteen hundred men, and thirty units of a hundred is six thousand.
+			per_unit = maxi(4, int(arg.substr(11)))
+		elif arg == "--thirty":
+			# The scale the tests are run at from now on: thirty units a side, thirty men in each.
+			bodies_per_side = 30
+			per_unit = 30
+			if not _agents_given:
+				agents = bodies_per_side * 2 * per_unit
 		elif arg == "--skirmish":
 			# The scale a person can actually command: four formations a side of a hundred and
 			# fifty, which is a battle you can pick up and place before it starts.
