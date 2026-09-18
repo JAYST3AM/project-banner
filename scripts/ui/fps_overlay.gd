@@ -2,9 +2,14 @@ extends CanvasLayer
 ## The frame rate, in the corner, on by default.
 ##
 ## Not a debug panel: the owner asks this machine for frames and wants to see them arriving, and a
-## number that only appears after finding a hotkey is a number nobody reads. It shows the *cap* as
-## well as the rate, because "it is stuck at sixty" is a complaint about the cap rather than about
-## the machine, and the two look identical when all you can see is a rate.
+## number that only appears after finding a hotkey is a number nobody reads. It shows what the rate
+## is *against* as well as what it is, because "it is stuck at sixty" is a complaint about a ceiling
+## rather than about the machine, and the two look identical when all you can see is a rate.
+##
+## The ceiling is read from the window, not from a project setting: this file claimed "vsync off"
+## on a project with no such setting set, on the strength of the engine's frame cap alone, while the
+## screen was synchronising every frame at three hundred and forty-three of its three hundred and
+## sixty. A label that disagrees with the number beside it is worse than no label.
 ##
 ## Frames are counted here and the rate is worked out over a window rather than read from
 ## Engine.get_frames_per_second(), so the number moves when the machine does instead of when the
@@ -70,12 +75,15 @@ func _rate_colour(fps: float) -> Color:
 ## frame rate alone, and the difference decides whether the machine or a setting owns the number.
 func _limit_text() -> String:
 	var parts: Array[String] = []
-	# The project's setting, not the window's report: the window says it is following the display
-	# while the engine is plainly running free, and a line that contradicts the number beside it is
-	# worse than no line. Measured: three hundred and forty-three frames a second under a "vsync
-	# on" label.
-	var vsync := int(ProjectSettings.get_setting("display/window/vsync/vsync_mode", 0))
-	parts.append("vsync off" if vsync == DisplayServer.VSYNC_DISABLED else "vsync on")
-	var cap := Engine.max_fps
-	parts.append("uncapped" if cap <= 0 else "cap %d" % cap)
+	var mode := DisplayServer.window_get_vsync_mode()
+	if mode == DisplayServer.VSYNC_DISABLED:
+		# Only when the synchronisation is genuinely off is the rate the machine's own. With it on,
+		# the ceiling is the screen's, and a frame cap on top of that is a second ceiling nobody
+		# needs to read about.
+		parts.append("vsync off")
+		var cap := Engine.max_fps
+		parts.append("uncapped" if cap <= 0 else "cap %d" % cap)
+	else:
+		var hz := DisplayServer.screen_get_refresh_rate()
+		parts.append("vsync on" if hz <= 0.0 else "vsync on   ·   %.0f Hz screen" % hz)
 	return "   ·   ".join(parts)
