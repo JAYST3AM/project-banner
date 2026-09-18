@@ -58,6 +58,50 @@ func current_settlement() -> Settlement:
 ## The size used is the [b]active fieldable[/b] count, not the roster count: dead
 ## soldiers stay in the party for the historical record and must not keep slowing
 ## the living down.
+## Where the party is on its route, and whether that is a road. Kept when a destination is set, so
+## step() follows the same curve the map draws rather than cutting across country.
+var route: PackedVector2Array = PackedVector2Array()
+## The world's field, built lazily: ground_factor() reads it every step and build() is not cheap.
+var _world: WorldChunks = null
+var route_leg := 0
+
+## On a road the owner wants speed; off it, the ground decides. Read from the world's own field - the
+## same one the map paints from - so a marsh is slow on the map and slow to cross.
+func ground_factor() -> float:
+	if is_on_road():
+		return config.get_float("travel.road_speed_bonus", 1.4)
+	# Built once and kept: this runs every simulation step, and WorldChunks.build() generates a field.
+	if _world == null:
+		_world = WorldChunks.build(state.campaign_seed)
+	var here: Dictionary = _world.sample(state.world_position)
+	var height := float(here.get("height", 0.5))
+	var wear := float(here.get("wear", 0.0))
+	var moisture := float(here.get("moisture", 0.5))
+	if height < config.get_float("travel.water_height", 0.335):
+		return config.get_float("travel.water_speed_factor", 0.30)
+	if height < config.get_float("travel.marsh_height", 0.375):
+		return config.get_float("travel.marsh_speed_factor", 0.55)
+	# Worn country is where the roads of the world already are: old traffic made it easy going.
+	return 1.1 if wear > 0.5 else (0.9 if moisture > 0.6 else 1.0)
+
+
+## Within about a road's width of the route's current leg, which is the leg the map drew as a road.
+func is_on_road() -> bool:
+	if route.size() < 2:
+		return false
+	var width := config.get_float("travel.road_width", 26.0)
+	for i in range(maxi(0, route_leg - 1), mini(route.size() - 1, route_leg + 1)):
+		var a := route[i]
+		var b := route[i + 1]
+		var span := b - a
+		if span.length() < 0.001:
+			continue
+		var t := clampf((state.world_position - a).dot(span) / span.length_squared(), 0.0, 1.0)
+		if state.world_position.distance_to(a + span * t) <= width:
+			return true
+	return false
+
+
 func speed_multiplier() -> float:
 	var penalty := config.get_float("travel.party_size_speed_penalty", 0.012)
 	var floor_fraction := config.get_float("travel.min_speed_fraction", 0.55)
@@ -84,7 +128,7 @@ func distance_to(point: Vector2) -> float:
 
 ## Game hours the party needs to reach a point. Used for UI estimates.
 func hours_to_reach(point: Vector2) -> float:
-	var speed := speed_units_per_game_hour()
+	var speed := speed_units_per_game_hour() * ground_factor()
 	if speed <= 0.0:
 		return 0.0
 	return distance_to(point) / speed
@@ -106,6 +150,58 @@ func is_within_settlement(settlement: Settlement) -> bool:
 
 ## Begin travelling toward a settlement. Returns false when the order makes no
 ## sense (unknown destination, or already standing there).
+## The route from here to there, through the road network, as a single polyline of the same curves
+## the map draws. Breadth-first over the road edges: the network has a few dozen nodes, so a shortest
+## path by hops is found instantly and, because roads are faster, the fewest-road route is usually the
+## quickest one too.
+func build_route(to: Settlement) -> void:
+	route = PackedVector2Array()
+	route_leg = 0
+	var from := current_settlement()
+	if from == null or to == null or from.id == to.id:
+		return
+	var edges := {}
+	for road in state.roads:
+		var a := str(road.get("a", ""))
+		var b := str(road.get("b", ""))
+		edges[a] = (edges.get(a, []) as Array) + [b]
+		edges[b] = (edges.get(b, []) as Array) + [a]
+	var came := {from.id: ""}
+	var queue: Array[String] = [from.id]
+	var found := false
+	while not queue.is_empty() and not found:
+		var here: String = queue.pop_front()
+		for next in (edges.get(here, []) as Array):
+			var id := str(next)
+			if came.has(id):
+				continue
+			came[id] = here
+			if id == to.id:
+				found = true
+				break
+			queue.append(id)
+	if not found:
+		return
+	var chain: Array[String] = []
+	var step := to.id
+	while step != from.id and step != "":
+		chain.push_front(step)
+		step = str(came.get(step, ""))
+	# Walk the chain backwards into waypoints, drawing each leg through RoadPath so the party's line
+	# and the map's line are the same line.
+	var points := PackedVector2Array([state.world_position])
+	var previous := from
+	for id in chain:
+		var node := state.settlement(id)
+		if node == null:
+			continue
+		for point in RoadPath.between(previous.position, node.position):
+			points.append(point)
+		previous = node
+	points.append(to.position)
+	route = points
+
+
 func set_destination(settlement_id: String) -> bool:
 	if state == null:
 		return false
@@ -169,7 +265,16 @@ func step(game_hours: float) -> Dictionary:
 	}
 	if state == null or game_hours <= 0.0 or not is_travelling():
 		return report
+	# The first step after a destination is set routes through the road network, once. After that the
+	# party walks the route's own points, so its line on the map is the line the map drew.
+	if route.size() < 2 and is_travelling() and destination() != null:
+		build_route(destination())
+	if route.size() >= 2:
+		while route_leg < route.size() - 1 and state.world_position.distance_to(route[route_leg + 1]) < 10.0:
+			route_leg += 1
 	var target := destination_position()
+	if route.size() >= 2 and route_leg < route.size() - 1:
+		target = route[route_leg + 1]
 	var to_target := target - state.world_position
 	var distance := to_target.length()
 	var radius := arrival_radius()

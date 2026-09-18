@@ -2,29 +2,76 @@ class_name BattlefieldTerrain
 extends RefCounted
 ## The battlefield ground, as data.
 ##
-## Terrain exists here first and is rendered second. The simulation asks this object
-## for a movement multiplier and gets a number; the view asks it for a colour and gets
-## one. Neither knows about the other, which is what keeps terrain testable headlessly
-## and lets the renderer be replaced without touching a single gameplay rule.
+## Terrain exists here first and is rendered second. The simulation asks this object for a movement
+## multiplier and gets a number; the view asks it for the ground's looks and gets weights. Neither
+## knows about the other, which is what keeps terrain testable headlessly and lets the renderer be
+## replaced without touching a single gameplay rule.
 ##
-## [b]Determinism.[/b] The same [code]terrain_seed[/code], field size and
-## [code]terrain.generation_version[/code] always produce the same battlefield. Noise
-## is derived from a positional hash rather than a stateful generator, so a cell's
-## value depends only on where it is - not on the order cells happen to be visited in.
+## [b]One cell, many channels.[/b] Every cell carries a height, a slope, a type, a soil, a biome and
+## its blend, a movement multiplier, a vegetation density, a cover value, a wetness, a sight-line
+## opacity, an obstacle state and a traversability. They are parallel packed arrays with no per-cell
+## objects, so a field of a hundred thousand cells is still a few megabytes and no allocations.
+## Adding a channel is an array, a query and a row in [method to_dict] - see the extension notes in
+## docs/TERRAIN_ARCHITECTURE.md.
 ##
-## [b]Resolution.[/b] Cells are coarse (metres across, not pixels) and there is one
-## integer and one float per cell. A 100x60 field is a few hundred cells; even a field
-## ten times that size stays a flat pair of arrays with no per-cell objects.
+## [b]Determinism.[/b] The same [code]terrain_seed[/code], field size, biome and
+## [code]terrain.generation_version[/code] always produce the same battlefield. Every random value is
+## derived from a positional hash rather than from a generator's state, so a cell's value depends
+## only on where it is - not on the order cells happen to be visited in - and generating a battlefield
+## cannot disturb any other random stream in the game.
 ##
-## [b]Scope.[/b] Terrain affects movement, and only movement, in this milestone. The
-## hooks a later milestone needs - height, slope, per-type data - are here and
-## queryable; the combat modifiers that will read them are not.
+## [b]Two layers, one truth.[/b] The gameplay layer is this object. The visual layer is generated
+## from it ([method build_ground_map], [method build_overlay_map]) and never feeds back: nothing in
+## the simulation reads a texture, a colour or a variant.
+##
+## [b]Scope.[/b] Terrain affects movement today; cover, sight lines, elevation and traversability are
+## generated, cached and queryable, and the rules that will read them are a later milestone. That is
+## deliberate: the maps are the expensive part and they are here now.
 
 const CELL_MIN := 1
 
-## Drawn for a cell that somehow has no type. Presentation only: an untyped cell would
-## still be walkable at whatever modifier the simulation had already resolved.
+## Drawn for a cell that somehow has no type. Presentation only: an untyped cell would still be
+## walkable at whatever modifier the simulation had already resolved.
 const FALLBACK_COLOUR := Color("2b3428")
+
+## Obstacle state, a bitfield per cell. Bit 0 is the ground itself (a cliff face); bit 1 is something
+## standing on it (a boulder, a trunk, a wall). They are separate bits because a formation cares
+## about the difference - one can be walked around, the other is the shape of the country.
+const OBSTACLE_TERRAIN := 1
+const OBSTACLE_PROP := 2
+## Neither bit set: open going.
+const OBSTACLE_NONE := 0
+
+## The channels a batch query can be asked for.
+enum Channel {
+	HEIGHT,
+	SLOPE,
+	MOVE,
+	COST,
+	VEGETATION,
+	COVER,
+	WETNESS,
+	LOS,
+	TRAVERSABLE,
+	TYPE_INDEX,
+	SOIL_INDEX,
+	BIOME_INDEX,
+	OBSTACLE,
+	BLEND,
+	## How wet the country is, as opposed to how wet the ground is after the river: this is the field
+	## that decided the soil and the look, kept so a season or a weather system can read it.
+	MOISTURE,
+}
+
+## How opaque a sight line has to get before it counts as blocked. A single wood cell (0.7) does not
+## block a line on its own - three of them do. A cliff (1.0) blocks by itself.
+const LOS_BLOCKED_AT := 0.75
+## How far above a sight line the ground has to rise to cut it, in world units. A ridge hides what is
+## behind it; the ground being level with the line does not.
+const LOS_GROUND_CLEARANCE := 0.5
+## How many cells a sight-line walk may cross before it gives up and calls the line blocked. A line
+## longer than this is a question nobody in a battle asks, and the answer is not worth the walk.
+const LOS_MAX_CELLS := 256
 
 ## The field this terrain describes.
 var size: Vector2 = Vector2(100.0, 60.0)
@@ -34,135 +81,283 @@ var rows: int = 0
 var terrain_seed: int = 0
 var generation_version: int = 1
 
-## Per-cell data, row-major. One integer and one float per cell, no objects.
+## The country this field was grown as, and the second country mixed into it - a transition band
+## rather than a border. [member blend_biome_id] is empty on a field that is one biome throughout,
+## which is the common case: a battlefield is usually one kind of country.
+var biome_id: String = ""
+var blend_biome_id: String = ""
+var blend_width_cells: float = 0.0
+
+## Per-cell data, row-major. Integers and floats, no objects.
 var _type_index: PackedInt32Array = PackedInt32Array()
+var _soil_index: PackedInt32Array = PackedInt32Array()
+var _obstacle: PackedInt32Array = PackedInt32Array()
+var _traversable: PackedInt32Array = PackedInt32Array()
 var _heights: PackedFloat32Array = PackedFloat32Array()
-## Movement multiplier resolved at generation time, so a query is an array read
-## rather than a dictionary lookup in the middle of a movement step.
+var _slope: PackedFloat32Array = PackedFloat32Array()
 var _move: PackedFloat32Array = PackedFloat32Array()
+var _vegetation: PackedFloat32Array = PackedFloat32Array()
+var _cover: PackedFloat32Array = PackedFloat32Array()
+var _wetness: PackedFloat32Array = PackedFloat32Array()
+var _los: PackedFloat32Array = PackedFloat32Array()
+## The country's own wetness (as opposed to the ground's): what grew the soil and the look.
+var _moisture: PackedFloat32Array = PackedFloat32Array()
+## How much of the secondary biome this cell is, 0..1.
+var _blend: PackedFloat32Array = PackedFloat32Array()
+## Four ground-variant weights per cell (stride 4) and four overlay coverages per cell (stride 4).
+var _variant_w: PackedFloat32Array = PackedFloat32Array()
+var _overlay_w: PackedFloat32Array = PackedFloat32Array()
+
+## A coarse mean-height grid over the field, for "is this spot above its surroundings" without a
+## second pass. Blocked to [constant MEAN_BLOCK] cells.
+const MEAN_BLOCK := 8
+var _mean_height: PackedFloat32Array = PackedFloat32Array()
+var _mean_cols: int = 0
+var _mean_rows: int = 0
+
 ## Lookup tables, indexed by the per-cell integer.
 var _type_ids: Array[String] = []
 var _type_names: Array[String] = []
 var _type_move: PackedFloat32Array = PackedFloat32Array()
-## Resolved at generation so that drawing a cell does not reach into the catalogue.
-## The renderer reads the terrain; the terrain does not read the renderer.
+var _type_cover: PackedFloat32Array = PackedFloat32Array()
+var _type_los: PackedFloat32Array = PackedFloat32Array()
+var _type_traversable: PackedInt32Array = PackedInt32Array()
 var _type_colours: Array[Color] = []
+var _soil_ids: Array[String] = []
+
+## The catalogues this field was grown against. Kept so a cell can be recomposed - by a test that
+## forces a type, or by a tool that paints terrain - without re-reading the JSON.
+var _types: TerrainCatalog = null
+var _biomes: BiomeCatalog = null
+var _soils: SoilCatalog = null
+
+## What a slope costs a soldier, per biome: x is the field's own biome, y the one blended into it.
+## Read through [method drag_at], which is where the blend is applied.
+var _veg_drag := Vector2(0.14, 0.14)
+var _wet_drag := Vector2(0.3, 0.3)
+var _slope_penalty := Vector2(0.55, 0.55)
+## Steeper than this and no formation crosses the ground, whatever its type says. A cliff is the
+## extreme case of it; the rule is what makes a steep hillside behave like one.
+var max_traversable_slope: float = 0.6
+
+## Generation tuning resolved once, kept for the tools and the debug overlay.
+var cliff_type_id: String = "cliff"
+var water_type_id: String = "water"
+var mud_type_id: String = "mud"
+var high_type_id: String = "high_ground"
+var woods_type_id: String = "woods"
+var rough_type_id: String = "rough"
 
 
 ## ---------- generation ---------------------------------------------------
 
 ## Build the battlefield for one battle. Deterministic in every input.
+##
+## [param catalog] and [param biomes] are injectable so a test can generate against a deliberately
+## broken or deliberately different catalogue; the defaults are the project's own data.
 static func generate(
 	p_seed: int,
 	p_size: Vector2,
 	config: GameConfig,
-	catalog: TerrainCatalog = null
+	catalog: TerrainCatalog = null,
+	biomes: BiomeCatalog = null,
+	p_biome_id: String = ""
 ) -> BattlefieldTerrain:
 	var terrain := BattlefieldTerrain.new()
-	var types := catalog if catalog != null else TerrainCatalog.load_from()
-	terrain._build(p_seed, p_size, config, types)
+	terrain._build(p_seed, p_size, config, catalog, biomes, p_biome_id)
 	return terrain
 
 
-func _build(p_seed: int, p_size: Vector2, config: GameConfig, catalog: TerrainCatalog) -> void:
+func _build(
+	p_seed: int,
+	p_size: Vector2,
+	config: GameConfig,
+	catalog: TerrainCatalog,
+	biomes: BiomeCatalog,
+	p_biome_id: String
+) -> void:
 	terrain_seed = p_seed
 	size = Vector2(maxf(8.0, p_size.x), maxf(8.0, p_size.y))
+	cell_size = maxf(0.5, config.get_float("terrain.cell_size", 4.0)) if config != null else 4.0
+	generation_version = config.get_int("terrain.generation_version", 1) if config != null else 1
+	cols = maxi(CELL_MIN, int(ceilf(size.x / cell_size)))
+	rows = maxi(CELL_MIN, int(ceilf(size.y / cell_size)))
 
-	var lattice := 7.0
-	var amplitude := 5.0
-	var high_threshold := 0.66
-	var woods_threshold := 0.60
-	var rough_threshold := 0.42
+	var types := catalog if catalog != null else TerrainCatalog.load_from()
+	var biome_source := biomes if biomes != null else BiomeCatalog.load_from()
+	var soils := SoilCatalog.load_from()
+	_types = types
+	_biomes = biome_source
+	_soils = soils
+	_adopt_type_table(types)
+	_adopt_soil_table(soils)
+	_allocate()
+
+	var wanted := p_biome_id
+	if wanted.is_empty() and config != null:
+		wanted = config.get_string("terrain.biome", "")
+	var blend := ""
+	var blend_width := 0.0
 	if config != null:
-		cell_size = maxf(0.5, config.get_float("terrain.cell_size", 4.0))
-		generation_version = config.get_int("terrain.generation_version", 1)
-		lattice = maxf(2.0, config.get_float("terrain.lattice_cells", 7.0))
-		amplitude = config.get_float("terrain.elevation_amplitude", 5.0)
-		high_threshold = config.get_float("terrain.high_ground_threshold", 0.66)
-		woods_threshold = config.get_float("terrain.woods_threshold", 0.60)
-		rough_threshold = config.get_float("terrain.rough_threshold", 0.42)
+		blend = config.get_string("terrain.blend_biome", "")
+		blend_width = maxf(0.0, config.get_float("terrain.blend_width_cells", 0.0))
+		max_traversable_slope = config.get_float("terrain.max_traversable_slope", 0.6)
+	biome_id = biome_source.resolve_id(wanted)
+	blend_biome_id = biome_source.resolve_id(blend) if not blend.is_empty() else ""
+	if blend_biome_id == biome_id:
+		blend_biome_id = ""
+	blend_width_cells = blend_width if not blend_biome_id.is_empty() else 0.0
+	_veg_drag = Vector2(
+		biome_source.number(biome_id, "vegetation_drag", 0.14, "movement"),
+		biome_source.number(blend_biome_id, "vegetation_drag", 0.14, "movement")
+	)
+	_wet_drag = Vector2(
+		biome_source.number(biome_id, "wetness_drag", 0.3, "movement"),
+		biome_source.number(blend_biome_id, "wetness_drag", 0.3, "movement")
+	)
+	_slope_penalty = Vector2(
+		biome_source.number(biome_id, "slope_penalty", 0.55, "movement"),
+		biome_source.number(blend_biome_id, "slope_penalty", 0.55, "movement")
+	)
 
-	cols = maxi(CELL_MIN, int(ceil(size.x / cell_size)))
-	rows = maxi(CELL_MIN, int(ceil(size.y / cell_size)))
+	TerrainGenerator.build(self, config, types, biome_source, soils, generation_version)
 
-	_type_ids = catalog.order.duplicate()
-	if _type_ids.is_empty():
-		_type_ids = [TerrainCatalog.FALLBACK_ID]
-	_type_names.clear()
-	_type_move = PackedFloat32Array()
-	_type_colours.clear()
-	for id in _type_ids:
-		_type_names.append(catalog.display_name(id))
-		_type_move.append(catalog.move_multiplier(id))
-		_type_colours.append(catalog.colour(id))
-	var open_index := maxi(0, _type_ids.find(TerrainCatalog.FALLBACK_ID))
-
-	var total := cols * rows
-	_type_index.resize(total)
-	_heights.resize(total)
-	_move.resize(total)
-
-	for row in rows:
-		for col in cols:
-			var index := row * cols + col
-			# Cell centre in lattice space, so the noise is sampled per cell rather
-			# than per world unit.
-			var u := (float(col) + 0.5) / float(cols) * lattice
-			var v := (float(row) + 0.5) / float(rows) * lattice
-			var elevation := _noise(p_seed, generation_version, u, v)
-			# A second, offset sample is enough to decorrelate cover from height
-			# without a second generator or a second pass over the grid.
-			var cover := _noise(p_seed + 7919, generation_version, u, v)
-
-			var type_index := open_index
-			if elevation >= high_threshold:
-				type_index = _index_or(_type_ids, "high_ground", open_index)
-			elif cover >= woods_threshold:
-				type_index = _index_or(_type_ids, "woods", open_index)
-			elif cover >= rough_threshold or elevation <= (1.0 - rough_threshold) * 0.5:
-				type_index = _index_or(_type_ids, "rough", open_index)
-
-			_type_index[index] = type_index
-			_heights[index] = elevation * amplitude
-			_move[index] = _type_move[type_index]
+	# The coarse mean-height grid and the derived maps are built here rather than by the generator:
+	# they are consequences of the channels, not inputs to them.
+	_build_mean_height()
 
 	if not is_valid():
 		DebugLogger.error("terrain generation produced an invalid battlefield", "Terrain")
 
 
-static func _index_or(ids: Array[String], id: String, fallback: int) -> int:
-	var found := ids.find(id)
-	return found if found >= 0 else fallback
+func _allocate() -> void:
+	var total := cols * rows
+	_type_index.resize(total)
+	_soil_index.resize(total)
+	_obstacle.resize(total)
+	_traversable.resize(total)
+	_heights.resize(total)
+	_slope.resize(total)
+	_move.resize(total)
+	_vegetation.resize(total)
+	_cover.resize(total)
+	_wetness.resize(total)
+	_los.resize(total)
+	_moisture.resize(total)
+	_blend.resize(total)
+	_variant_w.resize(total * 4)
+	_overlay_w.resize(total * 4)
+	for index in total:
+		_type_index[index] = 0
+		_soil_index[index] = 0
+		_obstacle[index] = OBSTACLE_NONE
+		_traversable[index] = 1
 
 
-## Smoothed value noise in 0..1. Position-determined: no generator state, so two
-## terrains built in different orders still agree cell for cell.
-static func _noise(seed_value: int, version: int, u: float, v: float) -> float:
-	var x0 := int(floor(u))
-	var y0 := int(floor(v))
-	var tx := u - float(x0)
-	var ty := v - float(y0)
-	var sx := tx * tx * (3.0 - 2.0 * tx)
-	var sy := ty * ty * (3.0 - 2.0 * ty)
-	var n00 := _lattice_value(seed_value, version, x0, y0)
-	var n10 := _lattice_value(seed_value, version, x0 + 1, y0)
-	var n01 := _lattice_value(seed_value, version, x0, y0 + 1)
-	var n11 := _lattice_value(seed_value, version, x0 + 1, y0 + 1)
-	return lerpf(lerpf(n00, n10, sx), lerpf(n01, n11, sx), sy)
+func _adopt_type_table(catalog: TerrainCatalog) -> void:
+	_type_ids = catalog.order.duplicate()
+	if _type_ids.is_empty():
+		_type_ids = [TerrainCatalog.FALLBACK_ID]
+	_type_names.clear()
+	_type_move = PackedFloat32Array()
+	_type_cover = PackedFloat32Array()
+	_type_los = PackedFloat32Array()
+	_type_traversable = PackedInt32Array()
+	_type_colours.clear()
+	for id in _type_ids:
+		_type_names.append(catalog.display_name(id))
+		_type_move.append(catalog.move_multiplier(id))
+		_type_cover.append(catalog.cover(id))
+		_type_los.append(catalog.los_blocking(id))
+		_type_traversable.append(1 if catalog.traversable(id) else 0)
+		_type_colours.append(catalog.colour(id))
 
 
-## One lattice corner, hashed from its own coordinates.
-static func _lattice_value(seed_value: int, version: int, ix: int, iy: int) -> float:
-	var key := "%d:%d:%d:%d" % [seed_value, version, ix, iy]
-	return float(RngService.stable_hash(key) % 100000) / 100000.0
+func _adopt_soil_table(catalog: SoilCatalog) -> void:
+	_soil_ids = catalog.order.duplicate()
+	if _soil_ids.is_empty():
+		_soil_ids = [SoilCatalog.FALLBACK_ID]
 
 
-## ---------- queries ------------------------------------------------------
-## Cheap enough for a per-unit, per-step call: bounds check, one integer division,
-## one array read. Nothing here allocates.
+## The type index of an id, or the index of the fallback type.
+func type_slot(id: String) -> int:
+	var found := _type_ids.find(id)
+	return found if found >= 0 else maxi(0, _type_ids.find(TerrainCatalog.FALLBACK_ID))
+
+
+## A per-biome number, blended for this cell: where a second biome is mixed in, the two values are
+## interpolated by the cell's own blend weight, so the transition band is a gradient in behaviour as
+## well as in looks rather than a line.
+func drag_at(pair: Vector2, index: int) -> float:
+	if blend_biome_id.is_empty():
+		return pair.x
+	return lerpf(pair.x, pair.y, clampf(blend_of_cell(index), 0.0, 1.0))
+
+
+## The movement multiplier one cell's own numbers compose to.
+##
+## This is the only place the rule lives, and it is called once per cell at generation time - the
+## answer is cached, so nothing per step ever does this arithmetic: the type says what the ground
+## does, the soil seasons it, vegetation and water drag on it, and a slope costs something to climb.
+## [method set_type_at] recomposes a single cell through the same path, so a forced type cannot leave
+## the field describing ground it is not.
+func resolve_move_of_cell(index: int) -> float:
+	var base := 1.0
+	if _type_move.size() > 0:
+		base = _type_move[clampi(_type_index[index], 0, _type_move.size() - 1)]
+	var soil_mult := 1.0
+	if _soils != null and index < _soil_index.size() and not _soil_ids.is_empty():
+		soil_mult = _soils.move_modifier(_soil_ids[clampi(_soil_index[index], 0, _soil_ids.size() - 1)])
+	return compose_move(
+		base,
+		soil_mult,
+		_vegetation[index] if index < _vegetation.size() else 0.0,
+		_wetness[index] if index < _wetness.size() else 0.0,
+		_slope[index] if index < _slope.size() else 0.0,
+		drag_at(_veg_drag, index),
+		drag_at(_wet_drag, index),
+		drag_at(_slope_penalty, index)
+	)
+
+
+## The composition itself, as a pure function so the generator, this object and any tool agree.
+static func compose_move(
+	base: float,
+	soil_multiplier: float,
+	vegetation: float,
+	wetness: float,
+	slope: float,
+	vegetation_drag: float,
+	wetness_drag: float,
+	slope_penalty: float
+) -> float:
+	var value := base * soil_multiplier
+	value *= 1.0 - clampf(vegetation_drag * vegetation, 0.0, 0.8)
+	value *= 1.0 - clampf(wetness_drag * wetness, 0.0, 0.8)
+	value *= 1.0 - clampf(slope_penalty * minf(1.0, slope), 0.0, 0.75)
+	return clampf(value, 0.05, 1.0)
+
+
+func _build_mean_height() -> void:
+	_mean_cols = maxi(1, int(ceilf(float(cols) / float(MEAN_BLOCK))))
+	_mean_rows = maxi(1, int(ceilf(float(rows) / float(MEAN_BLOCK))))
+	_mean_height = PackedFloat32Array()
+	_mean_height.resize(_mean_cols * _mean_rows)
+	for by in _mean_rows:
+		for bx in _mean_cols:
+			var total := 0.0
+			var count := 0
+			for y in range(by * MEAN_BLOCK, mini(rows, (by + 1) * MEAN_BLOCK)):
+				for x in range(bx * MEAN_BLOCK, mini(cols, (bx + 1) * MEAN_BLOCK)):
+					total += _heights[y * cols + x]
+					count += 1
+			_mean_height[by * _mean_cols + bx] = total / maxf(1.0, float(count))
+
+
+## ---------- validity and geometry ----------------------------------------
 
 func is_valid() -> bool:
-	return cols > 0 and rows > 0 and _type_index.size() == cols * rows
+	return cols > 0 and rows > 0 and _type_index.size() == cols * rows and _heights.size() == cols * rows
 
 
 func inside(point: Vector2) -> bool:
@@ -170,11 +365,11 @@ func inside(point: Vector2) -> bool:
 
 
 func cell_col_at(point: Vector2) -> int:
-	return clampi(int(floor(point.x / cell_size)), 0, cols - 1)
+	return clampi(int(floorf(point.x / cell_size)), 0, cols - 1)
 
 
 func cell_row_at(point: Vector2) -> int:
-	return clampi(int(floor(point.y / cell_size)), 0, rows - 1)
+	return clampi(int(floorf(point.y / cell_size)), 0, rows - 1)
 
 
 ## Cell index for a world point, or -1 when the point is off the field.
@@ -182,68 +377,6 @@ func cell_index_at(point: Vector2) -> int:
 	if not inside(point):
 		return -1
 	return cell_row_at(point) * cols + cell_col_at(point)
-
-
-func type_index_at(point: Vector2) -> int:
-	var index := cell_index_at(point)
-	return _type_index[index] if index >= 0 else maxi(0, _type_ids.find(TerrainCatalog.FALLBACK_ID))
-
-
-func type_id_at(point: Vector2) -> String:
-	var index := type_index_at(point)
-	return _type_ids[index] if index >= 0 and index < _type_ids.size() else TerrainCatalog.FALLBACK_ID
-
-
-func type_name_at(point: Vector2) -> String:
-	var index := type_index_at(point)
-	return _type_names[index] if index >= 0 and index < _type_names.size() else TerrainCatalog.FALLBACK_ID
-
-
-## Elevation in the same units as the field, zero on open ground.
-func height_at(point: Vector2) -> float:
-	var index := cell_index_at(point)
-	return _heights[index] if index >= 0 else 0.0
-
-
-## The movement multiplier for the ground under a point.
-##
-## The hot path is per moving soldier per tick - twenty thousand times at twenty thousand soldiers -
-## and this used to cost five nested calls to do one array read: `_effective_speed`, this method, the
-## cell index, and the two integer divisions inside it. The cell arithmetic is spelled out here instead,
-## reading the same array with the same guards, so the callers that need this once per soldier pay for
-## one call rather than five. [method move_multiplier_via_cells] is the previous shape, kept so the two
-## can be measured against each other in one build. See D-114.
-func move_multiplier_at(point: Vector2) -> float:
-	if point.x < 0.0 or point.y < 0.0 or point.x >= size.x or point.y >= size.y:
-		return 1.0
-	var col := clampi(int(floor(point.x / cell_size)), 0, cols - 1)
-	var row := clampi(int(floor(point.y / cell_size)), 0, rows - 1)
-	return _move[row * cols + col]
-
-
-## The reference: the same multiplier through `cell_index_at`, which is what the engine called before the
-## cell arithmetic was spelled out above. Kept for paired measurement and for callers that are not hot.
-func move_multiplier_via_cells(point: Vector2) -> float:
-	var index := cell_index_at(point)
-	return _move[index] if index >= 0 else 1.0
-
-
-## Height difference per unit travelled. Zero when either point is off the field, so
-## callers never have to check first.
-##
-## That zero is the contract, and it was not always honoured. Off-field ground reads as
-## zero height, so taking the two heights independently made two off-field points happen
-## to give zero while a point inside and a point outside gave a fake slope - the edge of
-## the field appearing to fall away into nothing. The contract is now checked first,
-## because a slope from here to somewhere that does not exist is not a small number, it
-## is not a slope. See D-057.
-func slope_between(from: Vector2, to: Vector2) -> float:
-	if not inside(from) or not inside(to):
-		return 0.0
-	var run := from.distance_to(to)
-	if run <= 0.0001:
-		return 0.0
-	return (height_at(to) - height_at(from)) / run
 
 
 func cell_centre(index: int) -> Vector2:
@@ -264,41 +397,518 @@ func cell_rect(index: int) -> Rect2:
 	)
 
 
-func set_type_at(point: Vector2, type_id: String) -> bool:
-	var index := cell_index_at(point)
-	var type_index := _type_ids.find(type_id)
-	if index < 0 or type_index < 0:
-		return false
-	_type_index[index] = type_index
-	_move[index] = _type_move[type_index]
-	return true
-
-
 func cell_count() -> int:
 	return _type_index.size()
 
 
-## Height of a cell by index. The by-position query is the one gameplay uses; this is
-## for tooling that already has an index in hand and does not want to go round again.
+func cell_of_col_row(col: int, row: int) -> int:
+	if col < 0 or row < 0 or col >= cols or row >= rows:
+		return -1
+	return row * cols + col
+
+
+## ---------- the channels, by cell ----------------------------------------
+
+func type_index_of_cell(index: int) -> int:
+	return _type_index[index] if index >= 0 and index < _type_index.size() else 0
+
+
+func type_id_of_cell(index: int) -> String:
+	if index < 0 or index >= _type_index.size():
+		return TerrainCatalog.FALLBACK_ID
+	var slot := _type_index[index]
+	return _type_ids[slot] if slot >= 0 and slot < _type_ids.size() else TerrainCatalog.FALLBACK_ID
+
+
 func height_of_cell(index: int) -> float:
-	if index < 0 or index >= _heights.size():
+	return _heights[index] if index >= 0 and index < _heights.size() else 0.0
+
+
+func slope_of_cell(index: int) -> float:
+	return _slope[index] if index >= 0 and index < _slope.size() else 0.0
+
+
+func move_multiplier_of_cell(index: int) -> float:
+	return _move[index] if index >= 0 and index < _move.size() else 1.0
+
+
+func vegetation_of_cell(index: int) -> float:
+	return _vegetation[index] if index >= 0 and index < _vegetation.size() else 0.0
+
+
+func cover_of_cell(index: int) -> float:
+	return _cover[index] if index >= 0 and index < _cover.size() else 0.0
+
+
+func wetness_of_cell(index: int) -> float:
+	return _wetness[index] if index >= 0 and index < _wetness.size() else 0.0
+
+
+func los_of_cell(index: int) -> float:
+	return _los[index] if index >= 0 and index < _los.size() else 0.0
+
+
+func moisture_of_cell(index: int) -> float:
+	return _moisture[index] if index >= 0 and index < _moisture.size() else 0.0
+
+
+func blend_of_cell(index: int) -> float:
+	return _blend[index] if index >= 0 and index < _blend.size() else 0.0
+
+
+func soil_index_of_cell(index: int) -> int:
+	return _soil_index[index] if index >= 0 and index < _soil_index.size() else 0
+
+
+func soil_id_of_cell(index: int) -> String:
+	var slot := soil_index_of_cell(index)
+	return _soil_ids[slot] if slot >= 0 and slot < _soil_ids.size() else SoilCatalog.FALLBACK_ID
+
+
+func obstacle_of_cell(index: int) -> int:
+	return _obstacle[index] if index >= 0 and index < _obstacle.size() else OBSTACLE_NONE
+
+
+func is_cell_traversable(index: int) -> bool:
+	return _traversable[index] == 1 if index >= 0 and index < _traversable.size() else true
+
+
+## Which of the four ground variants this cell mostly is.
+func variant_of_cell(index: int) -> int:
+	if index < 0 or index * 4 + 3 >= _variant_w.size():
+		return 0
+	var best := 0
+	var best_weight := -1.0
+	for slot in 4:
+		var weight := _variant_w[index * 4 + slot]
+		if weight > best_weight:
+			best_weight = weight
+			best = slot
+	return best
+
+
+func variant_weight_of_cell(index: int, slot: int) -> float:
+	if index < 0 or slot < 0 or slot > 3 or index * 4 + slot >= _variant_w.size():
 		return 0.0
-	return _heights[index]
+	return _variant_w[index * 4 + slot]
 
 
-## The colour this cell's ground should be drawn in. Presentation only - nothing in the
-## simulation reads this.
+func overlay_weight_of_cell(index: int, slot: int) -> float:
+	if index < 0 or slot < 0 or slot > 3 or index * 4 + slot >= _overlay_w.size():
+		return 0.0
+	return _overlay_w[index * 4 + slot]
+
+
+## The biome a cell is mostly made of.
+func biome_id_of_cell(index: int) -> String:
+	if blend_biome_id.is_empty():
+		return biome_id
+	return blend_biome_id if blend_of_cell(index) > 0.5 else biome_id
+
+
+## ---------- the channels, by world position ------------------------------
+## Every one of these is a bounds check, one integer division and one array read: cheap enough for
+## a per-soldier, per-step call, which is what the simulation's hot path does with two of them.
+
+func type_index_at(point: Vector2) -> int:
+	var index := cell_index_at(point)
+	return type_index_of_cell(index if index >= 0 else 0)
+
+
+func type_id_at(point: Vector2) -> String:
+	var index := cell_index_at(point)
+	return type_id_of_cell(index) if index >= 0 else TerrainCatalog.FALLBACK_ID
+
+
+func type_name_at(point: Vector2) -> String:
+	var slot := type_index_at(point)
+	return _type_names[slot] if slot >= 0 and slot < _type_names.size() else TerrainCatalog.FALLBACK_ID
+
+
+func height_at(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	return _heights[index] if index >= 0 else 0.0
+
+
+func slope_at(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	return _slope[index] if index >= 0 else 0.0
+
+
+func vegetation_at(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	return _vegetation[index] if index >= 0 else 0.0
+
+
+func cover_at(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	return _cover[index] if index >= 0 else 0.0
+
+
+func wetness_at(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	return _wetness[index] if index >= 0 else 0.0
+
+
+func los_blocking_at(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	return _los[index] if index >= 0 else 0.0
+
+
+func moisture_at(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	return _moisture[index] if index >= 0 else 0.0
+
+
+func soil_id_at(point: Vector2) -> String:
+	var index := cell_index_at(point)
+	return soil_id_of_cell(index) if index >= 0 else SoilCatalog.FALLBACK_ID
+
+
+func biome_id_at(point: Vector2) -> String:
+	var index := cell_index_at(point)
+	return biome_id_of_cell(index) if index >= 0 else biome_id
+
+
+func obstacle_bits_at(point: Vector2) -> int:
+	var index := cell_index_at(point)
+	return _obstacle[index] if index >= 0 else OBSTACLE_NONE
+
+
+func is_traversable(point: Vector2) -> bool:
+	var index := cell_index_at(point)
+	return _traversable[index] == 1 if index >= 0 else true
+
+
+## What it costs to cross the ground under a point, as a multiplier on TIME rather than on speed:
+## open ground costs 1.0 and a wood costs about 1.67. The simulation moves soldiers with
+## [method move_multiplier_at]; this is the same number read the way a pathfinder or an AI wants it.
+func movement_cost_at(point: Vector2) -> float:
+	return 1.0 / maxf(0.05, move_multiplier_at(point))
+
+
+## The movement multiplier for the ground under a point.
+##
+## The hot path is per moving soldier per tick - twenty thousand times at twenty thousand soldiers -
+## and this used to cost five nested calls to do one array read: `_effective_speed`, this method, the
+## cell index, and the two integer divisions inside it. The cell arithmetic is spelled out here
+## instead, reading the same array with the same guards, so the callers that need this once per
+## soldier pay for one call rather than five. [method move_multiplier_via_cells] is the previous
+## shape, kept so the two can be measured against each other in one build. See D-114.
+func move_multiplier_at(point: Vector2) -> float:
+	if point.x < 0.0 or point.y < 0.0 or point.x >= size.x or point.y >= size.y:
+		return 1.0
+	var col := clampi(int(floorf(point.x / cell_size)), 0, cols - 1)
+	var row := clampi(int(floorf(point.y / cell_size)), 0, rows - 1)
+	return _move[row * cols + col]
+
+
+## The reference: the same multiplier through `cell_index_at`, which is what the engine called before
+## the cell arithmetic was spelled out above. Kept for paired measurement and for callers that are not
+## hot.
+func move_multiplier_via_cells(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	return _move[index] if index >= 0 else 1.0
+
+
+## How much the ground under a point stands above the country around it, in world units. Positive is
+## a knoll, negative a hollow. Elevation mattered the moment it was generated; this is the number a
+## formation asks for when the question is "are we charging uphill".
+func elevation_advantage_at(point: Vector2) -> float:
+	var index := cell_index_at(point)
+	if index < 0:
+		return 0.0
+	var block := int(index / cols / MEAN_BLOCK) * _mean_cols + int(index % cols / MEAN_BLOCK)
+	if _mean_height.size() == 0 or block < 0 or block >= _mean_height.size():
+		return 0.0
+	return _heights[index] - _mean_height[block]
+
+
+## The direction the ground rises in, at a point. Zero on flat ground.
+func uphill_direction_at(point: Vector2) -> Vector2:
+	var gradient := gradient_at(point)
+	if gradient.length() <= 0.00001:
+		return Vector2.ZERO
+	return gradient.normalized()
+
+
+## The height gradient at a point, in world units of rise per world unit travelled, per axis.
+func gradient_at(point: Vector2) -> Vector2:
+	var index := cell_index_at(point)
+	if index < 0:
+		return Vector2.ZERO
+	var col := index % cols
+	var row := index / cols
+	var left := height_of_cell(cell_of_col_row(maxi(0, col - 1), row))
+	var right := height_of_cell(cell_of_col_row(mini(cols - 1, col + 1), row))
+	var up := height_of_cell(cell_of_col_row(col, maxi(0, row - 1)))
+	var down := height_of_cell(cell_of_col_row(col, mini(rows - 1, row + 1)))
+	return Vector2((right - left) * 0.5, (down - up) * 0.5) / maxf(0.001, cell_size)
+
+
+## Height difference per unit travelled. Zero when either point is off the field, so callers never
+## have to check first.
+##
+## That zero is the contract, and it was not always honoured. Off-field ground reads as zero height,
+## so taking the two heights independently made two off-field points happen to give zero while a point
+## inside and a point outside gave a fake slope - the edge of the field appearing to fall away into
+## nothing. The contract is now checked first, because a slope from here to somewhere that does not
+## exist is not a small number, it is not a slope. See D-057.
+func slope_between(from: Vector2, to: Vector2) -> float:
+	if not inside(from) or not inside(to):
+		return 0.0
+	var run := from.distance_to(to)
+	if run <= 0.0001:
+		return 0.0
+	return (height_at(to) - height_at(from)) / run
+
+
+## ---------- sight lines ---------------------------------------------------
+
+## How opaque the ground is along a sight line, 0..1, ignoring height: the sum of the cells it
+## crosses, capped. A caller that wants a yes or no should use [method blocks_line_of_sight].
+func sight_line_opacity(from: Vector2, to: Vector2) -> float:
+	var total := 0.0
+	for index in _line_cells(from, to):
+		total += _los[index]
+	return clampf(total, 0.0, 1.0)
+
+
+## Whether the ground stops a sight line from [param from] to [param to].
+##
+## Two things stop it, and both are the ground rather than a rule about it: enough opaque cells
+## (a wood is a thicket - one cell does not hide what is behind it, three do), and the land rising
+## into the line (a ridge hides the far side of it). The walk is at cell resolution and the height
+## test is at the same steps, so a hundred-unit line is about twenty-five array reads - cheap enough
+## for the tactical layer and far too expensive for the per-soldier loop, which is why nothing in the
+## per-soldier loop calls it.
+func blocks_line_of_sight(from: Vector2, to: Vector2) -> bool:
+	var opacity := 0.0
+	var run := from.distance_to(to)
+	var start_height := height_at(from)
+	var end_height := height_at(to)
+	var steps := 0
+	for index in _line_cells(from, to):
+		opacity += _los[index]
+		if opacity >= LOS_BLOCKED_AT:
+			return true
+		if index >= 0 and index < _heights.size() and run > 0.001:
+			var fraction := float(steps) / maxf(1.0, float(LOS_MAX_CELLS))
+			var line_height := lerpf(start_height, end_height, minf(1.0, fraction))
+			if _heights[index] > line_height + LOS_GROUND_CLEARANCE:
+				return true
+		steps += 1
+	return false
+
+
+## The cells a straight line crosses, in order, without duplicates. Off-field cells are skipped.
+func _line_cells(from: Vector2, to: Vector2) -> Array[int]:
+	var cells: Array[int] = []
+	if not inside(from) or not inside(to):
+		return cells
+	var start := cell_index_at(from)
+	cells.append(start)
+	var run := from.distance_to(to)
+	if run <= 0.0001:
+		return cells
+	var step := cell_size * 0.5
+	var count := mini(LOS_MAX_CELLS, int(ceilf(run / step)))
+	var direction := (to - from) / run
+	for i in range(1, count + 1):
+		var point := from + direction * minf(run, float(i) * step)
+		var index := cell_index_at(point)
+		if index >= 0 and cells[cells.size() - 1] != index:
+			cells.append(index)
+	return cells
+
+
+## ---------- grids ---------------------------------------------------------
+## Read-only views of the cached maps, for tooling, native kernels and anything that wants to walk
+## the field rather than query it point by point. Packed arrays are copied on write, so handing one
+## out costs nothing until somebody changes it.
+
+func height_grid() -> PackedFloat32Array:
+	return _heights
+
+
+func slope_grid() -> PackedFloat32Array:
+	return _slope
+
+
+func move_grid() -> PackedFloat32Array:
+	return _move
+
+
+func vegetation_grid() -> PackedFloat32Array:
+	return _vegetation
+
+
+func cover_grid() -> PackedFloat32Array:
+	return _cover
+
+
+func wetness_grid() -> PackedFloat32Array:
+	return _wetness
+
+
+func los_grid() -> PackedFloat32Array:
+	return _los
+
+
+func moisture_grid() -> PackedFloat32Array:
+	return _moisture
+
+
+func obstacle_grid() -> PackedInt32Array:
+	return _obstacle
+
+
+func traversable_grid() -> PackedInt32Array:
+	return _traversable
+
+
+func type_grid() -> PackedInt32Array:
+	return _type_index
+
+
+func soil_grid() -> PackedInt32Array:
+	return _soil_index
+
+
+func blend_grid() -> PackedFloat32Array:
+	return _blend
+
+
+## ---------- batch queries -------------------------------------------------
+
+## One channel for many positions, in one call.
+##
+## This is the seam a large army goes through. The per-point methods above are already one array read
+## each, which is what the per-soldier loop uses; a batch exists so that a caller who has twenty
+## thousand positions - an AI considering a line, a renderer, a native kernel - pays one crossing
+## instead of twenty thousand. Answers are in the same order as the questions, and a point off the
+## field answers with the same value its own single-point query would: never a surprise.
+func sample_batch(points: PackedVector2Array, channel: Channel) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(points.size())
+	fill_batch(points, channel, out)
+	return out
+
+
+## The same, into an array the caller already owns. [param out] is an [Array] rather than a packed
+## array on purpose: packed arrays are value types in GDScript, so filling one in place would fill a
+## copy and the caller would never see it. An [Array] is a reference, which is what makes a
+## per-tick refill allocation-free.
+func fill_batch(points: PackedVector2Array, channel: Channel, out: Array) -> void:
+	if out.size() < points.size():
+		out.resize(points.size())
+	for i in points.size():
+		out[i] = sample_one(points[i], channel)
+
+
+func sample_one(point: Vector2, channel: Channel) -> float:
+	match channel:
+		Channel.HEIGHT:
+			return height_at(point)
+		Channel.SLOPE:
+			return slope_at(point)
+		Channel.MOVE:
+			return move_multiplier_at(point)
+		Channel.COST:
+			return movement_cost_at(point)
+		Channel.VEGETATION:
+			return vegetation_at(point)
+		Channel.COVER:
+			return cover_at(point)
+		Channel.WETNESS:
+			return wetness_at(point)
+		Channel.LOS:
+			return los_blocking_at(point)
+		Channel.TRAVERSABLE:
+			return 1.0 if is_traversable(point) else 0.0
+		Channel.TYPE_INDEX:
+			return float(type_index_at(point))
+		Channel.SOIL_INDEX:
+			var soil_index := cell_index_at(point)
+			return float(soil_index_of_cell(soil_index) if soil_index >= 0 else 0)
+		Channel.BIOME_INDEX:
+			var index := cell_index_at(point)
+			return blend_of_cell(index) if index >= 0 else 0.0
+		Channel.OBSTACLE:
+			return float(obstacle_bits_at(point))
+		Channel.BLEND:
+			var blend_index := cell_index_at(point)
+			return blend_of_cell(blend_index) if blend_index >= 0 else 0.0
+		Channel.MOISTURE:
+			return moisture_at(point)
+	return 0.0
+
+
+## ---------- the visual layer, generated from the data ---------------------
+## Two images, at a resolution the caller chooses, both read from the channels above and never
+## written back to them. The ground map carries the four variant weights and the height; the overlay
+## map carries the four overlay coverages. Both are meant to be filtered linearly by the shader, so
+## a weight that steps per cell reads as a blend across the ground.
+
+## R,G,B = weights of variants 2, 3 and 4 (variant 1 is the remainder), A = height in 0..1.
+func build_ground_map(pixels_per_unit: float = 1.0) -> Image:
+	var width := maxi(2, int(roundf(size.x * maxf(0.05, pixels_per_unit))))
+	var height := maxi(2, int(roundf(size.y * maxf(0.05, pixels_per_unit))))
+	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
+	var tallest := maxf(0.001, max_height())
+	var lowest := min_height()
+	var span := maxf(0.001, tallest - lowest)
+	for y in height:
+		var world_y := (float(y) + 0.5) / float(height) * size.y
+		for x in width:
+			var world_x := (float(x) + 0.5) / float(width) * size.x
+			var index := cell_index_at(Vector2(world_x, world_y))
+			if index < 0:
+				image.set_pixel(x, y, Color(0.0, 0.0, 0.0, 0.5))
+				continue
+			var w1 := variant_weight_of_cell(index, 1)
+			var w2 := variant_weight_of_cell(index, 2)
+			var w3 := variant_weight_of_cell(index, 3)
+			var relief := (_heights[index] - lowest) / span
+			image.set_pixel(x, y, Color(w1, w2, w3, relief))
+	return image
+
+
+## R,G,B,A = the coverage of the biome's first four overlays.
+func build_overlay_map(pixels_per_unit: float = 1.0) -> Image:
+	var width := maxi(2, int(roundf(size.x * maxf(0.05, pixels_per_unit))))
+	var height := maxi(2, int(roundf(size.y * maxf(0.05, pixels_per_unit))))
+	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
+	for y in height:
+		var world_y := (float(y) + 0.5) / float(height) * size.y
+		for x in width:
+			var world_x := (float(x) + 0.5) / float(width) * size.x
+			var index := cell_index_at(Vector2(world_x, world_y))
+			if index < 0:
+				image.set_pixel(x, y, Color(0.0, 0.0, 0.0, 0.0))
+				continue
+			image.set_pixel(x, y, Color(
+				overlay_weight_of_cell(index, 0),
+				overlay_weight_of_cell(index, 1),
+				overlay_weight_of_cell(index, 2),
+				overlay_weight_of_cell(index, 3)
+			))
+	return image
+
+
+## The colour this cell's ground should be drawn in when there is no art: the biome's variant colour,
+## shaded by the type. Presentation only - nothing in the simulation reads this.
 func colour_of_cell(index: int) -> Color:
 	if index < 0 or index >= _type_index.size():
 		return FALLBACK_COLOUR
-	var type_index := _type_index[index]
-	if type_index < 0 or type_index >= _type_colours.size():
+	var type_slot_index := _type_index[index]
+	if type_slot_index < 0 or type_slot_index >= _type_colours.size():
 		return FALLBACK_COLOUR
-	return _type_colours[type_index]
+	return _type_colours[type_slot_index]
 
 
-## The tallest ground on the field, so a view can shade elevations without a second
-## pass to find the range.
+## The tallest ground on the field, so a view can shade elevations without a second pass to find the
+## range.
 func max_height() -> float:
 	var tallest := 0.0
 	for height in _heights:
@@ -306,39 +916,150 @@ func max_height() -> float:
 	return tallest
 
 
-func type_id_of_cell(index: int) -> String:
+func min_height() -> float:
+	var lowest := 0.0
+	var started := false
+	for height in _heights:
+		if not started or height < lowest:
+			lowest = height
+			started = true
+	return lowest
+
+
+## ---------- edits ---------------------------------------------------------
+
+## Force one cell's type. The maps that depend on the type - movement, cover, sight line and
+## traversability - are all recomposed for that cell, so the field cannot be left describing ground
+## it is not. This is what the tests use to build a controlled battlefield rather than hoping the
+## seed produced one.
+func set_type_at(point: Vector2, type_id: String) -> bool:
+	var index := cell_index_at(point)
+	var type_slot_index := _type_ids.find(type_id)
+	if index < 0 or type_slot_index < 0:
+		return false
+	_type_index[index] = type_slot_index
+	refresh_maps_of_cell(index)
+	return true
+
+
+## Recompute everything derived from a cell's type and its channels: cover, sight line, traversability,
+## obstacle state, and the movement multiplier itself. Generation calls this per cell and so does
+## [method set_type_at], which is what stops the two paths from drifting.
+func refresh_maps_of_cell(index: int) -> void:
 	if index < 0 or index >= _type_index.size():
-		return TerrainCatalog.FALLBACK_ID
-	return _type_ids[_type_index[index]]
+		return
+	var slot := clampi(_type_index[index], 0, maxi(0, _type_traversable.size() - 1))
+	if _type_traversable.size() == 0:
+		return
+	# Cover and opaqueness come from the ground and from what is growing on it. Density is read
+	# rather than re-derived: a thicket is a woods cell with vegetation in it, not a new type.
+	var vegetation := _vegetation[index] if index < _vegetation.size() else 0.0
+	_cover[index] = clampf(maxf(_type_cover[slot], vegetation * 0.35), 0.0, 0.9)
+	_los[index] = clampf(maxf(_type_los[slot], vegetation * 0.5), 0.0, 1.0)
+	var slope := _slope[index] if index < _slope.size() else 0.0
+	var ground_allows := _type_traversable[slot] == 1 and slope <= max_traversable_slope
+	_traversable[index] = 1 if ground_allows else 0
+	if _type_traversable[slot] == 0 or slope > max_traversable_slope:
+		_obstacle[index] = _obstacle[index] | OBSTACLE_TERRAIN
+	else:
+		_obstacle[index] = _obstacle[index] & ~OBSTACLE_TERRAIN
+	_move[index] = resolve_move_of_cell(index)
 
 
-## How many cells of each type the battlefield holds. Used by tests and by the
-## benchmark's summary line.
+## ---------- reporting -----------------------------------------------------
+
 func counts_by_type() -> Dictionary:
 	var counts := {}
 	for id in _type_ids:
 		counts[id] = 0
 	for index in _type_index.size():
-		var id := _type_ids[_type_index[index]]
+		var slot := _type_index[index]
+		var id := _type_ids[slot] if slot >= 0 and slot < _type_ids.size() else TerrainCatalog.FALLBACK_ID
 		counts[id] = int(counts.get(id, 0)) + 1
 	return counts
 
 
-## A compact fingerprint of the whole battlefield. Two terrains with the same
-## signature are identical cell for cell, which is what the determinism tests assert.
-func signature() -> String:
-	var parts := PackedStringArray()
-	parts.append("%d:%d:%d:%d" % [terrain_seed, generation_version, cols, rows])
+func counts_by_soil() -> Dictionary:
+	var counts := {}
+	for id in _soil_ids:
+		counts[id] = 0
+	for index in _soil_index.size():
+		var slot := _soil_index[index]
+		var id := _soil_ids[slot] if slot >= 0 and slot < _soil_ids.size() else SoilCatalog.FALLBACK_ID
+		counts[id] = int(counts.get(id, 0)) + 1
+	return counts
+
+
+func counts_by_variant() -> Dictionary:
+	var counts := {}
+	for slot in 4:
+		counts[slot] = 0
 	for index in _type_index.size():
-		parts.append("%d.%d" % [_type_index[index], int(round(_heights[index] * 100.0))])
-	return "%08x" % RngService.stable_hash("|".join(parts))
+		var slot := variant_of_cell(index)
+		counts[slot] = int(counts.get(slot, 0)) + 1
+	return counts
+
+
+## Every cell that is a given type, as cell indices. Used by the tests and the debug overlay.
+func cells_of_type(type_id: String) -> Array[int]:
+	var out: Array[int] = []
+	var wanted := _type_ids.find(type_id)
+	if wanted < 0:
+		return out
+	for index in _type_index.size():
+		if _type_index[index] == wanted:
+			out.append(index)
+	return out
+
+
+## A compact fingerprint of the whole battlefield. Two terrains with the same signature are identical
+## cell for cell, which is what the determinism tests assert. Every channel that carries information
+## is folded in, so a change to any one of them is caught rather than assumed.
+func signature() -> String:
+	var acc := 2166136261
+	acc = _mix(acc, terrain_seed)
+	acc = _mix(acc, generation_version)
+	acc = _mix(acc, cols)
+	acc = _mix(acc, rows)
+	acc = _mix(acc, int(cell_size * 100.0))
+	acc = _mix(acc, _biome_index_of_primary())
+	for index in _type_index.size():
+		acc = _mix(acc, _type_index[index])
+		acc = _mix(acc, _soil_index[index])
+		acc = _mix(acc, _obstacle[index])
+		acc = _mix(acc, _traversable[index])
+		acc = _mix(acc, int(round(_heights[index] * 64.0)))
+		acc = _mix(acc, int(round(_move[index] * 256.0)))
+		acc = _mix(acc, int(round(_vegetation[index] * 128.0)))
+		acc = _mix(acc, int(round(_cover[index] * 128.0)))
+		acc = _mix(acc, int(round(_wetness[index] * 128.0)))
+		acc = _mix(acc, int(round(_los[index] * 128.0)))
+		acc = _mix(acc, int(round(_moisture[index] * 128.0)))
+		acc = _mix(acc, int(round(_blend[index] * 64.0)))
+		for slot in 4:
+			acc = _mix(acc, int(round(_variant_w[index * 4 + slot] * 64.0)))
+			acc = _mix(acc, int(round(_overlay_w[index * 4 + slot] * 64.0)))
+	return "%08x" % (acc & 0xffffffff)
+
+
+static func _mix(accumulator: int, value: int) -> int:
+	var h := (accumulator ^ (value * 16777619)) & 0x7fffffff
+	h = (h ^ (h >> 13)) & 0x7fffffff
+	return h
+
+
+func _biome_index_of_primary() -> int:
+	var acc := 0
+	for character in biome_id.to_utf8_buffer():
+		acc = (acc * 31 + int(character)) & 0x7fffffff
+	return acc
 
 
 func summary() -> String:
 	if not is_valid():
 		return "terrain: invalid"
-	return "terrain seed %d v%d: %dx%d cells of %.1f, %s" % [
-		terrain_seed, generation_version, cols, rows, cell_size, str(counts_by_type()),
+	return "terrain seed %d v%d (%s): %dx%d cells of %.1f, %s" % [
+		terrain_seed, generation_version, biome_id, cols, rows, cell_size, str(counts_by_type()),
 	]
 
 
@@ -350,6 +1071,9 @@ func to_dict() -> Dictionary:
 		"cols": cols,
 		"rows": rows,
 		"size": DataUtils.vec2_to(size),
+		"biome": biome_id,
+		"blend_biome": blend_biome_id,
 		"signature": signature(),
 		"counts": counts_by_type(),
+		"soils": counts_by_soil(),
 	}
