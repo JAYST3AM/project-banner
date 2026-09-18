@@ -21,6 +21,24 @@ to move:
 | `battle_resolver.gd` | 419 | how a battle ends and what it hands back |
 | terrain, journal, result, unit, setup, ai, clock | 1,357 | the ground, the record, the outcome, the data |
 
+## What runs today, in the owner's words
+
+*"In the campaign when I get into a battle, it has its own battle sim, which isn't the battle sim
+that is run as a debug mode."* Exactly right, and it is the shape of the whole migration:
+
+- **The campaign's battles run the CPU battle** - `scripts/battle/` - because that is what the world
+  map's encounter flow still points at. Every battle he has actually played tonight was that path.
+- **Debug 2 runs the compute path** - `scripts/dev/gpu_crowd.tscn` - which is where every GPU number
+  quoted so far comes from (the six thousand men, the thirty against thirty, the collision proofs,
+  thirty ticks a second).
+- So the two implementations are both alive, and the campaign is wired to the old one. **Step 2
+  below - the campaign drives it - is the step that ends this**, and it is why the parity list
+  matters: that switch is the moment the game's real battles change engine.
+
+Until then: a battle tested from the campaign tests the CPU path, and a battle tested in Debug 2
+tests the compute path. They are not the same fight, and a number quoted without saying which path
+it came from is a number that cannot be compared with anything.
+
 ## The conditions
 
 **1. The CPU version is archived, not deleted, and it stays runnable.** It becomes the oracle: the
@@ -77,7 +95,8 @@ before promotion. The matrix in `docs/CPU_REFERENCE_FEATURE_MATRIX.md` is the lo
    whether battles resolve the way the reference's do. Needs a deterministic per-man random
    number: the reference seeds one stream per battle, the shader can hash (tick, man) instead.
 2. **The campaign drives it** - `battle_setup.gd`'s armies become the buffers, and the result
-   comes back as a `BattleResult` the campaign already knows how to eat.
+   comes back as a `BattleResult` the campaign already knows how to eat. *This is the step the owner
+   noticed is missing: until it lands, the campaign's own battles are the CPU ones.*
 3. **The command UI in the game's style**, including withdrawal and the results screen.
 4. **The promotion** - the scene becomes `scenes/battle/battle.tscn`, every "gpu" name in the
    game's own files goes (`gpu_crowd.gd` → `scripts/battle/battle_field.gd`), and the world map's
