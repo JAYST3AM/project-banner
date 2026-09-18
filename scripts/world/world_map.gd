@@ -165,6 +165,11 @@ func _apply_dev_autotravel() -> void:
 ## ---------- per-frame ----------------------------------------------------
 
 func _process(delta: float) -> void:
+	# The world is built behind the loading screen, on a thread, while this map's frames are already
+	# running. Until the build lands there is no clock to step and no travel to advance, and calling
+	# into either produced 327 errors of "Nonexistent function 'step' in base 'Nil'" in one run.
+	if _state == null or _travel == null:
+		return
 	if _state == null:
 		return
 

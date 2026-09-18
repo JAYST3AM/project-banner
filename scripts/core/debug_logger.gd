@@ -124,10 +124,20 @@ func debug(message: String, category: String = "general") -> void:
 
 
 func info(message: String, category: String = "general") -> void:
+	# The world builder runs on a thread and logs from it; a Node cannot emit signals off the main
+	# thread, which produced "The caller thread can't call the function emit_signalp() on this node".
+	# Deferring keeps the record and keeps the thread legal.
+	if not Thread.is_main_thread():
+		call_deferred("info", message, category)
+		return
 	log_entry(message, category, Level.INFO)
 
 
 func warn(message: String, category: String = "general") -> void:
+	# Same guard as info(): the world builder logs warnings from its thread.
+	if not Thread.is_main_thread():
+		call_deferred("warn", message, category)
+		return
 	log_entry(message, category, Level.WARN)
 
 
