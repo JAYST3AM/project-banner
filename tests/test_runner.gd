@@ -64,15 +64,20 @@ var _checks: int = 0
 var _suites_reported: int = 0
 var _suites_expected: int = 0
 var _suites_broken: int = 0
-## True while the current suite is inside its deadline; the watchdog checks it before firing.
-var _deadline_armed: bool = false
+## The wall-clock the current suite must finish by, and its name for the report. Empty name means no
+## suite is running. Checked in [method _process], which runs while the tree is paused.
+var _deadline_ms: int = 0
+var _stuck_suite: String = ""
 
 
 func _ready() -> void:
+	# The runner has to keep running while the game is paused: a suite that pauses the tree must not
+	# be able to take the watchdog down with it.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	# Suites wipe their saves at the start and end of every fixture. Point that at a test directory
 	# so a run can never eat the campaign somebody is partway through. See save_manager.save_dir().
 	OS.set_environment("PB_TEST_SAVES", "1")
-	SceneManager.adopt_initial_scene()
+	SceneManager.adopt_initial_scene(true)
 	await get_tree().process_frame
 	await _run_all()
 	var failed := _failures > 0
@@ -147,6 +152,14 @@ func _run_all() -> void:
 		print("  !! %d of %d suites never reported a result" % [missing, _suites_expected])
 
 
+## Runs even when the tree is paused, which is the whole point: the pause that a stuck suite leaves
+## behind would otherwise also silence the thing that reports it.
+func _process(_delta: float) -> void:
+	if _stuck_suite.is_empty() or Time.get_ticks_msec() < _deadline_ms:
+		return
+	_on_suite_deadline(_stuck_suite)
+
+
 ## The watchdog fired: say which suite, say what it means, and end the process with a code that is
 ## not a pass. Rerunning the named suite alone will show it green, which is the signature of state
 ## left behind by whatever ran before it.
@@ -185,18 +198,18 @@ func evaluate(path: String) -> Dictionary:
 	suite.runner = self
 	suite.suite_name = path.get_file().get_basename()
 
-	# A watchdog, because a hung suite cannot be interrupted: GDScript has no way to cancel a
-	# coroutine awaiting something that will never arrive. What it can do is refuse to hang the whole
-	# run in silence. A suite that stalls now costs a named result in ninety seconds, instead of
-	# fifteen minutes of nothing and a report that says only "three suites started".
-	_deadline_armed = true
-	var suite_name := suite.suite_name
-	var watchdog := get_tree().create_timer(float(SUITE_DEADLINE_S))
-	watchdog.timeout.connect(func() -> void:
-		if _deadline_armed:
-			_on_suite_deadline(suite_name))
+	# The pause is cleared before every suite. A suite that opens the pause menu and does not close it
+	# leaves the whole tree frozen, and the next suite's awaits then never complete - which is what
+	# stalled this run for fifteen minutes twice, and, because the first version of this watchdog was
+	# a SceneTreeTimer, froze the watchdog too.
+	get_tree().paused = false
+	# A watchdog by the clock, checked in _process: a suite cannot be interrupted - GDScript has no
+	# way to cancel a coroutine awaiting something that will never arrive - but the run does not have
+	# to be silent about it. Nineteen times the honest cost of a suite, so only a stuck one reaches it.
+	_deadline_ms = Time.get_ticks_msec() + SUITE_DEADLINE_S * 1000
+	_stuck_suite = suite.suite_name
 	await suite.run()
-	_deadline_armed = false
+	_stuck_suite = ""
 
 	# Order matters. A suite that aborted mid-run still carries whatever assertions
 	# it got through, and those all passed - checking failure count first would call

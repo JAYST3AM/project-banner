@@ -245,7 +245,7 @@ func _on_encounter_attack() -> void:
 	DebugLogger.info("attacking %s (battle %s)" % [world_party.display_name, context.battle_id], "WorldMap")
 	_close_encounter_dialog()
 	_hud.set_hint("Loading the battlefield against %s..." % party_id)
-	SceneManager.change_scene("battle", {"context": context})
+	SceneManager.change_scene("battle_field", {"context": context})
 
 
 func _on_encounter_retreat() -> void:

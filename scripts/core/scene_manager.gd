@@ -19,12 +19,20 @@ const SCENES := {
 	"main_menu": "res://scenes/ui/main_menu.tscn",
 	"world_map": "res://scenes/world/world_map.tscn",
 	"settlement": "res://scenes/settlements/settlement.tscn",
-	"battle": "res://scenes/battle/battle_field.tscn",
+	# "battle" is the CPU battle - the oracle. The migration plan's condition is that the suites keep
+	# running against it, and they do: several of them load this key and check its view and simulator.
+	# The game's own battles are "battle_field" below, and the world map is the only thing that asks
+	# for it. Pointing "battle" at the compute field (which cannot run headless at all) broke three
+	# suites in one run - the fault the plan predicted, made real for six minutes.
+	"battle": "res://scenes/battle/battle.tscn",
+	"battle_field": "res://scenes/battle/battle_field.tscn",
 	"battle_results": "res://scenes/battle/battle_results.tscn",
 }
 
 var current_key: String = ""
 var current_scene: Node = null
+## True when the adopted scene must never be freed by a change: the test runner.
+var _preserve_adopted: bool = false
 var last_key: String = ""
 
 ## The scene this manager created itself. Only this node is ever freed on a
@@ -102,7 +110,7 @@ func _apply_change() -> void:
 	# owner was looking at stayed up over the world map it had just opened, because nothing had ever
 	# claimed it.
 	var previous := _managed_scene
-	if previous == null:
+	if previous == null and not _preserve_adopted:
 		previous = get_tree().current_scene
 
 	_payload = payload
@@ -126,7 +134,14 @@ func _apply_change() -> void:
 ## Adopts the scene that Godot loaded from the command line / project settings,
 ## so [member current_scene] is correct even for the very first scene. Only
 ## scenes this manager knows about become "managed" (and therefore freeable).
-func adopt_initial_scene() -> void:
+##
+## [param preserve] says this scene is not a game screen and must outlive every
+## change - the test runner adopts itself that way, because it has to keep running
+## while the suites open and close scenes underneath it. Without it, the first
+## scene change frees the runner itself, the run goes silent, and the report says
+## only how many suites had started.
+func adopt_initial_scene(preserve: bool = false) -> void:
+	_preserve_adopted = preserve
 	var scene := get_tree().current_scene
 	current_scene = scene
 	if scene == null:
