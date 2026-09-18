@@ -50,6 +50,12 @@ His notes, unresolved:
    mipmaps enabled so the art does not alias back into speckle. **Uncommitted and awaiting his
    keep / keep-part / revert decision.**
 
+3. **"I only saw 2 different terrains is that correct?"** Yes, and it is deliberate: the shader has
+   two ground slots, filled with the set's *first* look (Standard) against its *third* (Dry), because
+   one biome's art had to stand in for two biomes to show a blend at all. Lush and Worn are
+   catalogued but drawn nowhere - and the per-tile variant picker (a seeded hash choosing among the
+   four) is not built. Four looks exist; two are in use.
+
 ## Where the working tree stands
 
 Last commit is `12334bc` (the first terrain showing). Uncommitted and waiting on him:
