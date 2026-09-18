@@ -1443,6 +1443,11 @@ func _freeze() -> void:
 	else:
 		_verdict = "DEFEAT   %d survivors   %d fallen" % [_alive.y, _fallen]
 	print("gpu crowd: battle resolved: %s (ticks %d)" % [_verdict, _tick])
+	# Why it is over, in words that can be grepped. The four-tick battles that cost tonight's runs
+	# were a side reading as empty for a reason nobody could see; this line is that reason.
+	DebugLogger.info("battle over after %d ticks (%.1f s): %s - our side %d standing, theirs %d, fallen %d" % [
+		_tick, float(_tick) / maxf(1.0, tick_hz), _verdict.strip_edges(),
+		_alive.x, _alive.y, _fallen], "BattleField")
 
 
 ## The audit's item 1, taken on every tick the simulation advances: the closest enemy gap

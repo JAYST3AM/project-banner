@@ -24,6 +24,15 @@ func _ready() -> void:
 		SceneManager.change_scene("world_map")
 		return
 	agents = units.size()
+	var ours := 0
+	var theirs := 0
+	for unit_of in units:
+		if unit_of.side == BattleContext.SIDE_PLAYER:
+			ours += 1
+		else:
+			theirs += 1
+	DebugLogger.info("battle %s: %d of ours against %d of theirs, seed %d, ground %s" % [
+		context.battle_id, ours, theirs, context.battle_seed, context.weather], "BattleField")
 	# The inherited builder uses this only to reserve vertical room for its demo
 	# bands; campaign bodies provide their own layout below.
 	bodies_per_side = 1
@@ -200,6 +209,39 @@ func _resolve(retreated: bool) -> void:
 	SceneManager.change_scene("world_map", {"select_settlement_id": ""})
 
 
+## Where everybody stands, dead and alive, against the field they are supposed to be inside. The
+## owner watched fallen markers drift off the drawn ground; every write path in the shader clamps to
+## the field, so either this says men are outside it - and the clamp is a lie - or it says they are
+## inside it, and the fault is in what gets drawn where.
+func _report_bounds() -> void:
+	var alive_lo := Vector2(INF, INF)
+	var alive_hi := Vector2(-INF, -INF)
+	var dead_lo := Vector2(INF, INF)
+	var dead_hi := Vector2(-INF, -INF)
+	var alive_n := 0
+	var dead_n := 0
+	for unit in units:
+		if unit.is_alive():
+			alive_lo = alive_lo.min(unit.position)
+			alive_hi = alive_hi.max(unit.position)
+			alive_n += 1
+		else:
+			dead_lo = dead_lo.min(unit.position)
+			dead_hi = dead_hi.max(unit.position)
+			dead_n += 1
+	print("battle field: bounds | field (%.1f, %.1f) | alive %d x %.1f..%.1f y %.1f..%.1f | dead %d x %.1f..%.1f y %.1f..%.1f" % [
+		field.x, field.y, alive_n, alive_lo.x, alive_hi.x, alive_lo.y, alive_hi.y,
+		dead_n, dead_lo.x, dead_hi.x, dead_lo.y, dead_hi.y])
+	# The same reading as one log line, with a verdict on whether anyone is outside the field they
+	# are supposed to be inside - the owner's off-map markers in one grep.
+	var outside := 0
+	for unit_of in units:
+		if unit_of.position.x < 0.0 or unit_of.position.x > field.x or unit_of.position.y < 0.0 or unit_of.position.y > field.y:
+			outside += 1
+	DebugLogger.info("outcome written: %d alive, %d fallen, %d outside the field (%.0f x %.0f)" % [
+		alive_n, dead_n, outside, field.x, field.y], "BattleField")
+
+
 func _write_outcome() -> void:
 	var state_data := _state_bytes.to_float32_array()
 	var meta_data := _meta_bytes.to_float32_array()
@@ -213,3 +255,6 @@ func _write_outcome() -> void:
 		unit.killed_by_id = record.w
 		unit.position = Vector2(state_data[i * 4], state_data[i * 4 + 1])
 		unit.facing = _forward_of(_man_body[i])
+	# After the writeback, not before: the units carry the battle's positions from here, and a
+	# report taken before it was a report of the deployment. That mistake cost a run too.
+	_report_bounds()
