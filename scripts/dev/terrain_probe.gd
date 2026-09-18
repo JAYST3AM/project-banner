@@ -135,6 +135,15 @@ func _run(size: Vector2, config: GameConfig, biome: String) -> void:
 	print("  props determinism: %s (signature %s)" % [
 		"identical" if _same_props(field, config, props) else "DIFFERENT", props.signature()])
 
+	# How a formation would read the ground, over a few rectangles a body might occupy.
+	for rect in [
+		Rect2(Vector2(10.0, 20.0), Vector2(24.0, 3.0)),
+		Rect2(Vector2(40.0, 25.0), Vector2(24.0, 3.0)),
+		Rect2(Vector2(2.0, 2.0), Vector2(20.0, 20.0)),
+	]:
+		var summary := TerrainSummary.grade(field, rect)
+		print("  ground %s -> %s" % [str(rect), summary.describe()])
+
 	# The maps, printed rather than described: one line per row, one character per cell.
 	if not _printed_summary:
 		_printed_summary = true
@@ -200,6 +209,6 @@ func _traversable_share(field: BattlefieldTerrain) -> float:
 
 ## Rebuild the props for the same field and compare: the scatter must be a pure function of the seed.
 func _same_props(field: BattlefieldTerrain, config: GameConfig, props: TerrainProps) -> bool:
-	var again := TerrainProps.build(field, null, field.terrain_seed, field.generation_version, config,
-		BattleSetup.deployment_zones(config))
+	var again := TerrainProps.build(field, BiomeCatalog.load_from(), field.terrain_seed,
+		field.generation_version, config, BattleSetup.deployment_zones(config))
 	return again.signature() == props.signature()

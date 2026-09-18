@@ -241,7 +241,11 @@ func _draw_settlements() -> void:
 
 
 func _draw_player_party() -> void:
-	var position := state.world_position
+	# Between the last simulation step and the next one, not on a step boundary: the world moves thirty
+	# times a second and the screen draws three hundred and sixty, so drawing the step position alone
+	# makes the party hop the same distance at the same interval. Interpolating costs one lerp and is
+	# the difference between a marker that glides and a marker that stutters.
+	var position := state.previous_world_position.lerp(state.world_position, clampf(state.render_alpha, 0.0, 1.0))
 	draw_circle(position, 12.0, COLOR_PARTY_OUTLINE)
 	draw_circle(position, 9.0, COLOR_PLAYER)
 	draw_arc(position, 14.0, 0.0, TAU, 32, COLOR_PLAYER.lightened(0.25), 2.0)

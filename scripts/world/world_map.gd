@@ -227,11 +227,15 @@ func _process(delta: float) -> void:
 		_accumulator -= SIM_STEP
 		var game_hours := _state.clock.advance_real_seconds(SIM_STEP)
 		if game_hours > 0.0:
+			# Remembered so the map can draw the party *between* steps rather than only on them.
+			_state.previous_world_position = _state.world_position
 			var report := _travel.step(game_hours)
 			if report.get("arrived", false):
 				_on_arrived(str(report.get("settlement_id", "")))
 			if _overworld != null:
 				_overworld.step(game_hours)
+	# How far the renderer is through the step it is waiting on, for the same reason.
+	_state.render_alpha = clampf(_accumulator / SIM_STEP, 0.0, 1.0)
 
 	_check_for_encounter()
 

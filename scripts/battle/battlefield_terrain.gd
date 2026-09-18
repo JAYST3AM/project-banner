@@ -930,6 +930,38 @@ func min_height() -> float:
 	return lowest
 
 
+## Make the ground under a set of rectangles passable, whatever it was.
+##
+## Only ever called for a deployment zone, and only for ground that is genuinely impassable under the
+## whole thing: the type is reset to the biome's own default ground, which is what the country would
+## be if the river had gone elsewhere. Cover and sight lines are recomposed with it, so the ground
+## does not keep describing a river that is no longer there.
+func clear_for_deployment(zones: Array[Rect2]) -> int:
+	var changed := 0
+	for zone in zones:
+		var min_col := cell_col_at(zone.position)
+		var max_col := cell_col_at(zone.position + zone.size - Vector2(0.01, 0.01))
+		var min_row := cell_row_at(zone.position)
+		var max_row := cell_row_at(zone.position + zone.size - Vector2(0.01, 0.01))
+		for row in range(min_row, max_row + 1):
+			for col in range(min_col, max_col + 1):
+				var cell := row * cols + col
+				if cell < 0 or cell >= _type_index.size():
+					continue
+				var slot := _type_index[cell]
+				var impassable := _type_traversable[slot] == 0 or _slope[cell] > max_traversable_slope
+				if not impassable:
+					continue
+				var soil := soil_id_of_cell(cell)
+				_type_index[cell] = type_slot(TerrainCatalog.FALLBACK_ID)
+				_slope[cell] = minf(_slope[cell], max_traversable_slope * 0.5)
+				if soil == "silt" or soil == "sand":
+					_soil_index[cell] = maxi(0, _soil_ids.find("dirt"))
+				refresh_maps_of_cell(cell)
+				changed += 1
+	return changed
+
+
 ## ---------- props ---------------------------------------------------------
 
 ## Grow the things standing on the ground and fold their gameplay into the cells they stand in.

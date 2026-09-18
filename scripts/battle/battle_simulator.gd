@@ -765,6 +765,7 @@ func _init(p_config: GameConfig, battle_seed: int = 0) -> void:
 		press_forward_cache_enabled = config.get_bool("battle.press_forward_cache_enabled", true)
 		native_guard_inlined = config.get_bool("battle.native_guard_inlined", true)
 		terrain_speed_inline = config.get_bool("battle.terrain_speed_inline", true)
+		terrain_pace_by_bounds = config.get_bool("battle.terrain_pace_bounds", true)
 		focus_inline_enabled = config.get_bool("battle.focus_inline_enabled", true)
 		target_timing_enabled = config.get_bool("battle.target_timing_enabled", true)
 		if OS.get_environment("PB_TGT_TIMING").to_lower() in ["off", "0", "false", "no", "counts"]:
@@ -858,15 +859,66 @@ func set_terrain_from_context(context: BattleContext, p_config: GameConfig = nul
 		return null
 	var source := p_config if p_config != null else config
 	terrain = BattlefieldTerrain.generate(context.terrain_seed, field_size, source, null, null, context.biome_id)
-	if terrain != null and source != null and source.get_bool("terrain.props", true):
-		# Props are grown here rather than in generation because they need to know where the armies
-		# are going to stand, and that is a battle's business rather than the ground's.
-		terrain.build_props(source, null, BattleSetup.deployment_zones(source))
+	_forget_terrain_summaries()
+	if terrain != null and source != null:
+		# An army cannot be drawn up in a river: the ground a deployment zone covers is made
+		# passable before anything else looks at it, because the alternative is a battle that opens
+		# with men standing in water. This is the one place terrain is bent for the game rather than
+		# generated for it, and it is stated rather than hidden.
+		terrain.clear_for_deployment(BattleSetup.deployment_zones(source))
+		if source.get_bool("terrain.props", true):
+			# Props are grown here rather than in generation because they need to know where the
+			# armies are going to stand, and that is a battle's business rather than the ground's.
+			terrain.build_props(source, null, BattleSetup.deployment_zones(source))
 	return terrain
 
 
 func set_terrain(p_terrain: BattlefieldTerrain) -> void:
 	terrain = p_terrain
+	_forget_terrain_summaries()
+
+
+## ---------- terrain, as a body of men sees it -----------------------------
+
+## Whether a body's pace comes from the ground under its whole footprint rather than from the cell
+## under its anchor. On by default; [code]battle.terrain_pace_bounds = false[/code] restores the
+## single-cell read, which is how the two are compared in one build. See D-115.
+var terrain_pace_by_bounds: bool = true
+var _terrain_summaries: Dictionary = {}
+var _terrain_summary_tick: int = -1
+
+
+func _forget_terrain_summaries() -> void:
+	_terrain_summaries.clear()
+	_terrain_summary_tick = -1
+
+
+## What the ground under a body of men is like, in one object: how steep, how passable, how much
+## cover, and which way it climbs. Built once per body per tick and cached, because a formation's
+## ground does not change while its soldiers are dressing to their slots.
+##
+## This is the whole of the terrain's answer to the tactical layer, and it is deliberately a summary
+## rather than a query per soldier: a body covering twenty cells would otherwise ask twenty questions
+## per tick, in the same loop that is already the most expensive one in the battle.
+func formation_terrain(formation: BattleFormation) -> TerrainSummary:
+	if formation == null or terrain == null:
+		return TerrainSummary.new()
+	if _terrain_summary_tick != tick_index:
+		_terrain_summaries.clear()
+		_terrain_summary_tick = tick_index
+	var key := formation.id
+	var cached: Variant = _terrain_summaries.get(key, null)
+	if cached != null:
+		return cached as TerrainSummary
+	var summary := TerrainSummary.grade_formation(terrain, formation)
+	_terrain_summaries[key] = summary
+	return summary
+
+
+## The ground under a rectangle, for callers that are not a formation - an AI weighing a flank, or a
+## tool. Not cached: the caller owns the rectangle and knows when it has moved.
+func terrain_summary_of(rect: Rect2) -> TerrainSummary:
+	return TerrainSummary.grade(terrain, rect)
 
 
 ## ---------- formations ---------------------------------------------------
@@ -1624,7 +1676,15 @@ func _formation_speed(formation: BattleFormation) -> float:
 	if config != null:
 		factor = maxf(0.05, config.get_float("formation.move_speed_factor", 0.9))
 	if terrain != null:
-		factor *= terrain.move_multiplier_at(formation.anchor)
+		# The ground under the body's own footprint, not the single cell under its anchor. A body
+		# half in a wood and half on open ground marches at the pace of the whole body - which is the
+		# same "slowest soldier" rule the line above already uses, applied to the ground rather than
+		# to the men. See D-115.
+		if terrain_pace_by_bounds:
+			var summary := formation_terrain(formation)
+			factor *= summary.mean_movement if summary.cells > 0 else terrain.move_multiplier_at(formation.anchor)
+		else:
+			factor *= terrain.move_multiplier_at(formation.anchor)
 	return slowest * formation.move_factor * factor
 
 

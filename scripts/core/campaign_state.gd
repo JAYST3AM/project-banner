@@ -340,3 +340,13 @@ func set_config(p_config: GameConfig) -> void:
 	if clock != null:
 		clock.config = p_config
 		clock.apply_config()
+
+
+## Where the party was at the last simulation step, and how far through the current one the renderer is.
+##
+## The world advances in thirty whole steps a second; the screen draws three hundred and sixty times.
+## Drawn straight from world_position the party therefore jumps the same amount at the same interval -
+## the owner's report, exactly: "player still jumping equal timing". These two let the map draw the
+## party between steps instead of only on them.
+var previous_world_position := Vector2.ZERO
+var render_alpha := 1.0

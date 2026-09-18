@@ -201,10 +201,14 @@ func _place(
 	if index < 0:
 		_count_refusal("outside the field")
 		return
-	for zone in clear_zones:
-		if zone.has_point(point):
-			_count_refusal("in a keep-clear zone")
-			return
+	# Only things that *obstruct* keep clear of where an army is drawn up. A bush or a stand of
+	# reeds underfoot is battlefield furniture; a boulder wall across the deployment is a battle that
+	# cannot be fought. The zone is the deployment's own numbers, so the two cannot drift apart.
+	if blocks:
+		for zone in clear_zones:
+			if zone.has_point(point):
+				_count_refusal("obstructing, in a keep-clear zone")
+				return
 	var type_id := field.type_id_of_cell(index)
 	# How much of this cell belongs to the country the prop grew in. On a blended field the two
 	# countries' props do not overlap in the middle of a wood that is only half theirs - which is
