@@ -97,8 +97,23 @@ void fragment() {
 	// Water and shore, from the height that was always there. The edges are soft over a few thousandths
 	// of height, which is what makes a bank rather than a cut-out; the water's own surface breaks up
 	// with the same per-repeat nudge the ground uses, so a lake does not read as one stretched sheet.
-	float water_edge = smoothstep(water_level - 0.010, water_level + 0.010, field.a);
-	float shore_edge = smoothstep(sand_level - 0.012, sand_level + 0.012, field.a);
+	// The tile this fragment sits in, and the field read at its four corners. A tile counts as water only
+	// when every corner is low water, so the sea's edge follows the land's own cells - the shape of the
+	// land - instead of a smooth curve smeared across it.
+	//
+	// This is the *soft* half of dual-grid autotiling: the same idea (corners decide, not centres) with
+	// one interpolation, no corner art and no cost. The crisp half needs a sixteen-piece shore sheet,
+	// which the shader can then pick exactly the way it picks its four ground variants today.
+	vec2 tile_span = vec2(tile_units, tile_units) / max(vec2(1.0), map_span);
+	vec2 tile_base = floor(UV / tile_span) * tile_span;
+	float h00 = texture(field_map, tile_base).a;
+	float h10 = texture(field_map, tile_base + vec2(tile_span.x, 0.0)).a;
+	float h01 = texture(field_map, tile_base + vec2(0.0, tile_span.y)).a;
+	float h11 = texture(field_map, tile_base + vec2(tile_span.x, tile_span.y)).a;
+	float h_corners = max(max(h00, h10), max(h01, h11));
+
+	float water_edge = smoothstep(water_level - 0.010, water_level + 0.010, h_corners);
+	float shore_edge = smoothstep(sand_level - 0.012, sand_level + 0.012, min(field.a, h_corners));
 	vec3 water = texture(ground_water, nudged * 0.5).rgb;
 	vec3 shore = texture(ground_sand, nudged * 0.7).rgb;
 	vec3 land = mix(shore, ground, shore_edge);

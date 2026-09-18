@@ -89,3 +89,15 @@ first showing on the real map, and all are meant to be turned.
   ground off settles it.
 - Terrain affecting the fight, beyond movement: line of sight, formation breaking, archers on a
   ridge. The hook exists; nothing reads it.
+
+## A tileset worth using, when the time comes
+
+"Updated grassland tileset (stylized)" on OpenGameArt carries exactly the kinds this map has - grass,
+dirt, sand and water - and its licence is **CC0**: public domain, commercial use, no attribution
+required. Verified on the page, not assumed.
+
+It is worth having because dual-grid autotiling is the correct way to draw a pixel shoreline, and the
+only thing stopping us is corner art. Sixteen corner pieces per material, drawn once, read by the
+shader exactly the way it already reads its four ground variants - zero per-frame cost, no TileMap,
+no chunk management. The owner was right that the tiles can be large: at our ground scale a dual-grid
+tile is 256 to 512 world units, so a screen is a handful of them, not a field of thousands.
