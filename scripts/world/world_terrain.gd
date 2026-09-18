@@ -19,10 +19,6 @@ extends Sprite2D
 ## still read the settlement and travel data they always did, and this node cannot change one of
 ## them.
 
-## The field's resolution. Not the screen's: this is how finely the biomes can change, one cell per
-## sixteen-odd world units. A test knob, like the two below it.
-const FIELD_COLS := 160
-const FIELD_ROWS := 112
 ## How wide a border is, in field cells: the two the owner wanted to test are these two numbers.
 ## 0 is a hard line; 6 was the width that suited the painted grounds. With the tiles the ground
 ## changes character in 64-pixel steps, and a band one tile wide read as a tile edge rather than a
@@ -34,9 +30,6 @@ const BLEND_WIDTH_CELLS := 10.0
 ## always takes the remainder, so the ground reads as one country with a dry district in it. This is
 ## the first number to turn if the looks ever feel too far apart again.
 const LOOK_STRENGTH := 0.75
-## How far the border wanders from where the noise put it. A straight blend still reads as a
-## straight line, just a soft one; this bends it.
-const BORDER_WIGGLE := 0.22
 ## Texture repeats. Smaller sees the art's detail closer up.
 ## One repeat of a ground image per this many world units. Smaller means more tiles and the art's
 ## detail closer up, which is what the owner asked for - and it only works with mipmaps under the
@@ -49,8 +42,6 @@ const BORDER_WIGGLE := 0.22
 ## finer art set rather than an even smaller repeat.
 const TILE_UNITS := 64.0
 
-const HEIGHT_OCTAVES := 3
-const BIOME_OCTAVES := 4
 const CATALOGUE := "res://data/terrain/biomes.json"
 
 var seed_value: int = 0
@@ -63,7 +54,7 @@ var generated_ms: float = 0.0
 func setup(p_seed: int, land: Rect2, _config: GameConfig) -> void:
 	seed_value = p_seed
 	var started := Time.get_ticks_usec()
-	var field := _build_field()
+	var field := _build_field(land)
 	generated_ms = float(Time.get_ticks_usec() - started) / 1000.0
 	centered = false
 	position = land.position
@@ -72,8 +63,8 @@ func setup(p_seed: int, land: Rect2, _config: GameConfig) -> void:
 	texture = _white_pixel()
 	scale = land.size
 	_build_material(field, land)
-	print("world terrain: 16 grounds, field %dx%d in %.0f ms | blend %.0f cells, look %.2f, wiggle %.2f | seed %d" % [
-		FIELD_COLS, FIELD_ROWS, generated_ms, BLEND_WIDTH_CELLS, LOOK_STRENGTH, BORDER_WIGGLE, seed_value])
+	print("world terrain: 16 grounds, field %dx%d cells of %d units in %.0f ms | blend %.0f cells, look %.2f | seed %d" % [
+		field.get_width(), field.get_height(), int(WorldChunks.CELL_SIZE), generated_ms, BLEND_WIDTH_CELLS, LOOK_STRENGTH, seed_value])
 
 
 static func _white_pixel() -> ImageTexture:
@@ -126,19 +117,26 @@ func _looks() -> Array:
 ## says how much character the land has at all - where it is low, the plain Standard look shows
 ## through. Every value is softened over BLEND_WIDTH_CELLS before it becomes a weight, and that
 ## band is what the looks mesh across.
-func _build_field() -> Image:
-	var image := Image.create_empty(FIELD_COLS, FIELD_ROWS, false, Image.FORMAT_RGBA8)
-	var half := maxf(0.0001, BLEND_WIDTH_CELLS / float(FIELD_COLS) * 3.0)
-	for row in FIELD_ROWS:
-		for col in FIELD_COLS:
-			var x := float(col) / float(FIELD_COLS)
-			var y := float(row) / float(FIELD_ROWS)
-			# The borders wander: each field is sampled from a point nudged sideways by a slower
-			# noise, which is what turns a soft straight edge into a coast.
-			var wander := (_fbm(x * 5.4, y * 5.4, 11, 2) - 0.5) * BORDER_WIGGLE
-			var moisture := smoothstep(0.5 - half, 0.5 + half, _fbm(x * 4.5 + wander, y * 4.5, 1, BIOME_OCTAVES))
-			var wear := smoothstep(0.5 - half, 0.5 + half, _fbm(x * 6.5 + wander, y * 6.5, 17, 3))
-			var region := smoothstep(0.42 - half, 0.58 + half, _fbm(x * 2.0, y * 2.0, 29, 2))
+## R = Lush, G = Dry, B = Worn, A = height, over the rectangle the map covers.
+##
+## Sampled from [WorldChunks] - the same data the settlements are proposed from and the simulation
+## will read. This used to be a private copy of the field: the map's own noise, with its own
+## frequencies and its own idea of where the hills were, which is exactly the arrangement in which a
+## place can look like one thing and behave like another. One source of truth, at the world's own cell
+## size.
+func _build_field(land: Rect2) -> Image:
+	var cols := int(ceil(land.size.x / WorldChunks.CELL_SIZE)) + 1
+	var rows := int(ceil(land.size.y / WorldChunks.CELL_SIZE)) + 1
+	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
+	var world := WorldChunks.build(seed_value)
+	var half := maxf(0.0001, BLEND_WIDTH_CELLS / float(maxi(cols, rows)) * 3.0)
+	for row in rows:
+		for col in cols:
+			var point := land.position + Vector2(float(col), float(row)) * WorldChunks.CELL_SIZE
+			var here := world.sample(point)
+			var moisture := smoothstep(0.5 - half, 0.5 + half, float(here["moisture"]))
+			var wear := smoothstep(0.5 - half, 0.5 + half, float(here["wear"]))
+			var region := smoothstep(0.42 - half, 0.58 + half, float(here["region"]))
 			var worn := wear * 0.85
 			var plain := 1.0 - worn
 			var lush := plain * moisture * region * LOOK_STRENGTH
@@ -152,49 +150,8 @@ func _build_field() -> Image:
 				lush *= overflow
 				dry *= overflow
 				worn *= overflow
-			var height := _fbm(x * 1.7, y * 1.7, 23, HEIGHT_OCTAVES)
-			image.set_pixel(col, row, Color(lush, dry, worn, height))
+			image.set_pixel(col, row, Color(lush, dry, worn, float(here["height"])))
 	return image
 
 
-## Fractal value noise: smoothstep-interpolated lattice values, summed over octaves, all of it
-## derived from where the sample is and the campaign's seed.
-func _fbm(x: float, y: float, salt: int, octaves: int) -> float:
-	var total := 0.0
-	var amplitude := 1.0
-	var weight_total := 0.0
-	var frequency := 1.0
-	for octave in octaves:
-		total += _value_noise(x * frequency, y * frequency, salt + octave) * amplitude
-		weight_total += amplitude
-		amplitude *= 0.5
-		frequency *= 2.0
-	return total / maxf(0.0001, weight_total)
 
-
-func _value_noise(x: float, y: float, salt: int) -> float:
-	var x0 := int(floorf(x))
-	var y0 := int(floorf(y))
-	var fx := x - floorf(x)
-	var fy := y - floorf(y)
-	# Smoothstep, so the lattice does not show as diamonds.
-	var sx := fx * fx * (3.0 - 2.0 * fx)
-	var sy := fy * fy * (3.0 - 2.0 * fy)
-	var a := _hash01(x0, y0, salt)
-	var b := _hash01(x0 + 1, y0, salt)
-	var c := _hash01(x0, y0 + 1, salt)
-	var d := _hash01(x0 + 1, y0 + 1, salt)
-	return lerpf(lerpf(a, b, sx), lerpf(c, d, sx), sy)
-
-
-## A number in [0, 1) from three integers, the same on every machine and in any order.
-func _hash01(x: int, y: int, salt: int) -> float:
-	var h := (x * 374761393 + y * 668265263 + salt * 2246822519 + seed_value * 2654435761) % 2147483647
-	if h < 0:
-		h += 2147483647
-	h = (h ^ (h >> 13)) * 1274126177
-	h = h % 2147483647
-	if h < 0:
-		h += 2147483647
-	h = h ^ (h >> 16)
-	return float(h % 16777216) / 16777216.0
