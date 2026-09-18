@@ -82,6 +82,17 @@ func is_ready() -> bool:
 	return _ready
 
 
+## The highest cost on the grid, for scaling a colour ramp. Water is near-impassable and would flatten
+## everything else, so the top two per cent are ignored when finding it.
+func dearest() -> float:
+	if not _ready:
+		return 1.0
+	var sorted := Array(_cost)
+	sorted.sort()
+	var index := maxi(0, int(float(sorted.size()) * 0.98) - 1)
+	return maxf(0.0001, float(sorted[index]))
+
+
 func cell_at(position: Vector2) -> Vector2i:
 	return Vector2i(int(floorf(position.x / CELL)), int(floorf(position.y / CELL)))
 

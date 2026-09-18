@@ -101,6 +101,7 @@ func _ready() -> void:
 	_costs = TravelCosts.new()
 	_costs.build(_state.campaign_seed, _config, _state.roads, _state.settlements)
 	_travel.costs = _costs
+	_view.costs = _costs
 	_view.bind(_state, _config, _travel)
 	# The ground goes in before the map view and behind it: the view draws roads, settlements and
 	# parties on top of terrain it no longer has to paint itself.
@@ -242,6 +243,11 @@ func _process(delta: float) -> void:
 				_overworld.step(game_hours)
 	# How far the renderer is through the step it is waiting on, for the same reason.
 	_state.render_alpha = clampf(_accumulator / SIM_STEP, 0.0, 1.0)
+
+	# The cost grid is drawn while debug mode is open, so what the pathfinder prices and what the
+	# owner can see are the same thing on the same screen.
+	if _view != null and _debug != null:
+		_view.show_costs = _debug.visible
 
 	_check_for_encounter()
 

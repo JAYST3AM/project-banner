@@ -952,6 +952,45 @@ func sample_cell_weights(point: Vector2, values: PackedFloat32Array, stride: int
 	return lerpf(top, bottom, ty)
 
 
+## A whole record's four values at a point, blended across cell boundaries in one walk.
+##
+## The bake reads a record at every pixel of a map, and asking [method sample_cell_weights] for each of
+## the four slots in turn walks the same four neighbours four times over - which on a map of a quarter
+## of a million pixels is the difference between a bake measured in tenths of a second and one measured
+## in seconds. Same answer, a quarter of the walking, no vector allocated per pixel.
+##
+## The values come back as a [Vector4] rather than written into an array the caller owns, because a
+## packed array is a value type: filling one inside a function fills a copy the caller never sees.
+func sample_cell_record(point: Vector2, values: PackedFloat32Array, stride: int) -> Vector4:
+	if values.is_empty() or cols <= 0 or rows <= 0:
+		return Vector4.ZERO
+	var cx := point.x / cell_size - 0.5
+	var cy := point.y / cell_size - 0.5
+	var x0 := int(floorf(cx))
+	var y0 := int(floorf(cy))
+	var tx := clampf(cx - float(x0), 0.0, 1.0)
+	var ty := clampf(cy - float(y0), 0.0, 1.0)
+	var max_col := maxi(0, cols - 1)
+	var max_row := maxi(0, rows - 1)
+	var row0 := clampi(y0, 0, max_row) * cols
+	var row1 := clampi(y0 + 1, 0, max_row) * cols
+	var base00 := (row0 + clampi(x0, 0, max_col)) * stride
+	var base10 := (row0 + clampi(x0 + 1, 0, max_col)) * stride
+	var base01 := (row1 + clampi(x0, 0, max_col)) * stride
+	var base11 := (row1 + clampi(x0 + 1, 0, max_col)) * stride
+	var top := Vector4(
+		lerpf(values[base00], values[base10], tx),
+		lerpf(values[base00 + mini(1, stride - 1)], values[base10 + mini(1, stride - 1)], tx),
+		lerpf(values[base00 + mini(2, stride - 1)], values[base10 + mini(2, stride - 1)], tx),
+		lerpf(values[base00 + mini(3, stride - 1)], values[base10 + mini(3, stride - 1)], tx))
+	var bottom := Vector4(
+		lerpf(values[base01], values[base11], tx),
+		lerpf(values[base01 + mini(1, stride - 1)], values[base11 + mini(1, stride - 1)], tx),
+		lerpf(values[base01 + mini(2, stride - 1)], values[base11 + mini(2, stride - 1)], tx),
+		lerpf(values[base01 + mini(3, stride - 1)], values[base11 + mini(3, stride - 1)], tx))
+	return top.lerp(bottom, ty)
+
+
 func _weight_at(col: int, row: int, values: PackedFloat32Array, stride: int, slot: int) -> float:
 	var c := clampi(col, 0, maxi(0, cols - 1))
 	var r := clampi(row, 0, maxi(0, rows - 1))
@@ -968,40 +1007,42 @@ func sample_cell_channel(point: Vector2, values: PackedFloat32Array) -> float:
 func build_ground_map(pixels_per_unit: float = 1.0, smooth: bool = true) -> Image:
 	var width := maxi(2, int(roundf(size.x * maxf(0.02, pixels_per_unit))))
 	var height := maxi(2, int(roundf(size.y * maxf(0.02, pixels_per_unit))))
-	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
 	var lowest := min_height()
 	var span := maxf(0.001, max_height() - lowest)
+	var data := PackedByteArray()
+	data.resize(width * height * 4)
+	var at := 0
 	for y in height:
 		var world_y := (float(y) + 0.5) / float(height) * size.y
 		for x in width:
-			var world_x := (float(x) + 0.5) / float(width) * size.x
-			var point := Vector2(world_x, world_y)
-			image.set_pixel(x, y, Color(
-				sample_cell_weights(point, _variant_w, 4, 1),
-				sample_cell_weights(point, _variant_w, 4, 2),
-				sample_cell_weights(point, _variant_w, 4, 3),
-				(sample_cell_channel(point, _heights) - lowest) / span
-			))
-	return _smooth(image, smooth)
+			var point := Vector2((float(x) + 0.5) / float(width) * size.x, world_y)
+			var record := sample_cell_record(point, _variant_w, 4)
+			data[at] = _byte(record.y)
+			data[at + 1] = _byte(record.z)
+			data[at + 2] = _byte(record.w)
+			data[at + 3] = _byte((sample_cell_channel(point, _heights) - lowest) / span)
+			at += 4
+	return _smooth(Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, data), smooth)
 
 
 ## R,G,B,A = the coverage of the biome's first four overlays.
 func build_overlay_map(pixels_per_unit: float = 1.0, smooth: bool = true) -> Image:
 	var width := maxi(2, int(roundf(size.x * maxf(0.02, pixels_per_unit))))
 	var height := maxi(2, int(roundf(size.y * maxf(0.02, pixels_per_unit))))
-	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
+	var data := PackedByteArray()
+	data.resize(width * height * 4)
+	var at := 0
 	for y in height:
 		var world_y := (float(y) + 0.5) / float(height) * size.y
 		for x in width:
-			var world_x := (float(x) + 0.5) / float(width) * size.x
-			var point := Vector2(world_x, world_y)
-			image.set_pixel(x, y, Color(
-				sample_cell_weights(point, _overlay_w, 4, 0),
-				sample_cell_weights(point, _overlay_w, 4, 1),
-				sample_cell_weights(point, _overlay_w, 4, 2),
-				sample_cell_weights(point, _overlay_w, 4, 3)
-			))
-	return _smooth(image, smooth)
+			var point := Vector2((float(x) + 0.5) / float(width) * size.x, world_y)
+			var record := sample_cell_record(point, _overlay_w, 4)
+			data[at] = _byte(record.x)
+			data[at + 1] = _byte(record.y)
+			data[at + 2] = _byte(record.z)
+			data[at + 3] = _byte(record.w)
+			at += 4
+	return _smooth(Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, data), smooth)
 
 
 ## Where the ground is not plain ground: R = water, G = rock (a cliff face), B = mud.
@@ -1012,7 +1053,6 @@ func build_overlay_map(pixels_per_unit: float = 1.0, smooth: bool = true) -> Ima
 func build_type_map(pixels_per_unit: float = 1.0, smooth: bool = true) -> Image:
 	var width := maxi(2, int(roundf(size.x * maxf(0.02, pixels_per_unit))))
 	var height := maxi(2, int(roundf(size.y * maxf(0.02, pixels_per_unit))))
-	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
 	# One channel per look, built once: the interpolation reads them like any other channel.
 	var water := PackedFloat32Array()
 	var rock := PackedFloat32Array()
@@ -1025,18 +1065,25 @@ func build_type_map(pixels_per_unit: float = 1.0, smooth: bool = true) -> Image:
 		water[index] = 1.0 if type_id == water_type_id else 0.0
 		rock[index] = 1.0 if type_id == cliff_type_id else 0.0
 		mud[index] = 1.0 if type_id == mud_type_id else 0.0
+	var data := PackedByteArray()
+	data.resize(width * height * 4)
+	var at := 0
 	for y in height:
 		var world_y := (float(y) + 0.5) / float(height) * size.y
 		for x in width:
-			var world_x := (float(x) + 0.5) / float(width) * size.x
-			var point := Vector2(world_x, world_y)
-			image.set_pixel(x, y, Color(
-				sample_cell_channel(point, water),
-				sample_cell_channel(point, rock),
-				sample_cell_channel(point, mud),
-				0.0
-			))
-	return _smooth(image, smooth)
+			var point := Vector2((float(x) + 0.5) / float(width) * size.x, world_y)
+			data[at] = _byte(sample_cell_channel(point, water))
+			data[at + 1] = _byte(sample_cell_channel(point, rock))
+			data[at + 2] = _byte(sample_cell_channel(point, mud))
+			data[at + 3] = 255
+			at += 4
+	return _smooth(Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, data), smooth)
+
+
+## A 0..1 value as a byte, for the baked maps. Clamped rather than trusted: a weight can be a hair
+## over one after interpolation, and a byte that wraps would turn a bright pixel into a black one.
+func _byte(value: float) -> int:
+	return clampi(int(roundf(value * 255.0)), 0, 255)
 
 
 ## Feather a baked map, so a value that steps per cell reads as a transition rather than as a grid.

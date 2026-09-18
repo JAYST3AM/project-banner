@@ -130,6 +130,8 @@ func _draw() -> void:
 	if state == null:
 		return
 
+	if show_costs:
+		_draw_cost_grid()
 	_draw_roads()
 	_draw_travel_line()
 	_draw_settlements()
@@ -152,6 +154,38 @@ func _draw_grid(land: Rect2) -> void:
 
 ## Roads are drawn from RoadPath.between(), shared with the party's walking so the two cannot disagree
 ## about where a road goes - see scripts/world/road_path.gd.
+## Shown when the owner has debug mode open; set by the map from the debug panel.
+var show_costs := false
+## The campaign priced ground, set by the map once it exists.
+var costs: TravelCosts = null
+
+
+## The travel cost grid, drawn when debug mode is open: "when I hit debug mode it should show the
+## point system in the grid." Cells are tinted by what crossing them costs - bright where ground is
+## cheap, dim where it is dear - so a route's reasoning is visible rather than inferred. Only the
+## cells in view are drawn, by the same rectangle everything else culls against.
+func _draw_cost_grid() -> void:
+	if costs == null or not costs.is_ready():
+		return
+	var visible := _visible_world_rect()
+	var cell := TravelCosts.CELL
+	var first := Vector2i(int(floorf(visible.position.x / cell)), int(floorf(visible.position.y / cell)))
+	var last := Vector2i(int(ceilf(visible.end.x / cell)), int(ceilf(visible.end.y / cell)))
+	var ceiling := costs.dearest()
+	for row in range(maxi(0, first.y), mini(TravelCosts.ROWS, last.y)):
+		for column in range(maxi(0, first.x), mini(TravelCosts.COLUMNS, last.x)):
+			var price := costs.cost_of(Vector2i(column, row))
+			if price == INF:
+				continue
+			var warmth := clampf(1.0 - price / maxf(0.0001, ceiling * 0.65), 0.0, 1.0)
+			var origin := Vector2(column, row) * cell
+			draw_rect(Rect2(origin, Vector2(cell, cell)), Color(0.95, 0.55, 0.15, 0.10 + 0.20 * warmth), true)
+			if warmth > 0.7:
+				draw_rect(Rect2(origin + Vector2(1.0, 1.0), Vector2(cell - 2.0, cell - 2.0)), Color(0.95, 0.62, 0.20, 0.10 + 0.22 * warmth), true)
+	if travel != null and not travel.route.is_empty():
+		draw_polyline(travel.route, Color(0.65, 0.95, 0.55, 0.9), 2.0, true)
+
+
 func _draw_roads() -> void:
 	var visible := _visible_world_rect()
 	for road in state.roads:

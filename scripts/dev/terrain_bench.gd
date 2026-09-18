@@ -56,7 +56,7 @@ func _ready() -> void:
 	var config := GameManager.config()
 	if not config.is_valid():
 		push_error("terrain bench: the game config did not load")
-		quit(1)
+		get_tree().quit(1)
 		return
 	_line("terrain benchmark - biome %s, seed %d, generation version %d" % [
 		_biome, SEED, config.get_int("terrain.generation_version", 1)])
@@ -78,16 +78,14 @@ func _ready() -> void:
 	_line("-".repeat(50))
 	var largest: BattlefieldTerrain = fields[-1]
 	var points := _sample_points(largest, SAMPLES)
-	_measure_query(largest, points, "height_at", HEIGHT_CALLS, func(point: Vector2) -> float:
-		return largest.height_at(point))
+	# The overhead of the measurement harness itself, so a reader can take it off the numbers below:
+	# a GDScript call through a Callable is not free and the numbers above it are not pure query cost.
+	_measure_empty(points)
+	_measure_hot(largest, points)
 	_measure_query(largest, points, "slope_at", HEIGHT_CALLS, func(point: Vector2) -> float:
 		return largest.slope_at(point))
-	_measure_query(largest, points, "move_multiplier_at", MOVE_CALLS, func(point: Vector2) -> float:
-		return largest.move_multiplier_at(point))
 	_measure_query(largest, points, "movement_cost_at", MOVE_CALLS, func(point: Vector2) -> float:
 		return largest.movement_cost_at(point))
-	_measure_query(largest, points, "is_traversable", TRAVERSABLE_CALLS, func(point: Vector2) -> float:
-		return 1.0 if largest.is_traversable(point) else 0.0)
 	_measure_query(largest, points, "obstacle_bits_at", OBSTACLE_CALLS, func(point: Vector2) -> float:
 		return float(largest.obstacle_bits_at(point)))
 	_measure_query(largest, points, "cover_at", COVER_CALLS, func(point: Vector2) -> float:
@@ -97,14 +95,19 @@ func _ready() -> void:
 	_measure_batch(largest, points)
 	_measure_sight_lines(largest, points)
 	_measure_summaries(largest)
+	_line("")
+	_line("the three hot paths, called directly rather than through a lambda - this is the number a")
+	_line("per-soldier loop actually pays:")
+	_measure_hot_line(largest, points, "height_at (direct)", HEIGHT_CALLS, 0)
+	_measure_hot_line(largest, points, "move_multiplier_at (direct)", MOVE_CALLS, 1)
+	_measure_hot_line(largest, points, "is_traversable (direct)", TRAVERSABLE_CALLS, 2)
 
 	_line("")
 	_line("field detail (largest)")
 	for entry in largest.channel_census():
 		var record := entry as Dictionary
 		_line("  %-18s %10d values" % [str(record["name"]), int(record["values"])])
-	_line("  %-18s %10d props on %d field%s" % ["props", largest.props.count(),
-		largest.biome_id, "" if largest.props == null else ""])
+	_line("  %-18s %10d grown in %s" % ["props", largest.props.count(), largest.biome_id])
 	_line("  %-18s %10.1f MB" % ["channels", float(largest.memory_bytes()) / 1048576.0])
 
 	if _out_path != "":
@@ -113,7 +116,7 @@ func _ready() -> void:
 			file.store_string("\n".join(_report) + "\n")
 			file.close()
 			print("terrain bench report written: %s" % _out_path)
-	quit(0)
+	get_tree().quit(0)
 
 
 ## ---------- measurement --------------------------------------------------
@@ -164,6 +167,7 @@ func _measure_query(field: BattlefieldTerrain, points: PackedVector2Array, label
 	_line("%-24s %12.1f %12.0f   (sum %.1f)" % [label, best, 1e9 / maxf(1.0, best), check])
 
 
+## A batch of a thousand positions in one call, measured per position-answer.
 func _measure_batch(field: BattlefieldTerrain, points: PackedVector2Array) -> void:
 	var check := 0.0
 	var best := INF
@@ -192,6 +196,63 @@ func _measure_sight_lines(field: BattlefieldTerrain, points: PackedVector2Array)
 		var usec := float(Time.get_ticks_usec() - start)
 		best = minf(best, usec * 1000.0 / float(SIGHT_LINES))
 	_line("%-24s %12.1f %12.0f   (blocked %d)" % ["blocks_line_of_sight", best, 1e9 / maxf(1.0, best), int(check)])
+
+
+## What a call through a lambda costs when it does nothing at all: the floor under every other number
+## in the table above, and the reason the hot paths are measured again, directly, further down.
+func _measure_empty(points: PackedVector2Array) -> void:
+	var check := 0.0
+	var best := INF
+	var nothing := func(point: Vector2) -> float:
+		return point.x
+	for run in 3:
+		var start := Time.get_ticks_usec()
+		var index := 0
+		for i in HEIGHT_CALLS:
+			check += float(nothing.call(points[index]))
+			index += 1
+			if index >= points.size():
+				index = 0
+		best = minf(best, float(Time.get_ticks_usec() - start) * 1000.0 / float(HEIGHT_CALLS))
+	_line("%-24s %12.1f %12.0f   (lambda overhead, sum %.1f)" % ["(empty lambda)", best, 1e9 / maxf(1.0, best), check])
+
+
+## The hot paths through the harness, so the table above has the same shape as the direct table below.
+func _measure_hot(field: BattlefieldTerrain, points: PackedVector2Array) -> void:
+	_measure_query(field, points, "height_at", HEIGHT_CALLS, func(point: Vector2) -> float:
+		return field.height_at(point))
+	_measure_query(field, points, "move_multiplier_at", MOVE_CALLS, func(point: Vector2) -> float:
+		return field.move_multiplier_at(point))
+	_measure_query(field, points, "is_traversable", TRAVERSABLE_CALLS, func(point: Vector2) -> float:
+		return 1.0 if field.is_traversable(point) else 0.0)
+
+
+## One hot path, called directly. The three loops are written out rather than passed in because the
+## point of this measurement is the call itself, and a function that takes the call as an argument
+## measures the argument instead.
+func _measure_hot_line(field: BattlefieldTerrain, points: PackedVector2Array, label: String,
+		calls: int, channel: int) -> void:
+	var check := 0.0
+	var best := INF
+	var index := 0
+	for run in 3:
+		var start := Time.get_ticks_usec()
+		match channel:
+			0:
+				for i in calls:
+					check += field.height_at(points[index])
+					index = 0 if index + 1 >= points.size() else index + 1
+			1:
+				for i in calls:
+					check += field.move_multiplier_at(points[index])
+					index = 0 if index + 1 >= points.size() else index + 1
+			_:
+				for i in calls:
+					if field.is_traversable(points[index]):
+						check += 1.0
+					index = 0 if index + 1 >= points.size() else index + 1
+		best = minf(best, float(Time.get_ticks_usec() - start) * 1000.0 / float(calls))
+	_line("%-24s %12.1f %12.0f   (sum %.1f)" % [label, best, 1e9 / maxf(1.0, best), check])
 
 
 func _measure_summaries(field: BattlefieldTerrain) -> void:
