@@ -84,6 +84,10 @@ func _build_material(field: Image, land: Rect2) -> void:
 	material.shader = load("res://shaders/world/world_ground.gdshader")
 	material.set_shader_parameter("field_map", ImageTexture.create_from_image(field))
 	material.set_shader_parameter("tile_units", TILE_UNITS)
+	# The two grounds that were missing. Loaded the same way the looks are, so replacing them with the
+	# owner's own art later is a file swap rather than a change here.
+	material.set_shader_parameter("ground_water", load("res://assets/terrain/water/water.png"))
+	material.set_shader_parameter("ground_sand", load("res://assets/terrain/sand/sand.png"))
 	material.set_shader_parameter("map_origin", land.position)
 	material.set_shader_parameter("map_span", land.size)
 	material.set_shader_parameter("shade_strength", 0.32)
