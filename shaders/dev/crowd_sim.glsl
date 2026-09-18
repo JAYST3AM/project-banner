@@ -67,6 +67,10 @@ layout(set = 0, binding = 5, std430) restrict buffer Counters { uint c[]; } coun
 layout(set = 0, binding = 6, std430) restrict buffer Meta { vec4 m[]; } meta;
 // Hundredths of a hit point taken this tick, accumulated by atomics.
 layout(set = 0, binding = 7, std430) restrict buffer Damage { uint d[]; } damage;
+// x = attack, y = defence, z = the reach of his weapon, w = how many ticks between his blows.
+// Read from the game's own unit definitions rather than invented here, so a spearman in this scene
+// is the spearman the campaign fields: attack 7, defence 4, reach 2.4, a blow every 1.5 seconds.
+layout(set = 0, binding = 12, std430) restrict buffer Stats { vec4 s[]; } stats;
 // x = the body this soldier belongs to, y = his file, z = his rank.
 layout(set = 0, binding = 8, std430) restrict buffer Attrs { vec4 a[]; } attrs;
 // Two vec4 per body: (anchor.xy, forward.xy) and (files, ranks, spacing, engaged).
@@ -89,6 +93,23 @@ const uint DAMAGE_SCALE = 100u;
 // starts at zero. The clear pass covers the whole block: covering too few was a real bug once -
 // the tail was never reset and every "this tick" figure became a running total.
 const uint COUNTER_COUNT = 96u;
+
+// A one-off mix: the same man striking on the same tick rolls the same number on any machine, in
+// any order, which is the whole reason the strike model can live on the GPU and still be checked.
+uint pb_hash(uint x) {
+	x ^= x >> 16;
+	x *= 0x7feb352du;
+	x ^= x >> 15;
+	x *= 0x846ca68bu;
+	x ^= x >> 16;
+	return x;
+}
+
+// The top twenty-four bits as a number in [0, 1): enough resolution for a hit chance and a fifteen
+// per cent spread, and exact in a float.
+float pb_unit(uint h) {
+	return float(h & 0xFFFFFFu) / float(0x1000000u);
+}
 const uint BODY_GAP_BASE = 32u;
 const uint BODY_GAP_SLOTS = 60u;
 // The per-body blocks are written and read at the same base. They were not, once: the reader moved
@@ -116,6 +137,12 @@ void main() {
 	float walk = params.f[8];
 	float reach = params.f[9];
 	float blow = params.f[10];
+	// [22] chance to hit, [23] damage taken off per point of defence, [24] the battle clock in
+	// ticks a second, [25] 1 = the reference's strike model, 0 = the flat placeholder it replaced.
+	float hit_chance = params.f[22];
+	float defence_mitigation = params.f[23];
+	float tick_hz = max(1.0, params.f[24]);
+	bool real_strikes = params.f[25] > 0.5;
 	float max_push = params.f[11];
 	float min_enemy = params.f[12];
 	uint tick_now = uint(params.f[13]);
@@ -408,11 +435,43 @@ void main() {
 		} else if (chosen >= 0 && chosen != prior_valid) {
 			atomicAdd(counters.c[21], 1u);
 		}
-		if (chosen >= 0 && chosen_d2 <= reach * reach) {
+		// His own weapon decides what he can reach, not the scene's global one: an archer stands
+		// behind the line and strikes past it, a spearman reaches further than a knife.
+		float my_reach = real_strikes ? stats.s[gid].z : reach;
+		if (chosen >= 0 && chosen_d2 <= my_reach * my_reach) {
 			// Strike the acquired opponent - and only it. This is the behaviour change the
 			// slice exists for: the legacy path struck every neighbour inside reach.
-			atomicAdd(damage.d[uint(chosen)], uint(blow * float(DAMAGE_SCALE)));
-			atomicAdd(counters.c[2], 1u);
+			bool ready = true;
+			if (real_strikes) {
+				// A weapon has a rhythm. The tick a man may strike again is kept on him, and
+				// until it passes he can hold a fight without adding to it.
+				ready = float(tick_now) >= meta.m[gid].w;
+				if (ready) {
+					meta.m[gid].w = float(tick_now) + max(1.0, stats.s[gid].w);
+				}
+			}
+			if (ready) {
+				float damage_taken = blow;
+				bool landed = true;
+				if (real_strikes) {
+					// One roll per man per blow, from a hash of who and when: the same battle
+					// rolls the same numbers whatever order the threads ran in, which is what
+					// keeps the determinism gate passing with the model on the GPU.
+					uint h = pb_hash(uint(gid) * 0x9E3779B9u ^ uint(tick_now) * 0x85EBCA6Bu ^ 0x2545F491u);
+					landed = pb_unit(h) <= hit_chance;
+					if (landed) {
+						float raw = stats.s[gid].x * (0.85 + 0.3 * pb_unit(pb_hash(h)));
+						float reduction = min(0.7, stats.s[chosen].y * defence_mitigation);
+						damage_taken = max(1.0, floor(raw * (1.0 - reduction) + 0.5));
+					}
+				}
+				if (landed) {
+					atomicAdd(damage.d[uint(chosen)], uint(damage_taken * float(DAMAGE_SCALE)));
+					atomicAdd(counters.c[2], 1u);
+				} else {
+					atomicAdd(counters.c[23], 1u);
+				}
+			}
 			contact = true;
 		}
 		targets.t[gid] = ivec4(chosen, int(next_tick), 0, 0);

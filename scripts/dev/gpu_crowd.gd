@@ -105,7 +105,7 @@ const COUNTER_SLOTS := 96
 ## Where the per-body nearest-enemy distances start in the counter block. The shader's
 ## BODY_GAP_BASE is the same number; the two are read together or not at all.
 const BODY_GAP_BASE := 32
-const PARAM_SLOTS := 20
+const PARAM_SLOTS := 26
 const CNT_DROPPED := 0
 const CNT_PROBES := 1
 const CNT_BLOWS := 2
@@ -480,6 +480,7 @@ var buf_damage: RID
 var buf_corr: RID
 var buf_attrs: RID
 var buf_bodies: RID
+var buf_stats: RID
 ## The remembered opponent and its next awareness tick, one ivec4 a soldier. See the shader.
 var buf_targets: RID
 var uniform_set: RID
@@ -706,6 +707,10 @@ func _parse_args() -> void:
 			# When the screenshot is taken, in seconds. Six is right for a deployment; a battle
 			# that has to march into contact first wants longer.
 			shot_at = float(arg.substr(10))
+		elif arg.begins_with("--unit="):
+			unit_type = arg.substr(7)
+		elif arg == "--legacy-damage":
+			real_strikes = false
 		elif arg == "--trace":
 			trace_orders = true
 		elif arg == "--manual":
@@ -786,14 +791,25 @@ func _build() -> void:
 	meta.resize(agents * 4)
 	var attrs := PackedFloat32Array()
 	attrs.resize(agents * 4)
+	var battle_config := GameManager.config()
+	hit_chance = battle_config.get_float("battle.base_hit_chance", 0.75)
+	defence_mitigation = battle_config.get_float("battle.defence_mitigation", 0.05)
+	_load_unit_stats()
 	_deploy(state, meta, attrs)
 
 	buf_state = _storage(state.to_byte_array(), agents * 16)
 	buf_push = _storage(PackedByteArray(), agents * 16)
 	buf_cursor = _storage(PackedByteArray(), cells * 4)
 	buf_slots = _storage(PackedByteArray(), cells * SLOT_CAPACITY * 4)
-	buf_params = _storage(_params().to_byte_array(), PARAM_SLOTS * 4)
+	# The size of the block the shader is actually handed. It was a remembered constant once, and
+	# adding four parameters without adding four to it made every frame fail to build its pipeline:
+	# 13,635 errors, a thousand milliseconds a frame, and a tick rate nobody could explain.
+	var param_values := _params()
+	buf_params = _storage(param_values.to_byte_array(), param_values.size() * 4)
 	buf_counters = _storage(PackedByteArray(), COUNTER_SLOTS * 4)
+	# What each man carries into the fight, from the game's own unit definitions: attack, defence,
+	# the reach of his weapon, and how many ticks pass between his blows.
+	buf_stats = _storage(_stats.to_byte_array(), agents * 16)
 	buf_meta = _storage(meta.to_byte_array(), agents * 16)
 	buf_damage = _storage(PackedByteArray(), agents * 4)
 	# The separation correction being accumulated this round, in fixed-point integers: ivec4 a man.
@@ -826,6 +842,7 @@ func _build() -> void:
 	uniforms.append(_uniform(9, buf_bodies))
 	uniforms.append(_uniform(10, buf_corr))
 	uniforms.append(_uniform(11, buf_targets))
+	uniforms.append(_uniform(12, buf_stats))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
 
 	_build_ground()
@@ -953,7 +970,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 			+ heading * ((float(rank) - float(ranks - 1) * 0.5) * SEPARATION)
 		state[i * 4 + 0] = place.x + rng.randf_range(-JITTER, JITTER)
 		state[i * 4 + 1] = place.y + rng.randf_range(-JITTER, JITTER)
-		meta[i * 4 + 0] = HP_MAX
+		meta[i * 4 + 0] = hp_max
 		meta[i * 4 + 1] = float(side)
 		attrs[i * 4 + 0] = float(b)
 		attrs[i * 4 + 1] = float(file)
@@ -1962,7 +1979,7 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 				var lift := picture + Vector2(-BAR_WIDTH * 0.5, -DISC_RADIUS - BAR_LIFT)
 				_write_bar(bars, lift, Vector2(BAR_WIDTH, BAR_HEIGHT), Color(0.05, 0.06, 0.07, 0.85))
 				bars += 1
-				var ratio := clampf(meta[i * 4 + 0] / HP_MAX, 0.0, 1.0)
+				var ratio := clampf(meta[i * 4 + 0] / hp_max, 0.0, 1.0)
 				var fill := Color(0.45, 0.85, 0.45) if ratio > 0.35 else Color(0.9, 0.35, 0.3)
 				_write_bar(bars, lift + Vector2(BAR_WIDTH * (1.0 - ratio) * 0.5, 0.0),
 					Vector2(maxf(BAR_WIDTH * ratio, 0.05), BAR_HEIGHT), fill)
@@ -2205,7 +2222,10 @@ func _params() -> PackedFloat32Array:
 		DT, field.x, field.y, WALK, REACH, BLOW, MAX_PUSH, MIN_ENEMY_GAP,
 		float(_tick), float(maxi(1, target_cadence)), target_retention,
 		target_switch_advantage, 0.0 if target_legacy else 1.0, target_search_radius,
-		1.0 if target_immediate else 0.0])
+		1.0 if target_immediate else 0.0,
+		# [22..25] the strike model: the reference's own numbers, read from the config so the
+		# scene cannot drift from the game by a constant somebody typed twice.
+		hit_chance, defence_mitigation, tick_hz, 1.0 if real_strikes else 0.0])
 
 
 func _push_constant(mode: int) -> PackedByteArray:
@@ -2288,7 +2308,58 @@ var _shapes := {}
 ## Scripted orders waiting for their tick: what a test uses in place of a hand on the mouse.
 ## Whether to echo every scripted order with the state it found: a test wants it, a battle does not.
 var trace_orders := false
+## The reference's own combat constants, read from the game's config: the chance a blow lands, and
+## how much of a blow a point of defence takes off.
+var hit_chance := 0.75
+var defence_mitigation := 0.05
 var _script_queue: Array = []
+## The stats every man is given in this scene, read from the game's own unit definitions. One unit
+## type for now: both sides field the same soldier, which is enough to check the model against the
+## reference and not yet enough to check spearmen against archers.
+var _stats := PackedFloat32Array()
+var unit_type := "spearman"
+## What one man's full health is, taken from the game's own definition: ten points, so a spear is
+## two blows from a kill. The probe used to carry a hundred, which is why nothing ever died.
+var hp_max := HP_MAX
+## 1 = the reference's strike model (hit roll, damage spread, defence, weapon rhythm), 0 = the flat
+## placeholder it replaced. Kept as a switch so the old behaviour can be measured against the new.
+var real_strikes := true
+
+
+## The unit's numbers, as the campaign would hand them to a battle.
+func _load_unit_stats() -> void:
+	var attack := 7.0
+	var defence := 4.0
+	var reach := 2.4
+	var cooldown := 1.5
+	# The game's soldier carries ten hit points, which is what makes a fight two blows long
+	# rather than twenty. The probe carried a hundred and nobody died of anything.
+	var hit_points := 10.0
+	var path := "res://data/units/unit_types.json"
+	if FileAccess.file_exists(path):
+		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+		if typeof(parsed) == TYPE_DICTIONARY and (parsed as Dictionary).has("units"):
+			for entry in (parsed as Dictionary)["units"]:
+				if str(entry.get("id", "")) != unit_type:
+					continue
+				attack = float(entry.get("attack", attack))
+				defence = float(entry.get("defence", defence))
+				reach = float(entry.get("attack_range", reach))
+				cooldown = float(entry.get("attack_cooldown", cooldown))
+				hit_points = float(entry.get("hp", entry.get("max_hp", hit_points)) if entry.get("hp", entry.get("max_hp", null)) != null else hit_points)
+				break
+	hp_max = maxf(1.0, hit_points)
+	_stats.resize(agents * 4)
+	for i in agents:
+		_stats[i * 4 + 0] = attack
+		_stats[i * 4 + 1] = defence
+		_stats[i * 4 + 2] = reach
+		# The rhythm in ticks, because the shader's clock is the battle's own: a blow every one
+		# and a half seconds is ninety ticks at sixty a second, and the tick rate is the game's
+		# decision, not the weapon's.
+		_stats[i * 4 + 3] = maxf(1.0, cooldown * tick_hz)
+	print("gpu crowd: unit %s | attack %.0f defence %.0f reach %.1f | a blow every %.2f s (%.0f ticks) | %d hp" % [
+		unit_type, attack, defence, reach, cooldown, maxf(1.0, cooldown * tick_hz), int(hp_max)])
 ## Whether --agents was given by hand: the skirmish preset only picks a size when nobody else did.
 var _agents_given := false
 ## The battle clock, stopped by the player. The camera and the marks keep working while it is:
