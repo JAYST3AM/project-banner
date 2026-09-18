@@ -4,8 +4,8 @@ Source art for the campaign map's biomes and the props that stand on them. One f
 
 ```
 assets/terrain/
-  grass/    grass_ground.png           (the tileable ground)
-  forest/   forest_ground.png  pine_large.png  pine_small.png  bush.png
+  grass/    grass_ground_1.png .. grass_ground_4.png   (four variants of the tileable ground)
+  forest/   forest_ground_1.png .. forest_ground_4.png  pine_large.png  pine_small.png  bush.png
   rock/     rock_ground.png    boulder_large.png  boulder_small.png
   props/    shared props that belong to no single biome (a fence post, a cart)
 ```
@@ -18,6 +18,9 @@ so a blend at 30% forest grows 30% as many trees and none at all below the weigh
 
 Two rules that keep it honest:
 
+- **Four ground variants per biome**, named `<biome>_ground_1..4.png`. The generator picks one per
+  tile from a seeded hash of that tile's position, so a tile always shows the same variant and the
+  four together break up the repetition a single tile would give.
 - **Naming: `<thing>_<size>.png`, lowercase, no spaces.** Files are sorted by looking at them if the
   names do not say, but a name that says is worth a minute of whoever exports it.
 - **Licences.** Art that may not be redistributed goes in `assets/art_source/` (gitignored) and is

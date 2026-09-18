@@ -5,8 +5,8 @@
     "id": "stable key, used by the world generator and by battlefields",
     "name": "what a player would call it",
     "type": "the terrain_types.json id whose movement rule this biome follows",
-    "ground": "res:// path to the ground image, or \"\" when it is generated from the palette alone",
-    "ground_scale": "how many world units one repeat of the ground image covers",
+    "grounds": "one to four res:// paths: variants of the same ground, chosen per tile by a seeded hash of the tile so a tile always shows the same one and neighbours rarely repeat. Blending between biomes blends whichever variants the two tiles chose.",
+    "ground_scale": "how many world units one repeat of a ground image covers",
     "palette": ["two to four colours, darkest first: what the height shading darkens and lightens from when there is no ground image"],
     "height": {"base": "0..1 of the battlefield's height range", "roughness": "0 = flat, 1 = broken", "bias": "-1 hollows, +1 raises"},
     "props": [
