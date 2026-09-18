@@ -124,13 +124,15 @@ func _build_procedural() -> void:
 		DebugLogger.info("player party placed at %s" % largest.name, "WorldBuilder")
 
 
-## Which settlement record a site's kind becomes. The world distinguishes four kinds; the settlement
-## record only has town and village today, so forts and castles are walled towns until the settlement
-## side grows the two types - the world's judgement is kept in the description rather than thrown
-## away.
+## Which settlement record a site's kind becomes. Four kinds in, four kinds out: the record used to
+## flatten forts and castles into towns, which made the map unable to say what a place was.
 static func _settlement_type(kind: String) -> String:
 	match kind:
-		"town", "fort", "castle":
+		"fort":
+			return Settlement.TYPE_FORT
+		"castle":
+			return Settlement.TYPE_CASTLE
+		"town":
 			return Settlement.TYPE_TOWN
 		_:
 			return Settlement.TYPE_VILLAGE

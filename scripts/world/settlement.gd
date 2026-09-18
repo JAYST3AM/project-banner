@@ -10,6 +10,11 @@ extends RefCounted
 const TYPE_TOWN := "town"
 const TYPE_VILLAGE := "village"
 const TYPE_WILDERNESS := "wilderness"
+## The world distinguishes four kinds of settlement; these two are the ones that used to be flattened
+## into a town on the way in, which threw away the land's own judgement and left the map unable to
+## show a fort as a fort.
+const TYPE_FORT := "fort"
+const TYPE_CASTLE := "castle"
 
 var id: String = ""
 var name: String = ""

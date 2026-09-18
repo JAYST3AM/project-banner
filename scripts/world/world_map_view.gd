@@ -17,6 +17,10 @@ const COLOR_CASING := Color(0.02, 0.03, 0.04, 0.55)
 const COLOR_TOWN := Color("e8ce8c")
 const COLOR_VILLAGE := Color("b99a5e")
 const COLOR_WILDERNESS := Color("7f8a6a")
+## A fort is steel and a castle is gold: the shape already says which is which, and the colour says it
+## again to anyone who cannot tell a square from a turret at a glance.
+const COLOR_FORT := Color("9fb0c0")
+const COLOR_CASTLE := Color("e8ce8c")
 const COLOR_SELECTED := Color("ffd479")
 const COLOR_HOVERED := Color("c9d4de")
 const COLOR_PLAYER := Color("4fa8e0")
@@ -99,6 +103,10 @@ func settlement_color(settlement: Settlement) -> Color:
 			return COLOR_VILLAGE
 		Settlement.TYPE_WILDERNESS:
 			return COLOR_WILDERNESS
+		Settlement.TYPE_FORT:
+			return COLOR_FORT
+		Settlement.TYPE_CASTLE:
+			return COLOR_CASTLE
 		_:
 			return COLOR_TOWN
 
@@ -170,12 +178,33 @@ func _draw_settlements() -> void:
 		if settlement == null:
 			continue
 		var color := settlement_color(settlement)
-		var radius := 11.0 if settlement.type == Settlement.TYPE_TOWN else 8.0
+		var radius := _settlement_radius(settlement.type)
 
-		# Marker: filled disc plus a ring, so it reads on both dark and light land.
-		draw_circle(settlement.position, radius + 2.0, COLOR_PARTY_OUTLINE)
-		draw_circle(settlement.position, radius, color)
-		draw_arc(settlement.position, radius + 4.0, 0.0, TAU, 32, color.darkened(0.35), 2.0)
+		# The marker says what the place is in three ways at once - shape, size and colour - because
+		# the map has to be readable at a glance and a player should not have to read a label to know
+		# whether the thing ahead is somewhere to trade or somewhere to be shot at.
+		#
+		#   village  small disc
+		#   town     large disc
+		#   fort     square, steel
+		#   castle   square with four corner towers, gold
+		#
+		# Placeholders, and the owner asked for placeholders: real icons are art, and art comes after
+		# the systems it describes.
+		match settlement.type:
+			Settlement.TYPE_FORT:
+				_draw_square_marker(settlement.position, radius, color, false)
+			Settlement.TYPE_CASTLE:
+				_draw_square_marker(settlement.position, radius, color, true)
+			_:
+				draw_circle(settlement.position, radius + 2.0, COLOR_PARTY_OUTLINE)
+				draw_circle(settlement.position, radius, color)
+				draw_arc(settlement.position, radius + 4.0, 0.0, TAU, 32, color.darkened(0.35), 2.0)
+				# A town wears a mark inside the disc. Size alone was not enough: at map zoom a village
+				# and a town were the same shape at slightly different scales, and a marker that needs
+				# the label read to be understood is not doing its job.
+				if settlement.type == Settlement.TYPE_TOWN:
+					draw_circle(settlement.position, radius * 0.4, COLOR_BG)
 
 		if settlement.visited:
 			draw_arc(settlement.position, radius + 8.0, 0.0, TAU, 32, COLOR_HOVERED.darkened(0.3), 1.0)
@@ -228,6 +257,41 @@ func _draw_world_parties() -> void:
 
 
 ## Centred text with a hard shadow so labels stay readable over any backdrop.
+## How big a settlement's marker is. Size is the first thing the eye reads, so a town is visibly
+## more than a village before anything else about it registers.
+static func _settlement_radius(type: String) -> float:
+	match type:
+		Settlement.TYPE_TOWN:
+			return 11.0
+		Settlement.TYPE_CASTLE:
+			return 12.0
+		Settlement.TYPE_FORT:
+			return 10.0
+		_:
+			return 8.0
+
+
+## A walled settlement: a filled square with a dark edge, and for a castle a turret at each corner -
+## four small squares, offset off the corners, which is the oldest shorthand there is for "this one is
+## fortified harder than that one".
+func _draw_square_marker(centre: Vector2, half: float, color: Color, towers: bool) -> void:
+	var body := Rect2(centre - Vector2(half, half), Vector2(half, half) * 2.0)
+	draw_rect(body.grow(2.0), COLOR_PARTY_OUTLINE, true)
+	draw_rect(body, color, true)
+	draw_rect(body, color.darkened(0.35), false, 2.0)
+	if not towers:
+		return
+	var turret := half * 0.42
+	var offsets: Array[Vector2] = [
+		Vector2(-half, -half), Vector2(half, -half), Vector2(-half, half), Vector2(half, half),
+	]
+	for offset in offsets:
+		var at := centre + offset
+		var square := Rect2(at - Vector2(turret, turret), Vector2(turret, turret) * 2.0)
+		draw_rect(square.grow(1.5), COLOR_PARTY_OUTLINE, true)
+		draw_rect(square, color, true)
+
+
 func _draw_label(text: String, position: Vector2, color: Color, font_size: int) -> void:
 	if _font == null:
 		return
