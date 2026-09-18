@@ -95,7 +95,7 @@ const TARGET_IMMEDIATE_ON_CONTACT_LOSS := true
 ## [8..13] are the collision proof; the target counters follow them. The clear pass in the shader
 ## resets all of them every tick, so these are per-tick counts and the totals below are summed on
 ## the CPU.
-const COUNTER_SLOTS := 64
+const COUNTER_SLOTS := 96
 ## Where the per-body nearest-enemy distances start in the counter block. The shader's
 ## BODY_GAP_BASE is the same number; the two are read together or not at all.
 const BODY_GAP_BASE := 32
@@ -445,6 +445,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_formation(_selected, "column")
 			KEY_O:
 				_set_formation(_selected, "loose")
+			KEY_K:
+				# The switch between a battle that fights itself and one that waits to be told.
+				# "A lot of movement I did not order" is the honest complaint against automatic
+				# behaviour, and the answer is to make the automatic behaviour optional rather
+				# than to argue for it.
+				_manual = not _manual
+				for b in _bodies:
+					if _is_mine(b) and _body_alive[b] > 0:
+						_order[b] = Order.HOLD if _manual else Order.ENGAGE
+						_hold_ordered[b] = 1 if _manual else 0
+						if not _manual:
+							_order_target[b] = -1
+				print("gpu crowd: your side %s" % ("holds until ordered (autonomy off)" if _manual else "fights on its own (autonomy on)"))
 			KEY_P:
 				_clock_paused = not _clock_paused
 				print("gpu crowd: %s" % ("paused" if _clock_paused else "running"))
@@ -674,13 +687,17 @@ func _parse_args() -> void:
 			checksum_every = maxi(0, int(arg.substr(17)))
 		elif arg.begins_with("--bodies="):
 			# How many formations a side: the size of the battle the player is asked to command.
-			bodies_per_side = clampi(int(arg.substr(9)), 1, 16)
+			bodies_per_side = clampi(int(arg.substr(9)), 1, 30)
 		elif arg == "--skirmish":
 			# The scale a person can actually command: four formations a side of a hundred and
 			# fifty, which is a battle you can pick up and place before it starts.
 			bodies_per_side = 4
 			if not _agents_given:
 				agents = bodies_per_side * 2 * 150
+		elif arg == "--manual":
+			# Autonomy off from the first tick: nothing on the player's side moves until it is
+			# told to. The only way to test input honestly.
+			_manual = true
 		elif arg == "--deploy":
 			# Start as a plan rather than a fight: formations are yours to place until Space.
 			_deploying = true
@@ -739,6 +756,13 @@ func _build() -> void:
 	pipeline = rd.compute_pipeline_create(shader)
 
 	field = _field_for(agents)
+	# The field grows to fit the army rather than the army being squeezed into the field: an army
+	# of thirty formations needs six hundred units of depth to deploy in, not the hundred and sixty
+	# nine the three-legion scene was drawn on. Nothing in the simulation depends on the field's
+	# size - it is the ground, and ground is whatever the battle needs.
+	var needed_depth := float(bodies_per_side) * BAND_NEEDS
+	if field.y < needed_depth:
+		field.y = needed_depth
 	grid = Vector2i(ceili(field.x / LG_CELL), ceili(field.y / LG_CELL))
 	var cells := grid.x * grid.y
 
@@ -1122,8 +1146,10 @@ func _advance_bodies() -> void:
 		# clearly beaten, and it is what the facing and the engagement below are driven by.
 		_select_target(b)
 		# Face the target, no faster than a body can turn. Every man's place in the line is built
-		# from this vector, so the whole lattice - and the dressing - swings with it.
-		var aim := _aim_for(b)
+		# from this vector, so the whole lattice - and the dressing - swings with it. A deployment
+		# is the one time a body keeps the facing it was given: a formation that turns itself while
+		# the player is still placing it is the formation making a decision for him.
+		var aim := _aim_for(b) if not _deploying else Vector2.ZERO
 		if aim != Vector2.ZERO:
 			var want := wrapf(aim.angle() - _heading[b], -PI, PI)
 			_heading[b] += clampf(want, -TURN_RATE * DT, TURN_RATE * DT)
@@ -2207,6 +2233,11 @@ func _storage(data: PackedByteArray, size: int) -> RID:
 ## a violation at 2.0 against a 2.47 minimum. Measured at four bodies a side in a 169-unit field,
 ## where the fit left 1.6 units of slack and produced 41,918 such pairs.
 const BAND_MARGIN := 6.0
+## What one formation needs of the field to stand in: four ranks of depth at the shared spacing,
+## plus the sideways room the solver needs. A band thinner than this cannot hold a formation at all,
+## and a body squeezed into one ends up standing in its neighbour's band - which is what thirty
+## formations a side produced on the old field, where each band was five and a half units tall.
+const BAND_NEEDS := 20.0
 const RIGHT_DRAG_SLOP := 7.0
 const SELECT_COLOUR := Color(1.0, 0.78, 0.24, 0.95)
 const ORDER_COLOUR := Color(1.0, 0.95, 0.75, 0.75)
@@ -2244,6 +2275,8 @@ var _agents_given := false
 ## The battle clock, stopped by the player. The camera and the marks keep working while it is:
 ## a commander looking at a frozen battle is still a commander looking.
 var _clock_paused := false
+## Autonomy off: the player's formations hold until they are told, and never choose for themselves.
+var _manual := false
 
 
 ## The catalog's shapes, in the probe's terms: a cap on how wide a formation may spread, and a
@@ -2576,7 +2609,7 @@ func _start_battle() -> void:
 	_deploying = false
 	for b in _bodies:
 		if _is_mine(b) and _body_alive[b] > 0:
-			_order[b] = Order.ENGAGE
+			_order[b] = Order.HOLD if _manual else Order.ENGAGE
 			_order_target[b] = -1
 			_hold_ordered[b] = 0
 	print("gpu crowd: the battle begins on tick %d" % _tick)
