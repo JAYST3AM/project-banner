@@ -1,18 +1,70 @@
 {
   "_comment": "Biomes. The campaign map's ground is data first, exactly as battlefield terrain is: the simulation reads a type and a movement number, the renderer reads a palette and a texture, and neither knows about the other. A BIOME is a look - a ground texture, a palette, a height character and a set of props. A TYPE (data/terrain/terrain_types.json) is a rule - how fast a soldier crosses it. Every biome names the type it behaves as, so adding a snowfield never changes a movement number, and re-balancing movement never changes how anything looks. When biomes meet, a tile carries WEIGHTS (70% grass, 30% forest) and colour, height, prop density and movement all read those weights.",
-
   "_fields": {
     "id": "stable key, used by the world generator and by battlefields",
     "name": "what a player would call it",
     "type": "the terrain_types.json id whose movement rule this biome follows",
-    "grounds": "one to four res:// paths: variants of the same ground, chosen per tile by a seeded hash of the tile so a tile always shows the same one and neighbours rarely repeat. Blending between biomes blends whichever variants the two tiles chose.",
-    "ground_scale": "how many world units one repeat of a ground image covers",
-    "palette": ["two to four colours, darkest first: what the height shading darkens and lightens from when there is no ground image"],
-    "height": {"base": "0..1 of the battlefield's height range", "roughness": "0 = flat, 1 = broken", "bias": "-1 hollows, +1 raises"},
+    "grounds": "one to four res:// paths with a name and the dominant colour sampled from the art. The first is the default; the generator picks one per tile from a seeded hash of the tile's position, so a tile always shows the same one and neighbours rarely repeat. At a biome border, whichever variants the two tiles chose are what blend.",
+    "ground_scale": "how many world units one repeat of a ground image covers (a knob: tune when it is on screen)",
+    "palette": [
+      "two to four colours, darkest first: what the height shading darkens and lightens from when there is no ground image"
+    ],
+    "height": {
+      "base": "0..1 of the battlefield's height range",
+      "roughness": "0 = flat, 1 = broken",
+      "bias": "-1 hollows, +1 raises"
+    },
     "props": [
-      {"art": "res:// path", "density": "props per 100 tiles at full weight", "min_weight": "how much of this biome a tile needs before the prop appears at all", "scale": "height in world units", "jitter": "0..1 placement scatter"}
+      {
+        "art": "res:// path",
+        "density": "props per 100 tiles at full weight",
+        "min_weight": "how much of this biome a tile needs before the prop appears at all",
+        "scale": "height in world units",
+        "jitter": "0..1 placement scatter"
+      }
     ]
   },
-
-  "biomes": []
+  "biomes": [
+    {
+      "id": "plains",
+      "name": "Plains",
+      "type": "open",
+      "ground_scale": 24.0,
+      "grounds": [
+        {
+          "art": "res://assets/terrain/plains/plains_standard.png",
+          "name": "Standard",
+          "dominant": "4f621a"
+        },
+        {
+          "art": "res://assets/terrain/plains/plains_lush.png",
+          "name": "Lush",
+          "dominant": "456e16"
+        },
+        {
+          "art": "res://assets/terrain/plains/plains_dry.png",
+          "name": "Dry",
+          "dominant": "8d762d"
+        },
+        {
+          "art": "res://assets/terrain/plains/plains_worn.png",
+          "name": "Worn",
+          "dominant": "596728"
+        }
+      ],
+      "palette": [
+        "38430f",
+        "4f621a",
+        "7a7a2c",
+        "a08f45"
+      ],
+      "height": {
+        "base": 0.45,
+        "roughness": 0.25,
+        "bias": 0.0
+      },
+      "props": [],
+      "notes": "Four looks rather than four variations of one: Standard, Lush, Dry and Worn differ in colour and wear, so they can later be chosen by moisture, season or region instead of at random. Art is 1254x1254, top-down and painted; props to follow."
+    }
+  ]
 }
