@@ -40,9 +40,11 @@ const BORDER_WIGGLE := 0.22
 ## One repeat of a ground image per this many world units. Smaller means more tiles and the art's
 ## detail closer up, which is what the owner asked for - and it only works with mipmaps under the
 ## samplers, or a 1254-pixel painting shrunk to a quarter of that aliases into coloured speckle. Sized so the art is seen at roughly its
-## own resolution on a normal zoom: tiling it small enough to repeat many times across the map
-## minifies a 1254-pixel painting into speckle, which is exactly what the first attempt looked like.
-const TILE_UNITS := 260.0
+## own resolution on a normal zoom. 260 was tried first, then 160; the owner looked at both and
+## asked for more tiles each time, which is this number going down. The trade-off to watch: a smaller repeat shows the same
+## art spread over less ground, so if the ground ever reads soft rather than detailed, the fix is a
+## finer art set rather than an even smaller repeat.
+const TILE_UNITS := 100.0
 
 const HEIGHT_OCTAVES := 3
 const BIOME_OCTAVES := 4
@@ -131,9 +133,9 @@ func _build_field() -> Image:
 			# The borders wander: each field is sampled from a point nudged sideways by a slower
 			# noise, which is what turns a soft straight edge into a coast.
 			var wander := (_fbm(x * 5.4, y * 5.4, 11, 2) - 0.5) * BORDER_WIGGLE
-			var moisture := smoothstep(0.5 - half, 0.5 + half, _fbm(x * 3.0 + wander, y * 3.0, 1, BIOME_OCTAVES))
-			var wear := smoothstep(0.5 - half, 0.5 + half, _fbm(x * 4.6 + wander, y * 4.6, 17, 3))
-			var region := smoothstep(0.42 - half, 0.58 + half, _fbm(x * 1.1, y * 1.1, 29, 2))
+			var moisture := smoothstep(0.5 - half, 0.5 + half, _fbm(x * 4.5 + wander, y * 4.5, 1, BIOME_OCTAVES))
+			var wear := smoothstep(0.5 - half, 0.5 + half, _fbm(x * 6.5 + wander, y * 6.5, 17, 3))
+			var region := smoothstep(0.42 - half, 0.58 + half, _fbm(x * 2.0, y * 2.0, 29, 2))
 			var worn := wear * 0.85
 			var plain := 1.0 - worn
 			var lush := plain * moisture * region * LOOK_STRENGTH

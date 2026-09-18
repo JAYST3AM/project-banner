@@ -8,6 +8,9 @@ config_version=5
 
 [application]
 
+; 0 is unlimited. Stated rather than inherited.
+run/max_fps=0
+
 config/name="Project Banner"
 config/description="A persistent medieval sandbox: individual soldiers, tactical battles, and a living campaign world."
 config/version="0.1.0"
@@ -30,6 +33,11 @@ gdscript/warnings/unsafe_property_access=1
 gdscript/warnings/unsafe_method_access=1
 
 [display]
+
+; The frame rate is never to be capped or synchronised: the owner wants the counter free to climb,
+; and a vsynced frame time is the monitor's, not the game's. The simulation runs on its own 60 Hz
+; clock, which is where the honest rate lives.
+window/vsync/vsync_mode=0
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
