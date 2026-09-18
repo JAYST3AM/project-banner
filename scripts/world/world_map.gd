@@ -59,8 +59,9 @@ func _ready() -> void:
 	# And no ground if the catalogue has no art for it. The art was deleted on the owner's instruction
 	# and the shader drew white without it; skipping the ground entirely is the honest picture of a map
 	# that has none, and it costs nothing when art comes back - the check passes and the ground returns.
-	if not _no_ground:
-		_no_ground = not _ground_has_art()
+	# Missing art is not the same as asking for no ground: one means "draw what we have", the other
+	# means "draw nothing". Conflating them is why the flat-colour fallback never ran.
+	var art_missing := not _ground_has_art()
 	DebugLogger.info("world map loading", "WorldMap")
 
 	if not GameManager.is_campaign_active():
@@ -97,7 +98,7 @@ func _ready() -> void:
 	_view.bind(_state, _config, _travel)
 	# The ground goes in before the map view and behind it: the view draws roads, settlements and
 	# parties on top of terrain it no longer has to paint itself.
-	if not _no_ground:
+	if not _no_ground and not art_missing:
 		_terrain = WorldTerrain.new()
 		# Under the map view, which draws at -10. The first version of this sat at -1 - above the
 		# view rather than below it - so the ground was painted over the roads, the settlement
