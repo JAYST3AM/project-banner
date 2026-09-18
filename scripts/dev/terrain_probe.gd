@@ -53,9 +53,9 @@ func _ready() -> void:
 	get_tree().quit(0)
 
 
-func _run(size: Vector2, config: GameConfig) -> void:
+func _run(size: Vector2, config: GameConfig, biome: String) -> void:
 	var started := Time.get_ticks_usec()
-	var field := BattlefieldTerrain.generate(SEED, size, config, null, null, _biome)
+	var field := BattlefieldTerrain.generate(SEED, size, config, null, null, biome)
 	var generation_ms := float(Time.get_ticks_usec() - started) / 1000.0
 	print("")
 	print("=== field %s, biome %s ===" % [str(size), field.biome_id])
@@ -125,6 +125,16 @@ func _run(size: Vector2, config: GameConfig) -> void:
 	var other := BattlefieldTerrain.generate(SEED + 1, size, config, null, null, biome)
 	print("  a different seed differs: %s" % ("yes" if other.signature() != field.signature() else "NO"))
 
+	# Props: what grew, where the rules refused, and how much of the ground they closed off.
+	var props := field.build_props(config, null)
+	print("  %s" % props.summary())
+	print("  props by kind: %s" % str(props.counts_by_kind()))
+	print("  ordinary props: %s" % str(props.refusals))
+	print("  blocks: %d of %d props obstruct movement; traversable now %.1f%%" % [
+		_blocks(props), props.count(), _traversable_share(field)])
+	print("  props determinism: %s (signature %s)" % [
+		"identical" if _same_props(field, config, props) else "DIFFERENT", props.signature()])
+
 	# The maps, printed rather than described: one line per row, one character per cell.
 	if not _printed_summary:
 		_printed_summary = true
@@ -170,3 +180,26 @@ func _glyph(type_id: String) -> String:
 
 func _count(counts: Dictionary, key: String) -> void:
 	counts[key] = int(counts.get(key, 0)) + 1
+
+
+func _blocks(props: TerrainProps) -> int:
+	var total := 0
+	for index in props.count():
+		if props.blocks_at(index):
+			total += 1
+	return total
+
+
+func _traversable_share(field: BattlefieldTerrain) -> float:
+	var open := 0
+	for index in field.cell_count():
+		if field.is_cell_traversable(index):
+			open += 1
+	return 100.0 * float(open) / maxf(1.0, float(field.cell_count()))
+
+
+## Rebuild the props for the same field and compare: the scatter must be a pure function of the seed.
+func _same_props(field: BattlefieldTerrain, config: GameConfig, props: TerrainProps) -> bool:
+	var again := TerrainProps.build(field, null, field.terrain_seed, field.generation_version, config,
+		BattleSetup.deployment_zones(config))
+	return again.signature() == props.signature()

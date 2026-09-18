@@ -140,6 +140,10 @@ var _slope_penalty := Vector2(0.55, 0.55)
 ## extreme case of it; the rule is what makes a steep hillside behave like one.
 var max_traversable_slope: float = 0.6
 
+## The things standing on the ground, once they have been grown. Null on a field nobody has scattered
+## props over - a headless test that only wants the ground does not pay for them.
+var props: TerrainProps = null
+
 ## Generation tuning resolved once, kept for the tools and the debug overlay.
 var cliff_type_id: String = "cliff"
 var water_type_id: String = "water"
@@ -926,6 +930,64 @@ func min_height() -> float:
 	return lowest
 
 
+## ---------- props ---------------------------------------------------------
+
+## Grow the things standing on the ground and fold their gameplay into the cells they stand in.
+##
+## This is called after generation and before anything reads the maps, because a prop is not
+## decoration: it writes cover, sight-line opacity and obstruction into the cells it occupies, and
+## the queries the simulation makes already read those cells.
+func build_props(config: GameConfig, biomes: BiomeCatalog, keep_clear: Array[Rect2] = []) -> TerrainProps:
+	var source := biomes if biomes != null else (_biomes if _biomes != null else BiomeCatalog.load_from())
+	var zones := keep_clear
+	if zones.is_empty() and config != null:
+		zones = BattleSetup.deployment_zones(config)
+	props = TerrainProps.build(self, source, terrain_seed, generation_version, config, zones)
+	apply_prop_obstacles()
+	return props
+
+
+## Write every prop's gameplay into the ground it stands on: enough cover to hide behind, enough
+## opacity to break a sight line, and - for the kinds that should - an obstruction.
+##
+## Cover and opacity are taken as maxima rather than added, so a bush inside a wood does not stack to
+## an impossible number, and a cell that already blocks a sight line cannot be made *less* blocking by
+## something standing in it.
+func apply_prop_obstacles() -> void:
+	if props == null or props.is_empty():
+		return
+	for index in props.count():
+		var point := props.position_at(index)
+		var radius := maxf(props.radius_at(index), cell_size * 0.35)
+		var cover := props.cover_at(index)
+		var opacity := props.los_at(index)
+		var blocks := props.blocks_at(index)
+		var min_col := cell_col_at(point - Vector2(radius, radius))
+		var max_col := cell_col_at(point + Vector2(radius, radius))
+		var min_row := cell_row_at(point - Vector2(radius, radius))
+		var max_row := cell_row_at(point + Vector2(radius, radius))
+		for row in range(min_row, max_row + 1):
+			for col in range(min_col, max_col + 1):
+				var cell := row * cols + col
+				if cell < 0 or cell >= _type_index.size():
+					continue
+				if cell_centre(cell).distance_to(point) > radius + cell_size * 0.5:
+					continue
+				_cover[cell] = clampf(maxf(_cover[cell], cover), 0.0, 0.95)
+				_los[cell] = clampf(maxf(_los[cell], opacity), 0.0, 1.0)
+				if blocks:
+					_obstacle[cell] = _obstacle[cell] | OBSTACLE_PROP
+					_traversable[cell] = 0
+
+
+## Whether a point is clear of every prop that obstructs movement. The traversability map already
+## answers this per cell; this is for a caller holding a prop and asking about a place.
+func props_block_at(point: Vector2) -> bool:
+	if props == null:
+		return false
+	return (obstacle_bits_at(point) & OBSTACLE_PROP) != 0
+
+
 ## ---------- edits ---------------------------------------------------------
 
 ## Force one cell's type. The maps that depend on the type - movement, cover, sight line and
@@ -956,8 +1018,18 @@ func refresh_maps_of_cell(index: int) -> void:
 	var vegetation := _vegetation[index] if index < _vegetation.size() else 0.0
 	_cover[index] = clampf(maxf(_type_cover[slot], vegetation * 0.35), 0.0, 0.9)
 	_los[index] = clampf(maxf(_type_los[slot], vegetation * 0.5), 0.0, 1.0)
+	# A prop standing here has already written its own cover and opacity into this cell. Those are
+	# maxima rather than a base, so recomposing the ground must not lower them - a tree does not stop
+	# hiding a man because the cell under it was repainted.
+	if (obstacle_of_cell(index) & OBSTACLE_PROP) != 0:
+		_cover[index] = clampf(maxf(_cover[index], maxf(_type_cover[slot], vegetation * 0.35)), 0.0, 0.95)
+		_los[index] = clampf(maxf(_los[index], maxf(_type_los[slot], vegetation * 0.5)), 0.0, 1.0)
 	var slope := _slope[index] if index < _slope.size() else 0.0
 	var ground_allows := _type_traversable[slot] == 1 and slope <= max_traversable_slope
+	# Something standing here that obstructs movement keeps its grip on the cell: a repainted type
+	# does not clear the tree that is in the way.
+	if (_obstacle[index] & OBSTACLE_PROP) != 0:
+		ground_allows = false
 	_traversable[index] = 1 if ground_allows else 0
 	if _type_traversable[slot] == 0 or slope > max_traversable_slope:
 		_obstacle[index] = _obstacle[index] | OBSTACLE_TERRAIN

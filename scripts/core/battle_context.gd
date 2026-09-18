@@ -35,6 +35,10 @@ var enemy_display_name: String = "Enemies"
 var world_position: Vector2 = Vector2.ZERO
 var terrain_seed: int = 0
 var battle_seed: int = 0
+## Which country this battle is fought in: a biome id from data/terrain/biomes.json, or "" for the
+## project's default. The campaign owns terrain and a battle is a window of it, so the country is
+## decided out on the map and carried here rather than invented when the scene loads.
+var biome_id: String = ""
 var campaign_day: int = 1
 var campaign_hour: float = 8.0
 var weather: String = "clear"
@@ -132,6 +136,7 @@ func to_dict() -> Dictionary:
 		"world_position": DataUtils.vec2_to(world_position),
 		"terrain_seed": terrain_seed,
 		"battle_seed": battle_seed,
+		"biome_id": biome_id,
 		"campaign_day": campaign_day,
 		"campaign_hour": campaign_hour,
 		"weather": weather,
@@ -151,6 +156,7 @@ static func from_dict(data: Dictionary) -> BattleContext:
 	context.world_position = DataUtils.vec2_from(data.get("world_position", [0.0, 0.0]))
 	context.terrain_seed = int(data.get("terrain_seed", 0))
 	context.battle_seed = int(data.get("battle_seed", 0))
+	context.biome_id = str(data.get("biome_id", ""))
 	context.campaign_day = int(data.get("campaign_day", 1))
 	context.campaign_hour = float(data.get("campaign_hour", 8.0))
 	context.weather = str(data.get("weather", "clear"))

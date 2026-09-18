@@ -199,6 +199,13 @@ func _apply_dev_autotravel() -> void:
 
 ## ---------- per-frame ----------------------------------------------------
 
+## One simulation step, in real seconds: the same 30 Hz the battle clock runs at, read from the config
+## so the two cannot drift apart.
+const SIM_STEP := 1.0 / 30.0
+## Real seconds banked since the last simulation step. Frame time varies; the step does not.
+var _accumulator := 0.0
+
+
 func _process(delta: float) -> void:
 	# The world is built behind the loading screen, on a thread, while this map's frames are already
 	# running. Until the build lands there is no clock to step and no travel to advance, and calling
@@ -210,13 +217,21 @@ func _process(delta: float) -> void:
 
 	_update_camera_pan(delta)
 
-	var game_hours := _state.clock.advance_real_seconds(delta)
-	if game_hours > 0.0:
-		var report := _travel.step(game_hours)
-		if report.get("arrived", false):
-			_on_arrived(str(report.get("settlement_id", "")))
-		if _overworld != null:
-			_overworld.step(game_hours)
+	# The world runs on the simulation clock, not on however fast the renderer draws. Stepping travel
+	# once per frame made it both too fast (360 steps a second, each capped at 24 units) and jittery
+	# (uneven frame times, so uneven strides) - the owner: "is jittery and sped up". A fixed 30 Hz
+	# accumulator gives every step the same slice of time, so the world advances evenly and at the rate
+	# the config names, and a dropped frame costs frame rate rather than running the world faster.
+	_accumulator += delta
+	while _accumulator >= SIM_STEP:
+		_accumulator -= SIM_STEP
+		var game_hours := _state.clock.advance_real_seconds(SIM_STEP)
+		if game_hours > 0.0:
+			var report := _travel.step(game_hours)
+			if report.get("arrived", false):
+				_on_arrived(str(report.get("settlement_id", "")))
+			if _overworld != null:
+				_overworld.step(game_hours)
 
 	_check_for_encounter()
 

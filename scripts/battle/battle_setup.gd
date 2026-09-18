@@ -39,6 +39,23 @@ static func field_size(config: GameConfig) -> Vector2:
 	)
 
 
+## The rectangles an army is drawn up in: the player on the left, the enemy on the right, each
+## [code]battle.deploy_depth[/code] deep and the full height of the field.
+##
+## This is the ground terrain props must leave alone. The deployment above is a formula rather than a
+## recorded decision, so the zones are derived from the same numbers - if the deployment ever changes
+## shape, this changes with it rather than falling out of step with it.
+static func deployment_zones(config: GameConfig) -> Array[Rect2]:
+	var field := field_size(config)
+	var depth := config.get_float("battle.deploy_depth", 20.0)
+	var margin := config.get_float("battle.deploy_margin", 8.0)
+	var zones: Array[Rect2] = []
+	var width := minf(field.x * 0.5, depth + margin)
+	zones.append(Rect2(Vector2.ZERO, Vector2(width, field.y)))
+	zones.append(Rect2(Vector2(field.x - width, 0.0), Vector2(width, field.y)))
+	return zones
+
+
 ## Place both armies facing each other: player on the left, enemy on the right,
 ## melee to the front and ranged behind, in ranks that fit the deployment depth.
 static func deploy(units: Array[BattleUnit], config: GameConfig) -> void:

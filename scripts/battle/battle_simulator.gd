@@ -848,11 +848,20 @@ func units_by_id() -> Dictionary:
 
 ## Build this battle's ground from the context's seed. Deterministic: the same
 ## context always produces the same battlefield.
+##
+## The battlefield is a window onto a country: the seed decides the land, and the biome decides which
+## country it is. Both come from the context, so a battle carried on from a save is fought on the same
+## ground it would have been fought on before the save - and a campaign that later gives its battles a
+## biome will not have to change this call, only the context.
 func set_terrain_from_context(context: BattleContext, p_config: GameConfig = null) -> BattlefieldTerrain:
 	if context == null:
 		return null
 	var source := p_config if p_config != null else config
-	terrain = BattlefieldTerrain.generate(context.terrain_seed, field_size, source)
+	terrain = BattlefieldTerrain.generate(context.terrain_seed, field_size, source, null, null, context.biome_id)
+	if terrain != null and source != null and source.get_bool("terrain.props", true):
+		# Props are grown here rather than in generation because they need to know where the armies
+		# are going to stand, and that is a battle's business rather than the ground's.
+		terrain.build_props(source, null, BattleSetup.deployment_zones(source))
 	return terrain
 
 

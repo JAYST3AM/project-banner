@@ -148,6 +148,11 @@ static func build(
 	## accident of overlapping hills becomes a cliff face.
 	var scarps := PackedFloat32Array()
 	scarps.resize(total)
+	## How open each cell is: a clearing is ground that has been levelled, and that means ground
+	## nothing is growing on. Without this a forest generated as one solid block of woods with
+	## nowhere for a formation to stand.
+	var opens := PackedFloat32Array()
+	opens.resize(total)
 
 	var has_blend := not secondary.is_empty() and field.blend_width_cells > 0.0
 	var blend_width := maxf(1.0, field.blend_width_cells)
@@ -181,7 +186,7 @@ static func build(
 			rockiness[index] = smoothstep(0.58, 0.88, rock_field[index])
 
 	# ---------- pass 2: the landforms -------------------------------------
-	_place_features(heights, flows, scarps, cols, rows, seed_value, version, biomes, primary, elevation_amplitude)
+	_place_features(heights, flows, scarps, opens, cols, rows, seed_value, version, biomes, primary, elevation_amplitude)
 
 	# ---------- pass 3: the restrained detail -----------------------------
 	for row in rows:
@@ -273,11 +278,14 @@ static func build(
 			var is_water := water_enabled and flow >= RIVER_WATER_PROFILE
 			var is_low := flow > 0.2
 			var is_face := cliffs_enabled and (scarps[index4] > 0.35 or here_slope >= cliff_slope)
-			# Vegetation: what the biome grows, thinned by slope and crowded out by water.
+			# Vegetation: what the biome grows, thinned by slope, crowded out by water and opened up
+			# where a clearing was levelled. A forest with no clearings has nowhere to deploy a
+			# formation, which is a battlefield that cannot be fought on.
 			var base_veg := lerpf(veg_a.x, veg_b.x, mix2)
 			var tree_density := lerpf(veg_a.y, veg_b.y, mix2)
 			var slope_thinning := clampf(1.0 - here_slope * 1.6, 0.15, 1.0)
-			vegetation[index4] = clampf(base_veg + tree_density * cluster[index4] * slope_thinning
+			var openness := clampf(1.0 - opens[index4], 0.0, 1.0)
+			vegetation[index4] = clampf(base_veg + tree_density * cluster[index4] * slope_thinning * openness
 				- wetness[index4] * 0.25, 0.0, 1.0)
 
 			# Soil: what the ground is made of, chosen by how wet the cell is.
@@ -363,6 +371,7 @@ static func _place_features(
 	heights: PackedFloat32Array,
 	flows: PackedFloat32Array,
 	scarps: PackedFloat32Array,
+	opens: PackedFloat32Array,
 	cols: int,
 	rows: int,
 	seed_value: int,
@@ -425,7 +434,7 @@ static func _place_features(
 							float(maxi(cols, rows)) * RIVER_RUN_FACTOR, RIVER_BED_CELLS,
 							strength * 0.6, seed_value, lx, ly, family_salt)
 					"clearings":
-						_flatten_clearing(heights, cols, rows, centre, size * 1.6, 0.7)
+						_flatten_clearing(heights, opens, cols, rows, centre, size * 1.6, 0.7)
 		placed[family] = count
 
 
@@ -572,6 +581,7 @@ static func _stamp_channel(
 ## battlefield.
 static func _flatten_clearing(
 	heights: PackedFloat32Array,
+	opens: PackedFloat32Array,
 	cols: int,
 	rows: int,
 	centre: Vector2,
@@ -600,6 +610,7 @@ static func _flatten_clearing(
 			var weight := clampf(strength * (0.5 + 0.5 * cos(PI * t)), 0.0, 1.0)
 			var index := row * cols + col
 			heights[index] = lerpf(heights[index], level, weight)
+			opens[index] = maxf(opens[index], weight)
 
 
 ## ---------- data-driven tables --------------------------------------------
@@ -839,6 +850,15 @@ static func _value_noise(seed_value: int, salt: int, x: float, y: float, period:
 	var c := _hash01(seed_value, salt, posmod(x0, period), posmod(y0 + 1, period))
 	var d := _hash01(seed_value, salt, posmod(x0 + 1, period), posmod(y0 + 1, period))
 	return lerpf(lerpf(a, b, sx), lerpf(c, d, sx), sy)
+
+
+## A number in [0, 1) from four integers, for callers outside the generator.
+##
+## Public on purpose: the prop scatter, the decal system and anything else that wants a deterministic
+## draw must use the *same* hash as the terrain, or two systems with the same seed will disagree about
+## where a place is.
+static func hash01(seed_value: int, salt: int, x: int, y: int) -> float:
+	return _hash01(seed_value, salt, x, y)
 
 
 ## A number in [0, 1) from four integers. Integer arithmetic only, so it is exact, fast, and gives
