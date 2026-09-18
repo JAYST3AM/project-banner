@@ -53,6 +53,20 @@ func get_value(path: String, default_value: Variant = null) -> Variant:
 	return node
 
 
+## Override a value at runtime, by the same dotted path the getters take. Tests and dev flags need
+## this: the game generates its world, while the suites assert about a known one, and a fixture is
+## cheaper than rewriting twenty-eight suites around a generator.
+func set_value(path: String, value: Variant) -> void:
+	var parts := path.split(".")
+	var node: Dictionary = _data
+	for i in range(parts.size() - 1):
+		var key := parts[i]
+		if not node.has(key) or typeof(node[key]) != TYPE_DICTIONARY:
+			node[key] = {}
+		node = node[key] as Dictionary
+	node[parts[parts.size() - 1]] = value
+
+
 func get_float(path: String, default_value: float = 0.0) -> float:
 	return float(get_value(path, default_value))
 

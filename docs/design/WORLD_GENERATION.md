@@ -64,6 +64,23 @@ with factions and armies still moving while nobody is looking.
 - **Gameplay: what makes the world matter has to be local** - reputation, supply, season, the region
   underfoot - while the far world is texture. Borders become fronts rather than walls.
 
+## Control, morale, and where the bandits are
+
+*The owner's rule, 2026-09-18: "we should have bandits only spawn at locations with low control or
+morale."* Recorded rather than built.
+
+- **Control and morale are world fields**, in the same family as moisture, wear and region: generated
+  from the seed, varying over the map, and readable at any position without asking a manager. That is
+  what makes the rule cheap - a party spawns where the field is low, and nothing has to remember
+  where bandits already are.
+- **Factions will move the fields later**: a strong hold raises control around it, a defeat lowers
+  morale, and the bandits follow the weakness. The generation layer does not have to know that yet;
+  it only has to leave room for a field that is not purely natural.
+- **Today the authored spawn points fail on a generated world** - `bandits_north_road` and its
+  neighbours name settlements that no longer exist, so a new campaign currently spawns no hostile
+  parties at all. The owner's call is that this is fine for now: an empty world is a smaller problem
+  than a wrong one, and the fix is to place parties by the field rather than by name.
+
 ## News, and who carries it
 
 - Events in the world - a siege, a harvest, a death, an army on the move - are timestamped where

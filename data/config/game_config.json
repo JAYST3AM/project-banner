@@ -17,7 +17,11 @@
     "camera_min_zoom": 0.45,
     "camera_max_zoom": 2.2,
     "camera_pan_speed": 700.0,
-    "label_font_size": 15
+    "label_font_size": 15,
+    "procedural": true,
+    "settlement_count": 14,
+    "settlement_search_radius": 520.0,
+    "_procedural_note": "true generates the world from the seed: sites proposed by the land, named from their own numbers, connected by roads. false uses data/settlements/settlements.json, the authored starting region, which stays useful for tests that want a known map."
   },
   "time": {
     "seconds_per_game_hour": 2.0,

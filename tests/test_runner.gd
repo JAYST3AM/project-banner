@@ -33,6 +33,7 @@ const SUITES: Array[String] = [
 	"res://tests/test_campaign_flow.gd",
 	"res://tests/test_world_map.gd",
 	"res://tests/test_world_chunks.gd",
+	"res://tests/test_world_sites.gd",
 	"res://tests/test_recruitment.gd",
 	"res://tests/test_party_semantics.gd",
 	"res://tests/test_encounters.gd",
@@ -78,6 +79,10 @@ func _ready() -> void:
 	# so a run can never eat the campaign somebody is partway through. See save_manager.save_dir().
 	OS.set_environment("PB_TEST_SAVES", "1")
 	SceneManager.adopt_initial_scene(true)
+	# The suites assert about a known map - Greywatch, four settlements, four roads - and the game
+	# generates its world now, so they run against the authored one. The generator has its own suite
+	# and does not need every other suite to be rewritten around it: a fixture is a fixture.
+	GameManager.config().set_value("world.procedural", false)
 	await get_tree().process_frame
 	await _run_all()
 	var failed := _failures > 0
