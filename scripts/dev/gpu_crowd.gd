@@ -47,7 +47,11 @@ const MAX_PUSH := 0.6
 ## with a five per cent tolerance. The proof run records the closest enemy gap on every tick
 ## and counts any pair inside this - the audit's item 1, and the number that has to be zero.
 const MIN_ENEMY_GAP := SEPARATION * 0.95
-const BODIES_PER_SIDE := 3
+## How many formations a side deploys with by default. The count is the knob that makes a battle
+## small enough for a person to command: three a side is a legion each, four or five is a skirmish
+## a player can actually pick up and place before it starts.
+const DEFAULT_BODIES_PER_SIDE := 3
+var bodies_per_side := DEFAULT_BODIES_PER_SIDE
 ## The frontage of one body, in files. A thousand men in forty files is twenty-five ranks:
 ## a legion that reads as a block, not a queue.
 const BODY_FILES := 40
@@ -91,7 +95,10 @@ const TARGET_IMMEDIATE_ON_CONTACT_LOSS := true
 ## [8..13] are the collision proof; the target counters follow them. The clear pass in the shader
 ## resets all of them every tick, so these are per-tick counts and the totals below are summed on
 ## the CPU.
-const COUNTER_SLOTS := 23
+const COUNTER_SLOTS := 64
+## Where the per-body nearest-enemy distances start in the counter block. The shader's
+## BODY_GAP_BASE is the same number; the two are read together or not at all.
+const BODY_GAP_BASE := 32
 const PARAM_SLOTS := 20
 const CNT_DROPPED := 0
 const CNT_PROBES := 1
@@ -340,10 +347,25 @@ func _unhandled_input(event: InputEvent) -> void:
 					_zoom_at(button.position, ZOOM_STEP)
 				MOUSE_BUTTON_WHEEL_DOWN:
 					_zoom_at(button.position, 1.0 / ZOOM_STEP)
+				MOUSE_BUTTON_LEFT:
+					# The left hand is for holding things: a formation, or a box drawn around
+					# several. During the deployment it also drags a formation into its place.
+					_press_at = button.position
+					_left_held = true
+					var under := _body_at(_uniso(button.position))
+					if _deploying and under >= 0 and under / bodies_per_side == 0:
+						_drag_body = under
+						_drag_grab = _uniso(button.position) - _anchor_of(under)
+					else:
+						_box_active = true
+						_box_from = button.position
+						_box_to = button.position
 				MOUSE_BUTTON_RIGHT:
-					# The orbit: drag right or left to swing the map around its middle, drag up or
-					# down to tilt it. One button for both axes is what "orbit" means, and the
-					# right button is where every game of this kind puts it.
+					# Tap to command, drag to look: the right button is where the genre puts
+					# both, so the drag has to be told from the tap by how far the hand moved.
+					_right_held = true
+					_right_moved = 0.0
+					_right_at = button.position
 					_rotating = true
 					_last_mouse = button.position
 				MOUSE_BUTTON_MIDDLE:
@@ -352,12 +374,33 @@ func _unhandled_input(event: InputEvent) -> void:
 					_last_mouse = button.position
 		else:
 			match button.button_index:
+				MOUSE_BUTTON_LEFT:
+					_left_held = false
+					if _drag_body >= 0:
+						_drag_body = -1
+					elif _box_active:
+						_box_active = false
+						if button.position.distance_to(_press_at) < 6.0:
+							_click_select(_uniso(button.position), button.shift_pressed)
+						else:
+							_box_select(_uniso(_box_from), _uniso(button.position), button.shift_pressed)
 				MOUSE_BUTTON_RIGHT:
+					_right_held = false
 					_rotating = false
+					if _right_moved < RIGHT_DRAG_SLOP:
+						_right_click(_uniso(button.position))
 				MOUSE_BUTTON_MIDDLE:
 					_panning = false
+	elif event is InputEventMouseMotion and _drag_body >= 0:
+		# Placing a formation before the fight: its anchor goes where the hand goes, and every
+		# man in it is drawn to his slot from that anchor. Placement is not a special case in
+		# the simulation - it is one anchor, the same number the march moves.
+		_place_body(_drag_body, _uniso((event as InputEventMouseMotion).position) - _drag_grab)
+	elif event is InputEventMouseMotion and _box_active:
+		_box_to = (event as InputEventMouseMotion).position
 	elif event is InputEventMouseMotion and _rotating:
 		var motion := event as InputEventMouseMotion
+		_right_moved += motion.relative.length()
 		yaw = wrapf(yaw + motion.relative.x * YAW_DRAG, -PI, PI)
 		# Up on the screen is further from the ground: drag up to look down on it, drag down to look
 		# across it towards the horizon.
@@ -383,10 +426,34 @@ func _unhandled_input(event: InputEvent) -> void:
 				_zoom_target = 1.0
 				_camera.position = _iso(_focus)
 			KEY_SPACE:
-				_follow_action = not _follow_action
+				# The battle is a plan until the player says go. Space is that word, and space
+				# is also how you get the camera back later, so it does whichever is wanted.
+				if _deploying:
+					_start_battle()
+				else:
+					_follow_action = not _follow_action
 			KEY_I:
 				flat_view = not flat_view
 				print("gpu crowd: view | %s" % ("flat, looking straight down" if flat_view else "isometric"))
+			KEY_H:
+				_order_stance(_selected, true)
+			KEY_U:
+				_order_stance(_selected, false)
+			KEY_L:
+				_set_formation(_selected, "line")
+			KEY_C:
+				_set_formation(_selected, "column")
+			KEY_O:
+				_set_formation(_selected, "loose")
+			KEY_P:
+				_clock_paused = not _clock_paused
+				print("gpu crowd: %s" % ("paused" if _clock_paused else "running"))
+			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5:
+				var digit := (event as InputEventKey).keycode - KEY_0
+				if (event as InputEventKey).ctrl_pressed:
+					_group_assign(digit)
+				else:
+					_group_recall(digit)
 
 var rd: RenderingDevice
 var shader: RID
@@ -564,6 +631,7 @@ func _parse_args() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--agents="):
 			agents = maxi(WORKGROUP, int(arg.substr(9)))
+			_agents_given = true
 		elif arg.begins_with("--target-cadence="):
 			target_cadence = maxi(1, int(arg.substr(17)))
 		elif arg.begins_with("--retention="):
@@ -604,6 +672,21 @@ func _parse_args() -> void:
 			advance_by = float(arg.substr(13))
 		elif arg.begins_with("--checksum-every="):
 			checksum_every = maxi(0, int(arg.substr(17)))
+		elif arg.begins_with("--bodies="):
+			# How many formations a side: the size of the battle the player is asked to command.
+			bodies_per_side = clampi(int(arg.substr(9)), 1, 16)
+		elif arg == "--skirmish":
+			# The scale a person can actually command: four formations a side of a hundred and
+			# fifty, which is a battle you can pick up and place before it starts.
+			bodies_per_side = 4
+			if not _agents_given:
+				agents = bodies_per_side * 2 * 150
+		elif arg == "--deploy":
+			# Start as a plan rather than a fight: formations are yours to place until Space.
+			_deploying = true
+		elif arg.begins_with("--at="):
+			# A scripted order, in place of a hand on the mouse. See _parse_script.
+			_parse_script(arg)
 		elif arg.begins_with("--yaw-deg="):
 			yaw = deg_to_rad(float(arg.substr(10)))
 		elif arg.begins_with("--pitch="):
@@ -719,6 +802,8 @@ func _build() -> void:
 	else:
 		print("gpu crowd: view | %s, yaw %.0f deg, pitch %.2f (right-drag orbits, wheel zooms at the cursor, middle-drag pans, WASD pans, Q/E quarter turn, [ ] tilts, F frames, I toggles flat)" % [
 			"flat" if flat_view else "isometric", rad_to_deg(yaw), squash])
+		print("gpu crowd: command | left-click select (shift adds), drag a box, right-click ground to move, right-click an enemy to attack, H hold, U engage, L/C/O line-column-loose, Ctrl+1..5 group, 1..5 recall, Space starts the battle, P pauses" if _deploying else \
+			"gpu crowd: command | left-click select (shift adds), drag a box, right-click ground to move, right-click an enemy to attack, H hold, U engage, L/C/O line-column-loose, Ctrl+1..5 group, 1..5 recall, Space follows the fighting, P pauses")
 	print("gpu crowd: %d soldiers, %d a side | grid %dx%d (cell %.1f) | field %.0fx%.0f | reach %.1f | blow %.2f/attacker | targeting %s (cadence %d, retention %.0f)" % [
 		agents, agents / 2, grid.x, grid.y, LG_CELL, field.x, field.y, REACH, BLOW,
 		"legacy" if target_legacy else "acquire/keep/release", target_cadence, target_retention])
@@ -733,7 +818,7 @@ func _build() -> void:
 ## way in.
 func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedFloat32Array) -> void:
 	var per_side := agents / 2
-	var per_body := ceili(float(per_side) / float(BODIES_PER_SIDE))
+	var per_body := ceili(float(per_side) / float(bodies_per_side))
 	# Kept, not just local: the pack needs the same band arithmetic the deployment used, or a
 	# body's leading edge would be measured from the wrong men.
 	_per_side = per_side
@@ -744,8 +829,11 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# of that, and a body clamped against the field edge reports nonsense - the baseline ladder
 	# measured "steps" of 114 units a tick at 600 soldiers because men were being clamped, not
 	# marched. So: forty files where they fit, fewer where they do not.
-	var band_height := field.y / float(BODIES_PER_SIDE)
-	var files := mini(BODY_FILES, maxi(4, int(band_height / SEPARATION)))
+	var band_height := field.y / float(bodies_per_side)
+	var files := mini(BODY_FILES, maxi(4, int((band_height - BAND_MARGIN * 2.0) / SEPARATION)))
+	# The line's width, remembered: a formation the player re-forms into a column and back into a
+	# line has to become the line it was, which means keeping the width it was deployed with.
+	_line_files = files
 	var ranks := ceili(float(per_body) / float(files))
 	var depth := float(ranks - 1) * SEPARATION
 	var frontage := float(files - 1) * SEPARATION
@@ -753,14 +841,14 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# more than a third of the field each - at small sizes "frontage + 20" pushed the outer two
 	# bodies off the field edge, and the first tick then dragged their men back inside (measured:
 	# a 49-unit "step" at tick 1 on a 600-soldier run).
-	var band := minf(frontage + 20.0, field.y / float(BODIES_PER_SIDE))
+	var band := minf(frontage + 20.0, field.y / float(bodies_per_side))
 	var inset := field.x * 0.12
 	# The oblique demo shifts the two sides apart in y so their bodies have to turn to face each
 	# other. Taken out of whatever slack the field has left rather than added on top: the bands
 	# already fill most of its height, and a shift that pushed men past the edge would be measured
 	# as a deployment fault (a 27-unit first-tick drag) rather than the turn it is meant to show.
-	var slack := maxf(0.0, field.y - ((BODIES_PER_SIDE - 1) * band + frontage)) * 0.5
-	_bodies = BODIES_PER_SIDE * 2
+	var slack := maxf(0.0, field.y - ((bodies_per_side - 1) * band + frontage)) * 0.5
+	_bodies = bodies_per_side * 2
 	_body_state.resize(_bodies * 8)
 	_heading.resize(_bodies)
 	_order.resize(_bodies)
@@ -780,9 +868,9 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 		_order_target[b] = -1
 		_order_point[b] = Vector2.ZERO
 	for b in _bodies:
-		var side := b / BODIES_PER_SIDE
-		var band_index := b % BODIES_PER_SIDE
-		var centre_y := field.y * 0.5 + (float(band_index) - float(BODIES_PER_SIDE - 1) * 0.5) * band
+		var side := b / bodies_per_side
+		var band_index := b % bodies_per_side
+		var centre_y := field.y * 0.5 + (float(band_index) - float(bodies_per_side - 1) * 0.5) * band
 		if side == 1:
 			centre_y += oblique * slack
 		else:
@@ -808,11 +896,11 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	for i in agents:
 		var side := 0 if i < per_side else 1
 		var within := i % per_side
-		var band_index := mini(BODIES_PER_SIDE - 1, within / per_body)
+		var band_index := mini(bodies_per_side - 1, within / per_body)
 		var in_body := within % per_body
 		var file := in_body % files
 		var rank := in_body / files
-		var b := side * BODIES_PER_SIDE + band_index
+		var b := side * bodies_per_side + band_index
 		var heading := Vector2(_body_state[b * 8 + 2], _body_state[b * 8 + 3])
 		var right := Vector2(-heading.y, heading.x)
 		var anchor := Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
@@ -855,7 +943,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	print("gpu crowd: deployed %d men, extent x %.1f..%.1f y %.1f..%.1f, field %s, outside %d (worst pull %.1f, %.1f)" % [
 		agents, lo.x, hi.x, lo.y, hi.y, str(field), outside, worst.x, worst.y])
 	print("gpu crowd: %d bodies a side, %d files x %d ranks each (%d a body), spacing %.1f, depth %.0f" % [
-		BODIES_PER_SIDE, files, ranks, per_body, SEPARATION, depth])
+		bodies_per_side, files, ranks, per_body, SEPARATION, depth])
 
 
 ## How much room a body's living men have before they are standing on the enemy - measured as the
@@ -868,7 +956,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 ## the 3.4 reach. Nobody could fight and nobody could close: 228 dead, then two lines staring at
 ## each other for ever.
 func _body_room(b: int) -> float:
-	if _body_gap.size() < BODIES_PER_SIDE * 2:
+	if _body_gap.size() < bodies_per_side * 2:
 		return 9999.0
 	return _body_gap[b]
 
@@ -888,7 +976,7 @@ func _body_room(b: int) -> float:
 ## The name a body is known by in the logs: P for the player's side, E for the enemy's, then the
 ## band down the field. Used by every diagnostic line so a human can follow one body through.
 func _body_name(b: int) -> String:
-	return "%s%d" % ["P" if b / BODIES_PER_SIDE == 0 else "E", b % BODIES_PER_SIDE]
+	return "%s%d" % ["P" if b / bodies_per_side == 0 else "E", b % bodies_per_side]
 
 
 ## A body changing its mind about who it is fighting is a rare, reviewable event, so it is printed
@@ -907,7 +995,7 @@ func _note_switch(text: String) -> void:
 ## lose an opponent still have a living enemy in the local window to find.
 func _wipe_body(band: int, fraction: float = 1.0, stripe: bool = false) -> void:
 	_wiped = true
-	var target_body := BODIES_PER_SIDE + band
+	var target_body := bodies_per_side + band
 	var data := _meta_bytes.to_float32_array()
 	var living := PackedInt32Array()
 	for i in agents:
@@ -963,12 +1051,12 @@ func _advance_body(band: int, distance: float) -> void:
 
 ## Where this body is fighting, as an index, or -1: what the reassignment tests read.
 func _select_target(b: int) -> void:
-	var side := b / BODIES_PER_SIDE
+	var side := b / bodies_per_side
 	var mine := Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
 	var best := -1
 	var best_distance := INF
 	for other in _bodies:
-		if other / BODIES_PER_SIDE == side:
+		if other / bodies_per_side == side:
 			continue
 		if _body_alive[other] <= 0:
 			continue
@@ -1017,7 +1105,7 @@ func _aim_for(b: int) -> Vector2:
 
 func _advance_bodies() -> void:
 	for b in _bodies:
-		var side := b / BODIES_PER_SIDE
+		var side := b / bodies_per_side
 		# Who are we fighting, if anyone? One selection a tick, retained until it is destroyed or
 		# clearly beaten, and it is what the facing and the engagement below are driven by.
 		_select_target(b)
@@ -1034,7 +1122,7 @@ func _advance_bodies() -> void:
 		if _body_state[b * 8 + 7] < 0.5:
 			var depth := (_body_state[b * 8 + 5] - 1.0) * SEPARATION
 			for other in _bodies:
-				if other / BODIES_PER_SIDE == side:
+				if other / bodies_per_side == side:
 					continue
 				var other_depth := (_body_state[other * 8 + 5] - 1.0) * SEPARATION
 				# Bodies are metres apart in both axes now that they can face any way, so the
@@ -1126,7 +1214,7 @@ func _process(delta: float) -> void:
 		return
 	var started := Time.get_ticks_usec()
 	var ticks_now := 0
-	if not _frozen:
+	if not _frozen and not _clock_paused:
 		if ticks_per_frame > 0:
 			for i in ticks_per_frame:
 				_advance_bodies()
@@ -1160,6 +1248,9 @@ func _process(delta: float) -> void:
 			_hold_body(hold_band)
 		if advance_band >= 0 and not _advanced and _tick >= advance_at:
 			_advance_body(advance_band, advance_by)
+		# Orders from the scripted list, fired at their tick. They go through the same functions
+		# the mouse calls, so a scripted order is not a second implementation of an order.
+		_apply_scripted_input()
 	# The picture is rebuilt on the simulation's clock, not the frame's: the frame rate is the
 	# renderer's business and repacking an unchanged army on every frame is work with no result.
 	if ticks_now > 0:
@@ -1171,6 +1262,7 @@ func _process(delta: float) -> void:
 	if _readback_counter >= maxi(1, readback_every):
 		_readback_counter = 0
 		_readback_and_pack()
+		_update_marks()
 		if not _frozen and (_alive.x == 0 or _alive.y == 0):
 			_freeze()
 
@@ -1229,11 +1321,11 @@ func _track_proof() -> void:
 	# The per-body nearest-enemy distances, as measured by the shader this tick. A sentinel
 	# (nothing seen) reads as "no enemy anywhere near", which is exactly how a body with no men
 	# left, or a body opposite a wiped-out enemy, should behave: walk on.
-	if counters.size() >= 8 + BODIES_PER_SIDE * 2:
+	if counters.size() >= BODY_GAP_BASE + bodies_per_side * 2:
 		var gaps := PackedFloat32Array()
-		gaps.resize(BODIES_PER_SIDE * 2)
-		for b in BODIES_PER_SIDE * 2:
-			gaps[b] = 9999.0 if counters[8 + b] < 0 else float(counters[8 + b]) / 1000.0
+		gaps.resize(bodies_per_side * 2)
+		for b in bodies_per_side * 2:
+			gaps[b] = 9999.0 if counters[BODY_GAP_BASE + b] < 0 else float(counters[BODY_GAP_BASE + b]) / 1000.0
 		_body_gap = gaps
 	var step := float(counters[6]) / 1000.0
 	if step > 2.0 and not _step_reported:
@@ -1266,7 +1358,7 @@ func _order_name(o: int) -> String:
 ## places, where the anchor is, and which way it faces. Six lines every few seconds is cheap, and
 ## when a body stops advancing or changes its mind this says why in one look.
 func _report_bodies() -> void:
-	if _body_front.size() < BODIES_PER_SIDE * 2 or _body_state.size() < _bodies * 8:
+	if _body_front.size() < bodies_per_side * 2 or _body_state.size() < _bodies * 8:
 		return
 	var parts := PackedStringArray()
 	for b in _bodies:
@@ -1289,7 +1381,7 @@ func _report_bodies() -> void:
 	for b in _bodies:
 		var against := PackedStringArray()
 		for e in _bodies:
-			if e / BODIES_PER_SIDE == b / BODIES_PER_SIDE:
+			if e / bodies_per_side == b / bodies_per_side:
 				continue
 			var engaged := _target_engage[b * _bodies + e] if _target_engage.size() >= _bodies * _bodies else 0
 			if engaged > 0:
@@ -1482,7 +1574,7 @@ func _check_retention() -> void:
 ## arrives. The stripe is the scenario's own extension of `--wipe-band`: killing every other man
 ## leaves each bereaved hunter a living neighbour, which is the case the rule is actually about.
 func _check_wipe() -> void:
-	var wiped_body := BODIES_PER_SIDE + 1
+	var wiped_body := bodies_per_side + 1
 	var hunters := PackedInt32Array()
 	var old := PackedInt32Array()
 	var near := PackedByteArray()
@@ -1693,10 +1785,10 @@ func _report() -> void:
 			_alive.x, _alive.y, _fallen,
 			float(counters[2]) * ticks_per_second / 1000.0, _weakest_hp,
 			counters[4], _max_inside, counters[0]]
-		_label.text = "GPU BATTLE   %d soldiers in %d legions a side, simulated by the GPU\nfps %.0f   ticks %.0f/s   tick %.2f ms   readback %.2f ms   pack %.2f ms\n%s\n%s" % [
-			agents, BODIES_PER_SIDE, fps, ticks_per_second,
+		_label.text = "GPU BATTLE   %d soldiers in %d legions a side, simulated by the GPU\nfps %.0f   ticks %.0f/s   tick %.2f ms   readback %.2f ms   pack %.2f ms\n%s\n%s\n%s" % [
+			agents, bodies_per_side, fps, ticks_per_second,
 			float(_tick_usec) / 1000.0, float(_readback_usec) / 1000.0, float(_pack_usec) / 1000.0,
-			state_line, _proof_line()]
+			_command_line(), state_line, _proof_line()]
 	print("gpu crowd: %5.1f fps | %7.1f ticks/s | %d soldiers = %.1fM agent-ticks/s | tick %.2f ms | readback %.2f ms | pack %.2f ms (loop %.2f, bars %.2f, submit %.2f) | alive %d v %d | fallen %d | blows %d | probes %d | now %.2f | inside %d (worst %d) | %s | overflow %d" % [
 		fps, ticks_per_second, agents, ticks_per_second * float(agents) / 1000000.0,
 		float(_tick_usec) / 1000.0, float(_readback_usec) / 1000.0, float(_pack_usec) / 1000.0,
@@ -1745,16 +1837,16 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 	# Each body's own leading edge, recomputed from where the living actually stand: the anchors
 	# are held against these next tick, so they have to come from the men, not from the slots.
 	var front := PackedFloat32Array()
-	front.resize(BODIES_PER_SIDE * 2)
-	for b in BODIES_PER_SIDE * 2:
-		front[b] = -9999.0 if b / BODIES_PER_SIDE == 0 else 9999.0
+	front.resize(bodies_per_side * 2)
+	for b in bodies_per_side * 2:
+		front[b] = -9999.0 if b / bodies_per_side == 0 else 9999.0
 	# Living men per body, and how far each of them stands from his place in the line. The second
 	# number is the body's cohesion: a body whose men are on their places is a body, one whose men
 	# are strung out behind their slots is a crowd following an anchor.
 	var living_men := PackedInt32Array()
 	var slot_error := PackedFloat32Array()
-	living_men.resize(BODIES_PER_SIDE * 2)
-	slot_error.resize(BODIES_PER_SIDE * 2)
+	living_men.resize(bodies_per_side * 2)
+	slot_error.resize(bodies_per_side * 2)
 	var loop_started := Time.get_ticks_usec()
 	var focus_sum := Vector2.ZERO
 	var bars := 0
@@ -1766,8 +1858,8 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 		# the camera stays a pure viewport the player moves over it. The bars lift in picture space,
 		# so they stay level however the ground is turned.
 		var picture := _iso(position)
-		var band := mini(BODIES_PER_SIDE - 1, (i % _per_side) / maxi(_per_body, 1))
-		var bi := (0 if i < _per_side else 1) * BODIES_PER_SIDE + band
+		var band := mini(bodies_per_side - 1, (i % _per_side) / maxi(_per_body, 1))
+		var bi := (0 if i < _per_side else 1) * bodies_per_side + band
 		var target := target_raw[i * 4 + 0] if target_raw.size() >= i * 4 + 4 else -1
 		_targets[i] = target
 		instances[base + AT_ORIGIN_X] = picture.x
@@ -1919,7 +2011,7 @@ func _build_outlines() -> void:
 		var line := Line2D.new()
 		line.width = 0.4
 		line.closed = true
-		line.default_color = COLOR_PLAYER if b / BODIES_PER_SIDE == 0 else COLOR_ENEMY
+		line.default_color = COLOR_PLAYER if b / bodies_per_side == 0 else COLOR_ENEMY
 		line.z_index = -5
 		add_child(line)
 		_outlines.append(line)
@@ -2016,6 +2108,14 @@ func _build_ground() -> void:
 	_view_root = Node2D.new()
 	add_child(_view_root)
 	_view_root.add_child(sprite)
+	# The marks the player makes live on the ground, between it and the men: a child of the view
+	# root, so the same transform lays them down, and below the men in depth, so a selection ring
+	# is under the formation rather than over it.
+	var paint := Node2D.new()
+	paint.set_script(load("res://scripts/dev/battle_paint.gd"))
+	paint.z_index = -10
+	_view_root.add_child(paint)
+	_paint = paint
 
 
 ## A corner panel in the game's own styling, so what the picture is and what it costs can be
@@ -2070,3 +2170,474 @@ func _storage(data: PackedByteArray, size: int) -> RID:
 	if bytes.size() < size:
 		bytes.resize(size)
 	return rd.storage_buffer_create(size, bytes)
+
+
+# =============================================================================================
+# The player's hands.
+#
+# Everything below exists for one purpose: to let a person command a battle small enough to hold
+# in his head. The end-game battles will not be simulated - the fight is decided by what the
+# player chose before it started and by what he asks for while it runs - so the thing that has to
+# be built and tested is the asking, not the marching.
+#
+# The rule that keeps it honest: nothing here is a parallel system. A click writes into the same
+# _order / _order_target / _order_point arrays a scripted event writes into, and the simulation
+# cannot tell a player from a script. Input is authority; a ring or an order line is the only
+# decoration in the whole file.
+# =============================================================================================
+
+## How far the right button may travel and still count as a tap. Beyond it the hand was turning the
+## camera, not giving an order, and an order that arrives because someone looked around is worse
+## than no order at all.
+## Room either side of a formation in its band, in the field's own units. The separation solver
+## shoves men sideways as well as back, and a formation whose edge is up against the next band's
+## edge has nowhere to be shoved to: the men end up in the neighbouring lane and the pair counts as
+## a violation at 2.0 against a 2.47 minimum. Measured at four bodies a side in a 169-unit field,
+## where the fit left 1.6 units of slack and produced 41,918 such pairs.
+const BAND_MARGIN := 6.0
+const RIGHT_DRAG_SLOP := 7.0
+const SELECT_COLOUR := Color(1.0, 0.78, 0.24, 0.95)
+const ORDER_COLOUR := Color(1.0, 0.95, 0.75, 0.75)
+const ENEMY_COLOUR := Color(0.95, 0.35, 0.30, 0.95)
+const BOX_COLOUR := Color(1.0, 0.78, 0.24, 0.85)
+
+var _paint: Node2D = null
+## The bodies in the player's hand. Body ids, not unit ids: the formation is the thing a commander
+## picks up, and picking formations is the whole point of the scale this scene is set to.
+var _selected: Array[int] = []
+## Saved selections, by number key - the gesture every game of this kind teaches.
+var _groups := {}
+var _deploying := false
+var _press_at := Vector2.ZERO
+var _left_held := false
+var _right_held := false
+var _right_moved := 0.0
+var _right_at := Vector2.ZERO
+var _box_active := false
+var _box_from := Vector2.ZERO
+var _box_to := Vector2.ZERO
+var _drag_body := -1
+var _drag_grab := Vector2.ZERO
+## The line's own width in files, as deployed. A formation ordered into a column and back into a
+## line has to become the line it was, which means remembering the width it was given rather than
+## deriving a new one from however many men are left standing.
+var _line_files := 0
+## The formation shapes, read from the game's own catalog rather than invented here, so the player
+## chooses between the same shapes the campaign offers.
+var _shapes := {}
+## Scripted orders waiting for their tick: what a test uses in place of a hand on the mouse.
+var _script_queue: Array = []
+## Whether --agents was given by hand: the skirmish preset only picks a size when nobody else did.
+var _agents_given := false
+## The battle clock, stopped by the player. The camera and the marks keep working while it is:
+## a commander looking at a frozen battle is still a commander looking.
+var _clock_paused := false
+
+
+## The catalog's shapes, in the probe's terms: a cap on how wide a formation may spread, and a
+## multiplier on the shared spacing. A cap below one is a fraction of the line (the loose shape);
+## anything above is a count of files (the column's four). Loaded from the game's data file, because
+## a second copy of these numbers living in this file would drift from the game's the first time a
+## designer touched either.
+func _load_shapes() -> void:
+	if not _shapes.is_empty():
+		return
+	_shapes = {
+		"line": {"files_cap": 999.0, "spacing": 1.0},
+		"column": {"files_cap": 4.0, "spacing": 1.0},
+		"loose": {"files_cap": 0.6, "spacing": 1.7},
+	}
+	var path := "res://data/formations/formation_types.json"
+	if not FileAccess.file_exists(path):
+		return
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if typeof(parsed) != TYPE_DICTIONARY or not (parsed as Dictionary).has("formations"):
+		return
+	for entry in (parsed as Dictionary)["formations"]:
+		var id := str(entry.get("id", ""))
+		if id.is_empty():
+			continue
+		_shapes[id] = {
+			"files_cap": float(entry.get("max_files", 999)),
+			"spacing": float(entry.get("spacing_multiplier", 1.0)),
+		}
+
+
+## The formation under a world point, or -1. Picked by the box its men actually stand in - the
+## lattice, measured along the body's own facing - because the anchor is a point in the middle of a
+## crowd, and nobody can see it, let alone click it.
+func _body_at(world: Vector2) -> int:
+	var best := -1
+	var best_gap := INF
+	for b in _bodies:
+		if _body_alive[b] <= 0:
+			continue
+		var anchor := _anchor_of(b)
+		var forward := _forward_of(b)
+		var across := Vector2(-forward.y, forward.x)
+		var rel := world - anchor
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		var half_depth := maxf(3.0, (_body_state[b * 8 + 5] - 1.0) * spacing * 0.5) + 3.0
+		var half_span := maxf(3.0, (_body_state[b * 8 + 4] - 1.0) * spacing * 0.5) + 3.0
+		if absf(rel.dot(forward)) <= half_depth and absf(rel.dot(across)) <= half_span:
+			var score := rel.length()
+			if score < best_gap:
+				best_gap = score
+				best = b
+	if best >= 0:
+		return best
+	# Nothing under the pointer: offer the nearest formation within reach of it, so a click just off
+	# a line still picks the line up rather than the grass behind it.
+	for b in _bodies:
+		if _body_alive[b] <= 0:
+			continue
+		var gap := world.distance_to(_anchor_of(b))
+		if gap < best_gap and gap < 14.0:
+			best_gap = gap
+			best = b
+	return best
+
+
+func _anchor_of(b: int) -> Vector2:
+	return Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
+
+
+func _forward_of(b: int) -> Vector2:
+	var forward := Vector2(_body_state[b * 8 + 2], _body_state[b * 8 + 3])
+	return forward if forward != Vector2.ZERO else Vector2.RIGHT
+
+
+## Side 0 is the player's. The enemy answers to the scenario, not to the mouse.
+func _is_mine(b: int) -> bool:
+	return b >= 0 and b / bodies_per_side == 0
+
+
+func _living_selection() -> Array[int]:
+	var kept: Array[int] = []
+	for b in _selected:
+		if b >= 0 and b < _bodies and _body_alive[b] > 0:
+			kept.append(b)
+	return kept
+
+
+func _selection_names() -> String:
+	var names: Array[String] = []
+	for b in _living_selection():
+		names.append(_body_name(b))
+	return ", ".join(names) if not names.is_empty() else "nothing"
+
+
+func _announce_selection() -> void:
+	print("gpu crowd: selected %s" % _selection_names())
+
+
+## The command line on the panel: whose formations are in the player's hand, how many are in his
+## hand at all, and whether the battle has started. A commander has to be able to read his own
+## intentions off the screen, because the alternative is remembering which of four identical blocks
+## is in his hand.
+func _command_line() -> String:
+	var stage := "DEPLOYMENT - drag to place, Space starts the battle" if _deploying else "IN THE FIELD"
+	var digits: Array[String] = []
+	for digit in _groups.keys():
+		digits.append(str(digit))
+	digits.sort()
+	var groups := "groups %s" % ", ".join(digits) if not digits.is_empty() else "no groups saved"
+	return "COMMAND  %s   |   holding: %s   |   %s" % [stage, _selection_names(), groups]
+
+
+## The right hand's command: an enemy formation under the pointer is an order to attack it,
+## anything else is an order to march there. One button, two orders, decided by what is under it -
+## which is why the player never has to learn a modifier.
+func _right_click(world: Vector2) -> void:
+	var mine := _living_selection()
+	if mine.is_empty():
+		return
+	var target := _body_at(world)
+	if target >= 0 and not _is_mine(target):
+		_order_attack(mine, target)
+	elif target >= 0 and _is_mine(target):
+		# Pointing at one's own formation with a selection in hand reads as "form up on that
+		# one", not "attack my own men".
+		_order_move(mine, _anchor_of(target))
+	else:
+		_order_move(mine, world)
+
+
+func _click_select(world: Vector2, add: bool) -> void:
+	var hit := _body_at(world)
+	if not add:
+		_selected.clear()
+	if _is_mine(hit) and not _selected.has(hit):
+		_selected.append(hit)
+	_announce_selection()
+
+
+func _box_select(from: Vector2, to: Vector2, add: bool) -> void:
+	if not add:
+		_selected.clear()
+	var rect := Rect2(from, to - from).abs()
+	for b in _bodies:
+		if not _is_mine(b) or _body_alive[b] <= 0:
+			continue
+		if rect.has_point(_anchor_of(b)) and not _selected.has(b):
+			_selected.append(b)
+	_announce_selection()
+
+
+func _group_assign(digit: int) -> void:
+	var mine := _living_selection()
+	if mine.is_empty():
+		return
+	_groups[digit] = mine.duplicate()
+	print("gpu crowd: group %d is %s" % [digit, _selection_names()])
+
+
+func _group_recall(digit: int) -> void:
+	if not _groups.has(digit):
+		print("gpu crowd: no group %d" % digit)
+		return
+	_selected.clear()
+	for b in _groups[digit]:
+		if b >= 0 and b < _bodies and _body_alive[b] > 0:
+			_selected.append(b)
+	_announce_selection()
+
+
+## The player's order to move: the same ADVANCE a scripted event gives, to a point on the ground.
+func _order_move(bodies: Array, point: Vector2) -> void:
+	var moved := 0
+	for b in bodies:
+		if not _is_mine(b) or _body_alive[b] <= 0:
+			continue
+		_order[b] = Order.ADVANCE
+		_order_point[b] = point
+		_hold_ordered[b] = 0
+		moved += 1
+	if moved > 0:
+		print("gpu crowd: %s ordered to (%.0f, %.0f)" % [_selection_names(), point.x, point.y])
+
+
+## The player's order to attack, which outranks whatever the body would have chosen for itself -
+## the reference keeps the player's target in its own field for exactly this reason.
+func _order_attack(bodies: Array, target: int) -> void:
+	if target < 0 or target >= _bodies:
+		return
+	var sent := 0
+	for b in bodies:
+		if not _is_mine(b) or _body_alive[b] <= 0:
+			continue
+		_order[b] = Order.ENGAGE
+		_order_target[b] = target
+		_hold_ordered[b] = 0
+		sent += 1
+	if sent > 0:
+		print("gpu crowd: %s ordered to attack %s" % [_selection_names(), _body_name(target)])
+
+
+func _order_stance(bodies: Array, hold: bool) -> void:
+	var set := 0
+	for b in bodies:
+		if not _is_mine(b) or _body_alive[b] <= 0:
+			continue
+		_order[b] = Order.HOLD if hold else Order.ENGAGE
+		_hold_ordered[b] = 1 if hold else 0
+		if not hold:
+			_order_target[b] = -1
+		set += 1
+	if set > 0:
+		print("gpu crowd: %s told to %s" % [_selection_names(), "hold" if hold else "engage at will"])
+
+
+## A new shape for a formation: how many files it spreads to, the depth that follows from it, and
+## the spacing. Every man is re-laid into that lattice here, on the CPU, and his file and rank go
+## back into the attribute buffer the shader slots him from - so the shape the player picks is the
+## shape the men walk into, not a label pinned to the old one.
+func _set_formation(bodies: Array, kind: String) -> void:
+	_load_shapes()
+	if not _shapes.has(kind):
+		return
+	var shape: Dictionary = _shapes[kind]
+	var names := _selection_names()
+	var changed := 0
+	for b in bodies:
+		if not _is_mine(b) or _body_alive[b] <= 0:
+			continue
+		if _relay_body(b, shape):
+			changed += 1
+	if changed > 0:
+		print("gpu crowd: %s re-formed as %s" % [names, kind])
+
+
+## Lays body b's men out again in the shape asked for and writes their new places into the attribute
+## buffer. The fallen are re-laid along with the living: they do not move, and a man's file and rank
+## only ever told the walk where to put him while he was alive. Returns whether the body changed.
+func _relay_body(b: int, shape: Dictionary) -> bool:
+	var count := 0
+	for i in agents:
+		if _man_body[i] == b:
+			count += 1
+	if count <= 0:
+		return false
+	var wide := float(maxi(2, _line_files if _line_files > 0 else _body_state[b * 8 + 4]))
+	var cap := float(shape.get("files_cap", 999.0))
+	var wanted := wide * cap if cap < 1.0 else minf(wide, cap)
+	var files := int(clampf(round(wanted), 2.0, wide))
+	# A shape may not be deeper than the station the body stands in. A hundred and fifty men in
+	# four files is thirty-eight ranks - ninety-six units of column inside a forty-two unit band,
+	# which puts the rear ranks inside the neighbouring formation and the same shape that reads as
+	# "go down the road" in open country becomes a crowd standing in another crowd. Measured: a
+	# scripted column order produced 34,884 pairs closer than the separation minimum, worst gap
+	# 1.76 against 2.47, because the solver was pushing apart men who had nowhere to be pushed to.
+	# The station is the honest limit at this scale, and a column is a shape for open ground.
+	var station := maxf(4.0, field.y / float(maxi(1, bodies_per_side)) - BAND_MARGIN * 2.0)
+	var ranks_that_fit := maxi(2, int(floor(station / SEPARATION)) + 1)
+	files = maxi(files, int(ceil(float(count) / float(ranks_that_fit))))
+	var ranks := int(ceil(float(count) / float(files)))
+	if int(_body_state[b * 8 + 4]) == files and is_equal_approx(_body_state[b * 8 + 6], SEPARATION * float(shape.get("spacing", 1.0))):
+		return false
+	var spacing := SEPARATION * float(shape.get("spacing", 1.0))
+	var bytes := rd.buffer_get_data(buf_attrs)
+	var at := 0
+	for i in agents:
+		if _man_body[i] != b:
+			continue
+		var lane := at % files
+		var rank := at / files
+		_man_file[i] = lane
+		_man_rank[i] = rank
+		bytes.encode_u32(i * 16 + 4, lane)
+		bytes.encode_u32(i * 16 + 8, rank)
+		at += 1
+	rd.buffer_update(buf_attrs, 0, bytes.size(), bytes)
+	_body_state[b * 8 + 4] = float(files)
+	_body_state[b * 8 + 5] = float(ranks)
+	_body_state[b * 8 + 6] = spacing
+	return true
+
+
+## The selection rings, the order lines and the dragging box, refilled every frame. All of it is
+## world space: the paint layer is a child of the view root, so the transform that lays the ground
+## down lays these on it, and none of it has to be told about panning, turning or zooming.
+func _update_marks() -> void:
+	if _paint == null:
+		return
+	var lines: Array = []
+	var rects: Array = []
+	for b in _living_selection():
+		var anchor := _anchor_of(b)
+		var across := Vector2(-_forward_of(b).y, _forward_of(b).x)
+		var half_span := maxf(2.0, _body_state[b * 8 + 4] * _body_state[b * 8 + 6] * 0.5)
+		lines.append([anchor - across * half_span, anchor + across * half_span, SELECT_COLOUR, 1.6, 0.0])
+	for b in _selected:
+		if b < 0 or b >= _bodies or _body_alive[b] <= 0:
+			continue
+		var from := _anchor_of(b)
+		match _order[b]:
+			Order.ADVANCE:
+				lines.append([from, _order_point[b], ORDER_COLOUR, 1.1, 3.0])
+			Order.ENGAGE:
+				var target := _order_target[b]
+				if target >= 0 and target < _bodies and _body_alive[target] > 0:
+					lines.append([from, _anchor_of(target), ENEMY_COLOUR, 1.1, 3.0])
+	if _box_active:
+		rects.append([Rect2(_uniso(_box_from), _uniso(_box_to) - _uniso(_box_from)).abs(), BOX_COLOUR, 0.9, 0.10])
+	_paint.lines = lines
+	_paint.rects = rects
+	_paint.queue_redraw()
+
+
+## Deployment. The battle begins as a plan: the player may drag his formations into place, and the
+## enemy stands where the scenario put him. Placement is nothing more than the anchor the march
+## moves, so a placed formation is not a special kind of formation - the men walk to the slots that
+## follow from where it was put.
+func _place_body(b: int, world: Vector2) -> void:
+	var margin := 14.0
+	var limit := field.x * 0.5 - margin
+	var want := Vector2(clampf(world.x, margin, limit), clampf(world.y, margin, field.y - margin))
+	_body_state[b * 8 + 0] = want.x
+	_body_state[b * 8 + 1] = want.y
+
+
+func _start_battle() -> void:
+	if not _deploying:
+		return
+	_deploying = false
+	for b in _bodies:
+		if _is_mine(b) and _body_alive[b] > 0:
+			_order[b] = Order.ENGAGE
+			_order_target[b] = -1
+			_hold_ordered[b] = 0
+	print("gpu crowd: the battle begins on tick %d" % _tick)
+
+
+## A scripted order, written through exactly the same functions the mouse uses. This is how the
+## interaction is tested without hands: if a scripted order and a clicked one disagree, then the two
+## paths are not one path, and that is a bug worth catching before a player finds it.
+func _apply_scripted_input() -> void:
+	if _script_queue.is_empty():
+		return
+	var entry: Array = _script_queue[0]
+	if _tick < int(entry[0]):
+		return
+	_script_queue.remove_at(0)
+	match str(entry[1]):
+		"select":
+			_selected.clear()
+			for b in entry[2]:
+				if _is_mine(int(b)):
+					_selected.append(int(b))
+			_announce_selection()
+		"move":
+			_order_move(_living_selection(), entry[2])
+		"attack":
+			_order_attack(_living_selection(), int(entry[2]))
+		"hold":
+			_order_stance(_living_selection(), true)
+		"engage":
+			_order_stance(_living_selection(), false)
+		"shape":
+			_set_formation(_living_selection(), str(entry[2]))
+		"group":
+			_group_assign(int(entry[2]))
+		"recall":
+			_group_recall(int(entry[2]))
+		"start":
+			_start_battle()
+
+
+## Parses one scripted order: --at=TICK:select=0,1 / move=120,300 / attack=1 / hold / engage /
+## shape=column / group=1 / recall=1 / start. Every order carries the tick it happens on, because a
+## test that cannot say *when* only ever checks the first tick of a battle.
+func _parse_script(arg: String) -> void:
+	var body := arg
+	var when := 0
+	if body.begins_with("--at="):
+		var rest := body.substr(5)
+		var split := rest.find(":")
+		if split < 0:
+			return
+		when = int(rest.substr(0, split))
+		body = rest.substr(split + 1)
+	if body.begins_with("select="):
+		var ids: Array = []
+		for piece in body.substr(7).split(",", false):
+			ids.append(int(piece))
+		_script_queue.append([when, "select", ids])
+	elif body.begins_with("move="):
+		var bits := body.substr(5).split(",", false)
+		if bits.size() == 2:
+			_script_queue.append([when, "move", Vector2(float(bits[0]), float(bits[1]))])
+	elif body.begins_with("attack="):
+		_script_queue.append([when, "attack", int(body.substr(7))])
+	elif body == "hold":
+		_script_queue.append([when, "hold", 0])
+	elif body == "engage":
+		_script_queue.append([when, "engage", 0])
+	elif body.begins_with("shape="):
+		_script_queue.append([when, "shape", body.substr(6)])
+	elif body.begins_with("group="):
+		_script_queue.append([when, "group", int(body.substr(6))])
+	elif body.begins_with("recall="):
+		_script_queue.append([when, "recall", int(body.substr(7))])
+	elif body == "start":
+		_script_queue.append([when, "start", 0])

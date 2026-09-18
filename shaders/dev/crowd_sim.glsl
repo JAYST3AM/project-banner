@@ -88,9 +88,13 @@ const uint DAMAGE_SCALE = 100u;
 // (these start at 8 and run to 13, one per body). Everything from 14 up is a target counter that
 // starts at zero. The clear pass covers the whole block: covering too few was a real bug once -
 // the tail was never reset and every "this tick" figure became a running total.
-const uint COUNTER_COUNT = 23u;
-const uint BODY_GAP_BASE = 8u;
-const uint BODY_GAP_SLOTS = 6u;
+const uint COUNTER_COUNT = 64u;
+const uint BODY_GAP_BASE = 32u;
+const uint BODY_GAP_SLOTS = 32u;
+// The per-body blocks are written and read at the same base. They were not, once: the reader moved
+// to 32 and the writer stayed at 8, so every body read "no enemy anywhere near" and pressed until
+// the fronts stood 2.05 apart with 24,314 pairs under the agreed minimum. The base is now named in
+// both places and the fault cannot recur silently.
 const int NO_TARGET = -1;
 // The unit the separation corrections are accumulated in. Fixed-point integers, deliberately:
 // the order neighbours are visited in depends on which thread binned which man first, and a float
@@ -273,7 +277,7 @@ void main() {
 							// a body advances exactly while nobody is in reach of it, which is
 							// the game's "press into the gap" rule with a measured gap instead
 							// of a guessed one.
-							atomicMin(counters.c[8u + uint(attrs.a[gid].x)], uint(dist * 1000.0));
+							atomicMin(counters.c[BODY_GAP_BASE + uint(attrs.a[gid].x)], uint(dist * 1000.0));
 							// The local search the acquisition is built on: the nearest enemy
 							// this 3x3 neighbourhood offers. Ties are broken by the lower
 							// agent id, so the answer cannot depend on the order the grid
