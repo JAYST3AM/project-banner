@@ -61,6 +61,10 @@ func current_settlement() -> Settlement:
 ## Where the party is on its route, and whether that is a road. Kept when a destination is set, so
 ## step() follows the same curve the map draws rather than cutting across country.
 var route: PackedVector2Array = PackedVector2Array()
+## Which settlement the current route is for. Without this the route was built once and kept forever:
+## the first order followed the roads and every order after it walked the old road to the old place -
+## the owner: "player does it off first command, but then not again".
+var _route_target := ""
 ## The world's field, built lazily: ground_factor() reads it every step and build() is not cheap.
 var _world: WorldChunks = null
 var route_leg := 0
@@ -287,8 +291,14 @@ func step(game_hours: float) -> Dictionary:
 		return report
 	# The first step after a destination is set routes through the road network, once. After that the
 	# party walks the route's own points, so its line on the map is the line the map drew.
-	if route.size() < 2 and is_travelling() and destination() != null:
-		build_route(destination())
+	var wanted := destination()
+	if wanted != null and str(wanted.id) != _route_target:
+		# A new destination, or the first: route it now. Re-routing on *identity*, not on emptiness,
+		# is what makes every order work rather than only the first.
+		_route_target = str(wanted.id)
+		route = PackedVector2Array()
+		route_leg = 0
+		build_route(wanted)
 	if route.size() >= 2:
 		while route_leg < route.size() - 1 and state.world_position.distance_to(route[route_leg + 1]) < 2.0:
 			route_leg += 1
@@ -313,7 +323,10 @@ func step(game_hours: float) -> Dictionary:
 		report["distance_travelled"] = distance
 		return report
 
-	var travel := speed_units_per_game_hour() * game_hours
+	# Cap one step's travel. The first step after an order can carry a long block of accumulated game
+	# time and fling the party most of the way to its destination in a single tick - the owner: "first
+	# movement command for some reason it is quick af". A step is a step, however much time it owes.
+	var travel := minf(speed_units_per_game_hour() * game_hours, config.get_float("travel.max_step_units", 24.0))
 	# Never overshoot a waypoint to reach the next one: the party moves toward the point immediately
 	# ahead and no further, which is what keeps it on the curve instead of cutting the corner. The
 	# owner: "like the curvature and everything needs to be followed."
