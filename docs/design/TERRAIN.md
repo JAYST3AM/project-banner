@@ -38,7 +38,7 @@ showing unless a line says so.
 
 ## Dials
 
-Three numbers in `world_terrain.gd` and two constants in `world_map_view.gd`. All were set from the
+Four numbers: three in `world_terrain.gd`, and the map ink in `world_map_view.gd`. All were set from the
 first showing on the real map, and all are meant to be turned.
 
 - **`LOOK_STRENGTH` (0.75)** - how much of a look a place can be. The owner's note was that the
@@ -47,9 +47,12 @@ first showing on the real map, and all are meant to be turned.
   stronger contrasts between regions, lower for a calmer map.
 - **`BLEND_WIDTH_CELLS` (6)** - how wide the band a look changes across is. 3 read as a mottle;
   6 reads as a gradient. Raise for softer still.
-- **`TILE_UNITS` (260)** - world units per texture repeat. **Smaller makes the ground busier, not
-  calmer**: the art's own detail (flowers, stones) is shown finer than the roads and labels at small
-  repeats, which is what the grain is. Larger tiles calm it.
+- **`TILE_UNITS` (100)** - world units per texture repeat. 260 was the first showing, 160 the second,
+  100 the third. The owner asked for more tiles at each step and was right each time, because at map
+  zoom the ground reads as *uniform* long before it reads as *repeated*: what smaller repeats buy is
+  variety, not busyness. The trade-off to watch is softness rather than grain - the same art spread
+  over less ground is minified harder, and the fix for soft ground is a finer art set or props, not
+  a larger repeat.
 - **Ink, not terrain** - the map's roads and labels were coloured to sit on a flat dark slab, and
   over painted ground they disappeared. Roads are now **cased** (a dark edge under the line, the
   trick contour maps have always used) and labels carry an **eight-way outline** instead of one drop
