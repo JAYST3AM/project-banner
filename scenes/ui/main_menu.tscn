@@ -3,84 +3,9 @@
 [ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_menu"]
 
 [node name="MainMenu" type="Control"]
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_menu")
-
-[node name="Background" type="ColorRect" parent="."]
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-color = Color(0.0705882, 0.0705882, 0.0862745, 1)
-
-[node name="Frame" type="VBoxContainer" parent="."]
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -240.0
-offset_top = -230.0
-offset_right = 240.0
-offset_bottom = 230.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/separation = 10
-
-[node name="Title" type="Label" parent="Frame"]
-theme_override_colors/font_color = Color(0.917647, 0.807843, 0.54902, 1)
-theme_override_font_sizes/font_size = 52
-text = "PROJECT BANNER"
-horizontal_alignment = 1
-
-[node name="Tagline" type="Label" parent="Frame"]
-theme_override_colors/font_color = Color(0.658824, 0.678431, 0.717647, 1)
-theme_override_font_sizes/font_size = 16
-text = "A persistent medieval world. Individual soldiers. Permanent consequences."
-horizontal_alignment = 1
-
-[node name="Spacer" type="Control" parent="Frame"]
-custom_minimum_size = Vector2(0, 18)
-
-[node name="NameLabel" type="Label" parent="Frame"]
-theme_override_colors/font_color = Color(0.658824, 0.678431, 0.717647, 1)
-theme_override_font_sizes/font_size = 14
-text = "Campaign name"
-
-[node name="NameInput" type="LineEdit" parent="Frame"]
-custom_minimum_size = Vector2(480, 34)
-placeholder_text = "A New Banner"
-max_length = 48
-
-[node name="SeedLabel" type="Label" parent="Frame"]
-theme_override_colors/font_color = Color(0.658824, 0.678431, 0.717647, 1)
-theme_override_font_sizes/font_size = 14
-text = "World seed (blank = random)"
-
-[node name="SeedInput" type="LineEdit" parent="Frame"]
-custom_minimum_size = Vector2(480, 34)
-placeholder_text = "random"
-max_length = 18
-
-[node name="Spacer2" type="Control" parent="Frame"]
-custom_minimum_size = Vector2(0, 14)
-
-[node name="NewCampaignButton" type="Button" parent="Frame"]
-custom_minimum_size = Vector2(480, 42)
-text = "New Campaign"
-
-[node name="ContinueButton" type="Button" parent="Frame"]
-custom_minimum_size = Vector2(480, 42)
-text = "Continue"
-
-[node name="QuitButton" type="Button" parent="Frame"]
-custom_minimum_size = Vector2(480, 42)
-text = "Quit"
-
-[node name="StatusLabel" type="Label" parent="Frame"]
-custom_minimum_size = Vector2(480, 46)
-theme_override_colors/font_color = Color(0.658824, 0.678431, 0.717647, 1)
-theme_override_font_sizes/font_size = 13
-text = "No saved campaign found."
-horizontal_alignment = 1
-autowrap_mode = 2
