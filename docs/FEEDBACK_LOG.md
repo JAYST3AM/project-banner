@@ -12,54 +12,17 @@ hour: "I want the terrain smaller" was read as an approval and four changes went
 shader's samplers, four import files, and a new `--no-ground` switch. He was right to call it out.
 Feature requests are not approvals. An approval is an approval.
 
-## Terrain direction (agreed in conversation, nothing built beyond the first showing)
+## Where the thinking lives
 
-- **The campaign map owns terrain.** A battlefield is a *window of it* - biome, height trend, line
-  features - with local detail invented inside those facts. Today a battle carries coordinates and
-  weather but not its ground; `BattleContext` is the channel that would carry it.
-- **Biomes blend; they do not abut.** A tile carries weights (70% grass / 30% forest) and colour,
-  height, prop density and movement all read those weights. Heights must blend too, or the border
-  becomes a cliff.
-- **Decided:** movement in a mixed tile is **by the mix**, not by the dominant biome.
-- **Undecided until tested:** blend width (1 tile vs 2-3) and whether the border is straight or
-  wiggled by noise. Both are constants in `world_terrain.gd` waiting on a look.
-- **Props** follow the weights: per-prop density and a **minimum weight**, seeded per tile, so a
-  sprinkle of woodland does not leave lone trees in a field.
-- He wants **procedural campaign map generation** - seed -> biomes -> blend -> battlefield window.
-- Four ground variants per biome, chosen per tile by a seeded hash.
+Topic notes, kept apart from this log so a decision has one home:
 
-## The plains set (delivered)
+- `docs/design/TERRAIN.md` - ground: biomes that blend by weight, the four looks, the plains set,
+  what the first showing proved, and what is still open.
+- `docs/design/WORLD_GENERATION.md` - procedural map, off-screen streaming, and the world that keeps
+  running while nobody is watching.
 
-Four looks, not four variations: Standard, Lush, Dry, Worn. Painted, top-down, 1254x1254, tileable.
-Catalogued in `data/terrain/biomes.json` with colours sampled from the art.
-
-## The first terrain showing, and his notes on it
-
-Built: a biome field from the world seed, a shader mixing two grounds by its weight, a blend band
-across the map. His verdict: **"you've meshed it very well"**.
-
-His notes, unresolved:
-
-1. **"I only see terrain, I said use the game's map for now, so there's no towns or anything showing
-   - why's that?"** The map's own feature layer - roads, settlement circles, labels, parties - is not
-   visible over the ground. Ruled out by reading: draw order (terrain is z -1, the feature pass is
-   z 0) and the feature code itself (intact, no parse errors). **His hypothesis: the terrain is
-   drawn on top of the UI.** The test that settles it is a single run with the ground off; it has
-   not been run yet.
-2. **"I want the terrain smaller like use more tiles."** Tile size 800 -> 260 was written, with
-   mipmaps enabled so the art does not alias back into speckle. **Uncommitted and awaiting his
-   keep / keep-part / revert decision.**
-
-3. **"I only saw 2 different terrains is that correct?"** Yes, and it is deliberate: the shader has
-   two ground slots, filled with the set's *first* look (Standard) against its *third* (Dry), because
-   one biome's art had to stand in for two biomes to show a blend at all. Lush and Worn are
-   catalogued but drawn nowhere - and the per-tile variant picker (a seeded hash choosing among the
-   four) is not built. Four looks exist; two are in use.
-
-4. **"Make sure to have 4 next time."** All four looks of a biome in use, not two. That means the
-   shader carrying four ground slots and a weight per look (a splat, not a two-way mix), plus the
-   per-tile picker that chooses a tile's variant from a seeded hash of its position - so a biome is
-   four faces, and so the paving repeats neither across the map nor across the blend.
+This file keeps what the topic files should not: his words as he said them, the verdicts, the
+process rule above, and whatever is waiting on him right now.
 
 ## Where the working tree stands
 
