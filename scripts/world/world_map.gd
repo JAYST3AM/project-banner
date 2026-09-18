@@ -64,6 +64,8 @@ func _ready() -> void:
 		while thread.is_alive():
 			await get_tree().process_frame
 		thread.wait_to_finish()
+		loader.set_status("Laying the ground under it")
+		await get_tree().process_frame
 		loader.finish()
 	else:
 		builder.build_if_needed()

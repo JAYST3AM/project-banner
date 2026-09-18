@@ -44,6 +44,11 @@ var progress := 0.0
 ## How many settlements exist. The loop below places one per iteration.
 var placing := 0
 
+## What the build is doing, in the owner's language, for the loading screen to show. He asked for more
+## of these, and the honest ones are the stages that really exist - a message per phase, not a rotation
+## of flavour text invented to fill time.
+var stage := "Reading the seed"
+
 
 func build() -> void:
 	if state == null:
@@ -104,12 +109,14 @@ func _build_procedural() -> void:
 	var centre := Vector2(WorldChunks.WORLD_SIZE, WorldChunks.WORLD_SIZE) * 0.5
 	var sites := WorldSites.build(seed_value)
 	var started := Time.get_ticks_usec()
+	stage = "Choosing where settlements stand"
 	var chosen := sites.settlement_sites(count, centre, radius)
 	var elapsed := float(Time.get_ticks_usec() - started) / 1000.0
 
 	var largest: Settlement = null
 	var names: Array[String] = []
 	placing = chosen.size()
+	stage = "Placing settlements and writing their names"
 	for i in chosen.size():
 		progress = float(i) / float(maxi(1, chosen.size()))
 		var site := chosen[i]

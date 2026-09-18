@@ -151,9 +151,19 @@ func _process(delta: float) -> void:
 	# Ease at a rate that crosses the gap in about a fifth of a second: fast enough that the bar is
 	# never lagging behind a settlement, slow enough that ninety steps do not read as ninety jolts.
 	_fill.size.x = BAR_WIDTH * move_toward(shown, _reported, delta * 5.0)
+	# The message follows the real stage of the build, in order: the seed, choosing the sites, placing
+	# them one by one with a count, the roads between them, then the ground under all of it. Every line
+	# here is something the build is actually doing at that moment.
+	var message := "Generating the world"
+	if source != null and "stage" in source:
+		message = str(source.stage)
 	if source != null and "placing" in source and int(source.placing) > 0:
 		var placed := int(round(float(source.placing) * _reported))
-		_status.text = "Placing settlements  %d of %d" % [placed, int(source.placing)]
+		if placed >= int(source.placing):
+			message = "Laying the roads between them"
+		else:
+			message = "%s  -  %d of %d" % [message, placed, int(source.placing)]
+	_status.text = message
 
 
 ## Name what is happening. The builder cannot report progress, but it can be described.
