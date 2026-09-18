@@ -28,6 +28,7 @@ const FLUSH_EVERY_MS := 1000
 const FLUSH_AT_LINES := 120
 
 var _pending: PackedStringArray = []
+var _log_handle: FileAccess = null
 var _last_flush_ms := 0
 var _log_path := ""
 ## A line identical to the one before it, inside this window, is dropped rather than written again.
@@ -48,6 +49,10 @@ func _ready() -> void:
 	# Globalized on purpose: the *absolute* variant of this call wants a real path, and handing it a
 	# user:// one fails quietly - which it did, and the sink wrote nothing.
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(LOG_DIR))
+	# Opened once and held: WRITE creates the file, and a handle kept for the session is both
+	# faster than an open per flush and immune to the mistake that made the first version write
+	# nothing - READ_WRITE does not create a file that is not there, and fails quietly.
+	_log_handle = FileAccess.open(LOG_FILE, FileAccess.WRITE)
 	# The session's file starts with a header, so a log found later says which run it is.
 	_pending.append("=== session %s ===" % Time.get_datetime_string_from_system())
 	_log_path = ProjectSettings.globalize_path(LOG_FILE)
@@ -66,22 +71,22 @@ func _flush_if_due(force: bool) -> void:
 	if not force and now_ms - _last_flush_ms < FLUSH_EVERY_MS and _pending.size() < FLUSH_AT_LINES:
 		return
 	_last_flush_ms = now_ms
-	var file := FileAccess.open(LOG_FILE, FileAccess.READ_WRITE)
-	if file == null:
+	if _log_handle == null:
 		# The log must never take the game down with it.
 		_pending.clear()
 		return
-	file.seek_end()
 	for line in _pending:
-		file.store_line(line)
-	file.flush()
-	file.close()
+		_log_handle.store_line(line)
+	_log_handle.flush()
 	_pending.clear()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
 		_flush_if_due(true)
+		if _log_handle != null:
+			_log_handle.close()
+			_log_handle = null
 
 
 ## Named [code]log_entry[/code] rather than [code]log[/code] because the global
