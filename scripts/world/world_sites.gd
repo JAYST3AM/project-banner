@@ -244,7 +244,7 @@ func _site_score(point: Vector2) -> float:
 
 func _too_close(position: Vector2, settled: Array[Dictionary]) -> bool:
 	for other in settled:
-		var kind_here := kind_for(site)
+		var kind_here := kind_for(candidate)
 		if too_close(position, kind_here, other):
 			return true
 	return false
