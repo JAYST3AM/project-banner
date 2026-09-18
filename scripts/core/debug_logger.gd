@@ -13,14 +13,75 @@ const LEVEL_NAMES: Array[String] = ["DEBUG", "INFO", "WARN", "ERROR"]
 const RING_SIZE := 300
 
 var min_level: Level = Level.DEBUG
-var echo_to_stdout: bool = true
+## Off by default: a console build's print is a synchronous write and the plain Windows build has no
+## usable stdout at all, so the file below is the log that matters. Turn this on only for a run whose
+## output is being piped somewhere on purpose.
+var echo_to_stdout: bool = false
+## Where the session's log goes. Under user://, which is
+## %APPDATA%/Godot/app_userdata/Project Banner/ on Windows - so it can be tailed or grepped while the
+## game is running, without a console window and without redirecting stdout.
+const LOG_DIR := "user://logs"
+const LOG_FILE := "user://logs/session.log"
+## Lines are held in memory and written in one go: a write per line is the thing that was slow.
+const FLUSH_EVERY_MS := 1000
+## When the buffer grows past this without a flush, write it anyway so a crash cannot lose the story.
+const FLUSH_AT_LINES := 120
+
+var _pending: PackedStringArray = []
+var _last_flush_ms := 0
+var _log_path := ""
+## A line identical to the one before it, inside this window, is dropped rather than written again.
+## The owner's report was that logging froze the game, and the arithmetic agrees: a frame-rate line
+## asks to be written five times a second, a console build's print is a synchronous write, and the
+## HUD's own readout was going out through it every half second per run. Throttling repeats is what
+## makes a logger safe to leave switched on.
+const REPEAT_WINDOW_MS := 250
 
 var _ring: Array[Dictionary] = []
+var _last_message := ""
+var _last_at_ms := 0
 
 
 func _ready() -> void:
 	# Logging must keep working while gameplay is paused.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Globalized on purpose: the *absolute* variant of this call wants a real path, and handing it a
+	# user:// one fails quietly - which it did, and the sink wrote nothing.
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(LOG_DIR))
+	# The session's file starts with a header, so a log found later says which run it is.
+	_pending.append("=== session %s ===" % Time.get_datetime_string_from_system())
+	_log_path = ProjectSettings.globalize_path(LOG_FILE)
+
+
+func _process(_delta: float) -> void:
+	_flush_if_due(false)
+
+
+## Write what has been collected. Called by the clock during play, by the flush threshold, and once
+## more on the way out so the last lines are not lost.
+func _flush_if_due(force: bool) -> void:
+	if _pending.is_empty():
+		return
+	var now_ms := Time.get_ticks_msec()
+	if not force and now_ms - _last_flush_ms < FLUSH_EVERY_MS and _pending.size() < FLUSH_AT_LINES:
+		return
+	_last_flush_ms = now_ms
+	var file := FileAccess.open(LOG_FILE, FileAccess.READ_WRITE)
+	if file == null:
+		# The log must never take the game down with it.
+		_pending.clear()
+		return
+	file.seek_end()
+	for line in _pending:
+		file.store_line(line)
+	file.flush()
+	file.close()
+	_pending.clear()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		_flush_if_due(true)
 
 
 ## Named [code]log_entry[/code] rather than [code]log[/code] because the global
@@ -35,11 +96,21 @@ func log_entry(message: String, category: String = "general", level: Level = Lev
 		"category": category,
 		"message": message,
 	}
+	var now_ms := Time.get_ticks_msec()
+	if message == _last_message and now_ms - _last_at_ms < REPEAT_WINDOW_MS:
+		# The same thing, again, too soon. Counted nowhere and written nowhere: a repeat carries no
+		# information the last line did not, and the write is the expensive part.
+		return
+	_last_message = message
+	_last_at_ms = now_ms
 	_ring.append(entry)
 	while _ring.size() > RING_SIZE:
 		_ring.pop_front()
+	var line := _format(entry)
+	_pending.append(line)
+	_flush_if_due(false)
 	if echo_to_stdout:
-		print(_format(entry))
+		print(line)
 	logged.emit(entry)
 
 

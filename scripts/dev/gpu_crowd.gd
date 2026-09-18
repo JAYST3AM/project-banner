@@ -345,6 +345,12 @@ func _update_camera(delta: float) -> void:
 	_camera.zoom = Vector2.ONE * _picture_scale()
 	if _view_root != null:
 		_view_root.transform = _view_transform()
+	# Reported here, not at build time: the root's transform is laid down by the camera, and a
+	# report taken before that describes an identity nobody ever sees on screen. Measured at build
+	# time first, and it said the ground was drawn flat - which was true for about one frame.
+	if not _geometry_logged:
+		_geometry_logged = true
+		_log_view_geometry()
 
 
 ## Zoom toward the cursor: the ground under the pointer stays under the pointer. That is the gesture
@@ -532,6 +538,12 @@ var _tick_usec := 0
 var _readback_usec := 0
 ## Four ints a man, straight from the tallies buffer: see [method tally].
 var _tallies := PackedInt32Array()
+## Where each man is drawn, in picture space, kept so the drawn bounds can be compared with the
+## ground's. Filled by the pack loop; diagnostic only, and empty until the first pack.
+var _man_picture := PackedVector2Array()
+## Print where the ground and the men are drawn, once, at setup. On by default: one line a battle.
+var debug_view_geometry := true
+var _geometry_logged := false
 var _pack_usec := 0
 var _frame_delta := 0.0
 var _frames := 0
@@ -851,6 +863,7 @@ func _build() -> void:
 	# shader's uvec4 to the byte. The campaign's resolver needs all three to write its result, and
 	# this is where a whole battle stops being only a picture and becomes an outcome.
 	buf_tallies = _storage(PackedByteArray(), agents * 16)
+	_man_picture.resize(agents)
 	# The separation correction being accumulated this round, in fixed-point integers: ivec4 a man.
 	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
@@ -1405,6 +1418,8 @@ func _process(delta: float) -> void:
 		_reports += 1
 		if _reports % 5 == 0:
 			_report_bodies()
+		if _reports % 10 == 0:
+			_log_drawn_bounds()
 		_frame_delta = 0.0
 		_frames = 0
 	_update_camera(delta)
@@ -2033,6 +2048,8 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 		# the camera stays a pure viewport the player moves over it. The bars lift in picture space,
 		# so they stay level however the ground is turned.
 		var picture := _iso(position)
+		if _man_picture.size() == agents:
+			_man_picture[i] = picture
 		var bi := _man_body[i]
 		var target := target_raw[i * 4 + 0] if target_raw.size() >= i * 4 + 4 else -1
 		_targets[i] = target
@@ -2251,6 +2268,56 @@ func _field_for(count: int) -> Vector2:
 
 ## The game's own ground: produced by the production terrain generator for this seed and
 ## field, baked one pixel a cell with the elevation shading the battle view uses.
+## Where the ground is drawn against where the men are drawn, in one space, in text. The owner
+## watched enemy markers sitting off the drawn ground while the simulation insisted nobody was
+## outside the field; this line is the difference between the two claims, in numbers.
+## Where the men are drawn, against where the ground is drawn, in the same picture space. The
+## ground's corners go through the view root's transform; the men go through _iso point by point.
+## If those two ever disagree, this line is where it shows - the whole reason the owner's markers
+## could sit off the ground while the simulation insisted nobody was outside the field.
+func _log_drawn_bounds() -> void:
+	if not debug_view_geometry or _man_picture.is_empty():
+		return
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for point in _man_picture:
+		lo = lo.min(point)
+		hi = hi.max(point)
+	var corners: Array[Vector2] = [
+		Vector2.ZERO, Vector2(field.x, 0.0), Vector2(field.x, field.y), Vector2(0.0, field.y),
+	]
+	var ground_lo := Vector2(INF, INF)
+	var ground_hi := Vector2(-INF, -INF)
+	for corner in corners:
+		var drawn := _view_root.transform * corner
+		ground_lo = ground_lo.min(drawn)
+		ground_hi = ground_hi.max(drawn)
+	var worst := 0.0
+	for point in _man_picture:
+		worst = maxf(worst, maxf(ground_lo.x - point.x, maxf(point.x - ground_hi.x,
+			maxf(ground_lo.y - point.y, point.y - ground_hi.y))))
+	print("gpu crowd: drawn | ground x %.1f..%.1f y %.1f..%.1f | men x %.1f..%.1f y %.1f..%.1f | worst man outside ground %.2f | yaw %.0f" % [
+		ground_lo.x, ground_hi.x, ground_lo.y, ground_hi.y, lo.x, hi.x, lo.y, hi.y,
+		worst, rad_to_deg(yaw)])
+
+
+func _log_view_geometry() -> void:
+	if not debug_view_geometry:
+		return
+	var corners: Array[Vector2] = [
+		Vector2.ZERO, Vector2(field.x, 0.0), Vector2(field.x, field.y), Vector2(0.0, field.y),
+	]
+	var ground_lo := Vector2(INF, INF)
+	var ground_hi := Vector2(-INF, -INF)
+	for corner in corners:
+		var drawn := _view_root.transform * corner
+		ground_lo = ground_lo.min(drawn)
+		ground_hi = ground_hi.max(drawn)
+	print("gpu crowd: geometry | field (%.1f x %.1f) | ground drawn x %.1f..%.1f y %.1f..%.1f | flat %s yaw %.1f squash %.2f | centre picture (%.1f, %.1f)" % [
+		field.x, field.y, ground_lo.x, ground_hi.x, ground_lo.y, ground_hi.y,
+		str(flat_view), rad_to_deg(yaw), squash, _iso(field * 0.5).x, _iso(field * 0.5).y])
+
+
 func _build_ground() -> void:
 	var config := GameManager.config()
 	var ground := BattlefieldTerrain.generate(seed_value, field, config)
