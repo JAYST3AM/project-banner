@@ -197,6 +197,26 @@ func on_road(point: Vector2) -> bool:
 	return _nearest_link(point) >= 0
 
 
+## The speed bonus the drawn roads give a walker standing here: the best bonus among the links whose
+## corridor holds the point, or 0.0 on open ground. The line the map draws is the truth for the
+## walk - the grid only ever prices the route - so the pace changes exactly at a road's visible
+## edge, and a march crossing one gets a blip in its own footprint (D-124).
+func bonus_at(point: Vector2) -> float:
+	if state == null:
+		return 0.0
+	var radius := _traffic_radius()
+	var best := 0.0
+	var links := mini(_paths.size(), state.roads.size())
+	for i in links:
+		if _distance_to_path(_paths[i], point) > radius:
+			continue
+		var raw: Variant = state.roads[i]
+		if typeof(raw) != TYPE_DICTIONARY:
+			continue
+		best = maxf(best, bonus_of(str((raw as Dictionary).get("kind", "none"))))
+	return best
+
+
 ## The width within which walking counts as using a road: the wear scan's corridor, and the width
 ## inside which a route is snapped onto the drawn line.
 func road_radius() -> float:

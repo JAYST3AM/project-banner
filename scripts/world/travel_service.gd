@@ -86,9 +86,15 @@ var _road_log_hours := 0.0
 ## On a road the owner wants speed; off it, the ground decides. Read from the world's own field - the
 ## same one the map paints from - so a marsh is slow on the map and slow to cross.
 func ground_factor() -> float:
-	# With a priced grid, the ground answers with its own number - the exact figure the pathfinder
-	# used, tier and terrain together - so the pace and the route cannot disagree. Without one, the
-	# route's own legs are the only road this service knows, and the field answers for the rest.
+	# The drawn road answers first: the walk's pace follows the line the map draws, so the speed
+	# changes exactly where a road visibly begins and ends (D-124) - the same corridor the wear scan
+	# and the on/off-road log use. Off the line, the open ground's own factor says what the field
+	# costs. Without a road network the priced grid (or the route's own legs) still speaks, as ever.
+	if roads != null:
+		var bonus := roads.bonus_at(state.world_position)
+		if bonus > 0.0:
+			return bonus
+		return _ground_factor_at(state.world_position)
 	if costs != null and costs.is_ready():
 		return costs.factor_at(state.world_position)
 	if is_on_road():
@@ -137,9 +143,16 @@ func distance_to(point: Vector2) -> float:
 	return state.world_position.distance_to(point)
 
 
-## The speed factor the ground gives at a point: the priced grid's own answer when it exists - a
-## road's tier speeds the party exactly as it priced the route - and the raw field otherwise.
+## The speed factor the ground gives at a point. The drawn roads answer first - the pace and the eta
+## both read the line the map draws, so an estimate lands where the walk will actually change speed
+## (D-124) - and the priced grid answers for the route's sake. Open ground falls to the raw field
+## either way.
 func factor_at_point(point: Vector2) -> float:
+	if roads != null:
+		var bonus := roads.bonus_at(point)
+		if bonus > 0.0:
+			return bonus
+		return _ground_factor_at(point)
 	if costs != null and costs.is_ready():
 		return costs.factor_at(point)
 	return _ground_factor_at(point)

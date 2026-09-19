@@ -19,6 +19,7 @@ func run() -> void:
 	_test_roadless_and_revival()
 	_test_grid_prices_each_tier()
 	_test_travel_wears_and_walks_faster()
+	_test_the_pace_follows_the_drawn_road()
 	_test_the_walk_follows_the_line()
 	_test_roads_survive_a_save()
 	SaveManager.delete_all_saves()
@@ -328,6 +329,64 @@ func _test_travel_wears_and_walks_faster() -> void:
 		travel.step(0.1)
 	check(float(link.get("traffic", 0.0)) > worn_before, "walking the link wears it")
 	travel.clear_destination()
+	GameManager.end_campaign()
+
+
+## The pace and the eta read the line the map draws, not the priced grid: standing on the drawn road
+## is the road's speed exactly, standing past its corridor is the field's, even where the grid still
+## paints the surrounding block as road (D-124).
+func _test_the_pace_follows_the_drawn_road() -> void:
+	section("the pace follows the drawn road, not the block that prices it")
+	var state := _fresh_campaign("Roads Test", 782)
+	var config := GameManager.config()
+	var network := RoadNetwork.new(state, config)
+	var costs := TravelCosts.new()
+	costs.build(state.campaign_seed, config, state.roads, state.settlements)
+	var travel := TravelService.new(state, config)
+	travel.costs = costs
+	travel.roads = network
+
+	var a := state.settlement("greywatch")
+	var b := state.settlement("redmoor")
+	var path := RoadPath.between(a.position, b.position)
+	var mid := path.size() / 2
+	var here: Vector2 = path[mid]
+	var across := (path[mid + 1] - path[mid - 1]).orthogonal().normalized()
+
+	approx(travel.factor_at_point(here), network.bonus_of("road"), 0.0001,
+		"on the drawn line the road's own speed answers")
+	approx(travel.factor_at_point(here + across * 40.0), network.bonus_of("road"), 0.0001,
+		"and anywhere inside the corridor it still does")
+	var away := here + across * (network.road_radius() + 20.0)
+	approx(travel.factor_at_point(away), travel._ground_factor_at(away), 0.0001,
+		"past the corridor the open ground answers")
+	check(travel.factor_at_point(away) < network.bonus_of("road") - 0.001,
+		"which is slower than the road")
+
+	# The corner the whole change turns on: somewhere the grid paints road while the drawn line is
+	# beyond its corridor. The block used to hand out its speed there; now the line decides. The
+	# probe must also be outside *every* corridor, or the road itself is legitimately near.
+	var leaked := false
+	var leak_point := Vector2.ZERO
+	for index in range(4, path.size() - 4, 2):
+		var side_across := (path[index + 1] - path[index - 1]).orthogonal().normalized()
+		for side in [-1.0, 1.0]:
+			for step in [1.1, 1.4, 1.7, 2.0]:
+				var probe: Vector2 = path[index] + side_across * (network.road_radius() * step) * side
+				if network.bonus_at(probe) > 0.0:
+					continue
+				if costs.factor_at(probe) > network.bonus_of("road") - 0.001:
+					leaked = true
+					leak_point = probe
+					break
+			if leaked:
+				break
+		if leaked:
+			break
+	check(leaked, "the grid does paint road beyond the drawn line's corridor somewhere here")
+	if leaked:
+		check(travel.factor_at_point(leak_point) < network.bonus_of("road") - 0.001,
+			"and the pace no longer takes its speed from that block")
 	GameManager.end_campaign()
 
 
