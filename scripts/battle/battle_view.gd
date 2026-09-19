@@ -28,18 +28,12 @@ const COLOR_FACING := Color("ffe9a8")
 const COLOR_ENGAGEMENT := Color("c58cff")
 const COLOR_BAND := Color("c58cff", 0.5)
 const COLOR_PROMOTED := Color("ff8ad8")
-## The marks a fight leaves: blood, and the other marks a battle may paint later.
-const COLOR_DECAL_BLOOD := Color("6e1a18")
-const COLOR_DECAL_MARK := Color("3a3226")
 
 var simulator: BattleSimulator = null
 var context: BattleContext = null
 
 ## Ground is drawn from the simulation's terrain data, never the other way round.
 var show_terrain: bool = true
-## Which terrain channel is drawn over the ground, if any. Off unless somebody asks - the numbers are
-## there for the person building the ground, not for the person fighting on it. Press T in the battle.
-var terrain_debug_mode: int = TerrainOverlay.Mode.OFF
 ## The development overlay: anchors, facing, target slots, formation bounds, cohesion.
 var show_formation_debug: bool = false
 ## Whether this view draws the soldiers themselves. Off when a [SoldierField] draws the army
@@ -83,18 +77,9 @@ var _font: Font = null
 
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
-	# The art ground is a child so it lives in the world with everything else, and behind this
-	# node's own drawing so the soldiers are drawn over it. It stays invisible until a field with
-	# art is handed to it.
-	_ground_art = TerrainGround.new()
-	_ground_art.name = "ArtGround"
-	_ground_art.z_index = -10
-	_ground_art.visible = false
-	add_child(_ground_art)
 
 
 func _process(delta: float) -> void:
-	_sync_ground_art()
 	if _popups.is_empty() and _arrows.is_empty():
 		return
 	var kept: Array[Dictionary] = []
@@ -203,13 +188,9 @@ func _draw() -> void:
 	# walking on rather than deciding anything about it.
 	if show_terrain and simulator.terrain != null:
 		_draw_terrain()
-		_draw_terrain_debug()
 	else:
 		draw_rect(Rect2(Vector2.ZERO, size), COLOR_GROUND)
 	draw_rect(Rect2(Vector2.ZERO, size), COLOR_GROUND_EDGE, false, 0.4)
-	# The marks on the ground go down before anything standing on it: a stain is under the men, not
-	# over them, however recently it was painted.
-	_draw_decals()
 
 	# Centre line and deployment bounds, so the layout is legible before the fight
 	var centre := size.x * 0.5
@@ -348,84 +329,18 @@ func drawing_level() -> int:
 ## ground that never changes. A stale bake is caught by the terrain's own identity.
 var _ground: ImageTexture = null
 var _ground_source: int = 0
-var _ground_art: TerrainGround = null
-var _debug_overlay: ImageTexture = null
-var _debug_overlay_key: String = ""
-## The marks the fight has left on the ground, if the battle is keeping any. Null is legal: a view
-## with no decals draws none, which is what a tool or a headless run wants.
-var decals: BattlefieldDecals = null
 
 
-## Draw the ground. Drawn by the art ground when this biome has art, and baked flat when it does not,
-## and never both: a battlefield drawn twice costs twice as much and shows whichever happened last.
+## Draw the ground. Baked once, drawn in one call, and rebaked only if the terrain is replaced.
 func _draw_terrain() -> void:
 	var terrain := simulator.terrain
 	if terrain == null:
-		return
-	if _ground_art != null and _ground_art.visible:
 		return
 	if _ground == null or _ground_source != terrain.get_instance_id():
 		_ground = _bake_ground(terrain)
 		_ground_source = terrain.get_instance_id() if _ground != null else 0
 	if _ground != null:
 		draw_texture_rect(_ground, Rect2(Vector2.ZERO, terrain.size), false)
-
-
-## Hand the art ground the current field. Called from _process rather than from _draw because it
-## uploads textures and sets shader parameters, and a draw pass is not the place for either.
-func _sync_ground_art() -> void:
-	if _ground_art == null:
-		return
-	var terrain: BattlefieldTerrain = simulator.terrain if simulator != null else null
-	if terrain == null:
-		_ground_art.visible = false
-		return
-	var wanted := TerrainGround.has_art(terrain, BiomeCatalog.load_from())
-	if not wanted:
-		if _ground_art.visible:
-			_ground_art.visible = false
-		return
-	_ground_art.show_field(terrain, null, GameManager.config())
-	# A field that changed under us leaves the flat bake stale, so it is thrown away with the picture.
-	if _ground_source != terrain.get_instance_id():
-		_ground = null
-		_ground_source = 0
-
-
-## The debug overlay: one channel of the terrain, drawn over the ground.
-func _draw_terrain_debug() -> void:
-	if terrain_debug_mode == TerrainOverlay.Mode.OFF or simulator == null:
-		return
-	var terrain := simulator.terrain
-	if terrain == null:
-		return
-	var key := "%s:%d" % [terrain.signature(), terrain_debug_mode]
-	if _debug_overlay == null or _debug_overlay_key != key:
-		var image := TerrainOverlay.bake(terrain, terrain_debug_mode)
-		if image == null:
-			return
-		_debug_overlay = ImageTexture.create_from_image(image)
-		_debug_overlay_key = key
-	draw_texture_rect(_debug_overlay, Rect2(Vector2.ZERO, terrain.size), false)
-
-
-## A mark on the ground, drawn where it was painted and as strong as it has become.
-##
-## One circle per decal and nothing else: this is a stain, not a sprite pass, and at the sizes a
-## battle paints in - a few hundred marks - it costs less than the formation overlay beside it. A
-## milestone that paints thousands will want an instanced pass, which is why [BattlefieldDecals] is
-## data rather than nodes.
-func _draw_decals() -> void:
-	if decals == null or decals.is_empty():
-		return
-	for index in decals.count():
-		var kind := decals.kind_at(index)
-		if kind < 0:
-			continue
-		var colour := COLOR_DECAL_BLOOD if kind == BattlefieldDecals.Kind.BLOOD else COLOR_DECAL_MARK
-		var strength := decals.strength_at(index)
-		var alpha := clampf(0.25 + strength * 0.5, 0.0, 0.75)
-		draw_circle(decals.position_at(index), 0.5 + strength * 1.1, Color(colour.r, colour.g, colour.b, alpha))
 
 
 ## One pixel per cell, shaded by elevation the same way the per-cell rectangles were, and read back

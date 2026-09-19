@@ -81,8 +81,7 @@ static func build(
 	seed_value: int,
 	unit_type: String = "spearman",
 	enemy_unit_type: String = "spearman",
-	max_seconds: float = 0.0,
-	with_terrain: bool = true
+	max_seconds: float = 0.0
 ) -> Dictionary:
 	var context := BattleContext.new()
 	context.battle_id = "showcase_%d" % per_side
@@ -120,11 +119,7 @@ static func build(
 	simulator.grid.configure(battlefield, simulator.cell_size)
 	simulator.overlap_grid.configure(battlefield, simulator.overlap_cell_size)
 	simulator.add_units(units)
-	# The ground, unless the run is the before-half of a before-and-after: the same battle on no
-	# terrain at all is the baseline the terrain has to be measured against, and asking for it here
-	# is cheaper and more honest than keeping an old build around to compare with.
-	if with_terrain:
-		simulator.set_terrain_from_context(context, config)
+	simulator.set_terrain_from_context(context, config)
 	var terrain := simulator.terrain
 
 	build_formations(simulator, formations_catalog, bodies, per_body, per_side, units)

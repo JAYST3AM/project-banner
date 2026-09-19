@@ -38,7 +38,6 @@ var _overlay: ImageTexture = null
 var _ground_key: String = ""
 var _overlay_key: String = ""
 var _frames: int = 0
-var _art_ground: TerrainGround = null
 
 var _seed_edit: LineEdit = null
 var _readout: Label = null
@@ -50,9 +49,6 @@ var _mode_pick: OptionButton = null
 func _ready() -> void:
 	_parse_flags()
 	_build_ui()
-	# The world sits below the panel rather than under it: the panel is wide, and a battlefield half
-	# hidden behind a debug readout is a picture nobody can judge.
-	position = Vector2(20.0, 210.0)
 	_generate()
 	if not _shot_path.is_empty():
 		set_process(true)
@@ -110,7 +106,6 @@ func _generate() -> void:
 	_overlay = null
 	_ground_key = ""
 	_overlay_key = ""
-	_sync_art_ground()
 	refresh_readout()
 	queue_redraw()
 
@@ -136,25 +131,9 @@ func refresh_readout() -> void:
 func _draw() -> void:
 	if terrain == null:
 		return
-	if not (_art_ground != null and _art_ground.visible):
-		_draw_ground()
+	_draw_ground()
 	_draw_overlay()
 	_draw_props()
-
-
-## The ground as the game draws it when the biome has art: one shader over the field's own maps.
-## Returns false when there is nothing to draw that way, which is how the flat bake stays the
-## fallback rather than becoming dead code.
-##
-## The node is created when the field is generated rather than here: adding a child while a canvas
-## item is drawing is a tree change in the middle of a draw pass, which Godot refuses.
-func _sync_art_ground() -> void:
-	if _art_ground == null:
-		_art_ground = TerrainGround.new()
-		_art_ground.name = "ArtGround"
-		_art_ground.z_index = -10
-		add_child(_art_ground)
-	_art_ground.show_field(terrain, null, GameManager.config())
 
 
 ## The ground as the game draws it when there is no art: one pixel per cell, in the cell's own

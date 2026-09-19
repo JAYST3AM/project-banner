@@ -66,24 +66,12 @@ enum Channel {
 ## How opaque a sight line has to get before it counts as blocked. A single wood cell (0.7) does not
 ## block a line on its own - three of them do. A cliff (1.0) blocks by itself.
 const LOS_BLOCKED_AT := 0.75
-## How dense vegetation has to be before it hides anything, and how much opacity it adds once it is.
-## Below the threshold the growth is not in the way of a man's eyes - which is most ground in most
-## countries - and above it, it hides like the thicket it is.
-const LOS_VEGETATION_THRESHOLD := 0.5
-const LOS_VEGETATION_OPACITY := 0.6
 ## How far above a sight line the ground has to rise to cut it, in world units. A ridge hides what is
-## behind it; the ground being level with the line does not, and neither does a bump of a few feet.
-## This is deliberately about a man's height rather than about a pixel: with it set low, ordinary
-## rolling ground reported as a wall, because every cell between two points sits a little above the
-## straight line drawn over it.
-const LOS_GROUND_CLEARANCE := 1.5
+## behind it; the ground being level with the line does not.
+const LOS_GROUND_CLEARANCE := 0.5
 ## How many cells a sight-line walk may cross before it gives up and calls the line blocked. A line
 ## longer than this is a question nobody in a battle asks, and the answer is not worth the walk.
 const LOS_MAX_CELLS := 256
-
-## How many pixels a baked visual map may have. A weight map only needs a couple of pixels per cell;
-## beyond that the bake is time nobody asked for, on battlefields scaled for armies nobody has.
-const VISUAL_PIXEL_BUDGET := 262144.0
 
 ## The field this terrain describes.
 var size: Vector2 = Vector2(100.0, 60.0)
@@ -683,98 +671,59 @@ func slope_between(from: Vector2, to: Vector2) -> float:
 
 ## How opaque the ground is along a sight line, 0..1, ignoring height: the sum of the cells it
 ## crosses, capped. A caller that wants a yes or no should use [method blocks_line_of_sight].
-##
-## A line of no length has no opacity: it crosses no ground at all. That is the same contract
-## [method slope_between] honours, and it is worth honouring here because a caller asking about a
-## point is otherwise handed the opacity of whatever cell the point happens to be in.
 func sight_line_opacity(from: Vector2, to: Vector2) -> float:
-	var run := from.distance_to(to)
-	if run <= 0.0001:
-		return 0.0
-	var step := maxf(0.5, cell_size * 0.5)
-	var count := mini(LOS_MAX_CELLS, maxi(1, int(ceilf(run / step))))
-	var direction := (to - from) / run
-	var opacity := 0.0
-	var last := -1
-	for i in range(count + 1):
-		var point := from + direction * minf(run, float(i) * step)
-		var index := cell_index_at(point)
-		if index < 0 or index == last:
-			continue
-		last = index
-		opacity += _los[index]
-	return clampf(opacity, 0.0, 1.0)
+	var total := 0.0
+	for index in _line_cells(from, to):
+		total += _los[index]
+	return clampf(total, 0.0, 1.0)
 
-
-## How much memory the field's per-cell channels occupy, in bytes.
-##
-## Every channel is a packed array of 32-bit values, so this is a count of them, and the number is
-## worth being able to read off rather than guess at: a battlefield quadrupled in each direction costs
-## sixteen times this, and that - not the generation time - is what decides whether an enormous battle
-## fits. It is a measurement of the field, not an estimate of the process.
-func memory_bytes() -> int:
-	var total := 0
-	for array in [_type_index, _soil_index, _obstacle, _traversable]:
-		total += (array as PackedInt32Array).size() * 4
-	for array in [_heights, _slope, _move, _vegetation, _cover, _wetness, _los, _moisture, _blend,
-			_variant_w, _overlay_w, _mean_height, _type_move, _type_cover, _type_los]:
-		total += (array as PackedFloat32Array).size() * 4
-	total += _type_traversable.size() * 4
-	return total
-
-
-## The channels the field carries, for a caller that has to describe it: one entry per channel, each
-## with its name and how many values it holds. A tool prints this; nothing in the game reads it.
-func channel_census() -> Array:
-	return [
-		{"name": "heights", "values": _heights.size()},
-		{"name": "slope", "values": _slope.size()},
-		{"name": "movement", "values": _move.size()},
-		{"name": "vegetation", "values": _vegetation.size()},
-		{"name": "cover", "values": _cover.size()},
-		{"name": "wetness", "values": _wetness.size()},
-		{"name": "sight lines", "values": _los.size()},
-		{"name": "moisture", "values": _moisture.size()},
-		{"name": "blend", "values": _blend.size()},
-		{"name": "variant weights", "values": _variant_w.size()},
-		{"name": "overlay weights", "values": _overlay_w.size()},
-	]
 
 ## Whether the ground stops a sight line from [param from] to [param to].
 ##
 ## Two things stop it, and both are the ground rather than a rule about it: enough opaque cells
 ## (a wood is a thicket - one cell does not hide what is behind it, three do), and the land rising
 ## into the line (a ridge hides the far side of it). The walk is at cell resolution and the height
-## test is taken at the same steps - *as a fraction of the line's own length*, which is the part that
-## has to be right: measuring the line against the longest line the walk will take made ordinary
-## ground report as a ridge, because the line's height never rose off its starting height.
-##
-## A line with an end off the field is not blocked: there is no ground there to block it, and the
-## caller is more likely to have mis-measured than to have found a wall at the edge of the world.
+## test is at the same steps, so a hundred-unit line is about twenty-five array reads - cheap enough
+## for the tactical layer and far too expensive for the per-soldier loop, which is why nothing in the
+## per-soldier loop calls it.
 func blocks_line_of_sight(from: Vector2, to: Vector2) -> bool:
-	if not inside(from) or not inside(to):
-		return false
+	var opacity := 0.0
 	var run := from.distance_to(to)
-	if run <= 0.0001:
-		return false
-	var step := maxf(0.5, cell_size * 0.5)
-	var count := mini(LOS_MAX_CELLS, maxi(1, int(ceilf(run / step))))
-	var direction := (to - from) / run
 	var start_height := height_at(from)
 	var end_height := height_at(to)
-	var opacity := 0.0
-	for i in range(count + 1):
-		var travelled := minf(run, float(i) * step)
-		var index := cell_index_at(from + direction * travelled)
-		if index < 0:
-			continue
+	var steps := 0
+	for index in _line_cells(from, to):
 		opacity += _los[index]
 		if opacity >= LOS_BLOCKED_AT:
 			return true
-		var line_height := lerpf(start_height, end_height, travelled / run)
-		if _heights[index] > line_height + LOS_GROUND_CLEARANCE:
-			return true
+		if index >= 0 and index < _heights.size() and run > 0.001:
+			var fraction := float(steps) / maxf(1.0, float(LOS_MAX_CELLS))
+			var line_height := lerpf(start_height, end_height, minf(1.0, fraction))
+			if _heights[index] > line_height + LOS_GROUND_CLEARANCE:
+				return true
+		steps += 1
 	return false
+
+
+## The cells a straight line crosses, in order, without duplicates. Off-field cells are skipped.
+func _line_cells(from: Vector2, to: Vector2) -> Array[int]:
+	var cells: Array[int] = []
+	if not inside(from) or not inside(to):
+		return cells
+	var start := cell_index_at(from)
+	cells.append(start)
+	var run := from.distance_to(to)
+	if run <= 0.0001:
+		return cells
+	var step := cell_size * 0.5
+	var count := mini(LOS_MAX_CELLS, int(ceilf(run / step)))
+	var direction := (to - from) / run
+	for i in range(1, count + 1):
+		var point := from + direction * minf(run, float(i) * step)
+		var index := cell_index_at(point)
+		if index >= 0 and cells[cells.size() - 1] != index:
+			cells.append(index)
+	return cells
 
 
 ## ---------- grids ---------------------------------------------------------
@@ -843,19 +792,10 @@ func blend_grid() -> PackedFloat32Array:
 ## thousand positions - an AI considering a line, a renderer, a native kernel - pays one crossing
 ## instead of twenty thousand. Answers are in the same order as the questions, and a point off the
 ## field answers with the same value its own single-point query would: never a surprise.
-##
-## The answers are collected into an [Array] and copied into the packed result at the end, and that is
-## not ceremony: a packed array is a *value* type in GDScript, so filling one inside another function
-## would fill a copy and the caller would get a row of zeroes. The copy is one allocation per batch,
-## against twenty thousand calls.
 func sample_batch(points: PackedVector2Array, channel: Channel) -> PackedFloat32Array:
-	var values: Array = []
-	values.resize(points.size())
-	fill_batch(points, channel, values)
 	var out := PackedFloat32Array()
-	out.resize(values.size())
-	for index in values.size():
-		out[index] = float(values[index])
+	out.resize(points.size())
+	fill_batch(points, channel, out)
 	return out
 
 
@@ -914,186 +854,49 @@ func sample_one(point: Vector2, channel: Channel) -> float:
 ## map carries the four overlay coverages. Both are meant to be filtered linearly by the shader, so
 ## a weight that steps per cell reads as a blend across the ground.
 
-## The resolution the visual maps are baked at.
-##
-## One pixel per cell is the floor, because that is the resolution the data itself has; the config's
-## own number is the preference; and a ceiling keeps a battlefield scaled for a huge army from
-## spending a second baking pictures nobody asked for. The maps are read back with linear filtering,
-## so what the camera sees is a blend of these pixels rather than the pixels themselves.
-func visual_pixels_per_unit(config: GameConfig = null) -> float:
-	var wanted := 1.0
-	if config != null:
-		wanted = maxf(0.05, config.get_float("terrain.visual_pixels_per_unit", 1.0))
-	var ppu := maxf(wanted, 1.0 / maxf(0.5, cell_size))
-	var pixels := size.x * ppu * size.y * ppu
-	if pixels > VISUAL_PIXEL_BUDGET:
-		ppu *= sqrt(VISUAL_PIXEL_BUDGET / pixels)
-	return maxf(0.02, ppu)
-
-
-## A cell's own value, at a point that may fall between cells.
-##
-## The simulation reads the nearest cell and always will - a soldier is standing in one cell or
-## another. A *picture* of the ground should not be a mosaic of those cells, so the baked maps are
-## blended across the cell boundaries instead: the river gets banks, the ground changes character over
-## a few units rather than at a line, and the eye stops finding the grid. The two readings are
-## deliberately different, and neither is wrong.
-func sample_cell_weights(point: Vector2, values: PackedFloat32Array, stride: int, slot: int) -> float:
-	if values.is_empty() or cols <= 0 or rows <= 0:
-		return 0.0
-	var cx := point.x / cell_size - 0.5
-	var cy := point.y / cell_size - 0.5
-	var x0 := int(floorf(cx))
-	var y0 := int(floorf(cy))
-	var tx := clampf(cx - float(x0), 0.0, 1.0)
-	var ty := clampf(cy - float(y0), 0.0, 1.0)
-	var top := lerpf(_weight_at(x0, y0, values, stride, slot), _weight_at(x0 + 1, y0, values, stride, slot), tx)
-	var bottom := lerpf(_weight_at(x0, y0 + 1, values, stride, slot), _weight_at(x0 + 1, y0 + 1, values, stride, slot), tx)
-	return lerpf(top, bottom, ty)
-
-
-## A whole record's four values at a point, blended across cell boundaries in one walk.
-##
-## The bake reads a record at every pixel of a map, and asking [method sample_cell_weights] for each of
-## the four slots in turn walks the same four neighbours four times over - which on a map of a quarter
-## of a million pixels is the difference between a bake measured in tenths of a second and one measured
-## in seconds. Same answer, a quarter of the walking, no vector allocated per pixel.
-##
-## The values come back as a [Vector4] rather than written into an array the caller owns, because a
-## packed array is a value type: filling one inside a function fills a copy the caller never sees.
-func sample_cell_record(point: Vector2, values: PackedFloat32Array, stride: int) -> Vector4:
-	if values.is_empty() or cols <= 0 or rows <= 0:
-		return Vector4.ZERO
-	var cx := point.x / cell_size - 0.5
-	var cy := point.y / cell_size - 0.5
-	var x0 := int(floorf(cx))
-	var y0 := int(floorf(cy))
-	var tx := clampf(cx - float(x0), 0.0, 1.0)
-	var ty := clampf(cy - float(y0), 0.0, 1.0)
-	var max_col := maxi(0, cols - 1)
-	var max_row := maxi(0, rows - 1)
-	var row0 := clampi(y0, 0, max_row) * cols
-	var row1 := clampi(y0 + 1, 0, max_row) * cols
-	var base00 := (row0 + clampi(x0, 0, max_col)) * stride
-	var base10 := (row0 + clampi(x0 + 1, 0, max_col)) * stride
-	var base01 := (row1 + clampi(x0, 0, max_col)) * stride
-	var base11 := (row1 + clampi(x0 + 1, 0, max_col)) * stride
-	var top := Vector4(
-		lerpf(values[base00], values[base10], tx),
-		lerpf(values[base00 + mini(1, stride - 1)], values[base10 + mini(1, stride - 1)], tx),
-		lerpf(values[base00 + mini(2, stride - 1)], values[base10 + mini(2, stride - 1)], tx),
-		lerpf(values[base00 + mini(3, stride - 1)], values[base10 + mini(3, stride - 1)], tx))
-	var bottom := Vector4(
-		lerpf(values[base01], values[base11], tx),
-		lerpf(values[base01 + mini(1, stride - 1)], values[base11 + mini(1, stride - 1)], tx),
-		lerpf(values[base01 + mini(2, stride - 1)], values[base11 + mini(2, stride - 1)], tx),
-		lerpf(values[base01 + mini(3, stride - 1)], values[base11 + mini(3, stride - 1)], tx))
-	return top.lerp(bottom, ty)
-
-
-func _weight_at(col: int, row: int, values: PackedFloat32Array, stride: int, slot: int) -> float:
-	var c := clampi(col, 0, maxi(0, cols - 1))
-	var r := clampi(row, 0, maxi(0, rows - 1))
-	var index := (r * cols + c) * stride + slot
-	return values[index] if index >= 0 and index < values.size() else 0.0
-
-
-## A single float channel, blended the same way.
-func sample_cell_channel(point: Vector2, values: PackedFloat32Array) -> float:
-	return sample_cell_weights(point, values, 1, 0)
-
-
-## R,G,B = the four variant weights and the height, in the resolution the view asked for.
-func build_ground_map(pixels_per_unit: float = 1.0, smooth: bool = true) -> Image:
-	var width := maxi(2, int(roundf(size.x * maxf(0.02, pixels_per_unit))))
-	var height := maxi(2, int(roundf(size.y * maxf(0.02, pixels_per_unit))))
+## R,G,B = weights of variants 2, 3 and 4 (variant 1 is the remainder), A = height in 0..1.
+func build_ground_map(pixels_per_unit: float = 1.0) -> Image:
+	var width := maxi(2, int(roundf(size.x * maxf(0.05, pixels_per_unit))))
+	var height := maxi(2, int(roundf(size.y * maxf(0.05, pixels_per_unit))))
+	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
+	var tallest := maxf(0.001, max_height())
 	var lowest := min_height()
-	var span := maxf(0.001, max_height() - lowest)
-	var data := PackedByteArray()
-	data.resize(width * height * 4)
-	var at := 0
+	var span := maxf(0.001, tallest - lowest)
 	for y in height:
 		var world_y := (float(y) + 0.5) / float(height) * size.y
 		for x in width:
-			var point := Vector2((float(x) + 0.5) / float(width) * size.x, world_y)
-			var record := sample_cell_record(point, _variant_w, 4)
-			data[at] = _byte(record.y)
-			data[at + 1] = _byte(record.z)
-			data[at + 2] = _byte(record.w)
-			data[at + 3] = _byte((sample_cell_channel(point, _heights) - lowest) / span)
-			at += 4
-	return _smooth(Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, data), smooth)
+			var world_x := (float(x) + 0.5) / float(width) * size.x
+			var index := cell_index_at(Vector2(world_x, world_y))
+			if index < 0:
+				image.set_pixel(x, y, Color(0.0, 0.0, 0.0, 0.5))
+				continue
+			var w1 := variant_weight_of_cell(index, 1)
+			var w2 := variant_weight_of_cell(index, 2)
+			var w3 := variant_weight_of_cell(index, 3)
+			var relief := (_heights[index] - lowest) / span
+			image.set_pixel(x, y, Color(w1, w2, w3, relief))
+	return image
 
 
 ## R,G,B,A = the coverage of the biome's first four overlays.
-func build_overlay_map(pixels_per_unit: float = 1.0, smooth: bool = true) -> Image:
-	var width := maxi(2, int(roundf(size.x * maxf(0.02, pixels_per_unit))))
-	var height := maxi(2, int(roundf(size.y * maxf(0.02, pixels_per_unit))))
-	var data := PackedByteArray()
-	data.resize(width * height * 4)
-	var at := 0
+func build_overlay_map(pixels_per_unit: float = 1.0) -> Image:
+	var width := maxi(2, int(roundf(size.x * maxf(0.05, pixels_per_unit))))
+	var height := maxi(2, int(roundf(size.y * maxf(0.05, pixels_per_unit))))
+	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
 	for y in height:
 		var world_y := (float(y) + 0.5) / float(height) * size.y
 		for x in width:
-			var point := Vector2((float(x) + 0.5) / float(width) * size.x, world_y)
-			var record := sample_cell_record(point, _overlay_w, 4)
-			data[at] = _byte(record.x)
-			data[at + 1] = _byte(record.y)
-			data[at + 2] = _byte(record.z)
-			data[at + 3] = _byte(record.w)
-			at += 4
-	return _smooth(Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, data), smooth)
-
-
-## Where the ground is not plain ground: R = water, G = rock (a cliff face), B = mud.
-##
-## A separate map from the variant weights because these are *types* rather than looks: a river is
-## water in every country, and the renderer needs to know where to stop drawing grass. Sampled
-## linearly, so the bank between land and water is a soft edge rather than a staircase.
-func build_type_map(pixels_per_unit: float = 1.0, smooth: bool = true) -> Image:
-	var width := maxi(2, int(roundf(size.x * maxf(0.02, pixels_per_unit))))
-	var height := maxi(2, int(roundf(size.y * maxf(0.02, pixels_per_unit))))
-	# One channel per look, built once: the interpolation reads them like any other channel.
-	var water := PackedFloat32Array()
-	var rock := PackedFloat32Array()
-	var mud := PackedFloat32Array()
-	water.resize(_type_index.size())
-	rock.resize(_type_index.size())
-	mud.resize(_type_index.size())
-	for index in _type_index.size():
-		var type_id := type_id_of_cell(index)
-		water[index] = 1.0 if type_id == water_type_id else 0.0
-		rock[index] = 1.0 if type_id == cliff_type_id else 0.0
-		mud[index] = 1.0 if type_id == mud_type_id else 0.0
-	var data := PackedByteArray()
-	data.resize(width * height * 4)
-	var at := 0
-	for y in height:
-		var world_y := (float(y) + 0.5) / float(height) * size.y
-		for x in width:
-			var point := Vector2((float(x) + 0.5) / float(width) * size.x, world_y)
-			data[at] = _byte(sample_cell_channel(point, water))
-			data[at + 1] = _byte(sample_cell_channel(point, rock))
-			data[at + 2] = _byte(sample_cell_channel(point, mud))
-			data[at + 3] = 255
-			at += 4
-	return _smooth(Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, data), smooth)
-
-
-## A 0..1 value as a byte, for the baked maps. Clamped rather than trusted: a weight can be a hair
-## over one after interpolation, and a byte that wraps would turn a bright pixel into a black one.
-func _byte(value: float) -> int:
-	return clampi(int(roundf(value * 255.0)), 0, 255)
-
-
-## Feather a baked map, so a value that steps per cell reads as a transition rather than as a grid.
-##
-## This is the difference between a river drawn as a row of blue squares and a river with banks: the
-## cells are the truth and stay the truth, but the picture of them is allowed to blend. Blurring a
-## weight map is safe precisely because it is a weight map - nothing in the simulation reads it.
-func _smooth(image: Image, enabled: bool) -> Image:
-	if enabled and image.has_method("blur"):
-		image.blur()
+			var world_x := (float(x) + 0.5) / float(width) * size.x
+			var index := cell_index_at(Vector2(world_x, world_y))
+			if index < 0:
+				image.set_pixel(x, y, Color(0.0, 0.0, 0.0, 0.0))
+				continue
+			image.set_pixel(x, y, Color(
+				overlay_weight_of_cell(index, 0),
+				overlay_weight_of_cell(index, 1),
+				overlay_weight_of_cell(index, 2),
+				overlay_weight_of_cell(index, 3)
+			))
 	return image
 
 
@@ -1246,18 +1049,13 @@ func refresh_maps_of_cell(index: int) -> void:
 	# rather than re-derived: a thicket is a woods cell with vegetation in it, not a new type.
 	var vegetation := _vegetation[index] if index < _vegetation.size() else 0.0
 	_cover[index] = clampf(maxf(_type_cover[slot], vegetation * 0.35), 0.0, 0.9)
-	# Only *thick* growth hides anything. A man standing in knee-high grass is not concealed from the
-	# men opposite, and treating every blade of it as opacity made every long sight line blocked: on a
-	# field of grass, twenty cells at 0.5 vegetation summed well past [constant LOS_BLOCKED_AT]. What
-	# blocks is the type (woods, a cliff) and what is standing in the cell (a tree); the grass only
-	# counts once it is over waist high.
-	_los[index] = clampf(maxf(_type_los[slot], maxf(0.0, vegetation - LOS_VEGETATION_THRESHOLD) * LOS_VEGETATION_OPACITY), 0.0, 1.0)
+	_los[index] = clampf(maxf(_type_los[slot], vegetation * 0.5), 0.0, 1.0)
 	# A prop standing here has already written its own cover and opacity into this cell. Those are
 	# maxima rather than a base, so recomposing the ground must not lower them - a tree does not stop
 	# hiding a man because the cell under it was repainted.
 	if (obstacle_of_cell(index) & OBSTACLE_PROP) != 0:
 		_cover[index] = clampf(maxf(_cover[index], maxf(_type_cover[slot], vegetation * 0.35)), 0.0, 0.95)
-		_los[index] = clampf(maxf(_los[index], maxf(_type_los[slot], maxf(0.0, vegetation - LOS_VEGETATION_THRESHOLD) * LOS_VEGETATION_OPACITY)), 0.0, 1.0)
+		_los[index] = clampf(maxf(_los[index], maxf(_type_los[slot], vegetation * 0.5)), 0.0, 1.0)
 	var slope := _slope[index] if index < _slope.size() else 0.0
 	var ground_allows := _type_traversable[slot] == 1 and slope <= max_traversable_slope
 	# Something standing here that obstructs movement keeps its grip on the cell: a repainted type

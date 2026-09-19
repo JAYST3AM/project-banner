@@ -30,8 +30,7 @@ extends Node2D
 ## Switches: [code]--per-side=[/code], [code]--ticks-per-frame=[/code],
 ## [code]--out=[/code], [code]--seed=[/code], [code]--shots=[/code],
 ## [code]--overlay=[/code], [code]--units=[/code] (archetype),
-## [code]--enemy-units=[/code], [code]--max-ticks=[/code], [code]--probe-every=[/code],
-## [code]--no-terrain[/code] (the baseline half of a terrain benchmark).
+## [code]--enemy-units=[/code], [code]--max-ticks=[/code], [code]--probe-every=[/code].
 
 const TICK := 0.05
 const FIELD := Vector2(200.0, 120.0)
@@ -53,9 +52,6 @@ var _shots := true
 var _overlay_enabled := true
 var _probe_every := 10
 var _out_dir := "F:/VSC Projects/pb-bench/showcase_300v300"
-## Whether the battle is fought on generated ground. Off is the before-half of a before-and-after
-## benchmark: [code]--no-terrain[/code] runs the same armies on the same field with no terrain at all.
-var _terrain_enabled := true
 var _unit_type := "spearman"
 var _enemy_unit_type := "spearman"
 ## The battle's own clock limit. Left at zero the production value is used - six hundred
@@ -183,8 +179,6 @@ func _parse_args() -> void:
 			_unit_type = arg.substr(8)
 		elif arg.begins_with("--enemy-units="):
 			_enemy_unit_type = arg.substr(14)
-		elif arg == "--no-terrain":
-			_terrain_enabled = false
 		elif arg.begins_with("--max-seconds="):
 			_max_seconds = maxf(0.0, float(arg.substr(14)))
 		elif arg == "--battlelog":
@@ -200,7 +194,7 @@ func _parse_args() -> void:
 func _build_battle() -> void:
 	var built := ShowcaseBattle.build(
 		config, units_catalog, catalog, _per_side, _seed,
-		_unit_type, _enemy_unit_type, _max_seconds, _terrain_enabled)
+		_unit_type, _enemy_unit_type, _max_seconds)
 	context = built["context"]
 	simulator = built["simulator"]
 	terrain = built["terrain"]
