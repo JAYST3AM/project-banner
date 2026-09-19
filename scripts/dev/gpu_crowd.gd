@@ -570,16 +570,13 @@ var _sprite_buffer := PackedFloat32Array()
 var _sprite_offsets := PackedInt32Array()
 var _sprite_stride := 0
 var _sprite_ok := false
-## The precomputed per-side tables [method _write_sprite] reads - ticks a frame is held for, frame
-## counts, every frame's UV rectangle, that table's stride, and one typed block of scalars (cell,
-## anchor, units a pixel, the hurt and attack window lengths). Index 0 is the player's side.
-var _side_ticks: Array = []
-var _side_frames: Array = []
-var _side_uv: Array = []
-var _side_common: Array = []
-var _side_uv_stride: PackedInt32Array = PackedInt32Array()
+## The per-soldier sprite step, shared with the canvas battle's [SoldierField]: per-side tables,
+## the animation and frame, the placement and the writes live in it, and it writes only what has
+## changed since the last pack.
+var _sprite_writer := UnitSpriteWriter.new()
 ## Per-man animation state, indexed like the sim's own arrays: where he stood and what he and
-## his opponent read at the last pack, and when he was first seen hurt, swinging and dying.
+## his opponent read at the last pack, and when he was first seen hurt, swinging and dying. This
+## is the evidence - what only this renderer's readback can tell - and the writer is handed it.
 var _anim_last_position := PackedVector2Array()
 var _anim_last_hp := PackedFloat32Array()
 var _anim_target_hp := PackedFloat32Array()
@@ -2309,20 +2306,21 @@ func _build_sprites() -> void:
 		DebugLogger.info("gpu crowd: unit sprites off (the layout could not be read back)",
 			"GpuCrowd")
 		return
-	# Precomputed per side, because [method _write_sprite] runs once per soldier per pack and may
-	# not walk a dictionary: index 0 is the player's side, and every table is a typed array.
-	_side_ticks = []
-	_side_frames = []
-	_side_uv = []
-	_side_common = []
-	_side_uv_stride = PackedInt32Array()
-	for key in [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY]:
-		var data := _art.renderer_data(key, 1.0 / maxf(DT, 0.001))
-		_side_ticks.append(data["ticks"])
-		_side_frames.append(data["frames"])
-		_side_uv.append(data["uv"])
-		_side_common.append(data["common"])
-		_side_uv_stride.append(int(data["uv_stride"]))
+	# The per-soldier step lives in the writer both renderers share: it holds the per-side tables
+	# and the memory of what each soldier was last written as, and writes only what changed. One
+	# call a soldier rather than five - see UnitSpriteWriter for the measured reason.
+	if not _sprite_writer.setup(_art, [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY],
+			1.0 / maxf(DT, 0.001), _sprite_offsets, _sprite_stride, SPRITE_FOOT_LIFT,
+			SPRITE_FALLEN_DARKEN):
+		_sprites_node.queue_free()
+		_sprites_node = null
+		_sprites = null
+		_art = null
+		_sprite_ok = false
+		DebugLogger.info("gpu crowd: unit sprites off (the art or the layout is not one the "
+			+ "sprite pass can draw)", "GpuCrowd")
+		return
+	_sprite_writer.reserve(agents)
 	_reset_animation_state()
 	_sprite_buffer.resize(agents * _sprite_stride)
 	# The discs stand down now: the sprites are the army, not markers on bases.
@@ -2368,9 +2366,6 @@ func _bar_lift() -> float:
 ## get, and the walk, the death and the idle need no inference at all.
 func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
 		hp: float, alive: bool, target: int, target_hp: float) -> void:
-	if side >= _side_common.size():
-		return
-	var common: PackedFloat32Array = _side_common[side]
 	var moved := false
 	# First sighting is not a step: the army is deployed standing still, and a walk cycle at the
 	# deployment would be the picture claiming motion the simulation never made.
@@ -2395,57 +2390,15 @@ func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
 	_anim_target_hp[i] = target_hp
 	if not alive and _anim_died_tick[i] < 0:
 		_anim_died_tick[i] = _tick
-	var ticks: PackedInt32Array = _side_ticks[side]
-	var counts: PackedInt32Array = _side_frames[side]
-	var uv_table: PackedVector4Array = _side_uv[side]
-	var uv_stride := _side_uv_stride[side]
 	var hurt_age := _tick - _anim_hurt_tick[i]
 	var strike_age := _tick - _anim_strike_tick[i]
 	var death_age := 0
 	if _anim_died_tick[i] >= 0:
 		death_age = _tick - _anim_died_tick[i]
-	var anim := UnitArt.plan(alive, moved, hurt_age, strike_age, int(common[5]), int(common[6]))
-	# The phase that desynchronises a rank belongs to the loops; a blow, a wound and a death
-	# start at their first frame because the soldier just lived them.
-	var into := _tick + i * UnitArt.PHASE_STRIDE
-	if anim == UnitArt.DEATH:
-		into = maxi(0, death_age)
-	elif anim == UnitArt.HURT:
-		into = maxi(0, hurt_age)
-	elif anim == UnitArt.ATTACK:
-		into = maxi(0, strike_age)
-	var cell := Vector2(common[0], common[1])
-	var unit_scale := common[4]
-	var origin := UnitArt.origin(
-		picture + Vector2(0.0, SPRITE_FOOT_LIFT),
-		cell, Vector2(common[2], common[3]), unit_scale)
-	var custom := UnitArt.custom_from(
-		uv_table[anim * uv_stride + UnitArt.frame(anim, into, ticks[anim], counts[anim])],
-		_anim_flip[i] == 1)
-	# The side's tint, then the corpse's darkening on top of it: both sides are the soldier now,
-	# so the colour is what separates them.
-	var colour := UnitArt.side_tint(side == 0)
-	if not alive:
-		colour = colour.darkened(SPRITE_FALLEN_DARKEN)
-	_write_sprite_instance(i, origin, cell * unit_scale, colour, custom)
-
-
-## One sprite instance, written at the offsets the probe measured.
-func _write_sprite_instance(index: int, origin: Vector2, size: Vector2,
-		colour: Color, custom: Vector4) -> void:
-	var base := index * _sprite_stride
-	_sprite_buffer[base + _sprite_offsets[0]] = size.x
-	_sprite_buffer[base + _sprite_offsets[1]] = size.y
-	_sprite_buffer[base + _sprite_offsets[2]] = origin.x
-	_sprite_buffer[base + _sprite_offsets[3]] = origin.y
-	_sprite_buffer[base + _sprite_offsets[4]] = colour.r
-	_sprite_buffer[base + _sprite_offsets[4] + 1] = colour.g
-	_sprite_buffer[base + _sprite_offsets[4] + 2] = colour.b
-	_sprite_buffer[base + _sprite_offsets[4] + 3] = colour.a
-	_sprite_buffer[base + _sprite_offsets[5]] = custom.x
-	_sprite_buffer[base + _sprite_offsets[5] + 1] = custom.y
-	_sprite_buffer[base + _sprite_offsets[5] + 2] = custom.z
-	_sprite_buffer[base + _sprite_offsets[5] + 3] = custom.w
+	# One call: the animation, the frame, the placement, the tint and the four writes, with the
+	# per-side tables and the "what changed" memory inside the writer both renderers share.
+	_sprite_writer.write(_sprite_buffer, i, i, picture, side, alive, moved, hurt_age, strike_age,
+		death_age, _anim_flip[i] == 1, _tick)
 
 
 ## One box a body, drawn the way the battle view's formation debug draws it: the ground the

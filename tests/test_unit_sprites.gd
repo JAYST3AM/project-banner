@@ -27,6 +27,7 @@ func run() -> void:
 	_test_both_sides_are_the_soldier_and_read_from_the_tint()
 	_test_the_precomputed_tables_hold_together_when_the_art_is_present()
 	_test_the_instance_write_follows_the_layout()
+	_test_the_writer_matches_the_pure_functions()
 	_test_the_atlas_table_holds_together_when_the_art_is_present()
 	# A runtime error inside a test function aborts that function without recording a failure -
 	# GDScript has no try/catch - so a suite whose static calls all failed would still reach
@@ -219,6 +220,112 @@ func _test_the_instance_write_follows_the_layout() -> void:
 			"the frame rect starts inside the atlas")
 		check(custom.z != 0.0 and custom.w != 0.0, "and has a size")
 	field.free()
+
+
+## The fused writer both renderers run their soldier loop through is fast because it inlines the
+## maths and writes only what changed. That makes it the one place where the hot path could drift
+## from the specification - [method UnitArt.plan], [method UnitArt.frame], [method UnitArt.origin],
+## [method UnitArt.custom] - so every state a battle produces is staged here and the instance left
+## in the buffer is compared against what those pure functions say it should be.
+func _test_the_writer_matches_the_pure_functions() -> void:
+	section("the fused writer against the pure functions")
+	var art := UnitArt.load_if_present()
+	if art == null:
+		check(true, "absent art is a legitimate outcome, not a failure")
+		return
+	var field := SoldierField.new()
+	field.art = art
+	field.build(8)
+	if not field.adopt_sprite_layout({
+		"ok": true, "stride": 16, "x_x": 0, "y_y": 5,
+		"origin_x": 3, "origin_y": 7, "color": 8, "custom": 12,
+	}):
+		check(false, "the injected layout was refused")
+		return
+	var built := ShowcaseBattle.build(
+		GameManager.config(), UnitCatalog.load_from(), FormationCatalog.load_from(), 2, SEED)
+	var simulator: BattleSimulator = built["simulator"]
+	var unit: BattleUnit = simulator.units[0]
+	var key := UnitArt.key_for_side(unit.side)
+	var data := art.renderer_data(key, field.anim_rate)
+	var ticks: PackedInt32Array = data["ticks"]
+	var counts: PackedInt32Array = data["frames"]
+	var living := UnitArt.side_tint(unit.side == BattleContext.SIDE_PLAYER)
+
+	# The deployed army: nobody has moved yet, so the first pack has everybody standing.
+	field.pack(simulator)
+	_check_instance(art, field, simulator, unit, ticks, counts, UnitArt.IDLE, 0, "first pack")
+	approx(field.sprite_instance_colour(0).v, living.v, 0.001, "a living soldier wears his side's tint")
+
+	# The pack that changes nothing: it writes nothing, and what is left in the buffer is still
+	# what the pure functions say - the whole point of writing only what changed.
+	field.pack(simulator)
+	_check_instance(art, field, simulator, unit, ticks, counts, UnitArt.IDLE, 0, "unchanged pack")
+
+	# He walked this pack: the walk loop, and the origin where his new position puts it.
+	unit.position += Vector2(0.9, 0.4)
+	simulator.tick_index += 1
+	field.pack(simulator)
+	_check_instance(art, field, simulator, unit, ticks, counts, UnitArt.WALK, 0, "a step")
+	# ...and his old position is not where he draws: the origin moved with him.
+	var rect := field.sprite_instance_rect(0)
+	var stale := UnitArt.origin(
+		unit.position - Vector2(0.9, 0.4) + Vector2(0.0, SoldierField.FOOT_LIFT),
+		art.cell_size(key), art.anchor(key), art.units_per_pixel())
+	check(absf(rect.position.x - stale.x) > 0.01, "the origin followed him rather than staying put")
+
+	# A wound: the hurt pose, from its first frame.
+	unit.last_attacked_tick = simulator.tick_index + 1
+	simulator.tick_index += 1
+	field.pack(simulator)
+	_check_instance(art, field, simulator, unit, ticks, counts, UnitArt.HURT, 0, "a wound")
+
+	# A blow of his own: the attack pose. The canvas battle reads a strike off the cooldown
+	# jumping, which is the only trace a blow leaves on the unit itself - once the wound has
+	# played out, because a wound outranks a blow in the plan.
+	unit.cooldown_left += SoldierField.STRIKE_COOLDOWN_JUMP + 1.0
+	simulator.tick_index += int(data["common"][5]) + 1
+	field.pack(simulator)
+	_check_instance(art, field, simulator, unit, ticks, counts, UnitArt.ATTACK, 0, "a blow")
+
+	# And the fall: the death pose held at its first frame, drawn darkened.
+	var dying: BattleUnit = simulator.units[1]
+	dying.hp = 0.0
+	var death_slot := 1
+	field.pack(simulator)
+	_check_instance(art, field, simulator, dying, ticks, counts, UnitArt.DEATH, 0, "the fall",
+		death_slot)
+	approx(field.sprite_instance_colour(death_slot).v,
+		UnitArt.side_tint(dying.side == BattleContext.SIDE_PLAYER).darkened(SoldierField.FALLEN_DARKEN).v,
+		0.001, "and a corpse is drawn darkened")
+	field.free()
+
+
+## One soldier's instance against the specification: his frame rectangle and his placement, both
+## derived from [method UnitArt]'s pure functions rather than from the writer's own arithmetic.
+func _check_instance(art: UnitArt, field: SoldierField, simulator: BattleSimulator, unit: BattleUnit,
+		ticks: PackedInt32Array, counts: PackedInt32Array, animation: int, age: int, label: String,
+		slot: int = 0) -> void:
+	var key := UnitArt.key_for_side(unit.side)
+	var cell := art.cell_size(key)
+	var scale := art.units_per_pixel()
+	var into := simulator.tick_index + unit.id * UnitArt.PHASE_STRIDE
+	if animation != UnitArt.IDLE and animation != UnitArt.WALK:
+		into = maxi(0, age)
+	var frame := UnitArt.frame(animation, into, ticks[animation], counts[animation])
+	var expected := UnitArt.custom(art.uv_rect(key, animation, frame), unit.facing.x < 0.0)
+	var custom := field.sprite_instance_custom(slot)
+	approx(custom.x, expected.x, 0.0001, "%s: the frame's left edge" % label)
+	approx(custom.y, expected.y, 0.0001, "%s: its top edge" % label)
+	approx(custom.z, expected.z, 0.0001, "%s: its width" % label)
+	approx(custom.w, expected.w, 0.0001, "%s: its height" % label)
+	var placement := UnitArt.origin(
+		unit.position + Vector2(0.0, SoldierField.FOOT_LIFT), cell, art.anchor(key), scale)
+	var rect := field.sprite_instance_rect(slot)
+	approx(rect.position.x, placement.x, 0.001, "%s: the anchor on his x" % label)
+	approx(rect.position.y, placement.y, 0.001, "%s: the bottom edge on his feet" % label)
+	approx(rect.size.x, cell.x * scale, 0.001, "%s: the cell's width" % label)
+	approx(rect.size.y, cell.y * scale, 0.001, "%s: and its height" % label)
 
 
 func _test_the_atlas_table_holds_together_when_the_art_is_present() -> void:

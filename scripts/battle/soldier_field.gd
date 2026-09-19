@@ -138,15 +138,10 @@ var _sprite_layout: Dictionary = {}
 ## tick is exactly the kind of cost this file exists to avoid.
 var _sprite_offsets: PackedInt32Array = PackedInt32Array()
 var _sprite_stride: int = 0
-## The precomputed per-side tables [method _write_sprite] reads: the ticks a frame is held for,
-## the frame counts, the UV rectangle of every frame, that table's stride, and one typed block of
-## scalars (cell, anchor, units a pixel, the hurt and attack window lengths). Index 0 is the
-## player's side. Typed arrays rather than dictionaries because this runs per soldier per tick.
-var _side_ticks: Array = []
-var _side_frames: Array = []
-var _side_uv: Array = []
-var _side_uv_stride: PackedInt32Array = PackedInt32Array()
-var _side_common: Array = []
+## The per-soldier sprite step, shared with the compute battlefield: the per-side tables, the
+## animation and frame, the placement, the tint and the writes live in it, and it writes only what
+## has changed since the last pack. Rebuilt when a layout is adopted, because it needs the offsets.
+var _sprite_writer := UnitSpriteWriter.new()
 ## Per-unit animation state, indexed by unit id: where the soldier stood at the last pack,
 ## what his cooldown read, when his blow landed, when he was struck, and when he fell.
 var _anim_last_position := PackedVector2Array()
@@ -301,6 +296,10 @@ func pack(simulator: BattleSimulator) -> Dictionary:
 	_packed_pips.resize(_capacity * stride)
 	if _sprite_ok:
 		_packed_sprites.resize(_capacity * _sprite_stride)
+		if _sprite_writer.capacity() < _capacity:
+			# Belt and braces: the writer was reserved when a layout was adopted, and a field
+			# whose army grew past it would otherwise write nothing for the new men.
+			_sprite_writer.reserve(_capacity)
 	var bodies := 0
 	var bars := 0
 	var pips := 0
@@ -531,7 +530,7 @@ func probe_sprite_layout() -> Dictionary:
 func adopt_sprite_layout(layout: Dictionary) -> bool:
 	_sprite_offsets = UnitArt.offsets_from(layout)
 	_sprite_stride = int(layout.get("stride", 0)) if _sprite_offsets.size() == 6 else 0
-	_sprite_ok = _sprite_stride > 0 and _sprite_offsets.size() == 6
+	_sprite_ok = _sprite_stride > 0 and _sprite_offsets.size() == 6 and _rebuild_sprite_tables()
 	return _sprite_ok
 
 
@@ -567,6 +566,17 @@ func sprite_instance_custom(index: int) -> Vector4:
 		_packed_sprites[base + at + 2], _packed_sprites[base + at + 3])
 
 
+## The colour one packed sprite instance carries, as the shader will read it: the side's tint, or
+## a corpse's darkened tint.
+func sprite_instance_colour(index: int) -> Color:
+	var base := index * _sprite_stride
+	if _sprite_offsets.size() < 6 or base + _sprite_stride > _packed_sprites.size():
+		return Color(0.0, 0.0, 0.0, 0.0)
+	var at := _sprite_offsets[4]
+	return Color(_packed_sprites[base + at], _packed_sprites[base + at + 1],
+		_packed_sprites[base + at + 2], _packed_sprites[base + at + 3])
+
+
 ## ---------- the sprite batch -------------------------------------------------
 
 
@@ -598,33 +608,24 @@ func _build_sprite_batch(capacity: int) -> void:
 	add_child(_sprites_node)
 	_sprites = UnitArt.build_batch(art.texture(), capacity)
 	_sprites_node.multimesh = _sprites
-	_rebuild_sprite_tables()
+	# The writer's tables need the measured layout, so they are rebuilt when one is adopted
+	# ([method adopt_sprite_layout]), not here.
 	_reset_animation_state(capacity)
 
 
-## The animation clock, per character: how many ticks a frame of each animation is held for at
-## this battle's rate, how many frames there are, and how long the hurt and attack poses last.
-## All of it comes from the atlas JSON via [method UnitArt.renderer_data], and all of it is
-## precomputed here because [method _write_sprite] runs once per soldier per tick and may not
-## walk a dictionary: an index by side picks a table, and the tables are typed arrays.
-func _rebuild_sprite_tables() -> void:
-	_side_ticks = []
-	_side_frames = []
-	_side_uv = []
-	_side_uv_stride = PackedInt32Array()
-	_side_common = []
-	if art == null:
-		return
-	# Player first: index 0 is the player's side in every side-indexed table here.
-	for key in [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY]:
-		if not art.has_character(key):
-			return
-		var data := art.renderer_data(key, anim_rate)
-		_side_ticks.append(data["ticks"])
-		_side_frames.append(data["frames"])
-		_side_uv.append(data["uv"])
-		_side_common.append(data["common"])
-		_side_uv_stride.append(int(data["uv_stride"]))
+## Hand the writer both renderers share what it needs: the per-side tables this atlas produces at
+## this battle's rate, the buffer layout the probe measured, and the two placements that belong to
+## the look rather than the maths. False means there is no sprite batch to write - a run without
+## the art, or with a layout this writer does not understand, draws the discs instead.
+func _rebuild_sprite_tables() -> bool:
+	if art == null or _sprite_offsets.size() != 6 or _sprite_stride <= 0:
+		return false
+	# Player first: index 0 is the player's side in every side-indexed table the writer holds.
+	if not _sprite_writer.setup(art, [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY],
+			anim_rate, _sprite_offsets, _sprite_stride, FOOT_LIFT, FALLEN_DARKEN):
+		return false
+	_sprite_writer.reserve(_capacity)
+	return true
 
 
 ## Per-unit animation state, sized for [param capacity] id-addressed slots and reset to the
@@ -666,15 +667,16 @@ func _write_sprite(index: int, unit: BattleUnit, position: Vector2, alive: bool,
 	var known := id >= 0 and id < _capacity
 	var moved := false
 	if known:
-		# First sighting is not a step: the army is deployed standing still, and a walk cycle
-		# at the deployment would be the renderer claiming motion the simulation never made.
-		moved = _anim_seen[id] == 1 \
+		# First sighting is neither a step nor a blow: the army is deployed standing still with
+		# a fresh cooldown, and against the "never" sentinel that reads as a jump.
+		var first := _anim_seen[id] == 0
+		moved = not first \
 			and position.distance_squared_to(_anim_last_position[id]) > UnitArt.MOVE_EPSILON
 		_anim_seen[id] = 1
 		_anim_last_position[id] = position
 		# A cooldown that jumped between packs is the blow landing: it is the only trace a
 		# strike leaves on the unit itself.
-		if unit.cooldown_left > _anim_last_cooldown[id] + STRIKE_COOLDOWN_JUMP:
+		if not first and unit.cooldown_left > _anim_last_cooldown[id] + STRIKE_COOLDOWN_JUMP:
 			_anim_strike_tick[id] = tick
 		_anim_last_cooldown[id] = unit.cooldown_left
 		if unit.last_attacked_tick > _anim_last_attacked[id]:
@@ -691,50 +693,8 @@ func _write_sprite(index: int, unit: BattleUnit, position: Vector2, alive: bool,
 		if _anim_died_tick[id] >= 0:
 			death_age = tick - _anim_died_tick[id]
 	var side := 0 if unit.side == BattleContext.SIDE_PLAYER else 1
-	if side >= _side_common.size():
-		return
-	var common: PackedFloat32Array = _side_common[side]
-	var ticks: PackedInt32Array = _side_ticks[side]
-	var counts: PackedInt32Array = _side_frames[side]
-	var uv_table: PackedVector4Array = _side_uv[side]
-	var uv_stride := _side_uv_stride[side]
-	var anim := UnitArt.plan(alive, moved, hurt_age, strike_age, int(common[5]), int(common[6]))
-	# The phase that desynchronises a rank applies to the loops; a blow, a wound and a death
-	# start at their first frame because the soldier just lived them.
-	var into := tick + id * UnitArt.PHASE_STRIDE
-	if anim == UnitArt.DEATH:
-		into = maxi(0, death_age)
-	elif anim == UnitArt.HURT:
-		into = maxi(0, hurt_age)
-	elif anim == UnitArt.ATTACK:
-		into = maxi(0, strike_age)
-	var cell := Vector2(common[0], common[1])
-	var unit_scale := common[4]
-	var origin := UnitArt.origin(
-		position + Vector2(0.0, FOOT_LIFT), cell, Vector2(common[2], common[3]), unit_scale)
-	var custom := UnitArt.custom_from(
-		uv_table[anim * uv_stride + UnitArt.frame(anim, into, ticks[anim], counts[anim])],
-		unit.facing.x < 0.0)
-	# The side's tint, then the corpse's darkening on top of it: both sides are the soldier now,
-	# so the colour is what separates them.
-	var colour := UnitArt.side_tint(unit.side == BattleContext.SIDE_PLAYER)
-	if not alive:
-		colour = colour.darkened(FALLEN_DARKEN)
-	_write_sprite_instance(index, origin, cell * unit_scale, colour, custom)
-
-
-## One sprite instance written into the packed buffer, at the offsets the probe measured.
-func _write_sprite_instance(index: int, origin: Vector2, size: Vector2, colour: Color, custom: Vector4) -> void:
-	var base := index * _sprite_stride
-	_packed_sprites[base + _sprite_offsets[0]] = size.x
-	_packed_sprites[base + _sprite_offsets[1]] = size.y
-	_packed_sprites[base + _sprite_offsets[2]] = origin.x
-	_packed_sprites[base + _sprite_offsets[3]] = origin.y
-	_packed_sprites[base + _sprite_offsets[4]] = colour.r
-	_packed_sprites[base + _sprite_offsets[4] + 1] = colour.g
-	_packed_sprites[base + _sprite_offsets[4] + 2] = colour.b
-	_packed_sprites[base + _sprite_offsets[4] + 3] = colour.a
-	_packed_sprites[base + _sprite_offsets[5]] = custom.x
-	_packed_sprites[base + _sprite_offsets[5] + 1] = custom.y
-	_packed_sprites[base + _sprite_offsets[5] + 2] = custom.z
-	_packed_sprites[base + _sprite_offsets[5] + 3] = custom.w
+	# One call: the animation, the frame, the placement, the tint and the writes. The writer is
+	# shared with the compute battlefield's soldier loop, which knows the same things about a man
+	# a different way - [param index] is this pack's slot, [param id] is who he is.
+	_sprite_writer.write(_packed_sprites, index, id if known else index, position, side, alive,
+		moved, hurt_age, strike_age, death_age, unit.facing.x < 0.0, tick)

@@ -4021,3 +4021,42 @@ circles with the knifes" (knights).
   one (T2) read as lighting rather than a faction. The suite pins the mapping and that the two
   tints differ, so neither "we quietly went back to orcs" nor "both sides tinted the same" can
   happen without a failure.
+
+
+**D-145: the sprite step is one fused call, and it writes only what changed.**
+
+Owner: "work on optimizing" - the sprite pass cost 10 ms a pack at 2,000 soldiers against 4 ms
+without it.
+
+Measured before changing anything. A throwaway micro-benchmark (scenes/dev/sprite_pack_bench.gd,
+2,000 soldiers x 60 reps) ran the same maths and the same writes four ways: 1.95 us a soldier as
+the shipped five static calls (plan, frame, origin, custom, write), 0.87 as one fused call, 0.82
+with everything inlined by hand, 0.69 inline with the writes skipped when nothing changed. The
+call graph was most of the step, and one call is nearly free - so the fix is one call, not a
+rewrite.
+
+Both renderers now run that one call into [b]UnitSpriteWriter[/b], which owns the per-side tables
+and the animation memory; each renderer keeps only the evidence - what changed since the last
+pack - because they read it from different places (the compute field's readback against the
+units' own fields) and that part is genuinely not shareable. The writer writes only what changed:
+size and tint once a soldier, the origin when his picture moved more than 0.05 units since the
+last [i]written[/i] picture (the offset accumulates, so a slow drift is bounded rather than lost),
+the frame rectangle when his frame changed, and the darkened tint on the pack he falls in. A slot
+that holds a different man than it did last pack is written whole.
+
+Measured after, paired on a quiet machine: the pack at 2,000 soldiers is 7.9-9.7 ms against 3.7-4.2
+without sprites (was 9.7-10.3), and at 20,000 it is 91.6-96.3 against 45.9-47.6. The sprite step is
+2.3 us a soldier, was 3.0. Gameplay battles are ten to a hundred men - 0.02 to 0.2 ms - so this
+buys space for large fields, not frames in the game that exists.
+
+Two things fall out of it besides the speed. The fused writer is now pinned to the pure functions
+by the suite, state by state (idle, walking, wounded, swinging, falling, and the pack that changes
+nothing), so the hot path cannot drift from the specification. And the pinning found a real bug:
+the first pack drew the whole army in the attack pose, because a fresh cooldown against the
+"never" sentinel read as a jump - the first sighting is now neither a step nor a blow.
+
+[b]Next lever, if twenty-thousand-man fields become gameplay:[/b] strike and hurt stamps in the
+simulation's readback, which would replace the inference with a fact (and make the poses exact
+rather than inferred), and then a sprite pass drawn on the GPU beside the simulation, which would
+take the per-soldier work out of GDScript entirely. Neither is worth doing for the battles the
+game actually fights.
