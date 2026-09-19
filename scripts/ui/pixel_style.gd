@@ -26,6 +26,22 @@ const FONT_PATH := "res://assets/fonts/Silkscreen-Regular.ttf"
 const BODY_FONT_PATH := "res://assets/fonts/EBGaramond-Regular.ttf"
 const BODY_FONT_ITALIC_PATH := "res://assets/fonts/EBGaramond-Italic.ttf"
 
+## What every interface size in this file is multiplied by, set from GameSettings when the player
+## moves the UI scale slider (D-137 follow-up). A static, because screens read it while they build:
+## a theme that already exists cannot be re-scaled, so the honest model is "the next screen built
+## wears the new size". Everything below rounds, so a pixel font never lands on a half size.
+static var ui_scale := 1.0
+
+
+## A base size, scaled. Public so screens with their own label helpers (the menus) can pass their
+## sizes through the same arithmetic.
+static func scaled(base: int) -> int:
+	return maxi(6, int(round(float(base) * ui_scale)))
+
+
+static func scaled_vec(base: Vector2) -> Vector2:
+	return Vector2(roundf(base.x * ui_scale), roundf(base.y * ui_scale))
+
 
 ## A button: a one-pixel outline, a two-pixel bevel that catches the light on the top and left, and
 ## a flat body. The bevel is the whole illusion - swap it and the same shape reads as pressed.
@@ -68,10 +84,10 @@ static func _nine_patch(image: Image, margin: int) -> StyleBoxTexture:
 	box.texture_margin_right = float(margin)
 	box.texture_margin_top = float(margin)
 	box.texture_margin_bottom = float(margin)
-	box.content_margin_left = 14.0
-	box.content_margin_right = 14.0
-	box.content_margin_top = 8.0
-	box.content_margin_bottom = 8.0
+	box.content_margin_left = roundf(14.0 * ui_scale)
+	box.content_margin_right = roundf(14.0 * ui_scale)
+	box.content_margin_top = roundf(8.0 * ui_scale)
+	box.content_margin_bottom = roundf(8.0 * ui_scale)
 	return box
 
 
@@ -98,7 +114,7 @@ static func dress_button(button: Button, styles: Dictionary, font: Font, font_si
 	button.add_theme_stylebox_override("focus", styles["hover"])
 	if font != null:
 		button.add_theme_font_override("font", font)
-	button.add_theme_font_size_override("font_size", font_size)
+	button.add_theme_font_size_override("font_size", scaled(font_size))
 	button.add_theme_color_override("font_color", text_colour)
 	button.add_theme_color_override("font_hover_color", text_colour)
 	button.add_theme_color_override("font_pressed_color", text_colour)
@@ -121,7 +137,7 @@ static func body_label(text: String, size: int = 14, colour: Color = Color.WHITE
 	var font := body_font(italic)
 	if font != null:
 		node.add_theme_font_override("font", font)
-	node.add_theme_font_size_override("font_size", size)
+	node.add_theme_font_size_override("font_size", scaled(size))
 	node.add_theme_color_override("font_color", colour)
 	return node
 
@@ -134,7 +150,7 @@ static func pixel_label(text: String, size: int = 10, colour: Color = Color.WHIT
 	var font := pixel_font()
 	if font != null:
 		node.add_theme_font_override("font", font)
-	node.add_theme_font_size_override("font_size", size)
+	node.add_theme_font_size_override("font_size", scaled(size))
 	node.add_theme_color_override("font_color", colour)
 	return node
 
@@ -179,7 +195,7 @@ static func chip_row(entries: Array, body: Color, edge: Color, label_colour: Col
 static func rule(colour: Color) -> ColorRect:
 	var rect := ColorRect.new()
 	rect.color = colour
-	rect.custom_minimum_size = Vector2(0.0, 2.0)
+	rect.custom_minimum_size = Vector2(0.0, maxf(2.0, roundf(2.0 * ui_scale)))
 	return rect
 
 
@@ -200,7 +216,7 @@ static func tooltip_theme(body: Color, edge: Color, text_colour: Color) -> Theme
 	var font := body_font()
 	if font != null:
 		theme.set_font("font", "TooltipLabel", font)
-	theme.set_font_size("font_size", "TooltipLabel", 14)
+	theme.set_font_size("font_size", "TooltipLabel", scaled(14))
 	theme.set_color("font_color", "TooltipLabel", text_colour)
 	return theme
 
@@ -220,7 +236,7 @@ static func text_button(text: String, styles: Dictionary, font_size: int, min_si
 	var node := Button.new()
 	node.text = text
 	dress_button(node, styles, pixel_font(), font_size, text_colour, dim_colour)
-	node.custom_minimum_size = min_size
+	node.custom_minimum_size = scaled_vec(min_size)
 	return node
 
 

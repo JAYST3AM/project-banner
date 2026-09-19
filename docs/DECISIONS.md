@@ -3736,3 +3736,14 @@ nothing is a lie.
 `FULLSCREEN >`, `ON >`, `360 >` with the footer reading "Applied: fullscreen, vsync On, cap 360."
 The same panel hangs off the Esc menu above Resume's column.
 
+**Follow-up - the UI scale slider, and more options.** The owner: "needs a ui size slider, and also
+more options." The scale lives on `PixelStyle.ui_scale` (0.8 to 1.4, step 0.05) and every size in
+the pixel furniture passes through `PixelStyle.scaled()` / `scaled_vec()` - fonts, button boxes,
+panel padding, chip boxes, rules, tooltip text - with the menus' own label helpers routed through
+the same arithmetic. A theme that is already built cannot be re-scaled, so a screen wears the scale
+it was built at: the settings panel rebuilds itself on `drag_ended`, which is the change made
+visible where it is made, and `--ui-scale=1.3` forces one for screenshots. The added options are
+Window size (four presets, applied in Windowed), Frame-rate overlay at start (F1 still toggles it,
+and hitch logging is independent of visibility), and Map hints on/off. `test_settings` grew to
+cover the widened tables, the scale arithmetic and the fuller save/load round trip.
+

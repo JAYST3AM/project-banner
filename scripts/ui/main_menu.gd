@@ -266,21 +266,21 @@ func _label(text: String, size: int, colour: Color) -> Label:
 	label.text = text
 	if _font != null:
 		label.add_theme_font_override("font", _font)
-	label.add_theme_font_size_override("font_size", size)
+	label.add_theme_font_size_override("font_size", PixelStyle.scaled(size))
 	label.add_theme_color_override("font_color", colour)
 	return label
 
 
 func _gap(height: int) -> Control:
 	var space := Control.new()
-	space.custom_minimum_size = Vector2(0, float(height))
+	space.custom_minimum_size = Vector2(0, float(PixelStyle.scaled(height)))
 	return space
 
 
 func _button(text: String) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.custom_minimum_size = Vector2(BUTTON_WIDTH, BUTTON_HEIGHT)
+	button.custom_minimum_size = PixelStyle.scaled_vec(Vector2(BUTTON_WIDTH, BUTTON_HEIGHT))
 	# Shrink, not fill: inside a vertical box the default is to stretch to the widest thing in the
 	# column, which is how three short words became three long bars.
 	button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -298,7 +298,7 @@ func _dress_field(field: LineEdit) -> void:
 		PixelStyle.panel_style(Color(0.13, 0.15, 0.19), UiTheme.ACCENT, UiTheme.ACCENT))
 	if _font != null:
 		field.add_theme_font_override("font", _font)
-	field.add_theme_font_size_override("font_size", SMALL_SIZE)
+	field.add_theme_font_size_override("font_size", PixelStyle.scaled(SMALL_SIZE))
 	field.add_theme_color_override("font_color", UiTheme.TEXT)
 	field.add_theme_color_override("font_placeholder_color", Color(0.45, 0.47, 0.51))
 	field.add_theme_color_override("caret_color", UiTheme.ACCENT)

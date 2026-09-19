@@ -135,6 +135,9 @@ func _build() -> void:
 	_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_hint.position = Vector2(12.0, -30.0)
 	_hint.offset_right = -240.0
+	# The Settings panel can turn the hint line off (D-137); it is read here at build, so a change
+	# lands on the next entry to the map rather than mid-session.
+	_hint.visible = GameSettings.show_hints
 	add_child(_hint)
 
 	# --- settlement inspection panel (top-right) -------------------------

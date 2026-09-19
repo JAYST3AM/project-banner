@@ -255,13 +255,11 @@ func _build_party_panel() -> Control:
 ## ---------- shared dressing ----------------------------------------------
 
 ## A button in the menus' own furniture, one size smaller: the same nine-patch, the same accent
-## spent on hover.
+## spent on hover. Sizes pass through [method PixelStyle.scaled_vec], so the UI scale slider sizes
+## the button as well as its label.
 func _button(text: String, min_width := 0.0, min_height := 32.0) -> Button:
-	var node := Button.new()
-	node.text = text
-	PixelStyle.dress_button(node, _button_styles, PixelStyle.pixel_font(), BUTTON_SIZE,
-		UiTheme.TEXT, UiTheme.DIM)
-	node.custom_minimum_size = Vector2(min_width, min_height)
+	var node := PixelStyle.text_button(text, _button_styles, BUTTON_SIZE,
+		Vector2(min_width, min_height), UiTheme.TEXT, UiTheme.DIM)
 	return node
 
 

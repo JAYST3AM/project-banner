@@ -51,8 +51,9 @@ func _ready() -> void:
 	_log_frames = DevFlags.framelog()
 	add_to_group("perf_overlay")
 	_build()
-	# Off until F1: the owner wants the corner clear by default.
-	visible = false
+	# Off unless the player keeps it on: the Settings panel has the toggle (D-137), and F1 still
+	# shows it by hand.
+	visible = GameSettings.show_perf_overlay
 
 
 ## Show or hide the overlay. Counting continues either way.

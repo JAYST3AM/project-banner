@@ -35,6 +35,9 @@ const HOVER_CARD_FLAG := "--hover-card"
 const HOVER_CARD_PREFIX := "--hover-card="
 ## Open the settings panel straight away, because a screenshot cannot click the button that opens it.
 const SETTINGS_PANEL_FLAG := "--settings-panel"
+## Force a UI scale for one run: "--ui-scale=1.2". Wins over the saved file, because it is the more
+## deliberate request, and it is how screenshots at other scales are taken.
+const UI_SCALE_PREFIX := "--ui-scale="
 ## Run a scripted formation drill through the battle scene's real order methods.
 const AUTOFORMATIONS_FLAG := "--autoformations"
 const BATTLESPEED_PREFIX := "--battlespeed="
@@ -130,6 +133,14 @@ static func hover_card() -> String:
 ## Whether a run asked to start with the settings panel open.
 static func settings_panel() -> bool:
 	return _has_flag(SETTINGS_PANEL_FLAG)
+
+
+## The UI scale a run asked for, or 0.0 when it did not.
+static func ui_scale() -> float:
+	for arg in _user_args():
+		if arg.begins_with(UI_SCALE_PREFIX):
+			return float(arg.substr(UI_SCALE_PREFIX.length()))
+	return 0.0
 
 
 ## Accept the first encounter prompt automatically instead of waiting for a click.
