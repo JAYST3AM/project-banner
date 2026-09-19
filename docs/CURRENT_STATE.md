@@ -63,6 +63,19 @@ bar's lift is derived from the `head` the atlas builder measures rather than han
   faults (men outside the ground, any step over two units between packs), milestones every tenth of
   the armies down, and the closing verdict - flushed per line, so a killed run still has its log.
   Every behaviour fault above was read out of these lines.
+- **The strike model is actually running** (D-153): the shader had been reading the strike model's
+  parameters two slots late, so the field ran the legacy damage path in silence - one global 3.4
+  reach (which is why battles froze with men standing 3.9 apart, unable to strike), every blow
+  landing, and 70% off each. With the slots aligned, the weapon clock no longer wiped every tick,
+  the melee's stop distance brought inside its own reach, one pair minimum derived from the shortest
+  weapon on the field, and a look that reaches as far as the weapon does, the 15-archer test battle
+  now resolves in 66 seconds instead of standing still for eight minutes. The swing is wired to the
+  same event as the damage (the weapon's clock, as the canvas renderer already reads it): an attack
+  always swings, a miss swings without damage, and damage never lands without the swing that dealt
+  it. The journal names every wound and every survivor once the field is down to its last two dozen.
+  Verified: seed 5150, 1x, verdict in 65.9 s, closest pair 1.90 against a 1.92 floor, blows logged
+  with attribution. Archers are strong now - the bow's 18 reach is doing what the owner asked for;
+  the tuning knobs are `attack_range`, `attack_cooldown` and `attack` in `data/units/unit_types.json`.
 - **Shared maths**: `scripts/battle/unit_art.gd` (frame plan, placement, the precomputed
   per-side tables) + `shaders/battle/unit_sprite.gdshader` (frame rect from instance custom
   data). Verified in a windowed run of both renderers; `test_unit_sprites` (new) pins the

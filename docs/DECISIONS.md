@@ -4243,3 +4243,70 @@ one with `--battlelog=<path>`:
 Every line is flushed as it is written, so a run that is killed (or hits its time limit mid-battle)
 still leaves a complete journal up to that point - which is how the run that walked off the map was
 diagnosed.
+
+**D-153: the strike model was never running, and a battle nobody could fight.**
+
+Owner: "when soldiers are actually attacking they need to use the sword swing animation, if they
+doesn't happen they can't be dealing damage" - and before that, eight minutes of a battle he watched
+in which nothing happened at all.
+
+Chasing that standstill found four faults, three of them silent for as long as the strike model has
+existed:
+
+- [b]The parameters were read two slots late.[/b] `_params()` writes the strike model at [20..23]
+  (hit chance, defence mitigation, ticks a second, 1 = the reference model). The shader read them at
+  [22..25]. So the field ran with `real_strikes` 0 - one global 3.4 reach for every weapon, which is
+  how a battle froze with thirty men alive and nobody able to strike anybody 3.9 units away - a hit
+  chance of 30.0 (every blow landed) and mitigation 1.0 (70% off every blow, intended 20%).
+  `PARAM_SLOTS := 26` was declared, never checked, and is what let two slots of drift go unnoticed;
+  the shader's comment and the CPU's comment both said [22..25] and both were wrong about the code
+  beside them.
+- [b]The weapon's clock was wiped every tick.[/b] The health pass wrote `meta.m[gid]` with hardcoded
+  zeros in z and w, and w is where the targeting pass keeps the tick a man may next swing. The
+  1.5-second rhythm never applied: every man struck every tick, which is why a reasonably-sized
+  battle was over in forty-five seconds of slaughter.
+- [b]And a trap worth its own line: a shader edit proves nothing without `--import`.[/b] The .glsl is
+  an imported resource. Two verification runs read the stale compiled copy - their "combat" counters
+  reported zeroes from a slot the loaded shader never wrote, and a stall diagnosis was built on top
+  of them. Check `.godot/imported/` is newer than the source before believing any run after a shader
+  edit.
+
+Switched on, the model then failed two geometry checks the old global reach had hidden:
+
+- [b]A melee stood outside its own reach.[/b] Bodies stop at the engagement distance (2.6) and the
+  separation solver held every pair to the separation - so a spear line ground at 2.6 while the spear
+  reaches 2.4, landing nothing, for the whole battle. The engagement distance was written when every
+  strike in the scene used one 3.4 reach.
+- [b]A bow line could not see far enough to shoot.[/b] The tactical search radius is 8; the bow
+  reaches 18. A line standing thirteen units behind its spears - exactly where D-149 puts it - had
+  nothing within search range, and loosed nothing at all: "45 v 45, holding out of reach 60".
+
+- [b]The fixes[/b]: the shader reads [20..23] and both sides say so; the health pass preserves z and
+  w; `_engage_room` holds a body whose men out-range the engagement distance at nine tenths of that
+  reach and closes a body that cannot reach that far to nine tenths of its own; one
+  [b]pair minimum[/b] is derived from the deployed stats (`min(MIN_ENEMY_GAP, shortest weapon x 0.8)`)
+  and the shader's walk and relaxation solvers both hold [i]enemy[/i] pairs to it while friends keep
+  the full separation - and the "inside the minimum" proof counts against the same number; and a
+  man's look reaches as far as his weapon does, with the grid window widened to match.
+
+[b]The swing is the damage.[/b] The pose and the arrow are driven by one event: the weapon's own
+clock jumping, which a strike - landed or missed - and nothing else does. That is exactly how the
+canvas renderer already reads it, so both battles now answer the same way: an attack always swings,
+a miss swings without damage, and damage never happens without the swing that dealt it. The damage
+tally is kept as a second opinion (the only trace the legacy model leaves).
+
+[b]The logs this needed[/b], all behind `--battlelog`: a line per body every two seconds now carries
+facing, contact, crowding, who its living men hold, how far away that is and what their weapons
+reach; the combat line accumulates blows landed and missed instead of reading one tick; and once the
+field is down to its last twenty-four men, every wound is named ("soldier 14 ours took 5, hit points
+23 -> 18, struck by soldier 55") and every survivor dumped man by man with his target, the gap and
+his weapon.
+
+Verified in the 15-archer/30-spearman battle, seed 5150, 1x, at 1920x1080: a verdict in 65.9
+seconds - "battle finished: DEFEAT, 85 fallen, 650 arrows loosed" - against the same seed standing
+still for eight minutes an hour earlier. Closest enemy gap 1.90 with the solver's floor at 1.92 in
+force; no pair inside the physical minimum; one soldier visibly mid-swing and a shaft in the air in
+the frame the screenshot caught. Balance note for the owner: with the model actually running,
+archers are strong - 18 reach, a shot every 1.5 seconds, and the end-game is a bow line executing
+whatever is left from fifteen units. That is the behaviour asked for; the numbers to tune are
+`attack_range`, `attack_cooldown` and `attack` in `data/units/unit_types.json`.

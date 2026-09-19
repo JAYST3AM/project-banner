@@ -580,6 +580,10 @@ const ARROW_HAND_LIFT := 0.6
 ## How often the journal says where every body stands and what it is doing: two seconds at thirty
 ## ticks a second, which is the cadence a behaviour question is answered at.
 const JOURNAL_BODY_EVERY := 60
+## Men still standing when the journal stops summarising and starts naming every blow and every
+## survivor. Twenty-four is the size of an end-game: past the fighting, into the part where a stall
+## would live.
+const JOURNAL_ENDGAME_AT := 24
 ## A man whose position moves further than this between two packs was not walked there: at [constant
 ## WALK] and thirty ticks a second a man covers 0.2 units a tick, so anything this size is a jump -
 ## the shape "the pathing wigged out" makes in numbers.
@@ -619,15 +623,26 @@ var _journal_milestones := 0
 var _journal_next_steady := 0
 var _journal_arrows := 0
 var _journal_next_bodies := 0
+var _journal_next_survivors := 0
 ## Shots and reach per body, so a journal line can say what a formation is doing rather than what
 ## its men are: the reach is the longest any of its men can strike at, the shots are what its men
 ## have loosed.
 var _body_reach := PackedFloat32Array()
+## The closest an enemy pair may stand: the physical minimum, brought inside the shortest weapon on
+## the field so the melee can come to grips. Set once from the roster in [method _load_unit_stats];
+## the shader's solver and its "inside the minimum" proof both read this one number.
+var _pair_minimum := MIN_ENEMY_GAP
 var _body_shots := PackedInt32Array()
 ## The previous pack's positions, for the step a man took between them: a step no walk can explain
 ## is the cheapest evidence of a man being dropped somewhere, which is what "the pathing wigged out"
 ## looks like in numbers.
 var _journal_last_position := PackedVector2Array()
+## Hit points a man carried at the last end-game pack: the difference is the blow that landed on
+## him, which is what the per-blow lines are built from.
+var _journal_last_hp := PackedFloat32Array()
+## Blows landed and missed, counted by summing the shader's per-tick counters as they are read.
+var _journal_blows_landed := 0
+var _journal_blows_missed := 0
 var _journal_path_reported := false
 ## The world position of every man at the last pack, and the pathing numbers last written, so a
 ## journal line appears when the anomaly changes rather than once a tick while it persists.
@@ -646,7 +661,9 @@ var _sprite_writer := UnitSpriteWriter.new()
 ## is the evidence - what only this renderer's readback can tell - and the writer is handed it.
 var _anim_last_position := PackedVector2Array()
 var _anim_last_hp := PackedFloat32Array()
-var _anim_target_hp := PackedFloat32Array()
+## The tick each man may next swing, as the shader keeps it: a jump forward is a strike made,
+## landed or missed. The canvas renderer reads its simulator's cooldown the same way.
+var _anim_last_cooldown := PackedFloat32Array()
 var _anim_hurt_tick := PackedInt32Array()
 var _anim_strike_tick := PackedInt32Array()
 var _anim_died_tick := PackedInt32Array()
@@ -966,6 +983,7 @@ func _build() -> void:
 	# What each body's men can strike at, needed by the march whether or not a journal is open: a
 	# body of archers holds at its own range (see [method _engage_room]).
 	_refresh_body_reach()
+	_derive_pair_minimum()
 	_open_journal()
 
 	buf_state = _storage(state.to_byte_array(), agents * 16)
@@ -1213,15 +1231,45 @@ func _body_room(b: int) -> float:
 	return _body_gap[b]
 
 
-## How much room a body needs before it walks forward: the agreed engagement distance, or nine
-## tenths of what its own men can strike at, whichever is further. A melee body's reach is inside
-## the engagement distance, so nothing changes for the line; a body of archers stops with the enemy
-## just inside their range instead of walking in to arm's length. The tenth of the reach held back
-## is what keeps its men actually firing rather than standing exactly on the boundary.
+## Whether this body is being crowded by a friendly body standing ahead of it: a friend within
+## [constant KEEP_STATION], in front of this body's own facing, which is what stops a bow line
+## walking through the spears it should be shooting over.
+##
+## A body already in contact with the enemy is never held back by this. A fighting front is not an
+## obstacle to press up behind, and the heading swings during a scrum - a melee that had turned
+## while the bodies stood on one another's anchors was held in place by its own archers for eight
+## minutes of a ten-minute battle, its anchors frozen at (75, 30) with nothing able to strike.
+func _crowding(b: int) -> bool:
+	if _body_state[b * 8 + 7] > 0.5:
+		return false
+	var mine := Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
+	var forward := Vector2(_body_state[b * 8 + 2], _body_state[b * 8 + 3])
+	var side := _side_of_body(b)
+	for other in _bodies:
+		if other == b or _side_of_body(other) != side:
+			continue
+		var ahead := Vector2(_body_state[other * 8 + 0], _body_state[other * 8 + 1]) - mine
+		if ahead.length() < KEEP_STATION and ahead.dot(forward) > 0.0:
+			return true
+	return false
+
+
+## How much room a body needs before it walks forward.
+##
+## A body whose men out-range the agreed engagement distance (archers, 18) holds at nine tenths of
+## that reach: it stands back and shoots over the line.
+##
+## A body whose men cannot reach that far (spearmen, 2.4) must close to nine tenths of *its own*
+## reach. The engagement distance was written when every strike in the scene used one global 3.4
+## reach; with the per-weapon model switched on, a spear line stopped at 2.6 was standing outside
+## its own range and a battle sat at "45 v 45, holding out of reach 60" for three minutes.
 func _engage_room(b: int) -> float:
 	if b < 0 or b >= _body_reach.size():
 		return ENGAGE
-	return maxf(ENGAGE, _body_reach[b] * 0.9)
+	var reach := _body_reach[b]
+	if reach > ENGAGE:
+		return reach * 0.9
+	return maxf(1.0, reach * 0.85)
 
 
 func _side_of_body(b: int) -> int:
@@ -1449,15 +1497,7 @@ func _advance_bodies() -> void:
 				# demo journal has both bodies on the same anchor at (72, 29) after four minutes, the
 				# archers having inched six units into their own line. Room only counts as room to
 				# move into if the ground ahead belongs to us.
-				var crowding := false
-				for other in _bodies:
-					if other == b or _side_of_body(other) != side:
-						continue
-					var ahead := Vector2(
-						_body_state[other * 8 + 0], _body_state[other * 8 + 1]) - mine
-					if ahead.length() < KEEP_STATION and ahead.dot(forward) > 0.0:
-						crowding = true
-						break
+				var crowding := _crowding(b)
 				# A body's own reach decides where it stops. Melee (reach 2.4) stops on the agreed
 				# engagement distance as it always did; a body of archers (reach 9.0) holds when the
 				# enemy's living edge is already inside their range, which is what "sit back in a line
@@ -1717,7 +1757,7 @@ func _track_proof() -> void:
 
 func _proof_line() -> String:
 	return "closest enemy gap %.2f (tick %d)   below %.2f: %d   furthest step %.2f   dropped %d" % [
-		_worst_gap, _worst_gap_tick, MIN_ENEMY_GAP, _violations, _max_step, _dropped_max]
+		_worst_gap, _worst_gap_tick, _pair_minimum, _violations, _max_step, _dropped_max]
 
 
 ## The order a body is under, as a word, for the diagnostic line.
@@ -2332,19 +2372,39 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 		# And the same man as a frame of the atlas, when there is one to draw. The sprite batch
 		# is written here, in the same walk of the army, so the two pictures cannot disagree
 		# about who is standing where.
+		# The one event a man's picture is built from: the damage he has dealt rose since the last
+		# pack, which is a blow he landed - and a shot loosed, if he carries a bow. The swing and
+		# the arrow are the same fact, so it is read once here and handed to both. It also settles
+		# an argument in favour of the picture: if this is false, nothing below draws a blow,
+		# because nothing below dealt one.
+		if _dealt_seen.size() != agents:
+			_dealt_seen.resize(agents)
+			_dealt_seen.fill(-1)
+		if _anim_last_cooldown.size() != agents:
+			_anim_last_cooldown.resize(agents)
+			_anim_last_cooldown.fill(-1.0)
+		var dealt_now := tally(i).y
+		var struck := _dealt_seen[i] >= 0 and dealt_now > _dealt_seen[i]
+		_dealt_seen[i] = dealt_now
+		# Did he swing this pack? The weapon's own clock is the answer, read exactly as the canvas
+		# renderer reads it: a strike - landed or missed - pushes the tick he may next swing to, and
+		# nothing else does. A landed blow also raises his damage tally, kept as a second opinion
+		# (the only trace the legacy damage model leaves). The picture must never show a blow that
+		# was not struck, nor swallow one that was: an attack without a swing is a lie, and damage
+		# without a swing is the same lie twice.
+		var clock := meta[i * 4 + 3]
+		var swung := _anim_last_cooldown[i] >= 0.0 and clock > _anim_last_cooldown[i] + 0.5
+		_anim_last_cooldown[i] = clock
+		var attacked := swung or struck
 		if _sprite_ok:
-			var target_hp := -1.0
-			if target >= 0 and target < agents:
-				target_hp = meta[target * 4 + 0]
 			_write_sprite(i, position, picture, int(meta[i * 4 + 1]), meta[i * 4 + 0],
-				meta[i * 4 + 2] < 0.5, target, target_hp)
-		# A ranged soldier whose dealt-damage tally rose this pack loosed a shot: the compute
-		# simulation reads back no "who struck whom", only what each man has dealt, so an arrow is
-		# what that looks like. The canvas battle gets the same picture from the simulator's own
-		# hit events ([method BattleView._launch_arrow]) - same look, same flight time. Outside
-		# the sprite batch on purpose: the shafts are drawn furniture and fly whether the art is
-		# on this machine or not.
-		if i < _man_ranged.size() and _man_ranged[i] == 1:
+				meta[i * 4 + 2] < 0.5, attacked)
+		# A landed blow from a bowman is a shaft in the air: the compute simulation reads back no
+		# "who struck whom", only what each man has dealt. The canvas battle gets the same picture
+		# from the simulator's own hit events ([method BattleView._launch_arrow]) - same look, same
+		# flight time. Outside the sprite batch on purpose: the shafts are drawn furniture and fly
+		# whether the art is on this machine or not.
+		if attacked and i < _man_ranged.size() and _man_ranged[i] == 1:
 			_note_shot(i, picture)
 	_loop_usec = Time.get_ticks_usec() - loop_started
 	var submit_started := Time.get_ticks_usec()
@@ -2440,6 +2500,20 @@ func _open_journal() -> void:
 ## What each body's men can strike at: the longest of their reaches, which is the number a journal
 ## needs to say whether a formation is holding at its range or walking into the fight. Built once,
 ## after the deploy has said which men are in which body.
+## The closest an enemy pair may stand, read from the weapons actually on the field: the physical
+## minimum, brought inside the shortest weapon's reach so the melee can come to grips. Taken from the
+## same per-agent stats the shader is given, after deployment, so it cannot disagree with what the
+## men carry - and a roster with nothing shorter than a bow keeps the full separation.
+func _derive_pair_minimum() -> void:
+	_pair_minimum = MIN_ENEMY_GAP
+	for i in agents:
+		if _stats.size() < i * 4 + 3:
+			break
+		var reach := _stats[i * 4 + 2]
+		if reach > 0.0:
+			_pair_minimum = minf(_pair_minimum, reach * 0.8)
+
+
 func _refresh_body_reach() -> void:
 	_body_reach.resize(_bodies)
 	_body_reach.fill(0.0)
@@ -2476,6 +2550,27 @@ func _journal_tick() -> void:
 	if _tick >= _journal_next_bodies:
 		_journal_next_bodies = _tick + JOURNAL_BODY_EVERY
 		_journal_bodies()
+		# The strife itself, for the same pass: blows that landed, blows that missed, and men
+		# holding somebody their weapon cannot reach. Three numbers that separate "nobody is
+		# fighting" from "everybody is fighting and it is not registering".
+		var combat := rd.buffer_get_data(buf_counters).to_int32_array()
+		if combat.size() > 24:
+			# The counters are cleared every tick, so a reading on its own is the state of one
+			# thirtieth of a second and usually nothing at all. Kept as a running total instead:
+			# blows landed and blows missed over the whole battle, and this tick's count of men
+			# holding somebody their weapon cannot reach.
+			_journal_blows_landed += combat[CNT_BLOWS]
+			_journal_blows_missed += combat[23]
+			_journal.note(_tick, "combat: %d blows landed, %d missed so far, %d holding out of reach this tick" % [
+				_journal_blows_landed, _journal_blows_missed, combat[24]])
+	# Once the field is down to its last few men, the journal stops summarising and starts naming:
+	# every wound, one line, and every survivor's whole state. This is the part of a battle where
+	# "they stopped fighting" lives, and no per-body summary can say which man refused to swing.
+	if _alive.x + _alive.y <= JOURNAL_ENDGAME_AT:
+		_journal_blows()
+		if _tick >= _journal_next_survivors:
+			_journal_next_survivors = _tick + JOURNAL_BODY_EVERY
+			_journal_survivors()
 	if _tick >= _journal_next_steady:
 		_journal_next_steady = _tick + BattleJournal.STEADY_INTERVAL
 		_journal.note(_tick, "still fighting: %d v %d at %.0fs, %d arrows loosed" % [
@@ -2493,11 +2588,21 @@ func _journal_bodies() -> void:
 	for b in _bodies:
 		var side := _side_of_body(b)
 		var anchor := Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
-		_journal.note(_tick, "body %d %s: %d alive, anchor (%.0f, %.0f), %s, room %.1f, reach %.1f, %d shots" % [
+		# The state that decides whether the body can advance at all, on the line: which way it is
+		# facing, whether it is in contact with the enemy, and whether a friend ahead is holding it
+		# back. A stall is read off these three.
+		var note_flags := ""
+		if _body_state[b * 8 + 7] > 0.5:
+			note_flags += ", in contact"
+		if _crowding(b):
+			note_flags += ", crowded"
+		var aiming := _man_targeting(b)
+		_journal.note(_tick, "body %d %s: %d alive, anchor (%.0f, %.0f), %s, room %.1f, reach %.1f, %d shots, facing %.0f deg%s, holding %d, nearest %.1f, weapon %.1f" % [
 			b, "ours" if side == 0 else "theirs",
 			_body_alive[b] if b < _body_alive.size() else 0, anchor.x, anchor.y,
 			_order_name(_order[b]), _body_room(b), _body_reach[b] if b < _body_reach.size() else REACH,
-			_body_shots[b] if b < _body_shots.size() else 0])
+			_body_shots[b] if b < _body_shots.size() else 0, rad_to_deg(_heading[b]) if b < _heading.size() else 0.0,
+			note_flags, int(aiming.x), aiming.y, aiming.z])
 		var front := _body_front[b] if b < _body_front.size() else (-INF if side == 0 else INF)
 		if side == 0:
 			ours = maxf(ours, front)
@@ -2508,6 +2613,91 @@ func _journal_bodies() -> void:
 			ours, theirs, theirs - ours])
 
 
+
+
+## What a body's living men are actually aiming at, read from the target buffer: how many hold a
+## valid living opponent, how near the nearest of those opponents is standing, and what reach the
+## GPU's own stats buffer gives those men. A stall where the men hold targets at 3.9 with a reach of
+## 18 is a strike-path question; a stall where nobody holds anything is a search question; a stall
+## where the reach reads 0 is a buffer-fill question. Three bugs, and this says which.
+func _man_targeting(b: int) -> Vector3:
+	var holding := 0
+	var nearest := -1.0
+	var reach := 0.0
+	if _man_body.size() < agents:
+		return Vector3.ZERO
+	var targets := rd.buffer_get_data(buf_targets).to_int32_array()
+	var state := rd.buffer_get_data(buf_state).to_float32_array()
+	var meta := rd.buffer_get_data(buf_meta).to_float32_array()
+	var stats := rd.buffer_get_data(buf_stats).to_float32_array()
+	if targets.size() < agents * 4 or state.size() < agents * 4 or meta.size() < agents * 4:
+		return Vector3.ZERO
+	for i in agents:
+		if _man_body[i] != b or meta[i * 4 + 2] > 0.0:
+			continue
+		if stats.size() >= i * 4 + 3:
+			reach = maxf(reach, stats[i * 4 + 2])
+		var other := targets[i * 4 + 0]
+		if other < 0 or other >= agents or meta[other * 4 + 2] > 0.0:
+			continue
+		holding += 1
+		var gap := Vector2(state[i * 4 + 0], state[i * 4 + 1]).distance_to(
+			Vector2(state[other * 4 + 0], state[other * 4 + 1]))
+		if nearest < 0.0 or gap < nearest:
+			nearest = gap
+	return Vector3(float(holding), nearest, reach)
+
+
+## Every blow of the end-game, one line a wound: who took it, from whom, and for how much. The
+## compute simulation records the attacker of the strike a man took on the man himself (the
+## lowest-numbered attacker to hit him this tick, cleared every tick), so pairing that with the drop
+## in his hit points gives an exact per-blow record - the reading a stall cannot be diagnosed
+## without. Only once the field is down to its last few men: a general engagement lands sixty blows
+## a second and a line a blow would drown every other reading in the file.
+func _journal_blows() -> void:
+	var meta := rd.buffer_get_data(buf_meta).to_float32_array()
+	var tallies := rd.buffer_get_data(buf_tallies).to_int32_array()
+	if meta.size() < agents * 4:
+		return
+	if _journal_last_hp.size() != agents:
+		_journal_last_hp.resize(agents)
+		_journal_last_hp.fill(-2.0)
+	for i in agents:
+		var hp := meta[i * 4 + 0]
+		var before := _journal_last_hp[i]
+		_journal_last_hp[i] = hp
+		if before < -1.0 or before <= hp + 0.001 or i >= _man_body.size():
+			continue
+		var attacker := tallies[i * 4 + 2] if tallies.size() >= i * 4 + 4 else -1
+		var side := int(meta[i * 4 + 1])
+		_journal.note(_tick, "blow: soldier %d %s (body %d) took %.0f, hit points %.0f -> %.0f, struck by %s" % [
+			i, "ours" if side == 0 else "theirs", _man_body[i], before - hp, before, hp,
+			("soldier %d" % attacker) if attacker >= 0 else "nobody recorded"])
+
+
+## Every man still standing, on one line: where he is, what is left of him, who he is fighting, how
+## far away that is, and what his own weapon reaches. The state a stalled end-game is read off, man
+## by man, instead of inferred from four body averages.
+func _journal_survivors() -> void:
+	var meta := rd.buffer_get_data(buf_meta).to_float32_array()
+	var state := rd.buffer_get_data(buf_state).to_float32_array()
+	var targets := rd.buffer_get_data(buf_targets).to_int32_array()
+	var stats := rd.buffer_get_data(buf_stats).to_float32_array()
+	if meta.size() < agents * 4 or state.size() < agents * 4:
+		return
+	for i in agents:
+		if meta[i * 4 + 2] > 0.5 or i >= _man_body.size():
+			continue
+		var other := targets[i * 4 + 0] if targets.size() >= i * 4 + 4 else -1
+		var reach := stats[i * 4 + 2] if stats.size() >= i * 4 + 4 else 0.0
+		var gap := -1.0
+		if other >= 0 and other < agents and state.size() >= other * 4 + 2:
+			gap = Vector2(state[i * 4 + 0], state[i * 4 + 1]).distance_to(
+				Vector2(state[other * 4 + 0], state[other * 4 + 1]))
+		_journal.note(_tick, "survivor: soldier %d %s (body %d) at (%.1f, %.1f), %.0f hp, target %s, gap %.1f, weapon %.1f" % [
+			i, "ours" if int(meta[i * 4 + 1]) == 0 else "theirs", _man_body[i],
+			state[i * 4 + 0], state[i * 4 + 1], meta[i * 4 + 0],
+			("soldier %d" % other) if other >= 0 else "none", gap, reach])
 
 
 ## The pathing numbers a "the pathing wigged out" report needs: men outside the ground, men whose
@@ -2573,14 +2763,6 @@ func _build_arrows() -> void:
 ## man he is already shooting at. The first pack only records the tally - an army that takes the
 ## field with damage already on the books must not volley on sight.
 func _note_shot(i: int, picture: Vector2) -> void:
-	if _dealt_seen.size() != agents:
-		_dealt_seen.resize(agents)
-		_dealt_seen.fill(-1)
-	var dealt := tally(i).y
-	var seen := _dealt_seen[i]
-	_dealt_seen[i] = dealt
-	if seen < 0 or dealt <= seen:
-		return
 	var target := _targets[i] if i < _targets.size() else -1
 	if target < 0 or target >= _man_picture.size():
 		return
@@ -2706,8 +2888,6 @@ func _reset_animation_state() -> void:
 	_anim_last_position.fill(Vector2.ZERO)
 	_anim_last_hp.resize(agents)
 	_anim_last_hp.fill(-1.0)
-	_anim_target_hp.resize(agents)
-	_anim_target_hp.fill(-1.0)
 	_anim_hurt_tick.resize(agents)
 	_anim_hurt_tick.fill(UnitArt.NEVER)
 	_anim_strike_tick.resize(agents)
@@ -2742,7 +2922,7 @@ func _bar_lift() -> float:
 ## meta readback would make both exact; until then this is the closest the picture can honestly
 ## get, and the walk, the death and the idle need no inference at all.
 func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
-		hp: float, alive: bool, target: int, target_hp: float) -> void:
+		hp: float, alive: bool, attacked: bool) -> void:
 	var moved := false
 	# First sighting is not a step: the army is deployed standing still, and a walk cycle at the
 	# deployment would be the picture claiming motion the simulation never made.
@@ -2759,12 +2939,11 @@ func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
 	if _anim_last_hp[i] >= 0.0 and hp < _anim_last_hp[i] - 0.001:
 		_anim_hurt_tick[i] = _tick
 	_anim_last_hp[i] = hp
-	# A blow that landed from him: his remembered opponent's hit points fell this tick. Several
-	# men engaging one opponent will all swing, which is what a press into one man looks like.
-	if target >= 0 and target < agents and target_hp >= 0.0 and _anim_target_hp[i] >= 0.0 \
-			and target_hp < _anim_target_hp[i] - 0.001:
+	# A blow struck by him, landed or missed, and the arrow a bowman looses with it: the caller
+	# reads the weapon's own clock and the damage tally together and hands over the one answer, so
+	# the pose, the shaft and the damage cannot disagree.
+	if attacked:
 		_anim_strike_tick[i] = _tick
-	_anim_target_hp[i] = target_hp
 	if not alive and _anim_died_tick[i] < 0:
 		_anim_died_tick[i] = _tick
 	var hurt_age := _tick - _anim_hurt_tick[i]
@@ -2971,12 +3150,14 @@ func _save_shot(index: int) -> void:
 func _params() -> PackedFloat32Array:
 	return PackedFloat32Array([
 		float(agents), float(grid.x), float(grid.y), LG_CELL, SEPARATION,
-		DT, field.x, field.y, WALK, REACH, BLOW, MAX_PUSH * (60.0 / maxf(1.0, tick_hz)), MIN_ENEMY_GAP,
+		DT, field.x, field.y, WALK, REACH, BLOW, MAX_PUSH * (60.0 / maxf(1.0, tick_hz)), _pair_minimum,
 		float(_tick), float(maxi(1, target_cadence)), target_retention,
 		target_switch_advantage, 0.0 if target_legacy else 1.0, target_search_radius,
 		1.0 if target_immediate else 0.0,
-		# [22..25] the strike model: the reference's own numbers, read from the config so the
-		# scene cannot drift from the game by a constant somebody typed twice.
+		# [20..23] the strike model: the reference's own numbers, read from the config so the scene
+		# cannot drift from the game by a constant somebody typed twice. The shader reads exactly
+		# these slots - it read [22..25] for a week and the field ran the legacy damage model in
+		# silence: every blow landed, seventy per cent off each, a global 3.4 reach for everyone.
 		hit_chance, defence_mitigation, tick_hz, 1.0 if real_strikes else 0.0])
 
 

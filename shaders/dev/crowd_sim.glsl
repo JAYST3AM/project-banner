@@ -150,11 +150,20 @@ void main() {
 	float blow = params.f[10];
 	// [22] chance to hit, [23] damage taken off per point of defence, [24] the battle clock in
 	// ticks a second, [25] 1 = the reference's strike model, 0 = the flat placeholder it replaced.
-	float hit_chance = params.f[22];
-	float defence_mitigation = params.f[23];
-	float tick_hz = max(1.0, params.f[24]);
-	bool real_strikes = params.f[25] > 0.5;
+	// The strike model. These four slots are the contract with _params() in gpu_crowd.gd: [20] hit
+	// chance, [21] defence mitigation, [22] ticks a second, [23] 1 = the strike model (per-weapon
+	// reach, weapon rhythm, hit rolls), 0 = legacy damage. They were read at [22..25] - two slots
+	// late - so the field silently ran with real_strikes 0 (a global 3.4 reach: nobody holding a
+	// target 3.9 away could ever strike, which is how a battle froze with thirty men alive), a hit
+	// chance of 30.0 (every blow landed) and mitigation 1.0 (70% off every blow).
+	float hit_chance = params.f[20];
+	float defence_mitigation = params.f[21];
+	float tick_hz = max(1.0, params.f[22]);
+	bool real_strikes = params.f[23] > 0.5;
 	float max_push = params.f[11];
+	// The closest an enemy pair may stand. Derived on the CPU from the shortest weapon on the
+	// field (see GpuCrowd._pair_minimum), so it is also the threshold the "inside the minimum"
+	// proof is counted against - solver and proof read the same number.
 	float min_enemy = params.f[12];
 	uint tick_now = uint(params.f[13]);
 	uint cadence = uint(max(params.f[14], 1.0));
@@ -226,6 +235,15 @@ void main() {
 
 	if (pc.mode == 2u) {
 		float side = meta.m[gid].y;
+		// What this man can see: the tactical search radius, and never less than what his own
+		// weapon reaches - an archer who can shoot eighteen units must be able to look eighteen, or
+		// the bow line stands behind its spears with nothing to shoot at (it did: thirty men alive
+		// and no arrow loosed, every look empty). The grid window is widened with it, below.
+		float see = search_radius;
+		if (real_strikes) {
+			see = max(see, stats.s[gid].z);
+		}
+		int win = int(clamp(ceil(see / max(cell, 0.001)), 1.0, 5.0));
 		ivec2 acc = ivec2(0);
 		uint probes = 0u;
 		bool contact = false;
@@ -302,8 +320,14 @@ void main() {
 					bool enemy = meta.m[other].y != side;
 					if (d2 > 0.000001) {
 						float dist = sqrt(d2);
-						if (dist < sep) {
-							acc += ivec2(round((d / dist) * ((sep - dist) * 0.5) * FIXED));
+						// Enemies are held at the pair minimum, not the full separation: that
+						// minimum is derived from the shortest weapon on the field, so a spear
+						// line can actually come to grips. Held at the full separation, a melee
+						// settled at 2.6 while the spear reaches 2.4, and two armies ground against
+						// each other landing nothing at all.
+						float room = enemy ? min(sep, min_enemy) : sep;
+						if (dist < room) {
+							acc += ivec2(round((d / dist) * ((room - dist) * 0.5) * FIXED));
 							// An enemy at body's length, or your own man actually overlapping
 							// you: either way your place is taken and you hold it where you are.
 							if (enemy || dist < sep * 0.9) {
@@ -327,7 +351,7 @@ void main() {
 							// this 3x3 neighbourhood offers. Ties are broken by the lower
 							// agent id, so the answer cannot depend on the order the grid
 							// happened to bin the men in.
-							if (targeting && d2 <= search_radius * search_radius) {
+							if (targeting && d2 <= see * see) {
 								bool better = d2 < best_d2 - 0.000001 \
 									|| (abs(d2 - best_d2) <= 0.000001 && other < best_cand);
 								if (better) {
@@ -364,12 +388,12 @@ void main() {
 		// is due and the first rung was empty, the ring around it is read as well. Separation
 		// and the collision proof are never taken from this rung; it only answers the search.
 		if (targeting && want_search && best_cand == 0xFFFFFFFFu) {
-			for (int oy = -2; oy <= 2; ++oy) {
+			for (int oy = -win; oy <= win; ++oy) {
 				int ny = cy + oy;
 				if (ny < 0 || ny >= int(gh)) {
 					continue;
 				}
-				for (int ox = -2; ox <= 2; ++ox) {
+				for (int ox = -win; ox <= win; ++ox) {
 					if (abs(ox) <= 1 && abs(oy) <= 1) {
 						continue;
 					}
@@ -387,7 +411,7 @@ void main() {
 						}
 						vec2 d = pos - agents.s[other].xy;
 						float d2 = dot(d, d);
-						if (d2 > 0.000001 && d2 <= search_radius * search_radius) {
+						if (d2 > 0.000001 && d2 <= see * see) {
 							bool better = d2 < best_d2 - 0.000001 \
 								|| (abs(d2 - best_d2) <= 0.000001 && other < best_cand);
 							if (better) {
@@ -495,6 +519,11 @@ void main() {
 				}
 			}
 			contact = true;
+		} else if (chosen >= 0) {
+			// Holding somebody this weapon cannot reach at all: counted so a battle journal can say
+			// whether a stalled end-state is a search problem or a reach problem - survivors standing
+			// four units apart with bows in their hands and no blows landing.
+			atomicAdd(counters.c[24], 1u);
 		}
 		targets.t[gid] = ivec4(chosen, int(next_tick), 0, 0);
 		// z carries "an enemy is on me": the man who is fighting does not walk anywhere. The
@@ -540,15 +569,17 @@ void main() {
 					float d2 = dot(d, d);
 					if (d2 > 0.000001) {
 						float dist = sqrt(d2);
-						if (dist < sep) {
+						bool foe = meta.m[other].y != my_side;
+						float room = foe ? min(sep, min_enemy) : sep;
+						if (dist < room) {
 							// The enemy gets no share of this: he never displaces me, I move
 							// myself clear of him, the whole overlap, every round. Sharing it
 							// half-and-half let my own rear rank push me into him - the two
 							// pushes cancelled and the front sat 0.38 inside the agreed gap
 							// with the solver reporting a clean pass. My own man only takes
 							// half, because we are both trying to leave.
-							float share = (meta.m[other].y != my_side) ? 1.0 : 0.5;
-							vec2 push = (d / dist) * ((sep - dist) * share);
+							float share = foe ? 1.0 : 0.5;
+							vec2 push = (d / dist) * ((room - dist) * share);
 							atomicAdd(corr.c[gid].x, int(round(push.x * FIXED)));
 							atomicAdd(corr.c[gid].y, int(round(push.y * FIXED)));
 						}
@@ -598,7 +629,11 @@ void main() {
 		atomicAdd(counters.c[3], 1u);
 		return;
 	}
-	meta.m[gid] = vec4(me.x - float(damage.d[gid]) / float(DAMAGE_SCALE), me.y, 0.0, 0.0);
+	// Take the wounds, and leave the weapon's own clock alone. This wrote 0.0 into zw every tick,
+	// which is where the targeting pass keeps the tick a man may next swing (meta.w) - so the
+	// rhythm the strike model sets was wiped before anybody could read it, and the first blow of a
+	// battle was also every man's last restriction.
+	meta.m[gid] = vec4(me.x - float(damage.d[gid]) / float(DAMAGE_SCALE), me.y, me.z, me.w);
 
 	uint bid = uint(attrs.a[gid].x);
 	vec4 head = bodies.b[bid * 2u];
