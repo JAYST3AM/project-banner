@@ -30,6 +30,10 @@ var travel_costs: TravelCosts = null
 ## The road network, cached for the same reason: its curves are shaped against the terrain on
 ## creation, which is another fifty milliseconds per visit (D-129). Runtime only.
 var road_network: RoadNetwork = null
+## The flat ground's blended field image, cached like the grid above (D-132): it is a pure function
+## of the seed and the land rectangle, and rebuilding it put a bare, groundless map in front of the
+## owner on every return from a town. Runtime only.
+var ground_field: Image = null
 
 var player_gold: int = 0
 var player_party: Party = null

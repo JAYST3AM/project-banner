@@ -85,18 +85,29 @@ func _ready() -> void:
 	# and this function waits for it while the frames keep coming.
 	_stage_name = "world"
 	var builder := WorldBuilder.new(_state, _config)
-	if builder.needs_build():
+	# The loading screen is only made when there is real work behind it (D-132): a fresh world, or
+	# the first entry of the session. The ground's field is cached on the campaign after that, so a
+	# return from a town used to build the ground again with NO screen at all, and the owner watched
+	# a bare map over it: "I see the map in its first state, just a grid, then it loads the campaign
+	# map we are on now."
+	var cached_ground: Image = _state.ground_field
+	if builder.needs_build() or cached_ground == null:
 		_loader = LoadingScreen.new()
 		var loader := _loader
 		add_child(loader)
-		loader.set_status("Generating the world")
-		loader.watch(builder)
 		loader.set_progress(0.02)
-		var thread := Thread.new()
-		thread.start(builder.build_if_needed)
-		while thread.is_alive():
-			await get_tree().process_frame
-		thread.wait_to_finish()
+		if builder.needs_build():
+			loader.set_status("Generating the world")
+			loader.watch(builder)
+			var thread := Thread.new()
+			thread.start(builder.build_if_needed)
+			while thread.is_alive():
+				await get_tree().process_frame
+			thread.wait_to_finish()
+		else:
+			# The world is already on the campaign; only the ground below still costs anything.
+			builder.build_if_needed()
+			loader.set_progress(0.7)
 		loader.set_status("Laying the ground under it")
 		await get_tree().process_frame
 	else:
@@ -132,6 +143,7 @@ func _ready() -> void:
 	_view.roads = _roads
 	# The ground goes in before the map view and behind it: the view draws roads, settlements and
 	# parties on top of terrain it no longer has to paint itself.
+	var ground_from_cache := false
 	if not _no_ground and not art_missing:
 		_terrain = WorldTerrain.new()
 		# Under the map view, which draws at -10. The first version of this sat at -1 - above the
@@ -160,7 +172,10 @@ func _ready() -> void:
 		await _terrain.setup(_state.campaign_seed, _view.land_rect(), _config, func(part: float) -> void:
 			if _loader != null:
 				_loader.set_progress(0.7 + 0.3 * part)
-		)
+		, cached_ground)
+		# Kept on the campaign so the next entry - every return from a town - is instant (D-132).
+		_state.ground_field = _terrain.field_image
+		ground_from_cache = cached_ground != null
 		_view.ground_art = true
 	else:
 		# The one-look test for "the towns and roads are gone": with the ground off, are the features
@@ -169,7 +184,10 @@ func _ready() -> void:
 		print("world terrain: disabled by --no-ground")
 	_view.queue_redraw()
 
-	DebugLogger.info("  map entry: ground done at %d ms" % (Time.get_ticks_msec() - _mark), "WorldMap")
+	DebugLogger.info("  map entry: ground done at %d ms%s" % [
+		Time.get_ticks_msec() - _mark,
+		" (cached)" if ground_from_cache else "",
+	], "WorldMap")
 	_stage_name = "map ready"
 	_mark = Time.get_ticks_msec()
 

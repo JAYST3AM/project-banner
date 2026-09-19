@@ -3530,3 +3530,27 @@ additions make the log grade the game by itself, so that comparison happens ever
   conversation starts with facts instead of "should be fine". The `DeviceReport` helper already
   existed for the benches; it now has a one-line form for the session log.
 
+
+## D-132 - the ground is cached, and the loading screen only covers real work
+
+**Context.** Every return from a settlement showed the map in "its first state, just a grid" for
+about 580 ms before the terrain appeared. With the world and its grid already on the campaign
+(D-129), `WorldBuilder.needs_build()` was false on re-entry - and the loading screen was only
+created inside that branch, so nothing covered the ground's build at all. The map drew its
+placeholder fill and grid while the ground layer ran behind it. The owner's report and the capture
+that matched it (frame 4 of `pb-bench/town_frames_before`, confirmed by eye): bare fill, no terrain.
+
+**Decision.** Two changes, in the order the numbers asked for:
+
+1. **The flat ground's field image is cached on the campaign** (`CampaignState.ground_field`), the
+   same trick as the priced grid (D-129): it is a pure function of the seed and the land rectangle,
+   about 66 KB, runtime-only. Measured on the town round-trip: ground build **583 ms -> 8 ms**.
+2. **The loading screen is only created when there is real work behind it** - a fresh world, or the
+   first entry of the session (when the ground cache is still empty). With a cache hit there is no
+   bare window to cover, and a screen that flashed for 8 ms on every town exit would be noise.
+
+The entry log now says which kind of entry it was: "ground done at 8 ms (cached)" against "ground
+done at 587 ms" for a build. Verified by the same captures (`town_frames_after`): no frame between
+the settlement and the loaded map shows the placeholder state any more, and the first map frame
+carries terrain, roads and settlements.
+

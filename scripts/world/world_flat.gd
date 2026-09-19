@@ -16,41 +16,54 @@ const FIELD_STEP := 32.0
 const LOOK_STRENGTH := 0.75
 
 var _sprite: Sprite2D
+## The blended field image this ground was built from, kept so the campaign can cache it: it is a
+## pure function of the seed and the land rectangle (D-132).
+var field_image: Image = null
 
 
-func setup(seed_value: int, land: Rect2, _config: GameConfig, on_progress: Callable = Callable()) -> void:  ## async: yields frames
+func setup(seed_value: int, land: Rect2, _config: GameConfig, on_progress: Callable = Callable(), cached: Image = null) -> void:  ## async: yields frames
 	var started := Time.get_ticks_msec()
 	var cols := int(ceil(land.size.x / FIELD_STEP)) + 1
 	var rows := int(ceil(land.size.y / FIELD_STEP)) + 1
-	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
-	var world := WorldChunks.build(seed_value)
-	for row in rows:
-		# Yield every few rows. Building this on the main thread without yielding froze the loading
-		# screen for the length of the build - the owner: "still stops out for no reason". Half a second
-		# of a bar that cannot repaint is indistinguishable from a hang, and the fix is to let the frame
-		# through rather than to make the work faster.
-		if row % 16 == 0 and get_tree() != null:
-			await get_tree().process_frame
+	var image: Image = null
+	if cached != null and cached.get_width() == cols and cached.get_height() == rows:
+		# The field is a pure function of the seed and the land, so a cached one is the same picture
+		# - and rebuilding it was half a second of every town visit, spent behind a map that had
+		# nothing to draw yet (D-132).
+		image = cached
+	else:
+		image = Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
+		var world := WorldChunks.build(seed_value)
+		for row in rows:
+			# Yield every few rows. Building this on the main thread without yielding froze the loading
+			# screen for the length of the build - the owner: "still stops out for no reason". Half a second
+			# of a bar that cannot repaint is indistinguishable from a hang, and the fix is to let the frame
+			# through rather than to make the work faster.
+			if row % 16 == 0 and get_tree() != null:
+				await get_tree().process_frame
+			if on_progress.is_valid():
+				on_progress.call(float(row) / float(maxi(1, rows)))
+			for col in cols:
+				var point := land.position + Vector2(float(col), float(row)) * FIELD_STEP
+				var here: Dictionary = world.sample(point)
+				var moisture := float(here["moisture"])
+				var wear := float(here["wear"])
+				var region := float(here["region"])
+				var worn := wear * 0.85
+				var plain := 1.0 - worn
+				var lush := plain * moisture * region * LOOK_STRENGTH
+				var dry := plain * (1.0 - moisture) * region * LOOK_STRENGTH
+				worn *= LOOK_STRENGTH
+				var used := lush + dry + worn
+				if used > 1.0:
+					var overflow := 1.0 / used
+					lush *= overflow
+					dry *= overflow
+					worn *= overflow
+				image.set_pixel(col, row, Color(lush, dry, worn, float(here["height"])))
 		if on_progress.is_valid():
-			on_progress.call(float(row) / float(maxi(1, rows)))
-		for col in cols:
-			var point := land.position + Vector2(float(col), float(row)) * FIELD_STEP
-			var here: Dictionary = world.sample(point)
-			var moisture := float(here["moisture"])
-			var wear := float(here["wear"])
-			var region := float(here["region"])
-			var worn := wear * 0.85
-			var plain := 1.0 - worn
-			var lush := plain * moisture * region * LOOK_STRENGTH
-			var dry := plain * (1.0 - moisture) * region * LOOK_STRENGTH
-			worn *= LOOK_STRENGTH
-			var used := lush + dry + worn
-			if used > 1.0:
-				var overflow := 1.0 / used
-				lush *= overflow
-				dry *= overflow
-				worn *= overflow
-			image.set_pixel(col, row, Color(lush, dry, worn, float(here["height"])))
+			on_progress.call(1.0)
+	field_image = image
 
 	var shader: Shader = load(SHADER)
 	if shader == null:
@@ -72,4 +85,7 @@ func setup(seed_value: int, land: Rect2, _config: GameConfig, on_progress: Calla
 	_sprite.scale = land.size
 	_sprite.material = material
 	add_child(_sprite)
-	print("world flat: %dx%d cells in %.0f ms, colours only" % [cols, rows, float(Time.get_ticks_msec() - started)])
+	print("world flat: %dx%d cells in %.0f ms, %s" % [
+		cols, rows, float(Time.get_ticks_msec() - started),
+		"cached field" if image == cached else "colours only",
+	])
