@@ -11,8 +11,17 @@ extends RefCounted
 ## choose again), and a log that says what every caravan did and why - behaviour is only debuggable
 ## if it is written down.
 ##
+## D-140 gave it money and classes. A caravan belongs to a noble house, a chartered guild or is an
+## independent with one wagon and no illusions; each class starts with its own purse (nobles hold
+## the land, so theirs is deep), BUYS the load it carries out of that purse at the origin, and is
+## paid for it at the far end. Spending power is therefore real: a noble fills a cart with jewellery
+## and horses, an independent scrapes together two crates of ale. A caravan with nothing to sell
+## anywhere walks home again rather than standing in a field forever.
+##
 ## Deterministic like everything else: routes come from named RNG streams, so the same seed grows
 ## the same caravans and a save needs only their positions and legs (both in [WorldParty]).
+
+const TRADERS_PATH := "res://data/config/traders.json"
 
 var state: CampaignState = null
 var config: GameConfig = null
@@ -21,11 +30,12 @@ var config: GameConfig = null
 var roads: RoadNetwork = null
 ## The unit catalogue guards are rolled from. Loaded on first use.
 var units: UnitCatalog = null
+## The trader classes (D-140): id, label, purse range, guards, cart size, and where its caravans
+## start. Loaded once from data/config/traders.json.
+var classes: Array = []
 
 ## The current leg's curve, keyed by caravan id: {"key": "from>to", "curve": PackedVector2Array}
 var _paths: Dictionary = {}
-## Behaviour counters for the daily digest.
-var _arrivals := 0
 var _last_digest_day := -1
 
 
@@ -34,7 +44,47 @@ static func build(p_state: CampaignState, p_config: GameConfig, p_roads: RoadNet
 	service.state = p_state
 	service.config = p_config
 	service.roads = p_roads
+	service.classes = service._load_classes()
+	service._migrate_existing()
 	return service
+
+
+## The trader classes, read once. An unreadable file means no caravans rather than invented ones.
+func _load_classes() -> Array:
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(TRADERS_PATH))
+	if typeof(parsed) != TYPE_DICTIONARY:
+		DebugLogger.warn("trade: could not read %s, so no caravans are classed" % TRADERS_PATH, "Trade")
+		return []
+	return ((parsed as Dictionary).get("classes", []) as Array).duplicate()
+
+
+## A save from before the classes (or a hand-made caravan) becomes an independent with a small
+## purse - the honest guess, and better than a caravan that cannot buy anything.
+func _migrate_existing() -> void:
+	for caravan in caravans():
+		if not caravan.trader_class.is_empty():
+			continue
+		caravan.trader_class = "independent"
+		if caravan.cash <= 0:
+			caravan.cash = 60
+		if caravan.home_settlement_id.is_empty():
+			caravan.home_settlement_id = caravan.from_settlement_id
+
+
+func _class_by_id(id: String) -> Dictionary:
+	for entry in classes:
+		var row: Dictionary = entry as Dictionary
+		if str(row.get("id", "")) == id:
+			return row
+	return {}
+
+
+## A caravan's class in the player's words ("Noble house", "Trade guild", "Independent trader").
+func class_label(caravan: WorldParty) -> String:
+	var row := _class_by_id(caravan.trader_class)
+	if row.is_empty():
+		return "Trader"
+	return str(row.get("label", caravan.trader_class))
 
 
 ## Every caravan currently on the road.
@@ -72,49 +122,133 @@ func leg_hours(caravan: WorldParty) -> float:
 	return _path_length(_leg_curve(caravan, from, to)) / speed
 
 
-## Make sure the roads carry as many caravans as the config asks for. Called once per map entry;
-## a save that already holds caravans keeps them.
+## Make sure the roads carry as many caravans as the classes ask for. Called once per map entry; a
+## save that already holds caravans keeps them (spawn only tops up what is missing).
 func spawn_if_needed() -> int:
-	var wanted := config.get_int("trade.caravan_count", 6)
+	if classes.is_empty():
+		return 0
+	var wanted := 0
+	for entry in classes:
+		wanted += int((entry as Dictionary).get("count", 0))
 	var existing := caravans().size()
 	if existing >= wanted:
 		return 0
-	var starts := _starting_settlements()
-	if starts.is_empty():
-		DebugLogger.warn("trade: no settlement has a road to a buyer, so no caravans", "Trade")
-		return 0
 	var spawned := 0
 	var used_starts := {}
-	for index in range(existing, wanted):
-		var generator := state.rng.stream("trade:spawn:%d" % index)
-		# A start town per caravan where there are enough to go round; repeats only once every
-		# town that can trade already has one on its road.
-		var start: Settlement = null
-		for attempt in starts.size():
-			var candidate: Settlement = starts[generator.randi_range(0, starts.size() - 1)]
-			if not used_starts.has(candidate.id):
-				start = candidate
+	var index := existing
+	for entry in classes:
+		var class_def: Dictionary = entry as Dictionary
+		var count := int(class_def.get("count", 0))
+		for slot in count:
+			if index >= wanted:
 				break
-		if start == null:
-			start = starts[generator.randi_range(0, starts.size() - 1)]
-		used_starts[start.id] = true
-		var caravan := WorldParty.new()
-		caravan.id = "caravan_%02d" % index
-		caravan.party_id = caravan.id
-		caravan.kind = Party.KIND_CARAVAN
-		caravan.behaviour = WorldParty.BEHAVIOUR_TRADE
-		caravan.display_name = "%s caravan" % start.name
-		caravan.position = start.position
-		caravan.home_position = start.position
-		caravan.destination = start.position
-		caravan.from_settlement_id = start.id
-		state.parties[caravan.id] = caravan
-		_hire_guards(caravan)
-		_plan(caravan)
-		if not caravan.path_stops.is_empty():
+			var caravan := _spawn_one(class_def, index, used_starts)
+			index += 1
+			if caravan == null:
+				continue
+			state.parties[caravan.id] = caravan
+			_hire_guards(caravan)
+			_plan(caravan)
 			spawned += 1
-	DebugLogger.info("trade: %d caravans on the road (%d wanted)" % [caravans().size(), wanted], "Trade")
+	var summary := []
+	for entry in classes:
+		var class_def: Dictionary = entry as Dictionary
+		summary.append("%d %s" % [int(class_def.get("count", 0)), str(class_def.get("id", "?"))])
+	DebugLogger.info("trade: %d caravans on the road (%s) - %d wanted" % [
+		caravans().size(), ", ".join(summary), wanted], "Trade")
 	return spawned
+
+
+## One caravan of one class: a home it plausibly belongs to, a name that says who it is, a purse,
+## and a cart suited to both. Null when nowhere fits (the warning says which class came up short).
+func _spawn_one(class_def: Dictionary, index: int, used_starts: Dictionary) -> WorldParty:
+	var class_id := str(class_def.get("id", "independent"))
+	var generator := state.rng.stream("trade:spawn:%s:%d" % [class_id, index])
+	var starts := _homes_for(class_def, used_starts)
+	if starts.is_empty():
+		starts = _starting_settlements()
+	if starts.is_empty():
+		DebugLogger.warn("trade: no settlement can start a %s caravan" % class_id, "Trade")
+		return null
+	var start: Settlement = starts[generator.randi_range(0, starts.size() - 1)]
+	used_starts[start.id] = true
+
+	var caravan := WorldParty.new()
+	caravan.id = "caravan_%s_%02d" % [class_id, index]
+	caravan.party_id = caravan.id
+	caravan.kind = Party.KIND_CARAVAN
+	caravan.behaviour = WorldParty.BEHAVIOUR_TRADE
+	caravan.trader_class = class_id
+	caravan.cash = generator.randi_range(
+		int(class_def.get("cash_min", 25)), int(class_def.get("cash_max", 80)))
+	caravan.home_settlement_id = start.id
+	caravan.position = start.position
+	caravan.home_position = start.position
+	caravan.destination = start.position
+	caravan.from_settlement_id = start.id
+	caravan.display_name = _name_for_class(class_def, caravan, start, index)
+	DebugLogger.info("trade: %s takes the road at %s with %d coin (%s)" % [
+		caravan.display_name, start.name, caravan.cash, str(class_def.get("label", class_id))],
+		"Trade")
+	return caravan
+
+
+## Where a class starts: a house wants a town its family is a name in; a guild wants a guild hall;
+## anyone else takes a town that can trade. Only towns that can actually trade qualify for ANY of
+## them - a caravan born in a dead end would idle on its first step.
+func _homes_for(class_def: Dictionary, used_starts: Dictionary) -> Array[Settlement]:
+	var can_trade := {}
+	for town in _starting_settlements():
+		can_trade[town.id] = true
+	var homes: Array[Settlement] = []
+	var wants := str(class_def.get("homes", "any"))
+	for key in state.settlements.keys():
+		var town := state.settlements[key] as Settlement
+		if town == null or used_starts.has(town.id) or not can_trade.has(town.id):
+			continue
+		match wants:
+			"families":
+				if not town.families.is_empty():
+					homes.append(town)
+			"guild_hall":
+				if _has_building(town, "guild_hall"):
+					homes.append(town)
+			_:
+				homes.append(town)
+	return homes
+
+
+func _has_building(town: Settlement, building_id: String) -> bool:
+	for entry in town.buildings:
+		if str((entry as Dictionary).get("id", "")) == building_id:
+			return true
+	return false
+
+
+## The caravan's name, in the class's own idiom: a house, a guild, or a person with one wagon.
+func _name_for_class(class_def: Dictionary, caravan: WorldParty, start: Settlement,
+		index: int) -> String:
+	var class_id := str(class_def.get("id", "independent"))
+	if class_id == "noble":
+		var house := "the House"
+		if not start.families.is_empty():
+			var owner: Dictionary = start.families[0] as Dictionary
+			house = str(owner.get("name", "Unknown"))
+			# The family rolls already speak in display names ("House Caldreth") - never say it twice.
+			if not house.begins_with("House "):
+				house = "House %s" % house
+		caravan.house = house.trim_prefix("House ")
+		return "%s caravan" % house
+	if class_id == "guild":
+		var names: Array = class_def.get("names", []) as Array
+		var pick := index % maxi(names.size(), 1)
+		var guild := str(names[pick]) if not names.is_empty() else "The Guild"
+		return "%s caravan" % guild
+	var generator := state.rng.stream("trade:traders:%s" % caravan.id)
+	var people := NameGenerator.load_from(state.rng)
+	var person: Dictionary = people.name_for(generator.randi_range(0, 99999), {})
+	var who := "%s %s" % [str(person.get("first_name", "A")), str(person.get("surname", "Trader"))]
+	return "%s's wagon" % who
 
 
 ## Advance every caravan by the hours the clock just moved, then say what the day looked like.
@@ -165,8 +299,9 @@ func _step_caravan(caravan: WorldParty, game_hours: float) -> bool:
 	return true
 
 
-## Choose where this caravan goes next: a buyer its town can reach by road, priced against the walk.
-## Deterministic per caravan and trip. A caravan with nothing to do says so once, not every step.
+## Choose where this caravan goes next: a buyer its town can reach by road, with a load its own
+## purse can pay for. A caravan whose town has no buyer - or whose purse cannot cover a single crate
+## - walks home and tries again there; only a caravan already home complains, and only once.
 func _plan(caravan: WorldParty) -> void:
 	caravan.path_stops.clear()
 	var from := state.settlement(caravan.from_settlement_id)
@@ -181,7 +316,7 @@ func _plan(caravan: WorldParty) -> void:
 		if not _path_over_links(from.id, str(route.get("id", ""))).is_empty():
 			reachable.append(route)
 	if reachable.is_empty():
-		_warn_idle(caravan, "no road to a buyer within %d u" % int(max_units))
+		_leave_for_home(caravan, from, "no road to a buyer within %d u" % int(max_units))
 		return
 	# The best road most of the time, the second or third often enough that two caravans out of the
 	# same town do not always take the same road.
@@ -193,8 +328,28 @@ func _plan(caravan: WorldParty) -> void:
 	if roll >= 0.85:
 		index = 2
 	index = mini(index, reachable.size() - 1)
-	var route: Dictionary = reachable[index] as Dictionary
-	var stops := _path_over_links(from.id, str(route.get("id", "")))
+
+	# Buy the load out of the purse, best goods first, capped by the class's cart. A route beyond
+	# the purse is skipped for the next one - a poor caravan still trades, just small.
+	var class_def := _class_by_id(caravan.trader_class)
+	var units_max := int(class_def.get("units_max", 2))
+	var chosen: Dictionary = {}
+	var load: Dictionary = {}
+	for offset in reachable.size():
+		var candidate: Dictionary = reachable[(index + offset) % reachable.size()] as Dictionary
+		var buyer := state.settlement(str(candidate.get("id", "")))
+		if buyer == null:
+			continue
+		var bought := TradeService.buy_load(from, buyer, caravan.cash, units_max)
+		if not (bought.get("goods", []) as Array).is_empty():
+			chosen = candidate
+			load = bought
+			break
+	if chosen.is_empty():
+		_leave_for_home(caravan, from, "nothing its purse of %d coin can buy" % caravan.cash)
+		return
+
+	var stops := _path_over_links(from.id, str(chosen.get("id", "")))
 	if stops.size() < 2:
 		_warn_idle(caravan, "the road to its buyer vanished")
 		return
@@ -203,11 +358,11 @@ func _plan(caravan: WorldParty) -> void:
 		caravan.path_stops.append(str(stop))
 	caravan.leg_index = 0
 	caravan.route_walked = 0.0
-	caravan.to_settlement_id = str(route.get("id", ""))
+	caravan.to_settlement_id = str(chosen.get("id", ""))
 	caravan.cargo.clear()
-	for good_any in (route.get("goods", []) as Array):
+	for good_any in (load.get("goods", []) as Array):
 		caravan.cargo.append(str(good_any))
-	caravan.display_name = "%s caravan" % from.name
+	caravan.cash -= int(load.get("cost", 0))
 	caravan.idle_warned = false
 	var guard_party := state.caravan_parties.get(caravan.id, null) as Party
 	if guard_party != null:
@@ -223,26 +378,87 @@ func _plan(caravan: WorldParty) -> void:
 			var mid := state.settlement(caravan.path_stops[i])
 			mids.append(mid.name if mid != null else "?")
 		via = " via %s" % ", ".join(mids)
-	DebugLogger.info("trade: %s departs for %s%s with %s at %d u/h (%.0f%% of a walker's pace), ~%.1f h out" % [
+	DebugLogger.info("trade: %s departs for %s%s carrying %s, paid %d, purse %d, at %d u/h (%.0f%% of a walker's pace), ~%.1f h out" % [
 		caravan.display_name, to.name if to != null else "?", via,
-		TradeService.describe_cargo(caravan.cargo, int(route.get("value", 0))),
+		TradeService.describe_cargo(caravan.cargo, int(chosen.get("value", 0))),
+		int(load.get("cost", 0)), caravan.cash,
 		int(round(speed)), percent, leg_hours(caravan)], "Trade")
 
 
-## Arrived: the cargo is sold (the log says for how much), and the caravan becomes a buyer here.
+## No trade here: a caravan with nothing to sell does not stand in a field. It walks home and tries
+## again there; if it IS home, it walks to the nearest town where its purse can actually buy, and
+## only gives up (once, loudly) when there is no town anywhere its coin is enough.
+func _leave_for_home(caravan: WorldParty, from: Settlement, reason: String) -> void:
+	var destination := state.settlement(caravan.home_settlement_id)
+	var going := "heads home to %s" % (destination.name if destination != null else "?")
+	if destination == null or destination.id == from.id:
+		destination = _town_worth_trying(caravan, from)
+		going = "moves on to %s" % (destination.name if destination != null else "?")
+	if destination == null:
+		_warn_idle(caravan, reason)
+		return
+	var stops := _path_over_links(from.id, destination.id)
+	if stops.size() < 2:
+		_warn_idle(caravan, "%s, and no road out of %s" % [reason, from.name])
+		return
+	caravan.path_stops.clear()
+	for stop in stops:
+		caravan.path_stops.append(str(stop))
+	caravan.leg_index = 0
+	caravan.route_walked = 0.0
+	caravan.to_settlement_id = destination.id
+	caravan.cargo.clear()
+	caravan.idle_warned = false
+	DebugLogger.info("trade: %s %s (%s)" % [caravan.display_name, going, reason], "Trade")
+
+
+## The nearest town where this caravan could actually buy a load - the difference between a trader
+## with an empty wagon and a trader with an empty wagon and nowhere to go. Nearest first, by road
+## distance; the first few towns are enough to find a market.
+func _town_worth_trying(caravan: WorldParty, from: Settlement) -> Settlement:
+	var max_units := config.get_float("trade.max_route_units", 1500.0)
+	var class_def := _class_by_id(caravan.trader_class)
+	var units_max := int(class_def.get("units_max", 2))
+	var candidates: Array[Dictionary] = []
+	for key in state.settlements.keys():
+		var town := state.settlements[key] as Settlement
+		if town == null or town.id == from.id:
+			continue
+		if _path_over_links(from.id, town.id).is_empty():
+			continue
+		candidates.append({"town": town, "distance": from.position.distance_to(town.position)})
+	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a["distance"]) < float(b["distance"]))
+	for entry in candidates.slice(0, 6):
+		var town: Settlement = entry["town"] as Settlement
+		for route_any in TradeService.best_routes(town, state.settlements, 3, max_units):
+			var route: Dictionary = route_any as Dictionary
+			var buyer := state.settlement(str(route.get("id", "")))
+			if buyer == null or _path_over_links(town.id, buyer.id).is_empty():
+				continue
+			var bought := TradeService.buy_load(town, buyer, caravan.cash, units_max)
+			if not (bought.get("goods", []) as Array).is_empty():
+				return town
+	return null
+
+
+## Arrived: the load is sold at what this town will pay, the purse takes the coin, and the caravan
+## becomes a buyer here - the next leg is bought with the money this one earned (D-140).
 func _arrive(caravan: WorldParty) -> void:
 	var to := state.settlement(caravan.to_settlement_id)
 	if to == null:
 		caravan.path_stops.clear()
 		return
-	var value := 0
-	for good in caravan.cargo:
-		value += TradeService.value_of(good)
+	var sold := TradeService.sale_value(caravan.cargo, to)
+	caravan.cash += sold
 	caravan.trips += 1
-	_arrivals += 1
-	DebugLogger.info("trade: %s reached %s (trip %d) with %s" % [
-		caravan.display_name, to.name, caravan.trips,
-		TradeService.describe_cargo(caravan.cargo, value)], "Trade")
+	if caravan.cargo.is_empty():
+		DebugLogger.info("trade: %s reached %s (trip %d) with an empty cart, purse %d" % [
+			caravan.display_name, to.name, caravan.trips, caravan.cash], "Trade")
+	else:
+		DebugLogger.info("trade: %s reached %s (trip %d): sold %s for %d coin - purse %d" % [
+			caravan.display_name, to.name, caravan.trips,
+			TradeService.describe_cargo(caravan.cargo, sold), sold, caravan.cash], "Trade")
 	caravan.from_settlement_id = to.id
 	caravan.to_settlement_id = ""
 	caravan.cargo.clear()
@@ -267,15 +483,24 @@ func _digest_if_new_day() -> void:
 	if day == _last_digest_day:
 		return
 	_last_digest_day = day
+	# Everything is read off the caravans themselves, not off counters living in this service: a map
+	# re-entry builds a new service, and a digest that forgets this morning's deliveries is worse
+	# than no digest (D-140 - the first live log said "0 arrivals so far" while two had just sold).
 	var moving := 0
 	var idle := 0
+	var deliveries := 0
+	var purse := 0
+	var richest := 0
 	for caravan in caravans():
 		if caravan.path_stops.size() >= 2:
 			moving += 1
 		else:
 			idle += 1
-	DebugLogger.info("trade digest: day %d - %d caravans, %d on the road, %d idle, %d arrivals so far" % [
-		day, caravans().size(), moving, idle, _arrivals], "Trade")
+		deliveries += caravan.trips
+		purse += caravan.cash
+		richest = maxi(richest, caravan.cash)
+	DebugLogger.info("trade digest: day %d - %d caravans, %d on the road, %d idle, %d deliveries so far, %d coin in purses (richest %d)" % [
+		day, caravans().size(), moving, idle, deliveries, purse, richest], "Trade")
 
 
 ## ---------- roads --------------------------------------------------------
@@ -393,8 +618,10 @@ static func _point_at(path: PackedVector2Array, distance: float) -> Vector2:
 ## rather than a dice roll. Deterministic per caravan; the first guard carries the spear.
 func _hire_guards(caravan: WorldParty) -> void:
 	var generator := state.rng.stream("trade:guards:%s" % caravan.id)
+	var class_def := _class_by_id(caravan.trader_class)
 	var count := generator.randi_range(
-		config.get_int("trade.guards_min", 2), config.get_int("trade.guards_max", 4))
+		int(class_def.get("guards_min", config.get_int("trade.guards_min", 2))),
+		int(class_def.get("guards_max", config.get_int("trade.guards_max", 4))))
 	var catalog: UnitCatalog = units if units != null else UnitCatalog.load_from()
 	if catalog == null:
 		return

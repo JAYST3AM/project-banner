@@ -92,6 +92,8 @@ func build() -> void:
 		})
 
 	_place_player_party()
+	# Coverage (D-140): the authored map trades by the same rule as the generated one.
+	SettlementDetails.repair_world_wants(state.settlements, state.roads)
 	DebugLogger.info("world built: %d settlements, %d roads" % [
 		state.settlements.size(), state.roads.size(),
 	], "WorldBuilder")
@@ -153,6 +155,10 @@ func _build_procedural() -> void:
 			largest = settlement
 
 	_build_roads(chosen, state.settlements)
+
+	# Coverage (D-140): every good some building can make needs a buyer somewhere, and every town
+	# needs a buyer in reach - a town nobody buys from is a town no caravan can leave.
+	SettlementDetails.repair_world_wants(state.settlements, state.roads)
 
 	DebugLogger.info("world generated: %d settlements from seed %d in %.0f ms | %s" % [
 		state.settlements.size(), seed_value, elapsed, ", ".join(names)], "WorldBuilder")

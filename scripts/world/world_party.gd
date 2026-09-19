@@ -38,8 +38,16 @@ var wander_count: int = 0
 ## means it is between legs and will plan one on the next step.
 var from_settlement_id: String = ""
 var to_settlement_id: String = ""
-## What it carries, by good id, priced by TradeService.
+## What it carries, by good id, priced by TradeService. Repeats are crates: two "ale" entries are
+## two crates of ale (D-140 - the cargo is bought with the caravan's own purse).
 var cargo: Array[String] = []
+## D-140: what sort of trader this is ("noble", "guild", "independent"), the noble house behind it
+## when there is one, its purse in coin (spent on cargo, filled by sales), and the town it calls
+## home - where a caravan with nothing to trade goes back to rather than standing in a field.
+var trader_class: String = ""
+var house: String = ""
+var cash: int = 0
+var home_settlement_id: String = ""
 ## The towns of the current leg's route, in order: [from, ...via..., to]. Empty when between legs.
 var path_stops: Array[String] = []
 ## Which leg of [member path_stops] the caravan is walking: from stops[leg_index] to the next.
@@ -73,6 +81,10 @@ func to_dict() -> Dictionary:
 		"from_settlement_id": from_settlement_id,
 		"to_settlement_id": to_settlement_id,
 		"cargo": cargo.duplicate(),
+		"trader_class": trader_class,
+		"house": house,
+		"cash": cash,
+		"home_settlement_id": home_settlement_id,
 		"path_stops": path_stops.duplicate(),
 		"leg_index": leg_index,
 		"route_walked": route_walked,
@@ -99,6 +111,10 @@ static func from_dict(data: Dictionary) -> WorldParty:
 	w.to_settlement_id = str(data.get("to_settlement_id", ""))
 	for good_any in (data.get("cargo", []) as Array):
 		w.cargo.append(str(good_any))
+	w.trader_class = str(data.get("trader_class", ""))
+	w.house = str(data.get("house", ""))
+	w.cash = int(data.get("cash", 0))
+	w.home_settlement_id = str(data.get("home_settlement_id", ""))
 	for stop_any in (data.get("path_stops", []) as Array):
 		w.path_stops.append(str(stop_any))
 	w.leg_index = int(data.get("leg_index", 0))

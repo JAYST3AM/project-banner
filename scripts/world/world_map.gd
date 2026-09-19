@@ -133,6 +133,9 @@ func _ready() -> void:
 		var st := _state.settlements[key] as Settlement
 		if st != null:
 			SettlementDetails.fill(st, _state.campaign_seed)
+	# Coverage (D-140): a town that wants nothing anybody makes - or that nobody buys from - is a
+	# dead end on the road.
+	SettlementDetails.repair_world_wants(_state.settlements, _state.roads)
 	_stage_name = "travel service"
 	_mark = Time.get_ticks_msec()
 	_travel = TravelService.new(_state, _config)
@@ -501,6 +504,8 @@ func _close_encounter_dialog() -> void:
 ## Meeting a caravan on the road: close enough and off cooldown, the traders have their say. The
 ## world pauses while the meeting is open, like an encounter - but nobody here is drawing steel.
 func _check_caravan_meeting() -> void:
+	if DevFlags.no_meetings():
+		return
 	if _caravans == null or _caravan_dialog == null or _caravan_dialog.visible:
 		return
 	if _dialog != null and _dialog.visible:

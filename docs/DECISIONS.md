@@ -3846,3 +3846,78 @@ said out loud.
   trade, purchase, meeting, and warnings when a caravan cannot plan a leg. Caravans are excluded
   from the overworld's wandering and chasing and from hostile encounter selection; the map draws
   them wagon-gold with their guard count beside the name.
+
+
+**D-140: the economy becomes real - trader classes, purses, and markets that stock what they sell.**
+
+The owner's brief: "I want this to work realistically and there's also only caravans for noble
+families, but there should be trade guilds, and also independent traders, each type should have a
+starting cash depending on how strong their party is... every settlement needs markets or a place to
+purchase from, obviously a town would maybe have a general store. but castles would have finer
+crafts, armour smiths, weapon smiths, jewellers ect."
+
+**What the first live session actually showed.** Six caravans, six clean departures, and then every
+single one of them made exactly one delivery and stopped: "reached Saltwatch (trip 1)" immediately
+followed by "is idle at saltwatch - no road to a buyer within 1500 u", six times, forever. A
+throwaway probe on the same seed put numbers on it: **4 of 17 towns could pass a cargo onward**;
+widening the window to 2600 u changed nothing; the road network itself was healthy (16 links, one
+connected cluster of all 17).
+
+**Four causes, one of them the real one.**
+
+1. **Five goods nothing could make** - salt, cloth, wine, spices, silk - and the market buildings
+   (`general_shop`, `market_stall`, `market_square`, `merchant's house`, `armoury`) all had
+   `enables: []`: shops with empty shelves. Castles had no armourer, weaponsmith or jeweller to
+   sell the fine things the owner asked for.
+2. **The want baskets were the killer.** Five goods per kind, barely overlapping what towns make:
+   ale, turnips, hides, leather, tools, firewood, pottery, wool cloth could never be wanted by
+   anyone, anywhere - so a caravan carrying them had nowhere to sell, ever.
+3. **The route score priced the road per unit at 0.012** - a crate of firewood (3 coin) could never
+   cover 400 u of road, so even a good with a willing buyer produced no route.
+4. **No return legs**: a caravan whose town had no buyer stood in the field instead of going
+   somewhere it could trade.
+
+And the reason no suite caught any of it: **every suite runs the authored four-town map** (the
+runner forces `world.procedural` off), which is rich in links and wants. The generated world - the
+one the owner actually plays - had never been exercised by the trade tests.
+
+**What is now true.**
+
+- **Markets have wares**: general shop (salt, pottery, tools), market stalls (salt, cloth), market
+  square (cloth, wine), merchant's house (spices, silk - what the region cannot make); new buildings
+  **weaponsmith** and **jeweller** (castles and rich towns), **vineyard** and **salt pans** (wine and
+  salt now come from somewhere); `armoury` sells armour. Three new goods - **armour, weapons,
+  jewellery** - priced 110/95/210. 28 goods, and a suite asserts every one of them is makeable and
+  buyable (the catalogue is closed in both directions).
+- **Wants are wide and guaranteed**: per-kind baskets now name every good any building can make,
+  plus staples every place wants if it cannot make them (salt above all). On top of that a
+  **coverage pass** (`SettlementDetails.repair_world_wants`, run at world build and on map entry)
+  makes two promises: every makeable good has a buyer somewhere, and **every town has a buyer for
+  something it sells within reach of its own roads**. 13 of 17 dead ends -> **0 of 17**.
+- **The road is charged by the load, not the crates**: route score's distance cost 0.012 -> 0.004,
+  because a caravan now carries up to six crates and bulk goods move on volume (that constant
+  predated both).
+- **Return legs**: no buyer here -> "heads home to X"; home and still nothing -> "moves on to" the
+  nearest town its purse can actually buy in. Only a caravan with nowhere at all left says so, once.
+- **Three classes of trader** (`data/config/traders.json`): **noble houses** (2 caravans, purse
+  320-640, 4-7 guards, up to 6 crates, start where the house is a name in the town's families,
+  named "House Varn caravan"), **trade guilds** (2, 140-320, 2-4 guards, up to 4 crates, start at a
+  town with a guild hall, named for the guild), and **independent traders** (3, 25-80, 0-2 guards,
+  up to 2 crates, named "<person>'s wagon"). Spending power is real, not a stat: **a caravan BUYS
+  its load out of its purse at the origin and is paid for it at the far end** (the destination's
+  want multiplier), so a noble fills a cart with jewellery and horses while an independent scrapes
+  together two crates of ale - and the difference is emergent, not scripted. Purses, class, house
+  and home are saved with the party; older saves migrate to independent. The hover card shows the
+  class and the purse.
+- **The suite now builds the real world**: `_test_the_generated_world_trades_end_to_end` loads its
+  own config (defeating the runner's authored-map override), builds seed 5150, fills every town and
+  asserts every town can sell onward, that no caravan strands over two game days of stepping, and
+  that fine crafts and shops exist - the test that would have caught the owner's dead ends. 92
+  assertions in the suite; the wider set (world map, campaign flow, roads, encounters, core
+  services, settlement details/buildings, sprite list) all green.
+- `--no-meetings` (dev flag): a verification run cannot stall on a caravan chat.
+- The building catalogue is 55 types now, so the sprite list grew by four pieces.
+
+**Left for later, deliberately**: prices that move with supply and demand; the player trading at a
+market counter (the market data exists - the produces/wants the caravans already use); robbing a
+caravan (purses now make that worth doing); nobles' purses compounding over a long campaign.

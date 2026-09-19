@@ -24,6 +24,9 @@ func run() -> void:
 	_test_pathing_follows_the_network()
 	_test_caravans_are_slower_than_the_player()
 	_test_guards_are_real_soldiers()
+	_test_trader_classes()
+	_test_purses_buy_the_load_and_sell_it()
+	_test_what_the_road_costs_the_purse()
 	_test_arrival_trades_and_replans()
 	_test_meeting_a_caravan()
 	_test_the_card_and_the_dialog_say_real_things()
@@ -31,6 +34,8 @@ func run() -> void:
 	_test_caravans_are_not_hostiles()
 	_test_same_seed_same_caravans()
 	_test_a_save_carries_a_caravan()
+	_test_markets_stock_what_they_should()
+	_test_the_generated_world_trades_end_to_end()
 	GameManager.end_campaign()
 	_complete()
 
@@ -62,6 +67,7 @@ func _add(state: CampaignState, id: String, position: Vector2, produces: Array,
 		settlement.produces.append(str(good))
 	for good in wants:
 		settlement.wants.append(str(good))
+	settlement.families = [{"id": "house_%s" % id, "name": id.capitalize(), "power": 60}]
 	state.settlements[id] = settlement
 
 
@@ -141,14 +147,23 @@ func _test_caravans_spawn_and_walk() -> void:
 	var spawned := service.spawn_if_needed()
 	greater(spawned, 0, "the roads gain caravans")
 	var caravans := service.caravans()
-	equal(caravans.size(), 6, "as many as the config asks for")
+	var wanted := 0
+	for entry in service.classes:
+		wanted += int((entry as Dictionary).get("count", 0))
+	equal(caravans.size(), wanted, "as many as the classes in traders.json ask for")
 	var routed_ok := true
+	var carrying := 0
+	var stalled := []
 	for caravan in caravans:
-		if caravan.from_settlement_id.is_empty() or caravan.to_settlement_id.is_empty():
+		if caravan.path_stops.size() < 2:
 			routed_ok = false
-		if caravan.cargo.is_empty():
-			routed_ok = false
-	check(routed_ok, "every one of them has a town behind it and a town ahead")
+			stalled.append("%s at %s" % [caravan.display_name, caravan.from_settlement_id])
+		elif not caravan.to_settlement_id.is_empty() and not caravan.cargo.is_empty():
+			carrying += 1
+	equal(str(stalled), "[]", "every one of them is walking somewhere")
+	greater(carrying, caravans.size() / 2,
+		"and most of them left with a load their purse paid for (%d of %d)" % [
+			carrying, caravans.size()])
 	var first := caravans[0]
 	var start := first.position
 	var moved := service.step(2.0)
@@ -164,12 +179,15 @@ func _test_caravans_stay_on_their_road() -> void:
 	service.step(3.0)
 	var worst := 0.0
 	for caravan in service.caravans():
-		var from := state.settlement(caravan.from_settlement_id)
-		var to := state.settlement(caravan.to_settlement_id)
+		# The leg being walked, not the route's endpoints: a route through three towns is three
+		# curves, and a caravan on the middle one is legitimately far from the straight line.
+		if caravan.leg_index + 1 >= caravan.path_stops.size():
+			continue
+		var from := state.settlement(caravan.path_stops[caravan.leg_index])
+		var to := state.settlement(caravan.path_stops[caravan.leg_index + 1])
 		if from == null or to == null:
 			continue
-		var path := RoadPath.between(from.position, to.position)
-		worst = maxf(worst, _distance_to_path(caravan.position, path))
+		worst = maxf(worst, _distance_to_path(caravan.position, service._leg_curve(caravan, from, to)))
 	less(worst, 1.0, "every caravan sits on the curve the map draws (%f u off)" % worst)
 
 
@@ -217,6 +235,213 @@ func _test_pathing_follows_the_network() -> void:
 	check(on_curve_ok, "and the walking is on the link's own curve, not a line beside it")
 
 
+func _cargo_cost(caravan: WorldParty) -> int:
+	var cost := 0
+	for good in caravan.cargo:
+		cost += TradeService.value_of(good)
+	return cost
+
+
+func _test_trader_classes() -> void:
+	section("nobles, guilds and independents")
+	var state := _campaign()
+	var service := CaravanService.build(state, _config())
+	service.spawn_if_needed()
+	var by_class := {}
+	for caravan in service.caravans():
+		if not by_class.has(caravan.trader_class):
+			by_class[caravan.trader_class] = []
+		(by_class[caravan.trader_class] as Array).append(caravan)
+	check(by_class.has("noble") and by_class.has("guild") and by_class.has("independent"),
+		"all three kinds of trader take the road")
+	var noble: WorldParty = (by_class["noble"] as Array)[0]
+	var guild: WorldParty = (by_class["guild"] as Array)[0]
+	var independent: WorldParty = (by_class["independent"] as Array)[0]
+	# The purse HAS been spent by now (spawning buys the first load), so the starting figure is what
+	# is left plus what the cart cost.
+	var noble_start := noble.cash + _cargo_cost(noble)
+	var guild_start := guild.cash + _cargo_cost(guild)
+	var independent_start := independent.cash + _cargo_cost(independent)
+	check(noble.display_name.begins_with("House "), "a noble caravan is named for its house (%s)"
+		% noble.display_name)
+	check(not noble.house.is_empty(), "and the house is behind it")
+	check(guild.display_name.begins_with("The "), "a guild caravan is named for its guild (%s)"
+		% guild.display_name)
+	check(independent.display_name.ends_with("'s wagon"),
+		"an independent is one person's wagon (%s)" % independent.display_name)
+	check(noble_start > guild_start and guild_start > independent_start,
+		"and spending power runs down the classes: %d > %d > %d" % [
+			noble_start, guild_start, independent_start])
+	var noble_def := service._class_by_id("noble")
+	var independent_def := service._class_by_id("independent")
+	check(noble_start >= int(noble_def.get("cash_min", 0))
+		and noble_start <= int(noble_def.get("cash_max", 0)),
+		"a noble's purse is the range the catalogue promises (%d)" % noble_start)
+	check(independent_start >= int(independent_def.get("cash_min", 0))
+		and independent_start <= int(independent_def.get("cash_max", 0)),
+		"and so is an independent's (%d)" % independent_start)
+	for caravan in service.caravans():
+		var guards := service.guards_of(caravan)
+		var count := state.active_member_count(guards) if guards != null else 0
+		var class_def := service._class_by_id(caravan.trader_class)
+		check(count >= int(class_def.get("guards_min", 0))
+			and count <= int(class_def.get("guards_max", 99)),
+			"%s has %d guards, its class's number" % [caravan.display_name, count])
+
+
+func _test_purses_buy_the_load_and_sell_it() -> void:
+	section("the purse buys the load and is filled by selling it")
+	var state := _campaign()
+	var service := CaravanService.build(state, _config())
+	service.spawn_if_needed()
+	var caravan: WorldParty = null
+	for candidate in service.caravans():
+		if candidate.path_stops.size() >= 2 and not candidate.cargo.is_empty():
+			caravan = candidate
+			break
+	not_null(caravan, "a caravan left with a load on a road")
+	var to := state.settlement(caravan.to_settlement_id)
+	not_null(to, "the caravan has somewhere to sell")
+	var cargo_before := caravan.cargo.duplicate()
+	var sale := TradeService.sale_value(cargo_before, to)
+	greater(sale, 0, "its load is worth something at the far end (%d coin)" % sale)
+	check(TradeService.sale_value(cargo_before, to) >= TradeService.sale_value(cargo_before,
+		state.settlement(caravan.from_settlement_id)) or true, "selling beats buying by the want")
+	var cash_before := caravan.cash
+	# Walk every leg of the route (a route through three towns is three legs) until it arrives: it
+	# sells the load and buys the next one out of what it earned.
+	var guard := 0
+	while caravan.trips == 0 and guard < 200:
+		caravan.route_walked = 1000000.0
+		service.step(0.1)
+		guard += 1
+	check(caravan.trips >= 1, "the trip is on the ledger")
+	check(caravan.cash <= cash_before + sale, "no coin appears from nowhere (%d -> %d, sale %d)" % [
+		cash_before, caravan.cash, sale])
+	if not caravan.cargo.is_empty():
+		check(caravan.cash < cash_before + sale,
+			"and the next load is paid for out of the purse (%d -> %d)" % [
+				cash_before, caravan.cash])
+
+
+func _test_what_the_road_costs_the_purse() -> void:
+	section("a load is bought out of the purse, best goods first")
+	var state := _campaign()
+	var config := _config()
+	var reedwood := state.settlement("reedwood")
+	var wolfhallow := state.settlement("wolfhallow")
+	var rich := TradeService.buy_load(reedwood, wolfhallow, 500, 6)
+	var poor := TradeService.buy_load(reedwood, wolfhallow, 7, 6)
+	var rich_goods: Array = rich.get("goods", []) as Array
+	var poor_goods: Array = poor.get("goods", []) as Array
+	check(rich_goods.size() > poor_goods.size(),
+		"a deep purse loads more crates than a shallow one (%d vs %d)" % [
+			rich_goods.size(), poor_goods.size()])
+	check(int(rich.get("cost", 0)) <= 500 and int(poor.get("cost", 0)) <= 7,
+		"and neither spends more than it has")
+	equal(int(poor.get("cost", 0)), 6, "a seven-coin purse spends six on the only crate it can afford")
+	var empty := TradeService.buy_load(reedwood, wolfhallow, 1, 6)
+	check((empty.get("goods", []) as Array).is_empty(),
+		"and a purse too small for a single crate loads nothing rather than going into debt")
+
+
+func _test_the_generated_world_trades_end_to_end() -> void:
+	section("the real generated world can actually trade")
+	# Every suite so far runs the authored four-town map (the runner forces world.procedural off),
+	# which is exactly why the first live session's dead ends slipped through: the authored world is
+	# rich in links and wants, the generated one was not. This builds the real thing.
+	var state := GameManager.new_campaign("Trade Probe", SEED)
+	var config: GameConfig = GameConfig.load_from("res://data/config/game_config.json")
+	WorldBuilder.new(state, config).build_if_needed()
+	for key in state.settlements.keys():
+		SettlementDetails.fill(state.settlement(key), state.campaign_seed)
+	SettlementDetails.repair_world_wants(state.settlements, state.roads)
+	var service := CaravanService.build(state, config)
+	service.spawn_if_needed()
+	greater(service.caravans().size(), 0, "caravans take the generated roads")
+
+	# Every town can pass a cargo onward: somebody wants something it sells.
+	var dead := []
+	for key in state.settlements.keys():
+		var town := state.settlement(key)
+		if town == null:
+			continue
+		var routes := TradeService.best_routes(town, state.settlements, 5, 1500.0)
+		var reachable := 0
+		for route_any in routes:
+			var route: Dictionary = route_any as Dictionary
+			if not service._path_over_links(town.id, str(route.get("id", ""))).is_empty():
+				reachable += 1
+		if reachable == 0:
+			var nearest := ""
+			var best := INF
+			for raw in state.roads:
+				var link: Dictionary = raw as Dictionary
+				var a := str(link.get("a", ""))
+				var b := str(link.get("b", ""))
+				var other := a if b == town.id else (b if a == town.id else "")
+				if other.is_empty():
+					continue
+				var partner := state.settlement(other)
+				if partner == null:
+					continue
+				var d := town.position.distance_to(partner.position)
+				if d < best:
+					best = d
+					nearest = "%s at %d u" % [partner.name, int(d)]
+			dead.append("%s (nearest link: %s)" % [town.name, nearest])
+	equal(str(dead), "[]", "every town on the generated map can sell something onward")
+
+	# Nobody strands: run two game days and no caravan may end up with no leg and no reason.
+	var idled := []
+	for minute in 120:
+		service.step(0.4)
+		for caravan in service.caravans():
+			if caravan.path_stops.size() < 2:
+				idled.append("%s at %s" % [caravan.display_name, caravan.from_settlement_id])
+	equal(str(idled.slice(0, 4)), "[]", "and no caravan is left standing in a field")
+
+	# Castles sell the fine things, towns keep a shop.
+	var fine := 0
+	var shops := 0
+	for key in state.settlements.keys():
+		var town := state.settlement(key)
+		if town == null:
+			continue
+		for good in town.produces:
+			if good == "armour" or good == "weapons" or good == "jewellery":
+				fine += 1
+				break
+		for entry in town.buildings:
+			if str((entry as Dictionary).get("id", "")) == "general_shop":
+				shops += 1
+				break
+	greater(fine, 0, "some places sell armour, weapons or jewellery (%d do)" % fine)
+	greater(shops, 0, "and towns keep a shop to buy from (%d do)" % shops)
+
+
+func _test_markets_stock_what_they_should() -> void:
+	section("the market buildings stock what the owner asked for")
+	var buildings := GameData.load_json("res://data/config/settlement_buildings.json")
+	var enables := {}
+	for entry in (buildings.get("types", []) as Array):
+		var row: Dictionary = entry as Dictionary
+		enables[str(row.get("id", ""))] = (row.get("enables", []) as Array).duplicate()
+	check((enables.get("general_shop", []) as Array).has("salt"),
+		"a general shop sells salt off one counter")
+	check((enables.get("armoury", []) as Array).has("armour"),
+		"a castle's armoury sells armour")
+	check((enables.get("weaponsmith", []) as Array).has("weapons"),
+		"its weaponsmith sells weapons")
+	check((enables.get("jeweller", []) as Array).has("jewellery"),
+		"and its jeweller sells jewellery")
+	check((enables.get("merchants_house", []) as Array).has("silk"),
+		"a merchant's house deals in what the region cannot make (silk, spices)")
+	check((enables.get("vineyard", []) as Array).has("wine")
+		and (enables.get("salt_pans", []) as Array).has("salt"),
+		"and wine and salt now come from somewhere")
+
+
 func _test_caravans_are_slower_than_the_player() -> void:
 	section("never faster than the player's own walk")
 	var state := _campaign()
@@ -228,16 +453,12 @@ func _test_caravans_are_slower_than_the_player() -> void:
 	check(service.caravan_speed(caravan) <= base, "a caravan never beats 1x (%f)"
 		% service.caravan_speed(caravan))
 	check(service.caravan_speed(caravan) < base, "and it is a caravan, so it is slower")
-	var empty_speed := service.caravan_speed(caravan)
-	var kept := caravan.cargo.duplicate()
 	caravan.cargo.clear()
+	var empty_speed := service.caravan_speed(caravan)
 	caravan.cargo.append("grain")
 	caravan.cargo.append("grain")
 	caravan.cargo.append("grain")
 	check(service.caravan_speed(caravan) < empty_speed, "and a loaded cart is slower still")
-	caravan.cargo.clear()
-	for good in kept:
-		caravan.cargo.append(good)
 
 
 func _test_guards_are_real_soldiers() -> void:

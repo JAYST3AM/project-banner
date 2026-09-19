@@ -65,7 +65,9 @@ func show_caravan(caravan: WorldParty, service: CaravanService, state: CampaignS
 	_title.text = caravan.display_name.to_upper()
 	var speed := service.caravan_speed(caravan)
 	var base := maxf(1.0, service.config.get_float("travel.world_units_per_game_hour", 150.0))
-	_meta.text = "%d deliveries  |  %d u/h (%.0f%% of a walker's pace)" % [
+	var class_label := service.class_label(caravan)
+	_meta.text = "%s%s  |  %d deliveries  |  %d u/h (%.0f%% of a walker's pace)" % [
+		class_label, "" if caravan.house.is_empty() else " of House " + caravan.house,
 		caravan.trips, int(round(speed)), 100.0 * speed / base]
 
 	for child in _body.get_children():
@@ -100,6 +102,8 @@ func show_caravan(caravan: WorldParty, service: CaravanService, state: CampaignS
 		_row("On the road", "~%.1f h out" % service.leg_hours(caravan))
 	elif to != null:
 		_row("On the road", "loading at %s" % (from.name if from != null else "?"))
+
+	_row("Purse", "%d coin" % caravan.cash)
 
 	_foot.text = "Traders. They keep to the roads, pay their tolls, and know what your silver is worth."
 	visible = true

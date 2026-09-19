@@ -120,12 +120,14 @@ func _test_trade_never_overlaps() -> void:
 	var disjoint_ok := true
 	for i in 40:
 		var s := _town("g%d" % i, KINDS[i % KINDS.size()])
-		if s.produces.size() < 2 or s.produces.size() > 3 or s.wants.size() < 2 or s.wants.size() > 3:
+		# Sells stays at two or three from the buildings; wants is the staples it cannot make plus
+		# one or two off its kind's basket (D-140: the baskets went wide so nothing dead-ends).
+		if s.produces.size() < 2 or s.produces.size() > 3 or s.wants.size() < 2 or s.wants.size() > 5:
 			sizes_ok = false
 		for good in s.produces:
 			if s.wants.has(good):
 				disjoint_ok = false
-	check(sizes_ok, "every town trades two or three goods each way")
+	check(sizes_ok, "every town trades two or three goods out and a few in")
 	check(disjoint_ok, "and produces and wants never share a good")
 
 

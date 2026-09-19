@@ -190,13 +190,10 @@
     "auto_resolve": false
   },
   "trade": {
-    "_comment": "Caravans (D-139). caravan_count is how many the roads carry; speed_multiplier is the caravan's pace as a fraction of the player's own walk and is hard-capped at 1.0 (a caravan is never faster than the player); cargo_speed_penalty_per_good slows a loaded cart further; max_route_units is the longest leg worth planning; guards_min/max size each caravan's guard party; meeting_radius is how close the player is when traders have their say; meeting_cooldown_hours is how long they keep their distance afterwards; markup is what a crate costs over the catalogue value when bought off a cart.",
-    "caravan_count": 6,
+    "_comment": "Caravans (D-139/D-140). The classes - noble houses, guilds, independents - their counts, purses, guards and cart sizes live in data/config/traders.json; what is here is how they move and how they meet the player. speed_multiplier is a caravan's pace as a fraction of the player's own walk and is hard-capped at 1.0 (a caravan is never faster than the player); cargo_speed_penalty_per_good slows a loaded cart further; max_route_units is the longest leg worth planning; meeting_radius is how close the player is when traders have their say; meeting_cooldown_hours is how long they keep their distance afterwards; markup is what a crate costs over the catalogue value when bought off a cart.",
     "speed_multiplier": 0.75,
     "cargo_speed_penalty_per_good": 0.06,
     "max_route_units": 1500.0,
-    "guards_min": 2,
-    "guards_max": 4,
     "meeting_radius": 42.0,
     "meeting_cooldown_hours": 20.0,
     "markup": 1.2

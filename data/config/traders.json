@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "note": "Who trades the roads (D-140). Three classes, each with its own purse: a noble house's caravan is the richest because the house holds the land, a chartered guild sits in the middle, and an independent trader owns exactly one wagon and knows it. cash is what the caravan starts with, and it is spent - a caravan BUYS the load it carries and is paid for it at the far end, so spending power is how much trade a caravan can do per trip. units_min/max cap how many crates it will carry; guards_min/max size the guard party. 'homes' says where its caravans start: 'families' = a town where the house is a name on the rolls, 'guild_hall' = a town with a guild hall, 'any' = anywhere that can trade.",
+  "classes": [
+    {
+      "id": "noble",
+      "label": "Noble house",
+      "count": 2,
+      "cash_min": 320,
+      "cash_max": 640,
+      "guards_min": 4,
+      "guards_max": 7,
+      "units_min": 2,
+      "units_max": 6,
+      "homes": "families"
+    },
+    {
+      "id": "guild",
+      "label": "Trade guild",
+      "count": 2,
+      "cash_min": 140,
+      "cash_max": 320,
+      "guards_min": 2,
+      "guards_max": 4,
+      "units_min": 1,
+      "units_max": 4,
+      "homes": "guild_hall",
+      "names": [
+        "The Ironwright Guild",
+        "The Salt Guild",
+        "The Cloth Guild",
+        "The Wine Guild",
+        "The Spice Guild",
+        "The Wool Guild"
+      ]
+    },
+    {
+      "id": "independent",
+      "label": "Independent trader",
+      "count": 3,
+      "cash_min": 25,
+      "cash_max": 80,
+      "guards_min": 0,
+      "guards_max": 2,
+      "units_min": 1,
+      "units_max": 2,
+      "homes": "any"
+    }
+  ]
+}

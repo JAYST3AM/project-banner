@@ -17,55 +17,60 @@ condition overlay first; the breadth (every biome, every attachment) is a later 
 
 | # | Building | Category | Towns (of 160) | Conditions seen | Roofs seen | Walls seen |
 |---|----------|----------|---------------|-----------------|------------|------------|
-| 1 | Cottages (`cottage`) | residential | 135 | average, poor, wealthy, damaged, repaired | weathered tile, slate, clay tile, dark tile, thatch, stone slab, brown tile, red tile, flat clay, cloth-shaded | darker timber, stone lower wall, mudbrick, pale plaster, mossy timber, dirty plaster, thick stone, lighter timber, weathered timber, clean plaster, lighter plaster, salt-stained timber, dusty plaster |
-| 2 | Townhouses (`townhouse`) | residential | 114 | poor, average, repaired, wealthy, damaged | dark tile, thatch, clay tile, weathered tile, brown tile, red tile, slate, stone slab, flat clay | mossy timber, pale plaster, thick stone, darker timber, mudbrick, weathered timber, lighter timber, dirty plaster, clean plaster, salt-stained timber, stone lower wall, dusty plaster |
-| 3 | Farmhouses (`farmhouse`) | residential | 91 | abandoned, poor, average, wealthy, repaired, damaged | dark tile, flat clay, thatch, weathered tile, red tile, clay tile, brown tile, stone slab, slate, cloth-shaded | mossy timber, thick stone, mudbrick, dirty plaster, stone lower wall, darker timber, clean plaster, salt-stained timber, dusty plaster, lighter plaster, weathered timber, lighter timber |
-| 4 | Stables (`stables`) | utility | 52 | poor, average, damaged, repaired, wealthy | dark tile, flat clay, thatch, brown tile, stone slab, weathered tile, cloth-shaded, slate, red tile, clay tile | mossy timber, mudbrick, weathered timber, darker timber, lighter timber, dirty plaster, thick stone, pale plaster, clean plaster, lighter plaster, dusty plaster, salt-stained timber |
-| 5 | Brewhouse (`brewhouse`) | commercial | 50 | poor, average, wealthy, repaired, damaged | dark tile, thatch, brown tile, weathered tile, stone slab, red tile, slate, cloth-shaded | dirty plaster, pale plaster, clean plaster, salt-stained timber, stone lower wall, darker timber, mossy timber, lighter timber, thick stone, mudbrick, weathered timber |
-| 6 | Smithy (`smithy`) | commercial | 41 | poor, average, repaired, wealthy | slate, dark tile, weathered tile, thatch, clay tile, brown tile, red tile, stone slab | stone lower wall, thick stone, weathered timber, mossy timber, lighter timber, clean plaster, dusty plaster, dirty plaster, darker timber, salt-stained timber |
-| 7 | Keep (`keep`) | special | 40 | poor, damaged, average, repaired, wealthy | thatch, stone slab, dark tile, cloth-shaded, weathered tile, slate, brown tile, red tile, flat clay | mossy timber, pale plaster, darker timber, thick stone, mudbrick, weathered timber, dirty plaster, clean plaster, stone lower wall, salt-stained timber, dusty plaster |
-| 8 | Kitchen gardens (`kitchen_garden`) | utility | 39 | poor, average, wealthy, repaired | thatch, stone slab, cloth-shaded, weathered tile, slate, dark tile, brown tile, clay tile, flat clay | salt-stained timber, thick stone, dusty plaster, lighter timber, darker timber, dirty plaster, clean plaster, mossy timber, pale plaster, mudbrick, lighter plaster |
-| 9 | Manor house (`manor_house`) | residential | 36 | average, wealthy, repaired | dark tile, brown tile, thatch, weathered tile, cloth-shaded, red tile, slate, clay tile, stone slab | stone lower wall, dirty plaster, darker timber, pale plaster, salt-stained timber, dusty plaster, lighter timber, thick stone, mossy timber, clean plaster, weathered timber, lighter plaster |
-| 10 | Woodcutter's yard (`woodcutters_yard`) | utility | 32 | poor, average, repaired, wealthy | weathered tile, thatch, dark tile, slate, brown tile, stone slab, red tile | darker timber, dirty plaster, lighter timber, mossy timber, thick stone, stone lower wall, clean plaster |
-| 11 | Mill (`mill`) | utility | 31 | poor, average, wealthy, repaired, damaged | thatch, flat clay, red tile, weathered tile, dark tile, clay tile, brown tile, stone slab | darker timber, mudbrick, dirty plaster, mossy timber, clean plaster, weathered timber, salt-stained timber, thick stone, lighter plaster, pale plaster, lighter timber |
-| 12 | Rough hovels (`hovel`) | residential | 31 | poor, average, abandoned, damaged | dark tile, thatch, clay tile, slate, flat clay, weathered tile, brown tile, stone slab | darker timber, pale plaster, stone lower wall, lighter plaster, salt-stained timber, thick stone, weathered timber, mossy timber, dirty plaster, dusty plaster, mudbrick, clean plaster |
-| 13 | Dairy (`dairy`) | utility | 30 | average, poor, wealthy, repaired | weathered tile, dark tile, thatch, stone slab, brown tile, red tile, slate, flat clay | dirty plaster, thick stone, darker timber, mossy timber, weathered timber, lighter timber, clean plaster, salt-stained timber, pale plaster, stone lower wall, dusty plaster |
-| 14 | Mine head (`mine_head`) | utility | 26 | average, poor, damaged, repaired, wealthy | dark tile, slate, stone slab | thick stone, stone lower wall, darker timber |
-| 15 | Stockyard (`stockyard`) | utility | 22 | poor, average, repaired, wealthy | slate, weathered tile, thatch, brown tile, flat clay, stone slab | stone lower wall, dirty plaster, clean plaster, mossy timber, darker timber, lighter timber, dusty plaster, mudbrick |
-| 16 | Charcoal burner (`charcoal_burner`) | utility | 22 | damaged, average, wealthy, poor, repaired | dark tile, slate, weathered tile, thatch, stone slab | darker timber, stone lower wall, dirty plaster, mossy timber, thick stone |
-| 17 | Sheepfold (`sheepfold`) | utility | 22 | poor, average, wealthy, repaired | flat clay, dark tile, stone slab, weathered tile, red tile, thatch, brown tile, slate | lighter plaster, darker timber, stone lower wall, salt-stained timber, dirty plaster, lighter timber, mossy timber, thick stone |
-| 18 | Market square (`market_square`) | special | 20 | average, poor, repaired, wealthy | brown tile, thatch, dark tile, red tile, flat clay | clean plaster, mossy timber, dirty plaster, darker timber, lighter timber, dusty plaster |
-| 19 | Tannery (`tannery`) | commercial | 19 | poor, repaired, average, wealthy, damaged | dark tile, red tile, stone slab, thatch, brown tile, weathered tile | thick stone, clean plaster, darker timber, pale plaster, dirty plaster, stone lower wall, lighter timber, mossy timber |
-| 20 | Gatehouse (`gatehouse`) | military | 16 | repaired, poor, average, wealthy | weathered tile, dark tile, brown tile, thatch, stone slab | weathered timber, dirty plaster, darker timber, clean plaster, thick stone, mossy timber, lighter timber |
-| 21 | Merchant's house (`merchants_house`) | commercial | 13 | wealthy, average, repaired | brown tile, thatch, weathered tile, dark tile, red tile, cloth-shaded | lighter timber, dirty plaster, darker timber, clean plaster, dusty plaster, mossy timber |
-| 22 | Docks (`docks`) | commercial | 13 | damaged, poor, wealthy, average | dark tile, thatch, weathered tile | weathered timber, pale plaster, salt-stained timber |
-| 23 | Well (`well`) | utility | 11 | average, repaired, wealthy, poor | thatch, slate, dark tile, cloth-shaded, stone slab | dirty plaster, thick stone, darker timber, pale plaster, dusty plaster, stone lower wall, mossy timber |
-| 24 | Guard house (`guard_house`) | military | 11 | poor, repaired, average, wealthy | thatch, dark tile, stone slab, weathered tile, red tile, cloth-shaded | mossy timber, stone lower wall, darker timber, dirty plaster, weathered timber, lighter timber, mudbrick, pale plaster |
-| 25 | Smokehouse (`smokehouse`) | commercial | 10 | average, poor, wealthy | thatch, slate, brown tile, stone slab, weathered tile, red tile, dark tile | dirty plaster, stone lower wall, darker timber, clean plaster, mossy timber, lighter timber, thick stone |
-| 26 | Granary (`granary`) | utility | 10 | poor, average, repaired, wealthy | flat clay, dark tile, slate, stone slab, weathered tile | mudbrick, stone lower wall, thick stone, mossy timber, pale plaster, darker timber, salt-stained timber |
-| 27 | Fish racks (`fish_racks`) | utility | 9 | poor, average, repaired, wealthy | dark tile, weathered tile, thatch | salt-stained timber, pale plaster, weathered timber |
-| 28 | Weaver's hall (`weavers_hall`) | commercial | 9 | poor, repaired, average, wealthy | dark tile, weathered tile, stone slab, thatch, clay tile, brown tile | darker timber, lighter timber, dirty plaster, clean plaster, mossy timber, lighter plaster |
-| 29 | Chapel (`chapel`) | special | 9 | average, wealthy, repaired, poor | red tile, weathered tile, thatch, dark tile, slate | dirty plaster, darker timber, clean plaster, lighter timber, weathered timber, stone lower wall |
-| 30 | Barracks (`barracks`) | military | 8 | poor, average | slate, dark tile, weathered tile, thatch | darker timber, weathered timber, lighter timber, mossy timber |
-| 31 | Ore shed (`ore_shed`) | utility | 8 | damaged, wealthy, average, poor | dark tile, slate, stone slab | thick stone, stone lower wall, darker timber |
-| 32 | Warehouse (`warehouse`) | utility | 7 | average, poor, repaired, wealthy | dark tile, flat clay, stone slab, cloth-shaded, thatch | stone lower wall, dusty plaster, darker timber |
-| 33 | Militia hall (`militia_hall`) | military | 7 | poor, repaired, wealthy | stone slab, slate, weathered tile, thatch | stone lower wall, thick stone, salt-stained timber, dirty plaster |
-| 34 | Potter's yard (`potters_yard`) | commercial | 6 | average, poor, repaired | slate, weathered tile, thatch, dark tile | thick stone, pale plaster, dirty plaster, salt-stained timber, darker timber |
-| 35 | Old stones (`old_stones`) | special | 6 | average, poor | thatch, weathered tile, red tile | dirty plaster, mossy timber, clean plaster, lighter timber |
-| 36 | Quarry (`quarry`) | utility | 6 | poor, repaired, average, wealthy | stone slab, slate | stone lower wall, thick stone, darker timber |
-| 37 | Barn (`barn`) | utility | 6 | average, poor, wealthy, repaired | weathered tile, clay tile, dark tile | salt-stained timber, lighter plaster, dirty plaster, mossy timber, weathered timber, pale plaster |
-| 38 | Palisade (`palisade`) | military | 5 | poor, average | weathered tile, red tile | mossy timber, clean plaster, darker timber |
-| 39 | Armoury (`armoury`) | military | 4 | average, wealthy | thatch, red tile, dark tile | weathered timber, darker timber, dirty plaster, stone lower wall |
-| 40 | Market stalls (`market_stall`) | commercial | 4 | poor, average, wealthy | weathered tile, thatch | salt-stained timber, mossy timber, lighter timber, dirty plaster |
-| 41 | Watchtower (`watchtower`) | military | 3 | poor, repaired, wealthy | slate, stone slab | darker timber |
-| 42 | Stone walls (`stone_walls`) | military | 3 | average, wealthy | stone slab, slate, weathered tile | thick stone, lighter timber |
-| 43 | Tavern (`tavern`) | commercial | 3 | average | slate, thatch | thick stone, clean plaster, weathered timber |
-| 44 | General shop (`general_shop`) | commercial | 3 | average, wealthy | weathered tile, slate | mossy timber, darker timber |
-| 45 | Woodshed (`woodshed`) | utility | 3 | wealthy, average | weathered tile, dark tile, thatch | dirty plaster, darker timber |
-| 46 | Workshop (`workshop`) | commercial | 2 | repaired, wealthy | brown tile, red tile | lighter timber, clean plaster |
-| 47 | Town hall (`town_hall`) | special | 2 | average | stone slab, brown tile | thick stone, dirty plaster |
-| 48 | Deep well (`deep_well`) | utility | 2 | average, repaired | dark tile, weathered tile | dirty plaster |
-| 49 | Large inn (`large_inn`) | commercial | 1 | poor | brown tile | clean plaster |
+| 1 | Cottages (`cottage`) | residential | 141 | average, poor, damaged, repaired, wealthy | weathered tile, slate, clay tile, dark tile, thatch, stone slab, brown tile, red tile, cloth-shaded, flat clay | darker timber, stone lower wall, mudbrick, salt-stained timber, mossy timber, dirty plaster, thick stone, lighter timber, weathered timber, clean plaster, pale plaster, lighter plaster |
+| 2 | Townhouses (`townhouse`) | residential | 115 | poor, average, damaged, repaired, wealthy | dark tile, thatch, stone slab, clay tile, weathered tile, brown tile, red tile, slate, flat clay | mossy timber, pale plaster, stone lower wall, darker timber, mudbrick, weathered timber, dirty plaster, clean plaster, lighter timber, salt-stained timber, thick stone, dusty plaster |
+| 3 | Farmhouses (`farmhouse`) | residential | 93 | abandoned, poor, average, repaired, wealthy, damaged | dark tile, stone slab, flat clay, thatch, slate, weathered tile, red tile, cloth-shaded, brown tile, clay tile | mossy timber, thick stone, mudbrick, dirty plaster, stone lower wall, darker timber, lighter timber, clean plaster, pale plaster, salt-stained timber, weathered timber, lighter plaster |
+| 4 | Keep (`keep`) | special | 40 | average, poor, repaired, wealthy | dark tile, weathered tile, stone slab, slate, cloth-shaded, brown tile, thatch, red tile, clay tile | mossy timber, weathered timber, darker timber, thick stone, mudbrick, dirty plaster, clean plaster, stone lower wall, salt-stained timber, pale plaster, lighter plaster |
+| 5 | Manor house (`manor_house`) | residential | 35 | average, wealthy, repaired | dark tile, brown tile, thatch, weathered tile, red tile, cloth-shaded, slate, stone slab | stone lower wall, dirty plaster, mossy timber, darker timber, clean plaster, pale plaster, salt-stained timber, dusty plaster, lighter timber, thick stone, weathered timber |
+| 6 | Stables (`stables`) | utility | 32 | poor, average, repaired, wealthy, damaged | thatch, dark tile, slate, brown tile, red tile, weathered tile, flat clay, clay tile | weathered timber, darker timber, lighter timber, dirty plaster, clean plaster, salt-stained timber, thick stone, mossy timber, pale plaster, dusty plaster, stone lower wall |
+| 7 | Rough hovels (`hovel`) | residential | 31 | poor, average, abandoned, damaged | dark tile, stone slab, clay tile, weathered tile, slate, thatch, flat clay, red tile | darker timber, weathered timber, stone lower wall, lighter plaster, salt-stained timber, mossy timber, pale plaster, thick stone, dusty plaster, dirty plaster, lighter timber, mudbrick, clean plaster |
+| 8 | Smithy (`smithy`) | commercial | 30 | poor, damaged, average, wealthy, repaired | thatch, dark tile, red tile, weathered tile, flat clay, slate, stone slab, brown tile, clay tile | salt-stained timber, stone lower wall, clean plaster, lighter timber, mossy timber, darker timber, dirty plaster, weathered timber, pale plaster, lighter plaster, thick stone |
+| 9 | Armoury (`armoury`) | military | 29 | poor, abandoned, average, repaired, wealthy | weathered tile, thatch, dark tile, brown tile, stone slab, slate, red tile | darker timber, clean plaster, dirty plaster, lighter timber, pale plaster, mossy timber, thick stone, weathered timber, stone lower wall, salt-stained timber |
+| 10 | Brewhouse (`brewhouse`) | commercial | 29 | poor, average, wealthy, repaired, damaged | dark tile, thatch, weathered tile, red tile, stone slab, cloth-shaded, slate, clay tile | dirty plaster, salt-stained timber, mossy timber, weathered timber, stone lower wall, lighter timber, darker timber, dusty plaster, thick stone, pale plaster |
+| 11 | Woodcutter's yard (`woodcutters_yard`) | utility | 29 | poor, average, wealthy, repaired | thatch, weathered tile, slate, dark tile, red tile, stone slab, brown tile | darker timber, dirty plaster, lighter timber, stone lower wall, clean plaster, mossy timber, thick stone |
+| 12 | General shop (`general_shop`) | commercial | 27 | poor, average, repaired, wealthy, abandoned | dark tile, clay tile, thatch, weathered tile, brown tile, stone slab, red tile, slate, cloth-shaded | thick stone, lighter plaster, salt-stained timber, dirty plaster, lighter timber, darker timber, mossy timber, mudbrick, clean plaster, stone lower wall, pale plaster |
+| 13 | Kitchen gardens (`kitchen_garden`) | utility | 26 | poor, average, repaired, wealthy | cloth-shaded, slate, weathered tile, thatch, dark tile, stone slab, clay tile, brown tile | mudbrick, darker timber, dirty plaster, mossy timber, thick stone, salt-stained timber, pale plaster, lighter plaster, lighter timber, clean plaster |
+| 14 | Mill (`mill`) | utility | 25 | average, poor, wealthy, repaired, damaged | red tile, brown tile, dark tile, weathered tile, stone slab, flat clay, cloth-shaded, clay tile, thatch | dirty plaster, clean plaster, mossy timber, salt-stained timber, thick stone, mudbrick, darker timber, dusty plaster, pale plaster, lighter plaster, lighter timber, weathered timber |
+| 15 | Mine head (`mine_head`) | utility | 24 | poor, damaged, repaired, wealthy, average | stone slab, slate, dark tile | stone lower wall, thick stone, darker timber |
+| 16 | Market square (`market_square`) | special | 23 | poor, average, wealthy, repaired | thatch, slate, brown tile, weathered tile, red tile, dark tile, flat clay | mossy timber, darker timber, dirty plaster, clean plaster, lighter timber, lighter plaster, stone lower wall |
+| 17 | Weaponsmith (`weaponsmith`) | commercial | 17 | average, damaged, wealthy, repaired, poor | cloth-shaded, dark tile, red tile, weathered tile, slate, thatch | mudbrick, mossy timber, lighter timber, thick stone, salt-stained timber, weathered timber, stone lower wall, dirty plaster, darker timber, clean plaster |
+| 18 | Guard house (`guard_house`) | military | 16 | poor, repaired, average, damaged, wealthy | flat clay, dark tile, stone slab, clay tile, weathered tile, slate, thatch, cloth-shaded, red tile | lighter plaster, stone lower wall, darker timber, mudbrick, dirty plaster, weathered timber, lighter timber, mossy timber, salt-stained timber, thick stone |
+| 19 | Gatehouse (`gatehouse`) | military | 15 | poor, wealthy, damaged, average | stone slab, thatch, weathered tile, brown tile, red tile, dark tile | darker timber, weathered timber, thick stone, clean plaster, dirty plaster, mossy timber |
+| 20 | Charcoal burner (`charcoal_burner`) | utility | 15 | average, wealthy, poor, repaired | dark tile, thatch, weathered tile, stone slab, slate | stone lower wall, darker timber, thick stone, mossy timber |
+| 21 | Merchant's house (`merchants_house`) | commercial | 15 | wealthy, average | slate, brown tile, weathered tile, thatch, dark tile, cloth-shaded, red tile | darker timber, lighter timber, mossy timber, dirty plaster, clean plaster, dusty plaster, thick stone |
+| 22 | Docks (`docks`) | commercial | 14 | damaged, poor, wealthy, average | dark tile, thatch, weathered tile | weathered timber, salt-stained timber, pale plaster |
+| 23 | Granary (`granary`) | utility | 14 | average, wealthy, poor, repaired | slate, flat clay, weathered tile, thatch, dark tile, stone slab | stone lower wall, lighter plaster, mossy timber, lighter timber, dirty plaster, weathered timber, darker timber, thick stone, salt-stained timber |
+| 24 | Stockyard (`stockyard`) | utility | 14 | average, poor, wealthy, repaired | weathered tile, slate, clay tile, thatch, dark tile | dirty plaster, darker timber, thick stone, salt-stained timber, stone lower wall, mudbrick, weathered timber, lighter plaster |
+| 25 | Vineyard (`vineyard`) | utility | 14 | wealthy, average, repaired, poor | slate, thatch, brown tile, red tile, dark tile, weathered tile, stone slab | thick stone, clean plaster, dirty plaster, pale plaster, salt-stained timber, darker timber |
+| 26 | Dairy (`dairy`) | utility | 14 | poor, average, damaged, wealthy | weathered tile, thatch, dark tile, slate, brown tile | darker timber, salt-stained timber, thick stone, mossy timber, dirty plaster, stone lower wall, clean plaster, pale plaster |
+| 27 | Sheepfold (`sheepfold`) | utility | 12 | poor, average, wealthy, repaired | weathered tile, thatch, dark tile, cloth-shaded, clay tile | dirty plaster, lighter timber, darker timber, salt-stained timber, lighter plaster, thick stone, clean plaster |
+| 28 | Salt pans (`salt_pans`) | utility | 11 | average, poor, wealthy, repaired | weathered tile, thatch, dark tile, clay tile | mossy timber, lighter timber, darker timber, dirty plaster, dusty plaster, thick stone |
+| 29 | Barn (`barn`) | utility | 10 | wealthy, poor, average, damaged, repaired | dark tile, slate, flat clay, cloth-shaded, thatch | darker timber, weathered timber, stone lower wall, dusty plaster, mudbrick, pale plaster |
+| 30 | Well (`well`) | utility | 9 | repaired, wealthy, poor, average | brown tile, thatch, weathered tile, clay tile, slate | clean plaster, pale plaster, dirty plaster, mudbrick, thick stone, darker timber, salt-stained timber |
+| 31 | Tannery (`tannery`) | commercial | 9 | average, wealthy, poor, damaged | stone slab, thatch, brown tile, weathered tile, slate | darker timber, pale plaster, clean plaster, mossy timber, dirty plaster, stone lower wall, thick stone |
+| 32 | Warehouse (`warehouse`) | utility | 9 | average, wealthy | dark tile, stone slab, weathered tile, slate | darker timber, thick stone, mossy timber, weathered timber, clean plaster |
+| 33 | Jeweller (`jeweller`) | commercial | 8 | average, wealthy | dark tile, thatch, weathered tile, red tile, slate | dirty plaster, darker timber |
+| 34 | Barracks (`barracks`) | military | 8 | poor, average, repaired | dark tile, red tile, stone slab, weathered tile | thick stone, dirty plaster, darker timber, weathered timber, clean plaster, mossy timber |
+| 35 | Chapel (`chapel`) | special | 8 | average, wealthy, repaired | red tile, weathered tile, thatch, dark tile, stone slab | dirty plaster, darker timber, lighter timber, weathered timber, clean plaster, stone lower wall |
+| 36 | Market stalls (`market_stall`) | commercial | 8 | average, poor, wealthy | stone slab, dark tile, weathered tile, thatch | thick stone, salt-stained timber, dirty plaster, mossy timber |
+| 37 | Large inn (`large_inn`) | commercial | 7 | repaired, average, poor, wealthy | red tile, dark tile, brown tile, weathered tile, flat clay | clean plaster, darker timber, mossy timber, mudbrick, stone lower wall, lighter timber |
+| 38 | Ore shed (`ore_shed`) | utility | 7 | poor, average | dark tile, slate, stone slab | thick stone, darker timber |
+| 39 | Tavern (`tavern`) | commercial | 6 | average, repaired, wealthy | thatch, slate, dark tile, brown tile, red tile | dirty plaster, thick stone, clean plaster, weathered timber, lighter timber |
+| 40 | Palisade (`palisade`) | military | 6 | poor, average, wealthy | weathered tile, red tile, brown tile, thatch | mossy timber, clean plaster, lighter timber, dirty plaster, darker timber |
+| 41 | Workshop (`workshop`) | commercial | 6 | repaired, average, wealthy, poor | brown tile, thatch, dark tile, weathered tile | lighter timber, mossy timber, dirty plaster, darker timber, clean plaster |
+| 42 | Quarry (`quarry`) | utility | 6 | poor, repaired, average, wealthy | dark tile, stone slab | thick stone, stone lower wall, darker timber |
+| 43 | Woodshed (`woodshed`) | utility | 6 | repaired, abandoned, average | dark tile, thatch | mossy timber, darker timber, dirty plaster |
+| 44 | Old stones (`old_stones`) | special | 6 | average, repaired, poor | weathered tile, thatch, brown tile | darker timber, mossy timber, lighter timber |
+| 45 | Militia hall (`militia_hall`) | military | 6 | abandoned, poor, repaired, average, wealthy | slate, stone slab, thatch | stone lower wall, thick stone, darker timber, dirty plaster |
+| 46 | Potter's yard (`potters_yard`) | commercial | 5 | poor, repaired, average, wealthy | weathered tile, thatch, dark tile | pale plaster, dirty plaster, salt-stained timber, mossy timber, thick stone |
+| 47 | Weaver's hall (`weavers_hall`) | commercial | 5 | poor, repaired, average, wealthy | dark tile, weathered tile, thatch | pale plaster, thick stone, dirty plaster, clean plaster |
+| 48 | Smokehouse (`smokehouse`) | commercial | 4 | average | brown tile, stone slab | dirty plaster, darker timber, clean plaster |
+| 49 | Town hall (`town_hall`) | special | 3 | average, wealthy, repaired | brown tile, weathered tile, dark tile | dirty plaster, darker timber |
+| 50 | Watchtower (`watchtower`) | military | 3 | average, repaired, wealthy | slate, stone slab | darker timber |
+| 51 | Deep well (`deep_well`) | utility | 3 | average, wealthy, repaired | thatch, dark tile, weathered tile | weathered timber, darker timber, dirty plaster |
+| 52 | Stone walls (`stone_walls`) | military | 2 | average | stone slab, slate | thick stone |
+| 53 | Fish racks (`fish_racks`) | utility | 2 | average, wealthy | dark tile | weathered timber, salt-stained timber |
+| 54 | Guild hall (`guild_hall`) | special | 1 | wealthy | dark tile | mossy timber |
 
 ## Attachment pieces — the modules stacked around buildings
 
@@ -74,56 +79,56 @@ condition overlay first; the breadth (every biome, every attachment) is a later 
 
 ### Structural
 
-- **Chimney** (`chimney`) — 102 placements
-- **Dormer window** (`dormer`) — 127 placements
-- **Awning** (`awning`) — 22 placements
+- **Chimney** (`chimney`) — 99 placements
+- **Dormer window** (`dormer`) — 114 placements
+- **Awning** (`awning`) — 23 placements
 - **Porch** (`porch`) — 149 placements
-- **Lean-to shed** (`lean_to_shed`) — 113 placements
-- **Outside stairs** (`stairs`) — 100 placements
-- **Balcony** (`balcony`) — 17 placements
-- **Fence** (`fence`) — 259 placements
-- **Gate** (`gate`) — 18 placements
-- **Side extension** (`side_extension`) — 74 placements
+- **Lean-to shed** (`lean_to_shed`) — 121 placements
+- **Outside stairs** (`stairs`) — 106 placements
+- **Balcony** (`balcony`) — 25 placements
+- **Fence** (`fence`) — 265 placements
+- **Gate** (`gate`) — 26 placements
+- **Side extension** (`side_extension`) — 82 placements
 
 ### Clutter
 
-- **Barrels** (`barrel`) — 43 placements
-- **Crates** (`crate`) — 50 placements
-- **Sacks** (`sack`) — 138 placements
-- **Firewood pile** (`woodpile`) — 223 placements
-- **Cart** (`cart`) — 64 placements
-- **Wagon** (`wagon`) — 96 placements
-- **Tools** (`tools`) — 137 placements
-- **Bucket** (`bucket`) — 63 placements
-- **Bench** (`bench`) — 158 placements
-- **Table** (`table`) — 21 placements
+- **Barrels** (`barrel`) — 45 placements
+- **Crates** (`crate`) — 52 placements
+- **Sacks** (`sack`) — 131 placements
+- **Firewood pile** (`woodpile`) — 226 placements
+- **Cart** (`cart`) — 62 placements
+- **Wagon** (`wagon`) — 86 placements
+- **Tools** (`tools`) — 97 placements
+- **Bucket** (`bucket`) — 64 placements
+- **Bench** (`bench`) — 156 placements
+- **Table** (`table`) — 12 placements
 - **Baskets** (`basket`) — 21 placements
-- **Hay bales** (`hay_bales`) — 59 placements
+- **Hay bales** (`hay_bales`) — 74 placements
 
 ### Life / detail
 
-- **Hanging sign** (`hanging_sign`) — 125 placements
-- **Lantern** (`lantern`) — 123 placements
-- **Banner** (`banner`) — 62 placements
-- **Laundry line** (`laundry`) — 172 placements
-- **Market goods** (`market_goods`) — 71 placements
-- **Animal pen** (`animal_pen`) — 125 placements
-- **Garden patch** (`garden`) — 63 placements
-- **Chopping block** (`chopping_block`) — 99 placements
-- **Water trough** (`water_trough`) — 61 placements
-- **Rope** (`rope`) — 44 placements
-- **Fishing nets** (`nets`) — 47 placements
+- **Hanging sign** (`hanging_sign`) — 134 placements
+- **Lantern** (`lantern`) — 116 placements
+- **Banner** (`banner`) — 78 placements
+- **Laundry line** (`laundry`) — 182 placements
+- **Market goods** (`market_goods`) — 78 placements
+- **Animal pen** (`animal_pen`) — 112 placements
+- **Garden patch** (`garden`) — 58 placements
+- **Chopping block** (`chopping_block`) — 100 placements
+- **Water trough** (`water_trough`) — 69 placements
+- **Rope** (`rope`) — 42 placements
+- **Fishing nets** (`nets`) — 42 placements
 
 ## Condition states — overlays, one set per state
 
 Rolled per building from the settlement's wealth. Draw as overlays so a base is drawn once:
 
-- **poor** — 198 buildings in the sweep
-- **average** — 431 buildings in the sweep
+- **poor** — 186 buildings in the sweep
+- **average** — 432 buildings in the sweep
 - **damaged** — 24 buildings in the sweep
-- **abandoned** — 4 buildings in the sweep
-- **repaired** — 118 buildings in the sweep
-- **wealthy** — 278 buildings in the sweep
+- **abandoned** — 8 buildings in the sweep
+- **repaired** — 116 buildings in the sweep
+- **wealthy** — 287 buildings in the sweep
 
 ## Materials — roofs and walls by ground
 
@@ -135,7 +140,7 @@ Rolled per building from the settlement's wealth. Draw as overlays so a base is 
 
 ## The count
 
-- 49 building bases drawn in this sweep (of 51 in the catalogue)
+- 54 building bases drawn in this sweep (of 55 in the catalogue)
 - 33 attachment modules
 - 6 condition overlays + 5 detail toggles (chimney, clutter, sign, fence, garden)
 - materials: roofs and walls as listed per ground (deduplicated across grounds)

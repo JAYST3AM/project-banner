@@ -33,6 +33,9 @@ const DEBUG_PANEL_FLAG := "--debug-panel"
 ## falling back to the nearest of any kind.
 const HOVER_CARD_FLAG := "--hover-card"
 const HOVER_CARD_PREFIX := "--hover-card="
+## "--no-meetings": caravans never stop the player for a chat. For verification runs, where a
+## meeting prompt would pause the world and wait for a click that never comes.
+const NO_MEETINGS_FLAG := "--no-meetings"
 ## Open the settings panel straight away, because a screenshot cannot click the button that opens it.
 const SETTINGS_PANEL_FLAG := "--settings-panel"
 ## Force a UI scale for one run: "--ui-scale=1.2". Wins over the saved file, because it is the more
@@ -142,6 +145,10 @@ static func hover_card() -> String:
 		if arg.begins_with(HOVER_CARD_PREFIX):
 			return arg.substr(HOVER_CARD_PREFIX.length())
 	return ""
+
+
+static func no_meetings() -> bool:
+	return _user_args().has(NO_MEETINGS_FLAG)
 
 
 ## Whether a run asked to start with the settings panel open.

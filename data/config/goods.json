@@ -27,6 +27,9 @@
     {"id": "tools", "name": "Tools", "value": 18, "category": "craft"},
     {"id": "pottery", "name": "Pottery", "value": 9, "category": "craft"},
     {"id": "horse tack", "name": "Horse tack", "value": 26, "category": "craft"},
-    {"id": "horses", "name": "Horses", "value": 90, "category": "livestock"}
+    {"id": "horses", "name": "Horses", "value": 90, "category": "livestock"},
+    {"id": "armour", "name": "Armour", "value": 110, "category": "craft"},
+    {"id": "weapons", "name": "Weapons", "value": 95, "category": "craft"},
+    {"id": "jewellery", "name": "Jewellery", "value": 210, "category": "luxury"}
   ]
 }
