@@ -20,6 +20,8 @@ const ROWS := 64
 
 ## Game hours to cross one world unit. Indexed row * COLUMNS + column.
 var _cost := PackedFloat32Array()
+## The pace the grid was built with, kept so walking can recover a speed factor from a stored cost.
+var _base := 150.0
 var _ready := false
 
 
@@ -28,11 +30,11 @@ func build(seed_value: int, config: GameConfig, roads: Array, settlements: Dicti
 	var world := WorldChunks.build(seed_value)
 	_cost.resize(COLUMNS * ROWS)
 	var base := maxf(1.0, config.get_float("travel.world_units_per_game_hour", 150.0))
+	_base = base
 	var water := config.get_float("travel.water_speed_factor", 0.30)
 	var marsh := config.get_float("travel.marsh_speed_factor", 0.55)
 	var water_height := config.get_float("travel.water_height", 0.335)
 	var marsh_height := config.get_float("travel.marsh_height", 0.375)
-	var road_bonus := config.get_float("travel.road_speed_bonus", 1.4)
 
 	for row in ROWS:
 		for column in COLUMNS:
@@ -52,14 +54,21 @@ func build(seed_value: int, config: GameConfig, roads: Array, settlements: Dicti
 				factor = 0.9
 			_cost[row * COLUMNS + column] = 1.0 / (base * maxf(0.05, factor))
 
-	# Roads are cheaper ground. Every cell a road passes through gets the road's speed, found by walking
-	# the same curve the map draws, so what the player sees and what the pathfinder prices agree.
-	var road_cost := 1.0 / (base * road_bonus)
-	for road in roads:
+	# Roads are cheaper ground, at the price their tier carries. Every cell a road passes through gets
+	# that link's speed, found by walking the same curve the map draws, so what the player sees and
+	# what the pathfinder prices agree. A roadless link (tier "none") stamps nothing at all.
+	for raw in roads:
+		if typeof(raw) != TYPE_DICTIONARY:
+			continue
+		var road := raw as Dictionary
+		var tier := str(road.get("kind", "road"))
+		if tier == "none":
+			continue
 		var a := settlements.get(str(road.get("a", "")), null) as Settlement
 		var b := settlements.get(str(road.get("b", "")), null) as Settlement
 		if a == null or b == null:
 			continue
+		var road_cost := 1.0 / (base * _tier_bonus(config, tier))
 		var path := RoadPath.between(a.position, b.position)
 		for i in path.size() - 1:
 			var from := path[i]
@@ -105,6 +114,23 @@ func cost_of(cell: Vector2i) -> float:
 	if not _ready or cell.x < 0 or cell.y < 0 or cell.x >= COLUMNS or cell.y >= ROWS:
 		return INF
 	return _cost[cell.y * COLUMNS + cell.x]
+
+
+## The speed factor the grid itself was built from at a point: walking reads the exact number the
+## pathfinder priced, so the pace on a road is the road's own price and not a second opinion.
+func factor_at(point: Vector2) -> float:
+	var cost := cost_of(cell_at(point))
+	if cost == INF:
+		return 1.0
+	return 1.0 / maxf(0.0001, cost * _base)
+
+
+## The speed factor a link's tier carries, from the roads block of the config. The old single
+## travel.road_speed_bonus stays the fallback for the top tier, so a config from before the tiers
+## still prices its roads the same.
+func _tier_bonus(config: GameConfig, tier: String) -> float:
+	var fallback := config.get_float("travel.road_speed_bonus", 1.4) if tier == "road" else 1.0
+	return maxf(1.0, config.get_float("roads.speed_bonus." + tier, fallback))
 
 
 ## Whether a straight line between two points stays off the expensive ground. Used to pull the staircase

@@ -49,18 +49,21 @@ func _test_clock() -> void:
 
 	equal(clock.full_string(), "Day 1 - 08:00", "clock formats day and time")
 
-	# 2 real seconds per game hour at normal speed => 2 real seconds = 1 hour.
+	# The rate and the multipliers come from the config, so a retune retunes the test with it.
+	var per_hour := cfg.get_float("time.seconds_per_game_hour", 10.0)
+	var normal_hours := 2.0 / per_hour
+	var fast_multiplier := float(cfg.get_dict("time.speed_multipliers", {}).get("fast", 3.0))
 	clock.advance_real_seconds(2.0)
-	approx(clock.hour, 9.0, 0.001, "2 real seconds advances 1 game hour at normal speed")
+	approx(clock.hour, 8.0 + normal_hours, 0.001, "two real seconds at normal speed buys the configured hours")
 
 	clock.set_speed(CampaignClock.Speed.FAST)
 	clock.advance_real_seconds(2.0)
-	approx(clock.hour, 12.0, 0.001, "fast speed advances 3x game time")
+	approx(clock.hour, 8.0 + normal_hours * (1.0 + fast_multiplier), 0.001, "fast speed multiplies game time")
 
 	clock.set_speed(CampaignClock.Speed.PAUSED)
 	var advanced := clock.advance_real_seconds(10.0)
 	approx(advanced, 0.0, 0.0001, "paused clock advances nothing")
-	approx(clock.hour, 12.0, 0.001, "paused clock keeps the hour unchanged")
+	approx(clock.hour, 8.0 + normal_hours * (1.0 + fast_multiplier), 0.001, "paused clock keeps the hour unchanged")
 
 	# Day rollover
 	clock.set_speed(CampaignClock.Speed.NORMAL)

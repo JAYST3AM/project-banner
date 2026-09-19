@@ -41,8 +41,13 @@ func _test_march_to_open_ground() -> void:
 	check(travel.is_travelling(), "and the party is travelling")
 	check(travel.is_marching_to_point(), "with a point for a destination, not a settlement")
 	approx(travel.distance_to(target), start.distance_to(target), 0.001, "from where it started")
-	approx(travel.hours_to_reach(target), travel.distance_to(target) / travel.speed_units_per_game_hour(),
-		0.001, "and an eta to match its pace")
+	# The eta prices the ground along the line rather than at one end, so it is quoted in game
+	# hours between the best road and the worst water - and it can never under-promise the distance.
+	var march_pace := travel.speed_units_per_game_hour()
+	var flat := travel.distance_to(target) / march_pace
+	var eta := travel.hours_to_reach(target)
+	check(eta >= flat / 1.4 - 0.001, "an eta is never faster than the best road would make it")
+	check(eta <= flat / 0.30 + 0.001, "nor slower than the worst water")
 
 	var guard := 0
 	while travel.is_travelling() and guard < 5000:
@@ -157,14 +162,23 @@ func _test_travel() -> void:
 
 	var distance := travel.distance_to(brackenford.position)
 	greater(distance, 0.0, "destination is some distance away")
-	var expected_hours := distance / travel.speed_units_per_game_hour()
-	approx(travel.hours_to_reach(brackenford.position), expected_hours, 0.001, "eta matches distance / pace")
-
-	# One hour of travel moves exactly pace * 1 hour.
 	var pace := travel.speed_units_per_game_hour()
-	var report := travel.step(1.0)
+	var flat := distance / pace
+	var eta := travel.hours_to_reach(brackenford.position)
+	check(eta >= flat / 1.4 - 0.001, "the eta is never faster than the best road would make it")
+	check(eta <= flat / 0.30 + 0.001, "nor slower than the worst water")
+
+	# A step covers its game hours at the ground's own pace, and no single step - however much
+	# game time it is handed - outruns the configured cap.
+	var factor := travel.ground_factor()
+	var report := travel.step(0.1)
 	check(bool(report.get("moved", false)), "step reports movement")
-	approx(travel.distance_to(brackenford.position), distance - pace, 0.5, "one game hour covers exactly one hour of pace")
+	var covered := distance - travel.distance_to(brackenford.position)
+	var cap := config.get_float("travel.max_step_units", 24.0)
+	approx(covered, minf(pace * factor * 0.1, cap), 0.5, "a step covers its hours at the ground's pace")
+	var big := travel.step(10.0)
+	approx(float(big.get("distance_travelled", 0.0)), cap, 0.5,
+		"a single step cannot outrun the cap, whatever time it is handed")
 	check(travel.distance_to(brackenford.position) > 0.0, "not there yet")
 
 	# A zero-length step must not be treated as movement.
@@ -215,7 +229,7 @@ func _test_arrival_and_enter() -> void:
 	var hours := travel.hours_to_reach(redmoor.position)
 	var arrived := false
 	var guard := 0
-	while not arrived and guard < 50:
+	while not arrived and guard < 200:
 		guard += 1
 		var report := travel.step(hours / 4.0)
 		arrived = bool(report.get("arrived", false))
@@ -225,7 +239,7 @@ func _test_arrival_and_enter() -> void:
 	equal(state.destination_id, "", "destination cleared on arrival")
 	approx(state.world_position.x, redmoor.position.x, 0.001, "party lands exactly on the settlement")
 	check(redmoor.visited, "arrival marks the settlement visited")
-	check(guard < 50, "arrival did not take an unreasonable number of steps")
+	check(guard < 200, "arrival did not take an unreasonable number of steps")
 
 	travel.teleport_to("brackenford")
 	check(travel.is_at_settlement("brackenford"), "teleport puts the party at the settlement")
@@ -240,18 +254,23 @@ func _test_speed_states() -> void:
 	var day_before := clock.day
 	var hour_before := clock.hour
 
-	# Two real seconds at normal speed is one game hour.
+	# The rate is the config's own: two real seconds buys this many game hours at normal speed.
+	var config := GameManager.config()
+	var per_hour := config.get_float("time.seconds_per_game_hour", 10.0)
+	var normal_hours := 2.0 / per_hour
 	var advanced := clock.advance_real_seconds(2.0)
-	approx(advanced, 1.0, 0.001, "normal speed: 2 real seconds = 1 game hour")
+	approx(advanced, normal_hours, 0.001, "normal speed: two real seconds at the configured rate")
 
 	clock.set_speed(CampaignClock.Speed.FAST)
+	var fast_multiplier := float(config.get_dict("time.speed_multipliers", {}).get("fast", 3.0))
 	advanced = clock.advance_real_seconds(2.0)
-	approx(advanced, 3.0, 0.001, "fast speed: 2 real seconds = 3 game hours")
+	approx(advanced, normal_hours * fast_multiplier, 0.001, "fast speed: the same time, multiplied")
 
 	clock.set_speed(CampaignClock.Speed.PAUSED)
 	advanced = clock.advance_real_seconds(2.0)
 	approx(advanced, 0.0, 0.001, "paused: no game time passes")
-	approx(clock.hour, hour_before + 4.0, 0.001, "only the unpaused advances applied")
+	approx(clock.hour, hour_before + normal_hours * (1.0 + fast_multiplier), 0.001,
+		"only the unpaused advances applied")
 	equal(clock.day, day_before, "no day rollover in this test")
 
 	check(clock.set_speed_by_name("fast"), "speed can be set by name")

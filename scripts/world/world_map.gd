@@ -15,6 +15,7 @@ var _state: CampaignState = null
 var _config: GameConfig = null
 var _travel: TravelService = null
 var _costs: TravelCosts = null
+var _roads: RoadNetwork = null
 ## Kept until the ground is built, so the bar is painted until the world is whole.
 var _loader: LoadingScreen = null
 var _debug: DebugPanel = null
@@ -105,6 +106,10 @@ func _ready() -> void:
 	_stage_name = "travel service"
 	_mark = Time.get_ticks_msec()
 	_travel = TravelService.new(_state, _config)
+	# The roads are a living thing: the network normalises every link (saves from before the tiers
+	# carry plain kinds) and the travel service wears the ones the party walks.
+	_roads = RoadNetwork.new(_state, _config)
+	_travel.roads = _roads
 	# One pathfinder for the campaign: 4,096 cells at 64 units each, about 136 milliseconds once
 	# measured, and every order after this is an A* over a grid that is already priced.
 	_costs = TravelCosts.new()
@@ -278,6 +283,11 @@ func _process(delta: float) -> void:
 				_on_arrived(str(report.get("settlement_id", "")))
 			if _overworld != null:
 				_overworld.step(game_hours)
+	# The roads age and grow on the same clock: a link worn by traffic rises a tier, one nobody has
+	# used for years falls one, and the map re-prices the ground when either happens - an event of
+	# about a seventh of a second, not a per-frame cost.
+	if _roads != null and _roads.review(_state.clock.total_hours()):
+		_rebuild_costs()
 	# How far the renderer is through the step it is waiting on, for the same reason.
 	_state.render_alpha = clampf(_accumulator / SIM_STEP, 0.0, 1.0)
 
@@ -301,6 +311,15 @@ func _refresh() -> void:
 	_hud.refresh()
 	if _debug != null:
 		_debug.refresh()
+
+
+## A road changed tier: the ground is re-priced in place and handed back to the same readers. A
+## journey already under way keeps its route; the next order is planned on the new prices.
+func _rebuild_costs() -> void:
+	_costs.build(_state.campaign_seed, _config, _state.roads, _state.settlements)
+	_travel.costs = _costs
+	_view.costs = _costs
+	_view.queue_redraw()
 
 
 func _on_arrived(settlement_id: String) -> void:

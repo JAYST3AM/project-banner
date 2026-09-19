@@ -41,6 +41,25 @@
     "party_size_speed_penalty": 0.012,
     "min_speed_fraction": 0.55
   },
+  "roads": {
+    "_comment": "The road network as a living thing. A link between two settlements carries a tier; the priced grid, the eta and the walking pace all read the tier's speed bonus. A settlement founded later links itself to its nearest neighbour as a dirt road - 'a very small bonus'. Traffic (world units walked on the link) raises a tier once upgrade_traffic is met; a link nobody has used for decay_days_per_tier of game days falls one tier, and can eventually be roadless again, which takes years: 'roadless, it takes years though, so I doubt it will ever happen.'",
+    "tiers": ["none", "dirt", "track", "road"],
+    "speed_bonus": {
+      "none": 1.0,
+      "dirt": 1.05,
+      "track": 1.2,
+      "road": 1.4
+    },
+    "upgrade_traffic": {
+      "none": 400.0,
+      "dirt": 800.0,
+      "track": 2400.0
+    },
+    "decay_days_per_tier": 3650.0,
+    "traffic_radius": 48.0,
+    "traffic_scan_hours": 0.1,
+    "review_hours": 6.0
+  },
   "battle": {
     "_comment": "Battle simulation settings. tick_rate is the fixed simulation step the runtime advances the fight at: frames are accumulated and whole ticks are run, so one tick is always 1/tick_rate seconds and the same seed fights the same battle whatever the machine renders at. The owner set sixty on 2026-09-18 and asked to try thirty later the same night, watching what the fight and the map read like at half the rate; every tick-counted rule below halved with it, so the same rule still means the same number of seconds. A tick is a design decision, not a rendering one.",
     "tick_rate": 30.0,

@@ -68,25 +68,22 @@ var _route_target := ""
 ## The world's field, built lazily: ground_factor() reads it every step and build() is not cheap.
 var _world: WorldChunks = null
 var route_leg := 0
+## The living road network, when the map has one: the party's walking wears the roads it uses, and
+## its pace reads the ground's price exactly as the grid priced it. Fixtures that build a travel
+## service on their own leave this null, in which case nothing is worn and the field answers alone.
+var roads: RoadNetwork = null
 
 ## On a road the owner wants speed; off it, the ground decides. Read from the world's own field - the
 ## same one the map paints from - so a marsh is slow on the map and slow to cross.
 func ground_factor() -> float:
+	# With a priced grid, the ground answers with its own number - the exact figure the pathfinder
+	# used, tier and terrain together - so the pace and the route cannot disagree. Without one, the
+	# route's own legs are the only road this service knows, and the field answers for the rest.
+	if costs != null and costs.is_ready():
+		return costs.factor_at(state.world_position)
 	if is_on_road():
 		return config.get_float("travel.road_speed_bonus", 1.4)
-	# Built once and kept: this runs every simulation step, and WorldChunks.build() generates a field.
-	if _world == null:
-		_world = WorldChunks.build(state.campaign_seed)
-	var here: Dictionary = _world.sample(state.world_position)
-	var height := float(here.get("height", 0.5))
-	var wear := float(here.get("wear", 0.0))
-	var moisture := float(here.get("moisture", 0.5))
-	if height < config.get_float("travel.water_height", 0.335):
-		return config.get_float("travel.water_speed_factor", 0.30)
-	if height < config.get_float("travel.marsh_height", 0.375):
-		return config.get_float("travel.marsh_speed_factor", 0.55)
-	# Worn country is where the roads of the world already are: old traffic made it easy going.
-	return 1.1 if wear > 0.5 else (0.9 if moisture > 0.6 else 1.0)
+	return _ground_factor_at(state.world_position)
 
 
 ## Within about a road's width of the route's current leg, which is the leg the map drew as a road.
@@ -130,12 +127,38 @@ func distance_to(point: Vector2) -> float:
 	return state.world_position.distance_to(point)
 
 
-## Game hours the party needs to reach a point. Used for UI estimates.
+## The speed factor the ground gives at a point: the priced grid's own answer when it exists - a
+## road's tier speeds the party exactly as it priced the route - and the raw field otherwise.
+func factor_at_point(point: Vector2) -> float:
+	if costs != null and costs.is_ready():
+		return costs.factor_at(point)
+	return _ground_factor_at(point)
+
+
+## How far apart the eta's samples are, in world units.
+const ETA_SAMPLE_UNITS := 32.0
+
+
+## Game hours the party needs to reach a point, priced along the line rather than at one end: a
+## journey over a marsh costs more than one over grass, and an eta taken while standing on a road
+## no longer quotes the whole distance at road speed. Used for UI estimates; the route itself is
+## priced by the grid when one exists.
 func hours_to_reach(point: Vector2) -> float:
-	var speed := speed_units_per_game_hour() * ground_factor()
-	if speed <= 0.0:
+	if state == null:
 		return 0.0
-	return distance_to(point) / speed
+	var distance := distance_to(point)
+	var speed := speed_units_per_game_hour()
+	if speed <= 0.0 or distance <= 0.0:
+		return 0.0
+	var samples := maxi(2, int(ceil(distance / ETA_SAMPLE_UNITS)) + 1)
+	var hours := 0.0
+	var previous := state.world_position
+	for i in range(1, samples + 1):
+		var at: Vector2 = state.world_position.lerp(point, float(i) / float(samples))
+		var factor := factor_at_point(previous.lerp(at, 0.5))
+		hours += previous.distance_to(at) / (speed * maxf(0.05, factor))
+		previous = at
+	return hours
 
 
 func is_at_settlement(settlement_id: String) -> bool:
@@ -360,6 +383,10 @@ func step(game_hours: float) -> Dictionary:
 	if state == null or game_hours <= 0.0 or not is_travelling():
 		return report
 
+	# Where the party stood before this step, so the ground it just walked can be handed to the
+	# road network afterwards.
+	var start_point := state.world_position
+
 	# A new destination routes, once. Keyed on identity so every order works rather than only the first.
 	var wanted := destination()
 	if wanted != null and str(wanted.id) != _route_target:
@@ -370,10 +397,13 @@ func step(game_hours: float) -> Dictionary:
 
 	if route.size() < 2:
 		# No route - marching to open ground, or a destination with no road between: a straight walk.
-		return _step_straight(game_hours, report)
+		var straight := _step_straight(game_hours, report)
+		_wear_roads(start_point, game_hours, straight)
+		return straight
 
-	# Never more than a step's worth of distance, however much game time the step was handed.
-	var budget := minf(speed_units_per_game_hour() * game_hours, config.get_float("travel.max_step_units", 24.0))
+	# Never more than a step's worth of distance, however much game time the step was handed, and
+	# never more than the ground gives: the pace reads the same factor the grid priced into the route.
+	var budget := minf(speed_units_per_game_hour() * ground_factor() * game_hours, config.get_float("travel.max_step_units", 24.0))
 	var spent := 0.0
 	var leg := route_leg
 	while budget > 0.0 and leg < route.size() - 1:
@@ -402,6 +432,7 @@ func step(game_hours: float) -> Dictionary:
 	# Arriving is reaching the end of the route, and only that.
 	if leg >= route.size() - 1 and state.world_position.distance_to(route[route.size() - 1]) <= arrival_radius():
 		_finish_travel(report)
+	_wear_roads(start_point, game_hours, report)
 	return report
 
 
@@ -413,7 +444,7 @@ func _step_straight(game_hours: float, report: Dictionary) -> Dictionary:
 	if distance <= arrival_radius():
 		_finish_travel(report)
 		return report
-	var travel := minf(speed_units_per_game_hour() * game_hours, config.get_float("travel.max_step_units", 24.0))
+	var travel := minf(speed_units_per_game_hour() * ground_factor() * game_hours, config.get_float("travel.max_step_units", 24.0))
 	if travel >= distance:
 		state.world_position = target
 		report["distance_travelled"] = distance
@@ -424,6 +455,17 @@ func _step_straight(game_hours: float, report: Dictionary) -> Dictionary:
 	report["moved"] = true
 	report["distance_travelled"] = travel
 	return report
+
+
+## Hand the ground just walked to the road network, so the link the party is on is credited with
+## the wear. The network throttles its own scans; this only reports what happened.
+func _wear_roads(from_point: Vector2, game_hours: float, report: Dictionary) -> void:
+	if roads == null:
+		return
+	var walked := float(report.get("distance_travelled", 0.0))
+	if walked <= 0.001:
+		return
+	roads.charge_move(from_point, state.world_position, walked, game_hours)
 
 
 ## Teleport (debug panel / tests). Skips travel entirely but still consumes no time.

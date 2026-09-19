@@ -11,6 +11,7 @@ const COLOR_LAND_EDGE := Color("3a4a3c")
 ## slab, and against painted ground a brown road on brown earth is simply not there.
 const COLOR_ROAD := Color("9a8452")
 const COLOR_TRACK := Color("6a5f49")
+const COLOR_DIRT := Color("5c4b38")
 ## The dark edge under a road. Casing is what makes a line legible over whatever it crosses - it is
 ## the trick contour maps have always used, and the reason the roads vanished without it.
 const COLOR_CASING := Color(0.02, 0.03, 0.04, 0.55)
@@ -198,13 +199,30 @@ func _draw_roads() -> void:
 		var span := Rect2(a.position, Vector2.ZERO).expand(b.position)
 		if not visible.intersects(span):
 			continue
-		var kind := str(road.get("kind", "road"))
-		var color := COLOR_ROAD if kind == "road" else COLOR_TRACK
-		var width := 5.0 if kind == "road" else 3.0
+		# The tier is the drawing: a road is the full width with a highlight, a track is narrower
+		# and plainer, a dirt road is a thin line, and a roadless link is not drawn at all.
+		var tier := str(road.get("kind", "road"))
+		if tier == "none":
+			continue
+		var color := COLOR_ROAD
+		var width := 5.0
+		match tier:
+			"dirt":
+				color = COLOR_DIRT
+				width = 2.0
+			"track":
+				color = COLOR_TRACK
+				width = 3.5
+			"road":
+				pass
+			_:
+				color = COLOR_TRACK
+				width = 3.5
 		var path := RoadPath.between(a.position, b.position)
-		draw_polyline(path, COLOR_CASING, width + 3.0, true)
+		var casing := 3.0 if tier != "dirt" else 2.0
+		draw_polyline(path, COLOR_CASING, width + casing, true)
 		draw_polyline(path, color, width, true)
-		if kind == "road":
+		if tier == "road":
 			draw_polyline(path, color.lightened(0.3), 1.0, true)
 
 
