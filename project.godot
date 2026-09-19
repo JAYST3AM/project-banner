@@ -12,6 +12,7 @@ config_version=5
 run/max_fps=360
 
 config/name="Project Banner"
+config/icon="res://icon.png"
 config/description="A persistent medieval sandbox: individual soldiers, tactical battles, and a living campaign world."
 config/version="0.1.0"
 run/main_scene="res://scenes/core/main.tscn"
