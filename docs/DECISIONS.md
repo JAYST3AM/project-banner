@@ -3197,3 +3197,71 @@ are the bounded difference above, and the GPU has no separate focus fallback or 
 `test_target_acquisition.gd` pins: keep, staggered cadence, immediate in-reach replacement, release,
 and no thrash between similar enemies.
 
+
+## D-120 - roads are a living network: a tier per link, worn by traffic, aged by years
+
+**Context.** The owner, on what roads should become: "real roads that also get built over time,
+because later we will have settlements being built by the ai" - and, on the two forks put to him: a
+settlement founded later spawns "a dirt road... but will only give a very small bonus"; an unused link
+can fall "roadless, it takes years though, so I doubt it will ever happen". Before this the network
+was frozen at world-gen: one spanning tree, priced once, a static list in the save, and nothing could
+add, move or age a link.
+
+**Decision.** A link's tier lives in the same `kind` field every reader already touches -
+`none | dirt | track | road`, ordered by `roads.tiers` in the config, each with its own speed bonus
+(dirt 1.05, track 1.2, road 1.4), so the grid, the map, the eta and the pace all read one number.
+`RoadNetwork` owns the ledger: every link carries `traffic` (world units walked on it) and
+`used_hours` (total game hours at last use). A settlement founded later calls `connect_settlement`,
+which links it to its nearest neighbour as a dirt road. Traffic arrives through the travel service's
+own steps (`charge_move`, throttled to `traffic_scan_hours` windows, attributed to the link nearest
+the walked stretch); `review` runs the slow clock - every `review_hours` of game time, a link with
+`upgrade_traffic[<tier>]` met rises a tier with the spill kept, and a link idle for
+`decay_days_per_tier` game days (3650 by default - the owner's "years") falls one tier, to the
+`none` floor, from which traffic can wear it back in. A tier change marks the ground dirty and the map
+re-prices the whole 64x64 grid in place (~140 ms - an event, not a frame cost). Old saves load as
+roads: an unknown kind reads as `road`, and a missing `used_hours` stamps *now*, not year zero, or the
+whole network would decay the moment it loaded.
+
+**Why traffic counts world units walked.** Distance is physical and needs no new unit: one crossing of
+a ~600-unit link is ~600 traffic against dirt's 800 to rise. Every number lives in
+`data/config/game_config.json` under `roads`; nothing is hardcoded.
+
+**Where the tiers show.** The map draws the ladder - road full width with a highlight, track narrower
+and plainer, dirt a thin line, `none` not at all - and the priced grid stamps each link's cells at its
+own tier's bonus (`none` stamps nothing). The world opens with its elder towns already at `road`; the
+dynamics are for what gets built after.
+
+**Proved, not asserted.** `tests/test_roads.gd` (58 assertions): the ladder and every bonus ordering,
+normalising (including the stamp-now reading), a founded settlement's dirt link to its nearest
+neighbour, upgrades on threshold with the spill kept and no climb without traffic, the full decay
+ladder over 3650-day spans down to the roadless floor, the roadless re-stamp of the grid and revival
+by traffic, per-tier grid prices asserted as exact cell costs, the walking factor agreeing with the
+price it was built from, a walked settlement route wearing its link, and the whole ledger surviving a
+save.
+
+
+## D-121 - the eta, the pace and the grid are one number now
+
+**Context.** Three speeds disagreed on one journey: the grid priced a link at its bonus, `step()`
+walked at a flat base pace that ignored the ground entirely, and `hours_to_reach` quoted the
+straight-line distance divided by the factor at the party's *current* spot - so standing on a road
+over-promised the whole journey by up to forty per cent. The owner, asked what he wanted from roads:
+"all of this" - speed feel, honest etas, the network shape - and the fix is one rule rather than
+three: the ground's own number.
+
+**Decision.** `TravelCosts.factor_at(point)` recovers the exact factor a cell was priced from
+(`1 / (cost * base)`); `TravelService.ground_factor()` reads that grid answer for the party's
+position, and both the route walk's budget and the direct walk apply it - the pace on a road is the
+road's own price and not a second opinion. `hours_to_reach` prices the line in 32-unit samples rather
+than at one end, so a marsh between costs more and a road underfoot pays where it runs. Without a grid
+(suites and fixtures that build a travel service alone), the previous field-and-route reading stands
+as the fallback.
+
+**The suite rebuilt to the new substance.** `test_world_map` had gone red holding three old truths: an
+eta with no ground factor, a one-hour step not capped at `max_step_units`, and a clock hardcoding two
+real seconds to the game hour against a config that says ten. The tests now assert the new contract in
+config terms - the eta bounded between best-road and worst-water, a step covering its own hours at
+`min(pace x factor x hours, cap)` and never outrunning the cap however much time it is handed, and the
+clock read from `time.seconds_per_game_hour` and `time.speed_multipliers` rather than literals - so a
+retune of the config retunes the suite with it. 109 assertions, 0 failures.
+

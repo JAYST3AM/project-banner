@@ -881,3 +881,29 @@ them: the press-forward cache was predicted at 16-18 ms from its price and measu
 collapse was predicted at 10-16 and measured 21.8; the native batch was predicted near twenty and
 measured 3.2. Every slice is chosen on its price and accepted on its paired run, which is why every
 switch keeps its reference in the same build.
+
+
+## Step 8 - roads as a living thing (`milestone-08`)
+
+**What it is.** The road network stops being a build-time artifact and becomes part of the world's
+state: links carry a tier (`none | dirt | track | road`), traffic wears them up, years of neglect wear
+them down, a settlement founded later links itself to its nearest neighbour by a dirt road, and the
+priced grid, the eta and the walking pace all read the tier's bonus. Agreed with the owner in
+conversation ("real roads that also get built over time, because later we will have settlements being
+built by the ai", "a very small bonus", "roadless, it takes years though... I doubt it will ever
+happen"), recorded as D-120 and D-121.
+
+| piece | where |
+| --- | --- |
+| the ledger, tiers, traffic, decay, `connect_settlement` | `scripts/world/road_network.gd` (new) |
+| per-link grid stamping at the tier's price, `factor_at` | `scripts/world/travel_costs.gd` |
+| pace and eta read the ground's own number; walking wears the link | `scripts/world/travel_service.gd` |
+| tier drawing - width and colour per tier, `none` not drawn | `scripts/world/world_map_view.gd` |
+| wiring, the review clock, the grid re-price on a tier change | `scripts/world/world_map.gd` |
+| the checks | `tests/test_roads.gd` (new, 58) and `test_world_map` rebuilt to 109/0 |
+
+**Settings** live in `data/config/game_config.json` under `roads`: the ladder and its bonuses, the
+traffic each tier needs to rise, the decay span, and the scan/review windows. **Verified** by the
+suite and by a live debug-1 run that walks a route, enters, recruits and returns with no script
+errors. **Next**: nothing in the world founds settlements at runtime yet - the road side of that
+exists as `connect_settlement`; the settlement side is its own milestone.

@@ -2,14 +2,17 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** end of Step 7.8B - the large-battle stalemate, reproduced and fixed at the
-formation layer, with the runtime moved onto a fixed simulation step
+**Last updated:** Step 8 - roads as a living thing: tiers, traffic and decay on every link, and
+the eta, the pace and the priced grid reading one number.
 **Engine:** Godot 4.7.2-stable
-**Test status:** `8563 assertions, 0 failures, 24 of 24 suites` headless (with the native
-accelerator loaded and required), plus `95 checks + 6 checks, 0 failures` in a genuine
-two-process restart check.
-**Independent gate:** GitHub Actions runs both of those on every push to `main` and
-every pull request against it, pinned to Godot 4.7.2-stable.
+**Test status:** Step 8's suites are green - `test_roads` 58/0 (new) and `test_world_map` 109/0 -
+plus `test_core_services` 83/0 with its clock read from the config. The rest of the tree is red
+from the 2026-09-19 revert and its fallout: 30 suites, 5,884 assertions, 41 failures, 5 BROKEN -
+and every one of those reproduces at the parent commit, verified suite by suite with the Step 8
+work stashed. See **Known red**, below. The two-process restart check has not been re-run since
+the revert.
+**Independent gate:** GitHub Actions runs the suite on every push to `main`; it is red for the
+same known reason until the battle-terrain cluster is dealt with.
 
 **Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, and Steps 7.2, 7.3, 7.4, 7.5 and 7.6 were
 engineering milestones; none of them added gameplay. Step 7 added terrain and formations.
@@ -25,6 +28,39 @@ query feasibility spike](#step-77---native-spatial-query-feasibility-spike) and 
 separation-pass optimisation](#step-78---separation-pass-optimisation) below.
 
 ---
+
+## Known red - the revert's fallout (all pre-existing)
+
+The 2026-09-19 revert that took the other session's sweep out of the tree also deleted
+`biome_catalog.gd`, `terrain_ground.gd`, `battlefield_decals.gd` and `terrain_bench.gd` - while
+seven files still reference them, headed by `scripts/battle/battlefield_terrain.gd`. The battle
+terrain cannot compile, and the suites built over it fail. Every line below reproduces at the
+parent commit with the Step 8 work stashed:
+
+| suite | state | what is known |
+| --- | --- | --- |
+| `test_terrain`, `test_formation_battle` | BROKEN | parse errors: `BiomeCatalog` does not exist |
+| `test_battle_outcomes`, `test_battle_view`, `test_formation_focus` | BROKEN | ran no assertions - the battle scene does not come up |
+| `test_target_acquisition` | 21 failures | battle phases come back 0 |
+| `test_party_semantics` | 5 failures | the HUD shows `-` where the count belongs |
+| `test_spatial_grid` | 2 failures | the grid signature is empty |
+| `test_combat`, `test_e2e_loop`, `test_encounters` | 1 / 3 / 1 failures | the same cluster |
+
+Also referencing the removed classes, outside the suites: `scripts/terrain/terrain_generator.gd`,
+`terrain_overlay.gd`, `terrain_props.gd`, `scripts/dev/terrain_lab.gd`, `terrain_probe.gd`,
+`ground_forge.gd`. Owner's call pending: restore the pre-sweep versions, or finish removing what
+the revert broke. The world map, travel and the road network are unaffected.
+
+## Roads (Step 8)
+
+A link between two settlements carries a **tier** - `none | dirt | track | road`, speed bonus
+1.0 / 1.05 / 1.2 / 1.4 - stored in the link's own `kind`, and the priced grid, the eta and the
+walking pace all read it. A settlement founded later links itself to its nearest neighbour as a
+dirt road; traffic (world units walked on the link) wears it up a tier; a long idle span - 3,650
+game days per tier - wears it down, roadless at the floor, and traffic can wear even that back in.
+Settings: `data/config/game_config.json` under `roads`. Model and measurements: D-120, D-121 and
+the Step 8 section of `ROADMAP.md`. Nothing founds settlements at runtime yet - the road side is
+`RoadNetwork.connect_settlement`, waiting on the settlement side.
 
 ## The vertical slice is complete
 
