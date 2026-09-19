@@ -333,6 +333,8 @@ func _build_settlement(raw: Dictionary) -> Settlement:
 		var count := int((raw.get("recruit_pool", {}) as Dictionary)[key])
 		settlement.recruit_pool[str(key)] = count
 		settlement.recruit_pool_base[str(key)] = count
+	# The detail the hover card shows (D-136), generated from the seed and the settlement's id.
+	SettlementDetails.fill(settlement, state.campaign_seed)
 	return settlement
 
 

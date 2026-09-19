@@ -735,6 +735,7 @@ func teleport_to(settlement_id: String) -> bool:
 	state.destination_id = ""
 	state.current_settlement_id = target.id
 	target.visited = true
+	target.last_visited_day = state.clock.day
 	DebugLogger.info("teleported to %s" % target.name, "Travel")
 	return true
 
@@ -765,6 +766,7 @@ func _finish_travel(report: Dictionary) -> void:
 		if here != null:
 			state.current_settlement_id = here.id
 			here.visited = true
+			here.last_visited_day = state.clock.day
 			report["settlement_id"] = here.id
 			DebugLogger.info("arrived at %s on %s%s" % [
 				here.name, state.clock.full_string(), _quote_report(),
@@ -796,6 +798,7 @@ func _arrive(target: Settlement, report: Dictionary) -> void:
 	state.destination_id = ""
 	state.current_settlement_id = target.id
 	target.visited = true
+	target.last_visited_day = state.clock.day
 	report["arrived"] = true
 	report["settlement_id"] = target.id
 	DebugLogger.info("arrived at %s on %s%s" % [

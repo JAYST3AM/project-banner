@@ -33,6 +33,20 @@ var market: Dictionary = {}
 
 var last_restock_day: int = 1
 var visited: bool = false
+## The last day the party stood inside: the hover card stamps its numbers with it, so stale
+## knowledge reads as stale (D-136).
+var last_visited_day: int = 0
+
+## Generated detail (D-136), filled by [SettlementDetails]: what stands here, what is traded, which
+## houses hold it, how rich and how defended. Empty on a save written before this existed; the world
+## map backfills on entry.
+var buildings: Array = []
+var produces: Array[String] = []
+var wants: Array[String] = []
+## [{ "id": "house_caldreth", "name": "House Caldreth", "power": 61 }], biggest first, sums to 100.
+var families: Array = []
+var wealth: String = ""
+var garrison: int = 0
 
 
 func is_enterable() -> bool:
@@ -79,6 +93,13 @@ func to_dict() -> Dictionary:
 		"market": market.duplicate(true),
 		"last_restock_day": last_restock_day,
 		"visited": visited,
+		"last_visited_day": last_visited_day,
+		"buildings": buildings.duplicate(true),
+		"produces": produces.duplicate(),
+		"wants": wants.duplicate(),
+		"families": families.duplicate(true),
+		"wealth": wealth,
+		"garrison": garrison,
 	}
 
 
@@ -96,4 +117,15 @@ static func from_dict(data: Dictionary) -> Settlement:
 	s.market = (data.get("market", {}) as Dictionary).duplicate(true)
 	s.last_restock_day = int(data.get("last_restock_day", 1))
 	s.visited = bool(data.get("visited", false))
+	s.last_visited_day = int(data.get("last_visited_day", 0))
+	s.buildings = (data.get("buildings", []) as Array).duplicate(true)
+	var produces_raw: Array = data.get("produces", []) as Array
+	for item in produces_raw:
+		s.produces.append(str(item))
+	var wants_raw: Array = data.get("wants", []) as Array
+	for item in wants_raw:
+		s.wants.append(str(item))
+	s.families = (data.get("families", []) as Array).duplicate(true)
+	s.wealth = str(data.get("wealth", ""))
+	s.garrison = int(data.get("garrison", 0))
 	return s

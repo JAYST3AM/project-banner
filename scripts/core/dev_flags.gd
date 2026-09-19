@@ -28,6 +28,11 @@ const FRAMELOG_FLAG := "--framelog"
 ## the frame-rate overlay. F1 toggles them by hand; a script and a screenshot cannot press a key,
 ## and "show me the debug grid" is a request that arrives as one.
 const DEBUG_PANEL_FLAG := "--debug-panel"
+## Hover, not click: "--hover-card" (or "--hover-card=<settlement id>") shows the settlement detail
+## card at boot, for a scripted run or a screenshot. Bare, it picks the nearest visited settlement,
+## falling back to the nearest of any kind.
+const HOVER_CARD_FLAG := "--hover-card"
+const HOVER_CARD_PREFIX := "--hover-card="
 ## Run a scripted formation drill through the battle scene's real order methods.
 const AUTOFORMATIONS_FLAG := "--autoformations"
 const BATTLESPEED_PREFIX := "--battlespeed="
@@ -107,6 +112,17 @@ static func autoengage() -> bool:
 ## for a scripted run or a screenshot that cannot press F1.
 static func debug_panel() -> bool:
 	return _has_flag(DEBUG_PANEL_FLAG)
+
+
+## "--hover-card" for the nearest visited settlement, "--hover-card=<id>" for a named one, "" for
+## no request.
+static func hover_card() -> String:
+	for arg in _user_args():
+		if arg == HOVER_CARD_FLAG:
+			return "nearest"
+		if arg.begins_with(HOVER_CARD_PREFIX):
+			return arg.substr(HOVER_CARD_PREFIX.length())
+	return ""
 
 
 ## Accept the first encounter prompt automatically instead of waiting for a click.

@@ -3664,3 +3664,42 @@ probe from the two radii (the centre of the cell the line passes through: inside
 corridor, outside the 10 u pace corridor), and its follow-on assert moved from the eta to the pace
 - the eta reads the route scale there deliberately (D-130). 90 assertions, green.
 
+
+## D-136 - the settlement detail card, on hover
+
+**Context.** The owner: "lets add some stuff to the settlements, this is going to be the settlements
+details, which this info needs to pop up via a hover over. building listings, trade goods,
+population, (scouted info), noble families and their power % in that settlement. give me more
+ideas." He approved the v1 cut with one amendment: "the rumors will come from the taverns later" -
+so no rumour line yet, and taverns are noted as its future home. Two decisions taken as proposed:
+the card appears after a 0.25 s rest, near the cursor; houses run one to three per settlement.
+
+**Decision.** The detail is generated, never authored: `SettlementDetails.fill()` is a pure function
+of the campaign seed and the settlement's id, so a run is reproducible, an old save regenerates the
+same town, and nothing of it has to survive serialisation on its own. Fields added to `Settlement`:
+`buildings` (3-7 chips, each with a one-line note in its tooltip), `produces`/`wants` (2-3 goods
+each way, never the same word), `families` (the owning house always first and largest, powers sum
+to 100), `wealth` (poor/modest/wealthy by population) and `garrison` (a per-kind factor of
+population, shown with a `~`). `last_visited_day` is stamped wherever `visited` is set, so a stale
+card reads as stale.
+
+**The card.** `SettlementHoverCard` follows the cursor (clamped to the screen), appears after a
+0.25 s rest so sweeping the map never flickers it, and hides the moment the cursor leaves. It never
+takes the mouse - every node inside it ignores the cursor - so resting on a settlement can never eat
+the click that orders the march. Unvisited places show the unscouted form: name, kind and the
+travel line only. Clicking still opens the action panel with Travel and Enter; the map entry
+backfills old saves idempotently, and `--hover-card[=<id>]` boots with the card showing for
+screenshots and scripted runs.
+
+**Verified.** Seed 5150, Blackburrow: HOUSES House Caldreth 70% (accent bar) / House Dunmore 30%
+(quiet bar), buildings GRANARY / MILL / TAVERN, Produces hides, turnips, wool, Wants salt, iron,
+Garrison ~9 spears, Wealth poor, visited stamp on the footnote. No clipping, no missing glyphs. New
+suite `test_settlement_details` (42 assertions): determinism per seed and id, powers summing to 100
+with the owner leading, buildings 3-7 unique and named, trade never overlapping, wealth/garrison
+following population and kind, old-save backfill and fill idempotence, round-trip through a save.
+
+**The trap worth remembering.** Assigning an untyped `Array` to a typed `Array[String]` property is
+a runtime error in GDScript, and the error aborts the whole function - `fill()` died mid-way, which
+showed up as unrelated-looking failures three fields later (empty wealth, zero garrison). Type the
+generator's returns to match the model's fields.
+

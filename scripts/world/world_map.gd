@@ -19,6 +19,12 @@ var _roads: RoadNetwork = null
 ## Kept until the ground is built, so the bar is painted until the world is whole.
 var _loader: LoadingScreen = null
 var _debug: DebugPanel = null
+## The settlement detail card (D-136), shown on hover by _update_hover.
+var _hover_card: SettlementHoverCard = null
+var _hover_candidate_id := ""
+var _hover_shown_id := ""
+var _hover_started_ms := 0
+var _hover_mouse := Vector2.ZERO
 var _overworld: OverworldService = null
 var _encounters: EncounterService = null
 var _dialog: EncounterDialog = null
@@ -114,6 +120,13 @@ func _ready() -> void:
 		builder.build_if_needed()
 
 	DebugLogger.info("  map entry: world done at %d ms" % (Time.get_ticks_msec() - _mark), "WorldMap")
+	# Old saves carry no settlement detail: fill it from the generator the world build uses, so a
+	# save written before D-136 grows the hover card without a migration. Idempotent - a filled
+	# settlement keeps what it has, so this runs on every entry.
+	for key in _state.settlements.keys():
+		var st := _state.settlements[key] as Settlement
+		if st != null and st.buildings.is_empty():
+			SettlementDetails.fill(st, _state.campaign_seed)
 	_stage_name = "travel service"
 	_mark = Time.get_ticks_msec()
 	_travel = TravelService.new(_state, _config)
@@ -197,6 +210,8 @@ func _ready() -> void:
 	_encounters = EncounterService.build(_state, _config)
 
 	_hud.setup(_state, _config, _travel)
+	_hover_card = SettlementHoverCard.new()
+	_hud.add_child(_hover_card)
 	_hud.speed_requested.connect(_on_speed_requested)
 	_hud.travel_requested.connect(_on_travel_requested)
 	_hud.enter_settlement_requested.connect(_on_enter_settlement)
@@ -229,6 +244,7 @@ func _ready() -> void:
 
 	_apply_dev_autoengage()
 	_apply_dev_autotravel()
+	_apply_dev_hover_card()
 
 	# The map is whole - the world, its roads and the ground are all in - so the screen can go. It used
 	# to be dismissed right after the world build (before the ground existed), and when the bar took the
@@ -333,6 +349,8 @@ func _process(delta: float) -> void:
 	_check_for_encounter()
 
 	_view.queue_redraw()
+
+	_update_hover()
 
 	# HUD text does not need to run at frame rate.
 	_hud_timer += delta
@@ -536,10 +554,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			_handle_right_click(_view.get_global_mouse_position())
 		return
 
-	if event is InputEventMouseMotion and _panning:
+	if event is InputEventMouseMotion:
 		var motion := event as InputEventMouseMotion
-		_camera.position -= motion.relative / _camera.zoom
-		_clamp_camera()
+		if _panning:
+			_camera.position -= motion.relative / _camera.zoom
+			_clamp_camera()
+			return
+		# Hovering the map: remember the cursor and the place under it (D-136). The card itself is
+		# shown by _process after a short rest, so sweeping the mouse across the map never flickers a
+		# card into being.
+		if not _map_drag:
+			_hover_mouse = motion.position
+			_update_hover_candidate()
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -579,6 +605,99 @@ func _toggle_perf_overlay() -> void:
 	for node in get_tree().get_nodes_in_group("perf_overlay"):
 		if node.has_method("toggle"):
 			node.call("toggle")
+
+
+## ---------- hover card (D-136) -------------------------------------------
+
+## How long the cursor must rest on a settlement before its detail card appears. Long enough that
+## sweeping the mouse across the map never flickers a card, short enough that resting feels like an
+## answer rather than a wait.
+const HOVER_DELAY_MS := 250
+
+
+func _update_hover_candidate() -> void:
+	if _view == null:
+		return
+	var under := _view.settlement_at(_view.get_global_mouse_position())
+	var id := under.id if under != null else ""
+	if id != _hover_candidate_id:
+		_hover_candidate_id = id
+		_hover_started_ms = Time.get_ticks_msec()
+
+
+## Once a frame: show the card for whatever has been rested on long enough, keep it near the
+## cursor, and take it away the moment the cursor moves off.
+func _update_hover() -> void:
+	if _hover_card == null or _state == null:
+		return
+	if _hover_candidate_id.is_empty():
+		if not _hover_shown_id.is_empty():
+			_hover_shown_id = ""
+			_hover_card.hide_card()
+		return
+	if _hover_shown_id == _hover_candidate_id:
+		_position_hover_card()
+		return
+	if Time.get_ticks_msec() - _hover_started_ms >= HOVER_DELAY_MS:
+		_show_hover_card(_hover_candidate_id)
+
+
+func _show_hover_card(settlement_id: String) -> void:
+	var settlement := _state.settlement(settlement_id)
+	if settlement == null:
+		return
+	_hover_shown_id = settlement_id
+	_hover_card.show_settlement(settlement,
+		"Travel here: ~%.1f game hours" % _travel.hours_to_reach(settlement.position))
+	_position_hover_card()
+
+
+## Near the cursor, clamped inside the screen: never under the pointer's own corner, never hanging
+## off an edge.
+func _position_hover_card() -> void:
+	if _hover_card == null:
+		return
+	var card_size := _hover_card.size
+	if card_size == Vector2.ZERO:
+		card_size = _hover_card.get_combined_minimum_size()
+	var screen := get_viewport().get_visible_rect().size
+	var at := _hover_mouse + Vector2(22.0, 18.0)
+	at.x = clampf(at.x, 8.0, maxf(8.0, screen.x - card_size.x - 8.0))
+	at.y = clampf(at.y, 8.0, maxf(8.0, screen.y - card_size.y - 8.0))
+	_hover_card.position = at
+
+
+## Dev-only: "--hover-card" (or "--hover-card=<id>") shows the card at boot. Bare, it prefers the
+## nearest VISITED settlement - the card's full form - and falls back to the nearest of any kind,
+## which shows the unscouted form.
+func _apply_dev_hover_card() -> void:
+	var wanted := DevFlags.hover_card()
+	if wanted.is_empty():
+		return
+	var target: Settlement = null
+	if wanted != "nearest":
+		target = _state.settlement(wanted)
+	else:
+		var best_visited := INF
+		var best_any := INF
+		var candidate_any: Settlement = null
+		for key in _state.settlements.keys():
+			var st := _state.settlements[key] as Settlement
+			if st == null:
+				continue
+			var distance := st.position.distance_to(_state.world_position)
+			if st.visited and distance < best_visited:
+				best_visited = distance
+				target = st
+			if distance < best_any:
+				best_any = distance
+				candidate_any = st
+		if target == null:
+			target = candidate_any
+	if target == null:
+		return
+	_hover_mouse = get_viewport().get_visible_rect().size * 0.42
+	_show_hover_card(target.id)
 
 
 func _handle_key(event: InputEventKey) -> void:
