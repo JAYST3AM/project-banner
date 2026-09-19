@@ -17,7 +17,7 @@ const LOOK_STRENGTH := 0.75
 
 ## How worn the ground inside a settlement's clearing is - the place where feet, carts and smoke
 ## work the land hardest. Blended into the natural weights across the clearing's band.
-const CLEARING_WORN := 0.55
+const CLEARING_WORN := 0.78
 ## Bump when the field's content changes shape: a cached field from an older version is rebuilt
 ## rather than reused. The settlement clearings arrived after the first caches were written.
 const GROUND_VERSION := 2

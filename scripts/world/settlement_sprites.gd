@@ -68,7 +68,7 @@ static func map_width(type: String) -> float:
 ## carve a clearing to this reach, so the structure stands on flattened, trodden ground and the
 ## country takes back over past it.
 static func clearing_radius(type: String) -> float:
-	return map_width(type) * 1.05
+	return map_width(type) * 1.6
 
 
 ## ---------- terrain clearings -------------------------------------------------
@@ -94,7 +94,7 @@ static func clearing_index(settlements: Array, world: RefCounted) -> Dictionary:
 		var entry := {
 			"position": settlement.position,
 			"height": float(world.sample(settlement.position).get("height", 0.5)),
-			"inner": map_width(settlement.type) * 0.6,
+			"inner": map_width(settlement.type) * 0.9,
 			"outer": clearing_radius(settlement.type),
 		}
 		if not index.has(bucket):

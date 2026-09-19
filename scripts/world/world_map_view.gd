@@ -38,6 +38,13 @@ const COLOR_WILDERNESS := Color("7f8a6a")
 const COLOR_FORT := Color("9fb0c0")
 const COLOR_CASTLE := Color("e8ce8c")
 const COLOR_SELECTED := Color("ffd479")
+## How far the baked contact shadow spills below the wall foot, as a fraction of the sprite's map
+## width. The baker (scripts/bake_structure_shadow.py in the asset factory) pads the canvas by
+## int(1.25 * 0.115 * texture_width) + 4, which scales to a fixed 0.1475 of the sprite's drawn width
+## once the texture is sized to the map - the number here tracks that pad. The sprite is drawn this
+## much lower than a plain bottom anchor so the wall foot meets the ground, and the soil nubs sit on
+## the same base line.
+const SPILL_BELOW_BASE := 0.1475
 const COLOR_HOVERED := Color("c9d4de")
 const COLOR_PLAYER := Color("4fa8e0")
 const COLOR_ENEMY := Color("d0603f")
@@ -335,11 +342,72 @@ func _draw_settlements() -> void:
 			var size := Vector2(width, width * float(texture.get_height()) / float(texture.get_width()))
 			sprite_height = size.y
 			base = width * 0.5
-			# Grounded the way the sprite was drawn: a soft shadow, then the structure standing
-			# bottom-centre on the spot. The clearing under it is carved into the terrain field
-			# itself (SettlementSprites.clearing_index), so the shadow only grounds the base.
-			draw_circle(settlement.position, base * 0.6, Color(0.0, 0.0, 0.0, 0.22))
-			draw_texture_rect(texture, Rect2(settlement.position - Vector2(size.x * 0.5, size.y), size), false)
+			# Planted (2026-09-19): the contact shadow is baked into the sprite itself, so it blends
+			# over whatever ground the terrain draws beneath, and the clearing around the town is
+			# carved into the terrain field (SettlementSprites.clearing_index). Nothing is drawn
+			# between the two - the double-shadow read was the first version's tell.
+			# The sprite anchors on its BASE, not its bottom edge (2026-09-19): the baked contact
+			# shadow spills below the wall foot, so a bottom-edge anchor leaves the building
+			# hovering a shadow's height above the very spot the clearing is centred on (the owner:
+			# "still too high"). Drawing it SPILL_BELOW_BASE lower puts the wall foot, the contact
+			# band and the middle of the dirt patch on one point.
+			var spill := width * SPILL_BELOW_BASE
+			var patch := width * 0.62
+			var phase := float(settlement.id.hash() % 628) / 100.0
+			draw_set_transform(settlement.position, 0.0, Vector2(1.0, 0.5))
+			for ring in [
+				{"r": patch, "a": 0.16},
+				{"r": patch * 0.82, "a": 0.20},
+				{"r": patch * 0.6, "a": 0.22},
+			]:
+				var points := PackedVector2Array()
+				for i in 24:
+					var angle := TAU * float(i) / 24.0
+					var wobble := 1.0 + 0.13 * sin(3.0 * angle + phase) \
+							+ 0.07 * sin(5.0 * angle + phase * 1.7)
+					points.append(Vector2(cos(angle), sin(angle)) * float(ring["r"]) * wobble)
+				draw_colored_polygon(points, Color(0.36, 0.30, 0.20, float(ring["a"])))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			# Two satellite smudges - fixed offsets, differing per town - so the edge is never a
+			# clean contour.
+			var wob_x := patch * (0.55 + 0.25 * sin(phase * 2.1))
+			var wob_y := patch * (0.10 + 0.22 * cos(phase * 1.3))
+			draw_circle(settlement.position + Vector2(wob_x, wob_y), patch * 0.2, Color(0.36, 0.30, 0.20, 0.15))
+			draw_circle(settlement.position + Vector2(-wob_x, wob_y * 1.4), patch * 0.16, Color(0.36, 0.30, 0.20, 0.13))
+			# And the first road that leaves it ends in the earth, not at a line: a faint spur of
+			# the same ground bridges the two.
+			for road_any in state.roads:
+				if typeof(road_any) != TYPE_DICTIONARY:
+					continue
+				var road := road_any as Dictionary
+				var other: Settlement = null
+				if str(road.get("a", "")) == settlement.id:
+					other = state.settlement(str(road.get("b", "")))
+				elif str(road.get("b", "")) == settlement.id:
+					other = state.settlement(str(road.get("a", "")))
+				if other == null:
+					continue
+				var direction := (other.position - settlement.position).normalized()
+				for step in 3:
+					draw_circle(settlement.position + direction * patch * (1.05 + 0.34 * float(step)),
+							patch * (0.24 - 0.05 * float(step)), Color(0.36, 0.30, 0.20, 0.10))
+				break
+			draw_texture_rect(texture, Rect2(settlement.position - Vector2(size.x * 0.5, size.y - spill), size), false)
+			# Soil nubs over the base line (2026-09-19): the keyer crops the sprite to its last
+			# opaque row, so the wall foot meets the ground at a knife edge - and a knife edge is
+			# what makes a structure float even with a shadow under it (the owner: "just fyi it
+			# looks like they are floating"). A scatter of earth blobs over that edge buries the
+			# foot in the same soil the clearing makes. Deterministic from the same phase as the
+			# patch, or the scatter would crawl between frames.
+			var base_y := settlement.position.y
+			for i in 9:
+				var t := (float(i) + 0.5) / 9.0
+				var nub := 0.5 + 0.5 * sin(phase * 3.0 + float(i) * 2.1)
+				var nx := settlement.position.x + (t - 0.5) * width * 0.9
+				var ny := base_y + (nub - 0.4) * 7.0
+				draw_circle(Vector2(nx, ny), 2.6 + 2.4 * nub, Color(0.34, 0.28, 0.19, 0.6))
+				if nub > 0.62:
+					draw_circle(Vector2(nx + 4.0, ny - 3.0), 2.0, Color(0.42, 0.37, 0.26, 0.5))
 		else:
 			draw_circle(settlement.position, radius + 2.0, COLOR_PARTY_OUTLINE)
 			draw_circle(settlement.position, radius, color)

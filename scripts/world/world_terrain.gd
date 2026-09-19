@@ -50,7 +50,7 @@ const TILE_UNITS := 64.0
 
 ## How worn the ground inside a settlement's clearing is - the place where feet, carts and smoke work
 ## the land hardest. Blended into the natural weights across the clearing's band.
-const CLEARING_WORN := 0.55
+const CLEARING_WORN := 0.78
 
 const CATALOGUE := "res://data/terrain/biomes.json"
 
