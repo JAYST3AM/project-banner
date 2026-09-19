@@ -53,9 +53,16 @@ func is_paused() -> bool:
 
 
 func set_speed(new_speed: Speed) -> void:
+	var previous := speed
 	if new_speed != Speed.PAUSED:
 		resume_speed = new_speed
 	speed = new_speed
+	if new_speed != previous:
+		# The world's own pace, on the record: when a run's wall clock and its game clock disagree,
+		# the first thing worth knowing is who moved the time controls.
+		DebugLogger.info("time speed: %s -> %s (x%.1f)" % [
+			SPEED_NAMES[int(previous)], SPEED_NAMES[int(new_speed)], multiplier(),
+		], "Time")
 
 
 func set_speed_by_name(speed_name: String) -> bool:

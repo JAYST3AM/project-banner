@@ -78,6 +78,7 @@ var roads: RoadNetwork = null
 var _journey_units := 0.0
 var _journey_on_road := 0.0
 var _journey_max_gap := 0.0
+var _journey_hours := 0.0
 var _on_road := false
 var _road_state_known := false
 var _road_check_hours := 0.0
@@ -445,6 +446,7 @@ func _begin_journey() -> void:
 	_journey_units = 0.0
 	_journey_on_road = 0.0
 	_journey_max_gap = 0.0
+	_journey_hours = 0.0
 	_on_road = false
 	_road_state_known = false
 	_road_check_hours = 0.0
@@ -456,8 +458,9 @@ func _begin_journey() -> void:
 func _log_journey_share() -> void:
 	if roads == null or _journey_units <= 1.0:
 		return
-	DebugLogger.info("travel: journey ends - %.0f%% of %.0f units walked on roads, worst %.0f u off a line" % [
-		100.0 * _journey_on_road / _journey_units, _journey_units, _journey_max_gap,
+	DebugLogger.info("travel: journey ends - %.0f%% of %.0f units walked on roads at ~%.0f u/h, worst %.0f u off a line" % [
+		100.0 * _journey_on_road / _journey_units, _journey_units,
+		_journey_units / maxf(_journey_hours, 0.0001), _journey_max_gap,
 	], "Travel")
 
 
@@ -474,13 +477,16 @@ func _watch_road_state(game_hours: float) -> void:
 	var gap := roads.distance_to_nearest_link(here)
 	_journey_max_gap = maxf(_journey_max_gap, gap)
 	var who := roads.link_label(roads.nearest_link(here, -1.0))
+	# The pace the log can be checked against: the same factor the walk is using at this instant,
+	# so a transition line and a speed change are one event, not two to be correlated later.
+	var factor := ground_factor()
 	var line := ""
 	if on:
-		line = "travel: on the road - %s, %.0f u off its line" % [who, gap]
+		line = "travel: on the road - %s, %.0f u off its line (ground x%.2f)" % [who, gap, factor]
 	elif who.is_empty():
-		line = "travel: off the road - %.0f u from any link" % gap
+		line = "travel: off the road - %.0f u from any link (ground x%.2f)" % [gap, factor]
 	else:
-		line = "travel: off the road - %.0f u from %s" % [gap, who]
+		line = "travel: off the road - %.0f u from %s (ground x%.2f)" % [gap, who, factor]
 	if not _road_state_known or on != _on_road:
 		DebugLogger.info(line, "Travel")
 		_on_road = on
@@ -496,6 +502,8 @@ func _watch_road_state(game_hours: float) -> void:
 func set_destination(settlement_id: String) -> bool:
 	if state == null:
 		return false
+	var was_travelling := is_travelling()
+	var walked := _journey_units
 	state.destination_is_point = false
 	var target := state.settlement(settlement_id)
 	if target == null:
@@ -511,9 +519,12 @@ func set_destination(settlement_id: String) -> bool:
 		state.current_settlement_id = target.id
 		if state.destination_id == target.id:
 			state.destination_id = ""
+		DebugLogger.info("travel: already standing at %s - order ignored" % target.name, "Travel")
 		return false
 	state.destination_id = target.id
 	state.current_settlement_id = ""
+	if was_travelling and walked > 1.0:
+		DebugLogger.info("travel: order replaced - %.0f u of the old journey already walked" % walked, "Travel")
 	_begin_journey()
 	DebugLogger.info("travelling to %s (%.0f units, ~%.1f game hours)" % [
 		target.name, distance_to(target.position), hours_to_reach(target.position),
@@ -527,8 +538,12 @@ func set_destination(settlement_id: String) -> bool:
 func set_destination_point(point: Vector2) -> bool:
 	if state == null:
 		return false
-	if state.world_position.distance_to(point) <= arrival_radius():
+	var span := state.world_position.distance_to(point)
+	if span <= arrival_radius():
+		DebugLogger.info("march refused: already at the spot (%.0f u away)" % span, "Travel")
 		return false
+	var was_travelling := is_travelling()
+	var walked := _journey_units
 	state.destination_is_point = true
 	state.destination_point = point
 	state.destination_id = ""
@@ -539,6 +554,8 @@ func set_destination_point(point: Vector2) -> bool:
 	route = PackedVector2Array()
 	route_leg = 0
 	_route_target = ""
+	if was_travelling and walked > 1.0:
+		DebugLogger.info("travel: order replaced - %.0f u of the old journey already walked" % walked, "Travel")
 	_begin_journey()
 	DebugLogger.info("marching to open ground (%.0f units, ~%.1f game hours)" % [
 		distance_to(point), hours_to_reach(point),
@@ -547,9 +564,13 @@ func set_destination_point(point: Vector2) -> bool:
 
 
 func clear_destination() -> void:
+	var was_travelling := is_travelling()
+	var walked := _journey_units
 	if state != null:
 		state.destination_id = ""
 		state.destination_is_point = false
+	if was_travelling and walked > 1.0:
+		DebugLogger.info("travel: order cleared - %.0f u of the journey already walked" % walked, "Travel")
 	# Cancelling drops the route with the order, so the next march starts from where the party
 	# actually stands rather than continuing the road it was on.
 	route = PackedVector2Array()
@@ -666,6 +687,7 @@ func _report_walk(from_point: Vector2, game_hours: float, report: Dictionary) ->
 	if _on_road:
 		_journey_on_road += walked
 	_journey_units += walked
+	_journey_hours += game_hours
 	_watch_road_state(game_hours)
 
 
