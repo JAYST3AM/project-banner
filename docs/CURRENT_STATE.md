@@ -54,7 +54,7 @@ the revert broke. The world map, travel and the road network are unaffected.
 ## Roads (Step 8)
 
 A link between two settlements carries a **tier** - `none | dirt | track | road`, speed bonus
-1.0 / 1.05 / 1.2 / 1.4 - stored in the link's own `kind`, and the priced grid, the eta and the
+1.0 / 1.1 / 1.5 / 2.0 - stored in the link's own `kind`, and the priced grid, the eta and the
 walking pace all read it. A settlement founded later links itself to its nearest neighbour as a
 dirt road; traffic (world units walked on the link) wears it up a tier; a long idle span - 3,650
 game days per tier - wears it down, roadless at the floor, and traffic can wear even that back in.
@@ -68,7 +68,7 @@ it: "0 u off its line" in the legs of a debug-1 run, against 15-31 u before). A 
 ground is a real march** again - a point order drops any route a previous settlement order left
 behind, where before the stale geometry "arrived" on the first step and the party never moved. And
 the debug panel's pace line now shows the **effective pace** with its ground factor
-("210 u/h (ground x1.40)" on a road) so the road bonus is visible in play. And the pace and the eta
+("~275 u/h (ground x2.00)" on a road) so the road bonus is visible in play. And the pace and the eta
 read the **drawn road itself** (D-124): `RoadNetwork.bonus_at` answers with the corridor the wear
 scan and the snap already use, the grid went back to only pricing the route - so speed changes
 exactly at a road's visible edge, a march crossing one gets its blip, and a road-painted block can

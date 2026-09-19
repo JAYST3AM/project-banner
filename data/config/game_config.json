@@ -46,9 +46,9 @@
     "tiers": ["none", "dirt", "track", "road"],
     "speed_bonus": {
       "none": 1.0,
-      "dirt": 1.05,
-      "track": 1.2,
-      "road": 1.4
+      "dirt": 1.1,
+      "track": 1.5,
+      "road": 2.0
     },
     "upgrade_traffic": {
       "none": 400.0,

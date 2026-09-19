@@ -913,7 +913,7 @@ road stretches are spliced onto the link curves (D-122), after the on/off-road t
 at the owner's request, "that way you can see whats actually happening" - proved the priced blocks
 disagreed with the line by up to 31 units. A march to open ground is a real march again (a stale
 route from a previous settlement order no longer finishes under the party's feet, D-123), and the
-debug panel's pace line shows the effective pace with its ground factor - "210 u/h (ground x1.40)"
+debug panel's pace line shows the effective pace with its ground factor - "~275 u/h (ground x2.00)"
 on a road - so the road bonus is visible in play rather than only in the log. And a last pass gave
 the pace and the eta the same truth (D-124): `RoadNetwork.bonus_at` reads the drawn corridor the
 wear scan and the snap already use, the grid went back to doing only what it is good at - pricing

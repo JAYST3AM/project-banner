@@ -3353,3 +3353,23 @@ speed is the line's. (That pass also had a human at the controls - point marches
 only input orders, and the time-speed changed with them - so its wall-clock figures are skewed; the
 game-hour speeds above are the ones that matter.)
 
+
+## D-125 - the ladder spaced for the eye: road x2.0
+
+**Context.** D-124 made the walk's speed follow the drawn road exactly, and the log proved the
+mechanism to the unit - but the owner, playing: "I can't really see the difference, can we make the
+speed changes a bit more exaggerated?" At x1.4 a road beat open ground by a couple of pixels a
+second at the map's own zoom; a correct number is not a felt one.
+
+**Decision.** Space the ladder for the eye: `none` 1.0, `dirt` 1.1 (kept inside the owner's own
+"very small bonus" band), `track` 1.5, `road` **2.0**. On a road the party now walks at twice its
+open-ground pace - the marker visibly doubles - and against marsh (x0.55) a road is 3.6x. Because
+pace, eta and the routing prices all read the one config number, nothing else needed an edit; the
+suite's eta bound now reads the value from the config rather than a literal, so a future retune
+does not break it. The dirt bound test (`dirt <= 1.1`) is the owner's "very small bonus" spec doing
+its job - it caught 1.15 and sent the number back to the band.
+
+**Not changed.** Wear, upgrade thresholds, decay and the 48 u corridor are untouched - a pace
+decision, not a network decision. Too arcade? `roads.speed_bonus.road` in
+`data/config/game_config.json`: 1.8 and 1.6 are the natural steps back.
+

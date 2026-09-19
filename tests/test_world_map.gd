@@ -46,7 +46,8 @@ func _test_march_to_open_ground() -> void:
 	var march_pace := travel.speed_units_per_game_hour()
 	var flat := travel.distance_to(target) / march_pace
 	var eta := travel.hours_to_reach(target)
-	check(eta >= flat / 1.4 - 0.001, "an eta is never faster than the best road would make it")
+	check(eta >= flat / GameManager.config().get_float("roads.speed_bonus.road", 2.0) - 0.001,
+		"an eta is never faster than the best road would make it")
 	check(eta <= flat / 0.30 + 0.001, "nor slower than the worst water")
 
 	var guard := 0
@@ -190,7 +191,8 @@ func _test_travel() -> void:
 	var pace := travel.speed_units_per_game_hour()
 	var flat := distance / pace
 	var eta := travel.hours_to_reach(brackenford.position)
-	check(eta >= flat / 1.4 - 0.001, "the eta is never faster than the best road would make it")
+	check(eta >= flat / config.get_float("roads.speed_bonus.road", 2.0) - 0.001,
+		"the eta is never faster than the best road would make it")
 	check(eta <= flat / 0.30 + 0.001, "nor slower than the worst water")
 
 	# A step covers its game hours at the ground's own pace, and no single step - however much
