@@ -355,25 +355,29 @@ func _draw_settlements() -> void:
 			var patch := width * 0.62
 			var phase := float(settlement.id.hash() % 628) / 100.0
 			draw_set_transform(settlement.position, 0.0, Vector2(1.0, 0.5))
-			for ring in [
-				{"r": patch, "a": 0.16},
-				{"r": patch * 0.82, "a": 0.20},
+			var rings := [
+				{"r": patch, "a": 0.30},
+				{"r": patch * 0.82, "a": 0.26},
 				{"r": patch * 0.6, "a": 0.22},
-			]:
+			]
+			for ring_index in rings.size():
+				# Each ring wobbles on its own phase (the first version shared one, and the shared
+				# pattern read as a scalloped, gear-like edge).
+				var ring: Dictionary = rings[ring_index]
 				var points := PackedVector2Array()
 				for i in 24:
 					var angle := TAU * float(i) / 24.0
-					var wobble := 1.0 + 0.13 * sin(3.0 * angle + phase) \
-							+ 0.07 * sin(5.0 * angle + phase * 1.7)
+					var wobble := 1.0 + 0.10 * sin(3.0 * angle + phase + float(ring_index) * 1.9) \
+							+ 0.05 * sin(5.0 * angle + phase * 1.7 + float(ring_index) * 0.8)
 					points.append(Vector2(cos(angle), sin(angle)) * float(ring["r"]) * wobble)
-				draw_colored_polygon(points, Color(0.36, 0.30, 0.20, float(ring["a"])))
+				draw_colored_polygon(points, Color(0.30, 0.25, 0.17, float(ring["a"])))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			# Two satellite smudges - fixed offsets, differing per town - so the edge is never a
 			# clean contour.
 			var wob_x := patch * (0.55 + 0.25 * sin(phase * 2.1))
 			var wob_y := patch * (0.10 + 0.22 * cos(phase * 1.3))
-			draw_circle(settlement.position + Vector2(wob_x, wob_y), patch * 0.2, Color(0.36, 0.30, 0.20, 0.15))
-			draw_circle(settlement.position + Vector2(-wob_x, wob_y * 1.4), patch * 0.16, Color(0.36, 0.30, 0.20, 0.13))
+			draw_circle(settlement.position + Vector2(wob_x, wob_y), patch * 0.2, Color(0.30, 0.25, 0.17, 0.22))
+			draw_circle(settlement.position + Vector2(-wob_x, wob_y * 1.4), patch * 0.16, Color(0.30, 0.25, 0.17, 0.18))
 			# And the first road that leaves it ends in the earth, not at a line: a faint spur of
 			# the same ground bridges the two.
 			for road_any in state.roads:
@@ -388,9 +392,9 @@ func _draw_settlements() -> void:
 				if other == null:
 					continue
 				var direction := (other.position - settlement.position).normalized()
-				for step in 3:
-					draw_circle(settlement.position + direction * patch * (1.05 + 0.34 * float(step)),
-							patch * (0.24 - 0.05 * float(step)), Color(0.36, 0.30, 0.20, 0.10))
+				for step in 4:
+					draw_circle(settlement.position + direction * patch * (1.05 + 0.30 * float(step)),
+							patch * (0.24 - 0.04 * float(step)), Color(0.30, 0.25, 0.17, 0.18))
 				break
 			draw_texture_rect(texture, Rect2(settlement.position - Vector2(size.x * 0.5, size.y - spill), size), false)
 			# Soil nubs over the base line (2026-09-19): the keyer crops the sprite to its last
@@ -400,14 +404,17 @@ func _draw_settlements() -> void:
 			# foot in the same soil the clearing makes. Deterministic from the same phase as the
 			# patch, or the scatter would crawl between frames.
 			var base_y := settlement.position.y
-			for i in 9:
-				var t := (float(i) + 0.5) / 9.0
+			# Varied size, spacing, opacity and a few crumbs above the line: evenly sized nubs on
+			# even spacing read as a string of beads, which is worse than the knife edge was.
+			for i in 12:
+				var t := (float(i) + 0.5) / 12.0 + sin(float(i) * 7.3 + phase) * 0.022
 				var nub := 0.5 + 0.5 * sin(phase * 3.0 + float(i) * 2.1)
-				var nx := settlement.position.x + (t - 0.5) * width * 0.9
-				var ny := base_y + (nub - 0.4) * 7.0
-				draw_circle(Vector2(nx, ny), 2.6 + 2.4 * nub, Color(0.34, 0.28, 0.19, 0.6))
-				if nub > 0.62:
-					draw_circle(Vector2(nx + 4.0, ny - 3.0), 2.0, Color(0.42, 0.37, 0.26, 0.5))
+				var crumb := 0.5 + 0.5 * sin(phase * 5.7 + float(i) * 3.7)
+				var nx := settlement.position.x + (t - 0.5) * width * 0.92
+				var ny := base_y + (nub - 0.4) * 9.0
+				draw_circle(Vector2(nx, ny), 1.7 + 3.6 * crumb, Color(0.26, 0.21, 0.14, 0.45 + 0.3 * nub))
+				if crumb > 0.72:
+					draw_circle(Vector2(nx + 5.0, ny - 4.0), 1.6 + 1.2 * nub, Color(0.26, 0.21, 0.14, 0.4))
 		else:
 			draw_circle(settlement.position, radius + 2.0, COLOR_PARTY_OUTLINE)
 			draw_circle(settlement.position, radius, color)
