@@ -666,7 +666,24 @@ func step(game_hours: float) -> Dictionary:
 	if leg >= route.size() - 1 and state.world_position.distance_to(route[route.size() - 1]) <= arrival_radius():
 		_finish_travel(report)
 	_report_walk(start_point, game_hours, report)
+	_check_step_jump(start_point)
 	return report
+
+
+## A one-step displacement beyond anything a step can walk is not travel, it is a jump - the class of
+## thing the eye catches as the marker teleporting ("the positioning while moving through the
+## campaign looked weird at one point") and the log had no word for. One warn per event, naming both
+## ends, so the next report of it is a measurement instead of a memory. Legitimate movers stay well
+## inside the bound: a step walks at most max_step_units, and arriving snaps at most arrival_radius.
+func _check_step_jump(from_point: Vector2) -> void:
+	if state == null:
+		return
+	var moved := from_point.distance_to(state.world_position)
+	var limit := config.get_float("travel.max_step_units", 24.0) * 1.75
+	if moved > limit:
+		DebugLogger.warn("travel: position jumped %.0f u in one step (%.0f,%.0f -> %.0f,%.0f)" % [
+			moved, from_point.x, from_point.y, state.world_position.x, state.world_position.y,
+		], "Travel")
 
 
 ## A straight walk to the destination, for journeys with no road under them.

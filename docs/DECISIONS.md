@@ -3600,3 +3600,26 @@ the right needs to shift more to the left". The content of all three scrolled pa
 `MarginContainer` with a 16 px right margin, which gives the values one consistent gutter, shared
 between the party rows and the record below them.
 
+
+## D-134 - the log rotates, and a jump is no longer silent
+
+**Context.** The owner asked for his own play session to be read, and the session was gone:
+`DebugLogger` opened `session.log` with WRITE, so every run truncated the last one, and a suite run
+beside his live game destroyed the play he was asking about - the file was NUL-padded where two
+writers disagreed about the end of it. The same session carried one reported symptom - "the
+positioning while moving through the campaign looked weird at one point" - and no log line existed
+that could have caught it.
+
+**Decision.** Two small repairs.
+
+- **Rotation instead of truncation.** At session start `session.log` is renamed to
+  `session.prev.log` (exactly one previous session kept). "What did the last run do" is always
+  answerable, and the current run is still a clean file.
+- **A one-step jump is a warn.** A step cannot move the marker further than `max_step_units`, and
+  an arrival snaps at most `arrival_radius`, so anything beyond `1.75 x max_step_units` in a single
+  step is not travel - it is a teleport. It writes `travel: position jumped N u in one step (x,y ->
+  x,y)`. The reported class of weirdness is measured next time instead of remembered.
+
+**Habit, not just code.** Before starting any run or suite while the owner's session matters, copy
+`session.log` aside first: rotation protects one slot, it does not protect an investigation.
+

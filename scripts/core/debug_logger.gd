@@ -49,6 +49,16 @@ func _ready() -> void:
 	# Globalized on purpose: the *absolute* variant of this call wants a real path, and handing it a
 	# user:// one fails quietly - which it did, and the sink wrote nothing.
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(LOG_DIR))
+	# The log is one session deep, and WRITE truncates: every run used to destroy the previous one -
+	# which cost the owner a whole play session's evidence when a suite started beside his running
+	# game ("check the logs" and the log no longer held his play). Rotate instead, keeping exactly
+	# one previous session beside it, so "what did the last run do" is always answerable.
+	var absolute := ProjectSettings.globalize_path(LOG_FILE)
+	if FileAccess.file_exists(absolute):
+		var previous := absolute.get_basename() + ".prev.log"
+		if FileAccess.file_exists(previous):
+			DirAccess.remove_absolute(previous)
+		DirAccess.rename_absolute(absolute, previous)
 	# Opened once and held: WRITE creates the file, and a handle kept for the session is both
 	# faster than an open per flush and immune to the mistake that made the first version write
 	# nothing - READ_WRITE does not create a file that is not there, and fails quietly.
