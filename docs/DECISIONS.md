@@ -3554,3 +3554,32 @@ done at 587 ms" for a build. Verified by the same captures (`town_frames_after`)
 the settlement and the loaded map shows the placeholder state any more, and the first map frame
 carries terrain, roads and settlements.
 
+
+## D-133 - the interface speaks one language: pixel chrome, serif body, prose on hover
+
+**Context.** The menus were dressed in `PixelStyle` - nine-patch frames, Silkscreen, the accent
+spent on hover - while every in-game screen was still flat grey panels in the engine's default
+font, with text everywhere: recruit cards carried a pitch paragraph, a prose stat sentence and a
+stock note; the party column clipped its own header ("Your Party (1 / 24 active") and ran trait and
+history lines off the panel edge. The owner, shown three directions mocked at real scale, picked C:
+"c - descriptions need to not be everywhere, you kind of throw text everywhere but can be helpful
+just maybe a hover tool tip maybe?".
+
+**Decision.**
+
+- **Pixel chrome everywhere.** The menus' palette (BODY/LIGHT/DARK/OUTLINE, the accent spent on
+  hover) and `PixelStyle` furniture dress the settlement screen now; the map HUD and the dialogs
+  follow.
+- **Two faces, two jobs.** Silkscreen for headers, buttons, prices and numeric values; EB Garamond
+  (OFL, bundled in `assets/fonts/`) for names, labels and anything read as a sentence.
+- **Prose lives on hover.** Unit descriptions, trait text, the town's own blurb and a soldier's
+  quick facts are tooltips; cards carry name, price, stock, stat chips and buttons. One theme on a
+  screen's root (`PixelStyle.tooltip_theme`) dresses every popover, so a tooltip reads as part of
+  the game. The detail pane is the one place a full record is allowed - click, not hover.
+- **Glyph rule.** Silkscreen carries basic ASCII only; separators in the pixel face are `|` and
+  `/`, because a missing `·` is a tofu box, not a typo.
+
+**Measured.** The rebuilt screen (seed 5150, Blackburrow, three recruits): no tofu, no clipping,
+chips readable at 1440p, the selected soldier's record complete. Portrait slots show initials until
+the art factory bakes heads.
+

@@ -18,6 +18,13 @@ const BUTTON_MARGIN := 5
 const PANEL_PIXELS := 16
 const PANEL_MARGIN := 4
 const FONT_PATH := "res://assets/fonts/Silkscreen-Regular.ttf"
+## Body text is set in a real serif, not the pixel face. The owner, looking at the first mock:
+## "descriptions need to not be everywhere, you kind of throw text everywhere but can be helpful
+## just maybe a hover tool tip maybe?" Silkscreen carries headers, buttons, prices and numeric
+## values; anything read as a sentence is set here, because a 5x7 pixel font turns a paragraph
+## into a maze.
+const BODY_FONT_PATH := "res://assets/fonts/EBGaramond-Regular.ttf"
+const BODY_FONT_ITALIC_PATH := "res://assets/fonts/EBGaramond-Italic.ttf"
 
 
 ## A button: a one-pixel outline, a two-pixel bevel that catches the light on the top and left, and
@@ -97,6 +104,105 @@ static func dress_button(button: Button, styles: Dictionary, font: Font, font_si
 	button.add_theme_color_override("font_pressed_color", text_colour)
 	button.add_theme_color_override("font_focus_color", text_colour)
 	button.add_theme_color_override("font_disabled_color", dim_colour)
+
+
+static func body_font(italic := false) -> Font:
+	var path := BODY_FONT_ITALIC_PATH if italic else BODY_FONT_PATH
+	if ResourceLoader.exists(path):
+		return load(path) as Font
+	return null
+
+
+## A label set in the serif: names, sentences, records.
+static func body_label(text: String, size: int = 14, colour: Color = Color.WHITE,
+		italic := false) -> Label:
+	var node := Label.new()
+	node.text = text
+	var font := body_font(italic)
+	if font != null:
+		node.add_theme_font_override("font", font)
+	node.add_theme_font_size_override("font_size", size)
+	node.add_theme_color_override("font_color", colour)
+	return node
+
+
+## A label set in the interface's own voice: headers, buttons, prices, stat values. Numbers in
+## Silkscreen scan better than numbers in a serif, which is the whole reason the pixel face stays.
+static func pixel_label(text: String, size: int = 10, colour: Color = Color.WHITE) -> Label:
+	var node := Label.new()
+	node.text = text
+	var font := pixel_font()
+	if font != null:
+		node.add_theme_font_override("font", font)
+	node.add_theme_font_size_override("font_size", size)
+	node.add_theme_color_override("font_color", colour)
+	return node
+
+
+## A stat chip: a small boxed value - "HP 28", "ATK 6". Five chips in a row answer the five
+## questions a recruit card asks faster than a sentence does.
+static func chip(label_text: String, value_text: String, body: Color, edge: Color,
+		label_colour: Color, value_colour: Color) -> Control:
+	var box := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = body
+	style.border_color = edge
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(0)
+	style.content_margin_left = 6.0
+	style.content_margin_right = 6.0
+	style.content_margin_top = 2.0
+	style.content_margin_bottom = 2.0
+	box.add_theme_stylebox_override("panel", style)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 5)
+	box.add_child(row)
+	if not label_text.is_empty():
+		row.add_child(pixel_label(label_text.to_upper(), 9, label_colour))
+	if not value_text.is_empty():
+		row.add_child(pixel_label(value_text, 10, value_colour))
+	return box
+
+
+## One row of chips, from pairs: [["HP", "28"], ["ATK", "6"], ...].
+static func chip_row(entries: Array, body: Color, edge: Color, label_colour: Color,
+		value_colour: Color) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 5)
+	for entry in entries:
+		var pair: Array = entry
+		row.add_child(chip(str(pair[0]), str(pair[1]), body, edge, label_colour, value_colour))
+	return row
+
+
+## A divider in the pixel language: two pixels of shade, not a hairline.
+static func rule(colour: Color) -> ColorRect:
+	var rect := ColorRect.new()
+	rect.color = colour
+	rect.custom_minimum_size = Vector2(0.0, 2.0)
+	return rect
+
+
+## Tooltips carry what the lean layout leaves out, so they have to look like the game: one theme
+## set on a screen's root styles every tooltip inside it, popover included.
+static func tooltip_theme(body: Color, edge: Color, text_colour: Color) -> Theme:
+	var theme := Theme.new()
+	var panel := StyleBoxFlat.new()
+	panel.bg_color = body
+	panel.border_color = edge
+	panel.set_border_width_all(2)
+	panel.set_corner_radius_all(0)
+	panel.content_margin_left = 10.0
+	panel.content_margin_right = 10.0
+	panel.content_margin_top = 8.0
+	panel.content_margin_bottom = 8.0
+	theme.set_stylebox("panel", "TooltipPanel", panel)
+	var font := body_font()
+	if font != null:
+		theme.set_font("font", "TooltipLabel", font)
+	theme.set_font_size("font_size", "TooltipLabel", 14)
+	theme.set_color("font_color", "TooltipLabel", text_colour)
+	return theme
 
 
 static func pixel_font() -> Font:
