@@ -73,6 +73,8 @@ func _ready() -> void:
 		return
 
 	_state = GameManager.campaign
+	var _mark := Time.get_ticks_msec()
+	var _stage_name := "start"
 	_config = GameManager.config()
 
 	# A fresh campaign has no world yet; a loaded save already does. Building it takes about five
@@ -80,6 +82,7 @@ func _ready() -> void:
 	# to happen right here on the main thread, so the game could not draw a frame of it and the owner
 	# felt a load spike. Now it runs on a thread behind a loading screen that can actually animate,
 	# and this function waits for it while the frames keep coming.
+	_stage_name = "world"
 	var builder := WorldBuilder.new(_state, _config)
 	if builder.needs_build():
 		_loader = LoadingScreen.new()
@@ -98,6 +101,9 @@ func _ready() -> void:
 	else:
 		builder.build_if_needed()
 
+	DebugLogger.info("  map entry: world done at %d ms" % (Time.get_ticks_msec() - _mark), "WorldMap")
+	_stage_name = "travel service"
+	_mark = Time.get_ticks_msec()
 	_travel = TravelService.new(_state, _config)
 	# One pathfinder for the campaign: 4,096 cells at 64 units each, about 136 milliseconds once
 	# measured, and every order after this is an A* over a grid that is already priced.
@@ -105,6 +111,9 @@ func _ready() -> void:
 	_costs.build(_state.campaign_seed, _config, _state.roads, _state.settlements)
 	_travel.costs = _costs
 	_view.costs = _costs
+	DebugLogger.info("  map entry: costs done at %d ms" % (Time.get_ticks_msec() - _mark), "WorldMap")
+	_stage_name = "view bind"
+	_mark = Time.get_ticks_msec()
 	_view.bind(_state, _config, _travel)
 	# The ground goes in before the map view and behind it: the view draws roads, settlements and
 	# parties on top of terrain it no longer has to paint itself.
@@ -130,7 +139,13 @@ func _ready() -> void:
 		_terrain = WorldFlat.new()
 		_terrain.z_index = -20
 		add_child(_terrain)
-		_terrain.setup(_state.campaign_seed, _view.land_rect(), _config)
+		# Awaited, and reporting, exactly like the painted ground: without the await the map finished
+		# _ready while these rows were still yielding, and without the callback the bar sat at 0.70 -
+		# the figure the owner kept seeing: "it gets to 90ish % then stops".
+		await _terrain.setup(_state.campaign_seed, _view.land_rect(), _config, func(part: float) -> void:
+			if _loader != null:
+				_loader.set_progress(0.7 + 0.3 * part)
+		)
 		_view.ground_art = true
 	else:
 		# The one-look test for "the towns and roads are gone": with the ground off, are the features
@@ -138,6 +153,10 @@ func _ready() -> void:
 		# painted grass? A switch rather than an edit, so the same build answers both halves.
 		print("world terrain: disabled by --no-ground")
 	_view.queue_redraw()
+
+	DebugLogger.info("  map entry: ground done at %d ms" % (Time.get_ticks_msec() - _mark), "WorldMap")
+	_stage_name = "map ready"
+	_mark = Time.get_ticks_msec()
 
 	_overworld = OverworldService.build(_state, _config)
 	_overworld.spawn_if_needed()
@@ -171,6 +190,14 @@ func _ready() -> void:
 
 	_apply_dev_autoengage()
 	_apply_dev_autotravel()
+
+	# The map is whole - the world, its roads and the ground are all in - so the screen can go. It used
+	# to be dismissed right after the world build (before the ground existed), and when the bar took the
+	# ground build into its window that call was dropped and never re-added: the bar reached 0.70, said
+	# it was laying the ground, and stayed there for good. The owner, watching it: "still stalling out".
+	DebugLogger.info("  map entry: map ready at %d ms" % (Time.get_ticks_msec() - _mark), "WorldMap")
+	if _loader != null:
+		await _loader.finish()
 
 
 ## Dev-only: drop the player next to a hostile party so the encounter path runs

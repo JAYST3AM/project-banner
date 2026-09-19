@@ -170,6 +170,11 @@ func _process(delta: float) -> void:
 			message = "Laying the roads between them"
 		else:
 			message = "%s  -  %d of %d" % [message, placed, int(source.placing)]
+	# The ground reports through the manual figure, after the builder has finished with the source
+	# object: once that figure exists the caption has to say what the bar is drawing, or it names the
+	# world's last phase while the ground is what is actually moving. Last word on purpose.
+	if _manual >= 0.0:
+		message = "Laying the ground under it"
 	_status.text = message
 
 
