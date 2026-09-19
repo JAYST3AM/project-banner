@@ -18,13 +18,19 @@ const LOOK_STRENGTH := 0.75
 var _sprite: Sprite2D
 
 
-func setup(seed_value: int, land: Rect2, _config: GameConfig, on_progress: Callable = Callable()) -> void:
+func setup(seed_value: int, land: Rect2, _config: GameConfig, on_progress: Callable = Callable()) -> void:  ## async: yields frames
 	var started := Time.get_ticks_msec()
 	var cols := int(ceil(land.size.x / FIELD_STEP)) + 1
 	var rows := int(ceil(land.size.y / FIELD_STEP)) + 1
 	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
 	var world := WorldChunks.build(seed_value)
 	for row in rows:
+		# Yield every few rows. Building this on the main thread without yielding froze the loading
+		# screen for the length of the build - the owner: "still stops out for no reason". Half a second
+		# of a bar that cannot repaint is indistinguishable from a hang, and the fix is to let the frame
+		# through rather than to make the work faster.
+		if row % 16 == 0 and get_tree() != null:
+			await get_tree().process_frame
 		if on_progress.is_valid():
 			on_progress.call(float(row) / float(maxi(1, rows)))
 		for col in cols:
