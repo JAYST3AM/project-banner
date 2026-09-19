@@ -64,9 +64,18 @@
     "fishing":  {"weights": {"residential": 3, "commercial": 3, "utility": 4, "military": 1, "special": 1}, "must": ["docks"]},
     "mining":   {"weights": {"residential": 3, "commercial": 2, "utility": 3, "military": 2, "special": 1}, "must": ["mine_head"]},
     "farming":  {"weights": {"residential": 4, "commercial": 2, "utility": 4, "military": 1, "special": 1}, "must": []},
-    "market":   {"weights": {"residential": 4, "commercial": 5, "utility": 2, "military": 1, "special": 3}, "must": ["market_square"]},
-    "military": {"weights": {"residential": 2, "commercial": 1, "utility": 3, "military": 5, "special": 1}, "must": []},
+    "market":   {"weights": {"residential": 4, "commercial": 5, "utility": 2, "military": 1, "special": 3}, "must": ["market_square", "merchants_house"]},
+    "military": {"weights": {"residential": 2, "commercial": 1, "utility": 3, "military": 5, "special": 1}, "must": ["keep"]},
     "mixed":    {"weights": {"residential": 4, "commercial": 3, "utility": 3, "military": 2, "special": 2}, "must": []}
+  },
+
+  "category_attachments": {
+    "note": "Chance rolls that dress a building by what it IS, on top of its ground's own pieces. Without these the life/detail half of the attachment catalogue never reached a wall.",
+    "residential": {"porch": 0.35, "dormer": 0.3, "laundry": 0.4, "bench": 0.35, "side_extension": 0.2},
+    "commercial": {"hanging_sign": 0.7, "lantern": 0.5, "market_goods": 0.4},
+    "utility": {"tools": 0.4, "sack": 0.45, "wagon": 0.3},
+    "military": {"banner": 0.3, "gate": 0.35},
+    "special": {"banner": 0.5, "lantern": 0.4, "balcony": 0.15}
   },
 
   "types": [

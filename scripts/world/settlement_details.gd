@@ -24,7 +24,9 @@ extends RefCounted
 ##
 ## v3 (D-138): buildings come from the modular catalogue - category, condition, materials and
 ## attachments - instead of the kind's flat list.
-const DETAILS_VERSION := 3
+## v4: must-haves gained their purpose's landmarks (market squares, merchant's houses, a castle's
+## keep) and attachments gained the by-category rolls, so the life/detail pieces reach walls.
+const DETAILS_VERSION := 4
 
 ## What each kind of place wants, before the buildings take their cut. Deliberately disjoint from
 ## every good the kind's buildings can provide, so the subtraction below is belt and braces rather

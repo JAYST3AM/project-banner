@@ -145,8 +145,15 @@ func _test_houses_follow_the_town() -> void:
 		"every village has its cottages")
 	check(str(_town("lanes", Settlement.TYPE_TOWN, 1200).buildings).contains("townhouse"),
 		"a town has townhouses")
-	check(str(_town("holdfast", Settlement.TYPE_CASTLE, 1000).buildings).contains("keep"),
-		"a castle has its keep")
+	# Twelve castles, because the trade repair pass ate the keep in one castle in forty and a
+	# single castle was not enough to catch it (it was: the sweep in test_sprite_list saw it).
+	var keeps_ok := true
+	for i in 12:
+		var castle := _town("keep_%d" % i, Settlement.TYPE_CASTLE, 700 + i * 160,
+			Vector2(400.0 + float(i) * 700, 2400.0))
+		if not str(castle.buildings).contains("keep"):
+			keeps_ok = false
+	check(keeps_ok, "every castle keeps its keep")
 
 
 func _test_vocabulary_is_closed() -> void:

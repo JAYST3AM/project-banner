@@ -3777,8 +3777,15 @@ will draw from its shopping list rather than invent one.
   ground's materials, one or two attachments, and the plan's detail toggles (chimney, clutter,
   sign, fence, garden).
 - The trade rule survives: the repair pass still guarantees three sellable goods, but it now gives
-  up a non-residential building's place first - the first version ate the town's cottages, which
-  the suite caught ("every village has its cottages").
+  up a non-residential building's place first - the first version ate the town's cottages, and the
+  second traded away every castle's keep, both caught by suites. Must-haves are now protected too.
+- The sprite list (`tests/test_sprite_list.gd`, 160 towns swept, markdown + JSON written to
+  user:// and kept in `docs/SETTLEMENT_SPRITE_LIST.md`) ranks every building by how often the game
+  actually asks for it - and it earned its keep immediately by exposing two gaps: two wealthy-only
+  buildings had never been drawn, and fourteen of the thirty-three attachment modules had never
+  reached a wall. Must-haves gained their purpose's landmarks, and category rolls now dress a
+  building by what it IS (a shop wears its hanging sign whatever ground it stands on), so all
+  thirty-three pieces are placed.
 - `Settlement.biome` joins the detail; `DETAILS_VERSION` goes to 3 so every existing save's towns
   regenerate on next entry, and the hover card's building tooltips now speak the state and the
   materials ("It looks well-kept, slate roof, stone lower wall. Around it: Firewood pile.").

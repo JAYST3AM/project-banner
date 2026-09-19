@@ -105,7 +105,7 @@ static func plan(settlement: Settlement, campaign_seed: int, wealth: String) -> 
 	var wanted := _count_for(settlement.type, rng)
 
 	var chosen := _choose(settlement.type, biome, wealth, purpose, wanted, rng)
-	_repair_trade(chosen, settlement.type, biome, wealth, rng)
+	_repair_trade(chosen, settlement.type, biome, wealth, purpose, rng)
 
 	var buildings: Array = []
 	for type_entry in chosen:
@@ -244,11 +244,13 @@ static func _weighted_category(weights: Dictionary, rng: RandomNumberGenerator) 
 ## The owner's trade rule (D-136) survives the new system: while the town can provide fewer than
 ## three goods, a building that provides nothing gives its place to one that does.
 static func _repair_trade(chosen: Array, kind: String, biome: String, wealth: String,
-		rng: RandomNumberGenerator) -> void:
+		purpose: String, rng: RandomNumberGenerator) -> void:
+	var purpose_row: Dictionary = (catalogue().get("purposes", {}) as Dictionary).get(purpose, {}) as Dictionary
+	var must_ids: Array = purpose_row.get("must", []) as Array
 	var guard := 0
 	while _enabled_goods(chosen).size() < 3 and guard < 40:
 		guard += 1
-		var victim := _first_quiet(chosen)
+		var victim := _first_quiet(chosen, must_ids)
 		if victim < 0:
 			return
 		var pool := _eligible(kind, biome, wealth)
@@ -269,19 +271,23 @@ static func _repair_trade(chosen: Array, kind: String, biome: String, wealth: St
 		chosen[victim] = donors[rng.randi_range(0, donors.size() - 1)]
 
 
-## The first building that provides nothing, preferring one that is not a home: the house ladder is
-## the first thing chosen and would otherwise be the first thing the repair pass eats. The town's
-## cottages matter more than which smithy stands beside them.
-static func _first_quiet(chosen: Array) -> int:
+## The first building that provides nothing, preferring one that is not a home and never one the
+## purpose demanded: the house ladder and the landmarks are the first things chosen and would
+## otherwise be the first things the repair pass eats - the first version traded away each town's
+## cottages, and the second traded away every castle's keep.
+static func _first_quiet(chosen: Array, must_ids: Array) -> int:
 	for index in chosen.size():
 		var entry: Dictionary = chosen[index] as Dictionary
 		if (entry.get("enables", []) as Array).is_empty() \
-				and str(entry.get("category", "")) != "residential":
+				and str(entry.get("category", "")) != "residential" \
+				and not must_ids.has(str(entry.get("id", ""))):
 			return index
 	for index in chosen.size():
 		if index == 0:
 			continue
-		if ((chosen[index] as Dictionary).get("enables", []) as Array).is_empty():
+		var entry: Dictionary = chosen[index] as Dictionary
+		if (entry.get("enables", []) as Array).is_empty() \
+				and not must_ids.has(str(entry.get("id", ""))):
 			return index
 	return -1
 
@@ -319,6 +325,19 @@ static func _dress(type_entry: Dictionary, biome: String, wealth: String,
 			bag.erase(pick)
 			if not attachments.has(pick):
 				attachments.append(pick)
+
+	# What the building IS dresses it too: a shop wants its hanging sign whatever the ground it
+	# stands on, and a home wants a bench, a porch and a line of laundry. These rolls are what carry
+	# the life/detail half of the attachment catalogue onto actual walls.
+	var by_category: Dictionary = catalogue().get("category_attachments", {}) as Dictionary
+	var category_rolls: Dictionary = by_category.get(
+		str(type_entry.get("category", "")), {}) as Dictionary
+	for attachment_any in category_rolls.keys():
+		var attachment := str(attachment_any)
+		if attachments.has(attachment):
+			continue
+		if rng.randf() < float(category_rolls[attachment_any]):
+			attachments.append(attachment)
 
 	# The art plan's detail flags: what a sprite assembler would toggle on this building.
 	var details := {
