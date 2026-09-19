@@ -41,6 +41,7 @@ func run() -> void:
 	_test_the_pace_follows_the_drawn_road()
 	_test_water_is_bridged_or_bent()
 	_test_a_bridge_walks_like_a_road()
+	_test_a_restamp_is_the_same_grid()
 	_test_the_walk_follows_the_line()
 	_test_roads_survive_a_save()
 	SaveManager.delete_all_saves()
@@ -498,6 +499,55 @@ func _test_a_bridge_walks_like_a_road() -> void:
 	var middle: Vector2 = curve[(int(bridge.x) + int(bridge.y)) / 2]
 	approx(network.bonus_at(middle), network.bonus_of("road"), 0.0001,
 		"and standing on the bridge walks at the link's own speed")
+	GameManager.end_campaign()
+
+
+## A link changing tier is re-stamped in place rather than rebuilt whole: the grid must be exactly
+## what a full rebuild would have produced, because the owner's map used to freeze for a fifth of a
+## second every time a road upgraded or decayed (D-129).
+func _test_a_restamp_is_the_same_grid() -> void:
+	section("a re-stamp is the same grid as a rebuild")
+	var state := _fresh_campaign("Roads Test", 786)
+	var config := GameManager.config()
+	var network := RoadNetwork.new(state, config)
+	state.roads.clear()
+	var greywatch := state.settlement("greywatch")
+	var brackenford := state.settlement("brackenford")
+	var redmoor := state.settlement("redmoor")
+	var first := {
+		"a": greywatch.id, "b": brackenford.id, "kind": "road", "traffic": 0.0,
+		"used_hours": state.clock.total_hours(),
+	}
+	var second := {
+		"a": brackenford.id, "b": redmoor.id, "kind": "track", "traffic": 0.0,
+		"used_hours": state.clock.total_hours(),
+	}
+	state.roads.append(first)
+	state.roads.append(second)
+	network.refresh_paths()
+
+	var prior := TravelCosts.new()
+	prior.build(state.campaign_seed, config, state.roads, state.settlements)
+	var restamped := TravelCosts.new()
+	restamped.build(state.campaign_seed, config, state.roads, state.settlements)
+
+	# The first link loses a rung: re-price its ground in place.
+	first["kind"] = "dirt"
+	restamped.apply_tier(0)
+	var rebuilt := TravelCosts.new()
+	rebuilt.build(state.campaign_seed, config, state.roads, state.settlements)
+
+	var differing := 0
+	var moved := 0
+	for row in TravelCosts.ROWS:
+		for column in TravelCosts.COLUMNS:
+			var cell := Vector2i(column, row)
+			if not is_equal_approx(rebuilt.cost_of(cell), restamped.cost_of(cell)):
+				differing += 1
+			if not is_equal_approx(prior.cost_of(cell), restamped.cost_of(cell)):
+				moved += 1
+	equal(differing, 0, "the in-place re-stamp is the grid a full rebuild produces")
+	greater(moved, 0, "and the tier change actually moved some ground")
 	GameManager.end_campaign()
 
 

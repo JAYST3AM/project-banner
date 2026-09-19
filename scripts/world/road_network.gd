@@ -27,6 +27,9 @@ var _paths: Array[PackedVector2Array] = []
 ## Where each link's curve crosses water, [start, end] index pairs per link - the bridges the map
 ## draws and the walk crosses by.
 var _spans: Array = []
+## The links the last [method review] changed tier, so the map can re-price just their ground
+## instead of rebuilding the whole grid (D-129). Cleared when a review starts.
+var changed_links: Array[int] = []
 ## The stretch of walking not yet attributed to a link, held until a scan window fills.
 var _window_open := false
 var _window_from := Vector2.ZERO
@@ -359,9 +362,11 @@ func review(total_hours: float) -> bool:
 	if _last_review_hours >= 0.0 and total_hours - _last_review_hours < _review_hours():
 		return false
 	_last_review_hours = total_hours
+	changed_links.clear()
 	var ladder := tiers()
 	var changed := false
-	for raw in state.roads:
+	for i in state.roads.size():
+		var raw: Variant = state.roads[i]
 		if typeof(raw) != TYPE_DICTIONARY:
 			continue
 		var link := raw as Dictionary
@@ -376,6 +381,7 @@ func review(total_hours: float) -> bool:
 			link["kind"] = str(ladder[rung + 1])
 			link["traffic"] = traffic - threshold
 			changed = true
+			changed_links.append(i)
 			DebugLogger.info("road %s-%s wears up to %s" % [
 				str(link.get("a", "")), str(link.get("b", "")), str(ladder[rung + 1]),
 			], CATEGORY)
@@ -387,6 +393,7 @@ func review(total_hours: float) -> bool:
 			link["kind"] = str(ladder[rung - 1])
 			link["used_hours"] = total_hours
 			changed = true
+			changed_links.append(i)
 			DebugLogger.info("road %s-%s falls to %s after %.0f idle days" % [
 				str(link.get("a", "")), str(link.get("b", "")), str(ladder[rung - 1]), idle_days,
 			], CATEGORY)

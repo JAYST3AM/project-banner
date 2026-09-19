@@ -18,6 +18,9 @@ extends CanvasLayer
 ## How long a reading covers. A quarter of a second is long enough to be steady and short enough
 ## that a stall shows up while it is still happening.
 const SAMPLE_SECONDS := 0.25
+## A frame this slow is called out the moment it happens when the frame log is on: the tail is what
+## a "runs fine" claim gets wrong, and the average never shows it.
+const HITCH_MS := 25.0
 
 var _label: Label = null
 var _frames := 0
@@ -25,11 +28,14 @@ var _elapsed := 0.0
 ## The worst single frame in the window, in milliseconds: a good average with a bad tail is what a
 ## hitch looks like from the inside.
 var _worst_ms := 0.0
+## Whether this run asked for the frame pacing on the record ("--framelog").
+var _log_frames := false
 
 
 func _ready() -> void:
 	layer = 100
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_log_frames = DevFlags.framelog()
 	_build()
 
 
@@ -47,10 +53,16 @@ func _process(delta: float) -> void:
 	_frames += 1
 	_elapsed += delta
 	_worst_ms = maxf(_worst_ms, delta * 1000.0)
+	if _log_frames and delta * 1000.0 >= HITCH_MS:
+		DebugLogger.warn("hitch: %.1f ms" % (delta * 1000.0), "Perf")
 	if _elapsed < SAMPLE_SECONDS:
 		return
 	var fps := float(_frames) / _elapsed
 	var ms := _elapsed * 1000.0 / float(_frames)
+	if _log_frames:
+		DebugLogger.info("frame: %.0f fps, avg %.2f ms, worst %.1f ms, process %.2f ms" % [
+			fps, ms, _worst_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		], "Perf")
 	_label.text = "%s   ·   %.2f ms   ·   %s" % [
 		_rate_text(fps), ms, _limit_text()]
 	_label.add_theme_color_override("font_color", _rate_colour(fps))

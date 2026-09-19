@@ -23,37 +23,38 @@ var _cost := PackedFloat32Array()
 ## The pace the grid was built with, kept so walking can recover a speed factor from a stored cost.
 var _base := 150.0
 var _ready := false
+## What the grid was built from, kept so one link can be re-stamped in place: a road changing tier
+## must not cost the whole map a rebuild (D-129). The roads array is the campaign's own, so a link
+## whose kind changed is visible here the moment it changes.
+var _world: WorldChunks = null
+var _config: GameConfig = null
+var _roads: Array = []
+var _settlements: Dictionary = {}
+var _water_factor := 0.30
+var _marsh_factor := 0.55
+var _water_height := 0.335
+var _marsh_height := 0.375
+var _bridge_max := 64.0
 
 
 func build(seed_value: int, config: GameConfig, roads: Array, settlements: Dictionary) -> void:
 	var started := Time.get_ticks_msec()
-	var world := WorldChunks.build(seed_value)
+	_world = WorldChunks.build(seed_value)
+	_config = config
+	_roads = roads
+	_settlements = settlements
+	_base = maxf(1.0, config.get_float("travel.world_units_per_game_hour", 150.0))
+	_water_factor = config.get_float("travel.water_speed_factor", 0.30)
+	_marsh_factor = config.get_float("travel.marsh_speed_factor", 0.55)
+	_water_height = config.get_float("travel.water_height", 0.335)
+	_marsh_height = config.get_float("travel.marsh_height", 0.375)
+	_bridge_max = config.get_float("roads.bridge_max_span", 64.0)
 	_cost.resize(COLUMNS * ROWS)
-	var base := maxf(1.0, config.get_float("travel.world_units_per_game_hour", 150.0))
-	_base = base
-	var water := config.get_float("travel.water_speed_factor", 0.30)
-	var marsh := config.get_float("travel.marsh_speed_factor", 0.55)
-	var water_height := config.get_float("travel.water_height", 0.335)
-	var marsh_height := config.get_float("travel.marsh_height", 0.375)
-	var bridge_max := config.get_float("roads.bridge_max_span", 64.0)
 
 	for row in ROWS:
 		for column in COLUMNS:
 			var point := Vector2((float(column) + 0.5) * CELL, (float(row) + 0.5) * CELL)
-			var here: Dictionary = world.sample(point)
-			var height := float(here.get("height", 0.5))
-			var wear := float(here.get("wear", 0.0))
-			var moisture := float(here.get("moisture", 0.5))
-			var factor := 1.0
-			if height < water_height:
-				factor = water
-			elif height < marsh_height:
-				factor = marsh
-			elif wear > 0.5:
-				factor = 1.1
-			elif moisture > 0.6:
-				factor = 0.9
-			_cost[row * COLUMNS + column] = 1.0 / (base * maxf(0.05, factor))
+			_cost[row * COLUMNS + column] = _terrain_cost_at(point)
 
 	# Roads are cheaper ground, at the price their tier carries. Every cell a road passes through gets
 	# that link's speed, found by walking the same curve the map draws, so what the player sees and
@@ -61,33 +62,94 @@ func build(seed_value: int, config: GameConfig, roads: Array, settlements: Dicti
 	for raw in roads:
 		if typeof(raw) != TYPE_DICTIONARY:
 			continue
-		var road := raw as Dictionary
-		var tier := str(road.get("kind", "road"))
-		if tier == "none":
-			continue
-		var a := settlements.get(str(road.get("a", "")), null) as Settlement
-		var b := settlements.get(str(road.get("b", "")), null) as Settlement
-		if a == null or b == null:
-			continue
-		var road_cost := 1.0 / (base * _tier_bonus(config, tier))
-		# The same terrain-shaped curve the map draws, bridges included: a bridge is road-priced
-		# ground, which is exactly what a bridge is for.
-		var path := RoadPath.between(a.position, b.position, world, water_height, bridge_max)
-		for i in path.size() - 1:
-			var from := path[i]
-			var to := path[i + 1]
-			var span := from.distance_to(to)
-			var steps := maxi(1, int(ceil(span / (CELL * 0.5))))
-			for s in steps + 1:
-				var at := from.lerp(to, float(s) / float(steps))
-				var cell := cell_at(at)
-				if cell.x < 0 or cell.y < 0 or cell.x >= COLUMNS or cell.y >= ROWS:
-					continue
-				var index := cell.y * COLUMNS + cell.x
-				_cost[index] = minf(_cost[index], road_cost)
+		_stamp_link(raw as Dictionary, {})
 
 	_ready = true
 	print("travel costs: %dx%d cells of %d units in %.0f ms" % [COLUMNS, ROWS, int(CELL), float(Time.get_ticks_msec() - started)])
+
+
+## The price of one cell of bare ground, from the same field the ground is painted from.
+func _terrain_cost_at(point: Vector2) -> float:
+	var here: Dictionary = _world.sample(point)
+	var height := float(here.get("height", 0.5))
+	var wear := float(here.get("wear", 0.0))
+	var moisture := float(here.get("moisture", 0.5))
+	var factor := 1.0
+	if height < _water_height:
+		factor = _water_factor
+	elif height < _marsh_height:
+		factor = _marsh_factor
+	elif wear > 0.5:
+		factor = 1.1
+	elif moisture > 0.6:
+		factor = 0.9
+	return 1.0 / (_base * maxf(0.05, factor))
+
+
+## A link's curve: the same terrain-shaped line the map draws and the snap rides, bridges included.
+func _link_path(road: Dictionary) -> PackedVector2Array:
+	var a := _settlements.get(str(road.get("a", "")), null) as Settlement
+	var b := _settlements.get(str(road.get("b", "")), null) as Settlement
+	if a == null or b == null:
+		return PackedVector2Array()
+	return RoadPath.between(a.position, b.position, _world, _water_height, _bridge_max)
+
+
+## One link's stamp, at the price its tier carries. [param only] limits the write to the cells it
+## names (empty = every cell the curve touches). A roadless link stamps nothing.
+func _stamp_link(road: Dictionary, only: Dictionary) -> void:
+	var tier := str(road.get("kind", "road"))
+	if tier == "none":
+		return
+	var path := _link_path(road)
+	if path.size() < 2:
+		return
+	var road_cost := 1.0 / (_base * _tier_bonus(_config, tier))
+	for i in path.size() - 1:
+		var from := path[i]
+		var to := path[i + 1]
+		var span := from.distance_to(to)
+		var steps := maxi(1, int(ceil(span / (CELL * 0.5))))
+		for s in steps + 1:
+			var cell := cell_at(from.lerp(to, float(s) / float(steps)))
+			if cell.x < 0 or cell.y < 0 or cell.x >= COLUMNS or cell.y >= ROWS:
+				continue
+			if not only.is_empty() and not only.has(cell):
+				continue
+			var index := cell.y * COLUMNS + cell.x
+			_cost[index] = minf(_cost[index], road_cost)
+
+
+## One link changed tier: re-price the ground it touches, and only that ground. Its cells are
+## recomputed as bare terrain, then every link stamps them again - so a cell shared with another
+## road keeps that road's price, and the result is the grid a full rebuild would have produced.
+## Where a full rebuild froze the map for a fifth of a second, this costs one link's footprint.
+func apply_tier(link_index: int) -> void:
+	if not _ready or _world == null or link_index < 0 or link_index >= _roads.size():
+		return
+	var raw: Variant = _roads[link_index]
+	if typeof(raw) != TYPE_DICTIONARY:
+		return
+	var path := _link_path(raw as Dictionary)
+	if path.size() < 2:
+		return
+	var touched := {}
+	for i in path.size() - 1:
+		var from := path[i]
+		var to := path[i + 1]
+		var span := from.distance_to(to)
+		var steps := maxi(1, int(ceil(span / (CELL * 0.5))))
+		for s in steps + 1:
+			var cell := cell_at(from.lerp(to, float(s) / float(steps)))
+			if cell.x < 0 or cell.y < 0 or cell.x >= COLUMNS or cell.y >= ROWS:
+				continue
+			touched[cell] = true
+	for cell in touched:
+		_cost[cell.y * COLUMNS + cell.x] = _terrain_cost_at(centre(cell))
+	for other in _roads:
+		if typeof(other) != TYPE_DICTIONARY:
+			continue
+		_stamp_link(other as Dictionary, touched)
 
 
 func is_ready() -> bool:

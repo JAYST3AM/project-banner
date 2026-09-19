@@ -21,6 +21,9 @@ const AUTOENGAGE_FLAG := "--autoengage"
 const AUTOATTACK_FLAG := "--autoattack"
 const AUTOLEAVE_FLAG := "--autoleave"
 const AUTOSTART_BATTLE_FLAG := "--autostart-battle"
+## Frame pacing on the record: "--framelog" logs the frame rate, frame-time mean and worst, and any
+## hitch the moment it happens. A frame rate you can grep beats one you have to watch.
+const FRAMELOG_FLAG := "--framelog"
 ## Run a scripted formation drill through the battle scene's real order methods.
 const AUTOFORMATIONS_FLAG := "--autoformations"
 const BATTLESPEED_PREFIX := "--battlespeed="
@@ -139,6 +142,11 @@ static func battle_speed() -> float:
 ## where a game that writes one unasked would fill a player's disk.
 static func battle_log_requested() -> bool:
 	return _has_flag(BATTLELOG_FLAG)
+
+
+## Whether this run wants frame pacing written to the log.
+static func framelog() -> bool:
+	return _has_flag(FRAMELOG_FLAG)
 
 
 ## Where the battle journal should go, or "" for the journal's own default. Meaningless

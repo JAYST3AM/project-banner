@@ -23,6 +23,13 @@ var last_saved_at: String = ""
 
 var clock: CampaignClock = null
 var rng: RngService = null
+## The priced travel grid, kept between visits to the map: it changes only when a road changes tier,
+## and rebuilding it on every map entry cost a third of a second each time (D-129). Runtime only -
+## never saved - and nothing but the world map's own cache reads it.
+var travel_costs: TravelCosts = null
+## The road network, cached for the same reason: its curves are shaped against the terrain on
+## creation, which is another fifty milliseconds per visit (D-129). Runtime only.
+var road_network: RoadNetwork = null
 
 var player_gold: int = 0
 var player_party: Party = null

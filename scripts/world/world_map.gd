@@ -107,13 +107,22 @@ func _ready() -> void:
 	_mark = Time.get_ticks_msec()
 	_travel = TravelService.new(_state, _config)
 	# The roads are a living thing: the network normalises every link (saves from before the tiers
-	# carry plain kinds) and the travel service wears the ones the party walks.
-	_roads = RoadNetwork.new(_state, _config)
+	# carry plain kinds) and the travel service wears the ones the party walks. Cached on the campaign
+	# with the grid (D-129): re-shaping its curves is fifty milliseconds of every map visit.
+	_roads = _state.road_network
+	if _roads == null:
+		_roads = RoadNetwork.new(_state, _config)
+		_state.road_network = _roads
 	_travel.roads = _roads
 	# One pathfinder for the campaign: 4,096 cells at 64 units each, about 136 milliseconds once
 	# measured, and every order after this is an A* over a grid that is already priced.
-	_costs = TravelCosts.new()
-	_costs.build(_state.campaign_seed, _config, _state.roads, _state.settlements)
+	# The priced grid is cached on the campaign (D-129): it changes only when a road changes tier, and
+	# a fresh build on every visit to the map froze it for a fifth of a second each time.
+	_costs = _state.travel_costs
+	if _costs == null or not _costs.is_ready():
+		_costs = TravelCosts.new()
+		_costs.build(_state.campaign_seed, _config, _state.roads, _state.settlements)
+		_state.travel_costs = _costs
 	_travel.costs = _costs
 	_view.costs = _costs
 	DebugLogger.info("  map entry: costs done at %d ms" % (Time.get_ticks_msec() - _mark), "WorldMap")
@@ -314,10 +323,20 @@ func _refresh() -> void:
 		_debug.refresh()
 
 
-## A road changed tier: the ground is re-priced in place and handed back to the same readers. A
-## journey already under way keeps its route; the next order is planned on the new prices.
+## A road changed tier: its ground is re-priced in place, and handed back to the same readers. A
+## journey already under way keeps its route; the next order is planned on the new prices. The full
+## rebuild is only for when there is no link ledger to trust - it used to run for every tier change
+## and every map entry, a fifth of a second of frozen map each time (D-129).
 func _rebuild_costs() -> void:
-	_costs.build(_state.campaign_seed, _config, _state.roads, _state.settlements)
+	if _costs != null and _costs.is_ready() and _roads != null and not _roads.changed_links.is_empty():
+		var restamped := _roads.changed_links.size()
+		for index in _roads.changed_links:
+			_costs.apply_tier(index)
+		_roads.changed_links.clear()
+		DebugLogger.info("  costs: re-stamped %d changed link(s) in place" % restamped, "WorldMap")
+	else:
+		_costs.build(_state.campaign_seed, _config, _state.roads, _state.settlements)
+		_state.travel_costs = _costs
 	_travel.costs = _costs
 	_view.costs = _costs
 	_view.queue_redraw()

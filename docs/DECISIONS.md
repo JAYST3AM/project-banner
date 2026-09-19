@@ -3459,3 +3459,32 @@ average nearest neighbour M u" - the numbers this decision was tuned against, vi
 average 505. Tests: `test_world_sites`' floor assertion follows the constant (closest pair 465.9 u
 measured against a 460 floor); test_roads 86/0, test_world_map 116/0, test_campaign_flow 41/0.
 
+
+## D-129 - the stalls, not the frame rate: the map stops freezing on tier changes and town visits
+
+**Context.** The owner asked for frame-rate work "without affecting quality visuals". Measuring first
+(a new `--framelog` on the FPS overlay: per-second fps, mean/worst frame time and process time, and
+any frame over 25 ms named the moment it happens) said the steady state was never the problem:
+352-360 fps at 2.79 ms mean against the 360 Hz vsync cap, worst frames ~3 ms. What the log did show
+was stalls: a **219 ms grid rebuild** on every map entry and on load, a fifth to a third of a second
+frozen on every road tier change, and the ground builder's ~70 ms slices during transitions.
+
+**Decision - caches and re-stamps, no pixel touched.**
+- A road changing tier is **re-stamped in place** (`TravelCosts.apply_tier`): its cells are
+  recomputed as bare terrain and every link stamps them again, so a cell shared with another road
+  keeps that road's price. The grid it produces is asserted cell-for-cell identical to a full
+  rebuild across all 4,096 cells (`test_roads`). Where every upgrade froze the map, this costs one
+  link's footprint.
+- The priced grid **and** the road network ride on the campaign (`CampaignState.travel_costs` /
+  `road_network`; runtime only, never saved): both are deterministic from the seed and the links, so
+  a visit to a town no longer rebuilds them on return. Measured on a scripted entry-and-return: the
+  cost phase went **219 ms -> 0 ms**; the network's terrain-shaped curves (the phase's other 52 ms)
+  are cached in the same breath.
+- Seeing this is part of the fix: `--framelog` turns the on-screen FPS label into a greppable
+  record and names every hitch as it happens.
+
+**Left alone, deliberately.** Steady-state rendering (already at the cap), the loading screen's own
+work (behind the bar, by design), and the per-frame redraw of the map view - the numbers do not
+justify splitting it today. The battle renderer has its own bench (`render_bench.gd`) for its own
+milestone.
+

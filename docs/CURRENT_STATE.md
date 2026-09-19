@@ -58,6 +58,11 @@ the revert broke. The world map, travel and the road network are unaffected.
 now holds ~17-20 settlements rather than 36, and a hop between neighbours is two to three game
 hours.
 
+**Performance (D-129):** frame rate sits at the vsync cap (352-360 fps, ~2.8 ms) and the stalls are
+gone: a road tier change re-stamps only that link's cells (previously a 200-300 ms full grid
+rebuild), and the grid and road network are cached on the campaign so a town visit costs **0 ms** on
+return (was 219 ms). `--framelog` logs fps/avg/worst per second and names any frame over 25 ms.
+
 A link between two settlements carries a **tier** - `none | dirt | track | road`, speed bonus
 1.0 / 1.1 / 1.5 / 2.0 - stored in the link's own `kind`, and the priced grid, the eta and the
 walking pace all read it. A settlement founded later links itself to its nearest neighbour as a
