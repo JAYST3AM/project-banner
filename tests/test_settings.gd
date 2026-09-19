@@ -15,6 +15,7 @@ func run() -> void:
 	_test_option_tables_line_up()
 	_test_scale_bounds()
 	_test_scaled_sizes()
+	_test_scale_commit_announces()
 	_test_cycling_wraps()
 	_test_save_and_load_round_trip()
 	_complete()
@@ -61,6 +62,23 @@ func _test_cycling_wraps() -> void:
 	equal(GameSettings.next_index(0, 3), 1, "the next index")
 	equal(GameSettings.next_index(2, 3), 0, "and past the end it wraps")
 	equal(GameSettings.next_index(0, 0), 0, "an empty table is index zero, not a crash")
+
+
+func _test_scale_commit_announces() -> void:
+	section("committing a scale change tells the built screens to rebuild")
+	var kept_path := GameSettings.path
+	GameSettings.path = TEST_PATH
+	var seen := [0]
+	var probe := func() -> void: seen[0] += 1
+	GameSettings.ui_scale_committed.connect(probe)
+	var kept_scale := GameSettings.ui_scale
+	GameSettings.ui_scale = 1.1
+	GameSettings.commit_ui_scale()
+	GameSettings.ui_scale_committed.disconnect(probe)
+	equal(seen[0], 1, "one commit, one announcement")
+	GameSettings.ui_scale = kept_scale
+	GameSettings.path = kept_path
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_PATH))
 
 
 func _test_save_and_load_round_trip() -> void:

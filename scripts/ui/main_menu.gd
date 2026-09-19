@@ -34,6 +34,7 @@ const SCRIM := Color(0.03, 0.04, 0.06, 0.86)
 
 var _font: Font = null
 var _settings: SettingsPanel = null
+var _margin: MarginContainer = null
 var _button_styles: Dictionary = {}
 var _continue_button: Button = null
 var _status: Label = null
@@ -48,6 +49,27 @@ func _ready() -> void:
 	_build_background()
 	_build_column()
 	_refresh_continue_state()
+	# A committed UI-scale change rebuilds the column at the new size (D-137 follow-up). The settings
+	# panel is a sibling of the column, so it stays open while the words behind it re-set.
+	GameSettings.ui_scale_committed.connect(_rebuild_column)
+
+
+## Build the column again at the current scale. The old column is freed whole, and the panel that
+## asked for the change is not part of it, so nothing the player is looking at disappears.
+func _rebuild_column() -> void:
+	if _margin != null:
+		_margin.free()
+		_margin = null
+	_build_new_panel_cleared()
+	_build_column()
+	_refresh_continue_state()
+
+
+## The new-campaign panel lives inside the column, so a rebuild must forget the old reference before
+## the column is built again - otherwise the menu would think a panel is open when its node is gone.
+func _build_new_panel_cleared() -> void:
+	if _new_panel != null:
+		_new_panel = null
 
 
 func _build_background() -> void:
@@ -88,7 +110,8 @@ func _build_background() -> void:
 
 
 func _build_column() -> void:
-	var margin := MarginContainer.new()
+	_margin = MarginContainer.new()
+	var margin := _margin
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 68)
 	margin.add_theme_constant_override("margin_right", 24)

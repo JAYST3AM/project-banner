@@ -3736,14 +3736,27 @@ nothing is a lie.
 `FULLSCREEN >`, `ON >`, `360 >` with the footer reading "Applied: fullscreen, vsync On, cap 360."
 The same panel hangs off the Esc menu above Resume's column.
 
-**Follow-up - the UI scale slider, and more options.** The owner: "needs a ui size slider, and also
-more options." The scale lives on `PixelStyle.ui_scale` (0.8 to 1.4, step 0.05) and every size in
-the pixel furniture passes through `PixelStyle.scaled()` / `scaled_vec()` - fonts, button boxes,
-panel padding, chip boxes, rules, tooltip text - with the menus' own label helpers routed through
-the same arithmetic. A theme that is already built cannot be re-scaled, so a screen wears the scale
-it was built at: the settings panel rebuilds itself on `drag_ended`, which is the change made
-visible where it is made, and `--ui-scale=1.3` forces one for screenshots. The added options are
-Window size (four presets, applied in Windowed), Frame-rate overlay at start (F1 still toggles it,
-and hitch logging is independent of visibility), and Map hints on/off. `test_settings` grew to
-cover the widened tables, the scale arithmetic and the fuller save/load round trip.
+**Follow-up 2 - the scale reaches built screens.** The owner, on the refreshed build: "ui slider doesn't
+affect the rest of the ui. ie the ui on the campaign map." He was right, and the reason is structural: a
+control keeps the text size it was born with, and only the panel that owns the slider was rebuilding
+itself. The fix is one signal - `GameSettings.ui_scale_committed`, emitted by `commit_ui_scale()` when
+the player lets go of the handle - and every screen that is already built listens: the world map tears
+its HUD and its satellites (hover card, encounter dialog, debug panel) down and builds them again,
+putting back whatever settlement the player was inspecting; both menus' columns rebuild around the
+settings panel, which stays open because it is a sibling, not a child. Deliberately not rebuilt: the
+pause menu's own host node (the player is inside it, holding the slider) and the dev furniture's
+overlay autoload. `--ui-scale-late=0.6` moves the scale four seconds into a run so the rebuild can be
+photographed: boot 80% → commit 60% shrinks the stats text from ~22 px to ~16 px, in ratio, with the
+log reading "ui scale committed: screens rebuilt at 60%".
+
+**Follow-up 3 - the check-runs stop touching the player's machine.** Two lessons paid for the hard way.
+`--log-name=<name>` gives a dev run its own log file, because a check-run rotating the player's live
+`session.log` out from under his running game is interference, not diligence. And `--screenshot=<path>`
++ `--screenshot-delay` + `--screenshot-quit` save the game's own viewport through a probe parented to
+the tree root - a desktop screen grab behind a focus-stealing Windows session captures whatever window
+is on top, which twice captured the owner's own game and once captured the agent's own chat window.
+The probe must live on the root, not the boot scene: `change_scene` replaces the boot scene and a
+coroutine dies with its node. A stale call left behind by that refactor broke `main.gd`'s parse, and
+every launch from source showed a game that never loads - which is the one thing the owner saw and
+said out loud.
 

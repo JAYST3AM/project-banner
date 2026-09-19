@@ -240,10 +240,13 @@ func _on_scale_changed(value: float) -> void:
 	_scale_value.text = "%d%%" % int(round(value * 100.0))
 
 
-## On release: rebuild, which is how the panel shows the change it just made.
+## On release: rebuild, which is how the panel shows the change it just made - and commit it, which
+## is how every other built screen (the map's HUD, both menus' columns) hears that its own text is
+## the wrong size now.
 func _on_scale_released(_changed: bool) -> void:
 	_rebuild()
 	visible = true
+	GameSettings.commit_ui_scale()
 	_status.text = "Applied: UI scale %d%%." % int(round(GameSettings.ui_scale * 100.0))
 
 

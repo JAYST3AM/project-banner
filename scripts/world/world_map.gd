@@ -209,28 +209,12 @@ func _ready() -> void:
 	_overworld.spawn_if_needed()
 	_encounters = EncounterService.build(_state, _config)
 
-	_hud.setup(_state, _config, _travel)
-	_hover_card = SettlementHoverCard.new()
-	_hud.add_child(_hover_card)
-	_hud.speed_requested.connect(_on_speed_requested)
-	_hud.travel_requested.connect(_on_travel_requested)
-	_hud.enter_settlement_requested.connect(_on_enter_settlement)
-	_hud.save_requested.connect(_on_save_requested)
-	_hud.menu_requested.connect(_on_menu_requested)
+	_build_hud_and_overlays()
 	_build_pause_menu()
 
-	_dialog = EncounterDialog.new()
-	_hud.add_child(_dialog)
-	_dialog.attack_requested.connect(_on_encounter_attack)
-	_dialog.retreat_requested.connect(_on_encounter_retreat)
+	# A committed UI-scale change rebuilds the map's screens at the new size (D-137 follow-up).
+	GameSettings.ui_scale_committed.connect(_rebuild_hud)
 
-	_debug = DebugPanel.new()
-	_hud.add_child(_debug)
-	_debug.setup(_state, _config, _travel)
-	_debug.teleport_requested.connect(_on_teleport_requested)
-	_debug.gold_requested.connect(_on_gold_requested)
-	_debug.speed_requested.connect(_on_speed_requested)
-	_debug.state_requested.connect(_refresh)
 	# Dev-only: "--debug-panel" opens with the developer's furniture showing, priced grid included.
 	# A scripted run cannot press F1, and "show me the grid" arrives as a screenshot request.
 	if DevFlags.debug_panel():
@@ -274,6 +258,60 @@ func _apply_dev_autoengage() -> void:
 	DebugLogger.info("dev flag: moved the party onto %s (%d soldiers)" % [
 		target.display_name, _state.active_members(_state.party_of(target)).size(),
 	], "WorldMap")
+
+
+## The HUD and the screens that hang off it: the hover card, the encounter dialog, the developer's
+## panel. Extracted so a UI-scale change can build all of them again - a control keeps the text size
+## it was born with, and the owner's report was exactly that: "ui slider doesn't affect the rest of
+## the ui. ie the ui on the campaign map."
+func _build_hud_and_overlays() -> void:
+	_hud.setup(_state, _config, _travel)
+	_hover_card = SettlementHoverCard.new()
+	_hud.add_child(_hover_card)
+	_hud.speed_requested.connect(_on_speed_requested)
+	_hud.travel_requested.connect(_on_travel_requested)
+	_hud.enter_settlement_requested.connect(_on_enter_settlement)
+	_hud.save_requested.connect(_on_save_requested)
+	_hud.menu_requested.connect(_on_menu_requested)
+
+	_dialog = EncounterDialog.new()
+	_hud.add_child(_dialog)
+	_dialog.attack_requested.connect(_on_encounter_attack)
+	_dialog.retreat_requested.connect(_on_encounter_retreat)
+
+	_debug = DebugPanel.new()
+	_hud.add_child(_debug)
+	_debug.setup(_state, _config, _travel)
+	_debug.teleport_requested.connect(_on_teleport_requested)
+	_debug.gold_requested.connect(_on_gold_requested)
+	_debug.speed_requested.connect(_on_speed_requested)
+	_debug.state_requested.connect(_refresh)
+
+
+## Build the map's screens again at the new scale, and put the player's inspection back: rebuilding
+## must not quietly close the settlement they were reading. The pause menu is deliberately NOT
+## rebuilt - the player is inside it, holding the slider that asked for this.
+func _rebuild_hud() -> void:
+	var inspected := _hud.shown_settlement_id()
+	for node in [_hud, _hover_card, _dialog, _debug]:
+		if node != null:
+			node.free()
+	_hud = WorldHud.new()
+	_hud.name = "HUD"
+	add_child(_hud)
+	_build_hud_and_overlays()
+	if DevFlags.debug_panel():
+		_debug.visible = _debug.is_available()
+	_hover_shown_id = ""
+	_hover_candidate_id = ""
+	_refresh()
+	_hud.set_hint("Click a settlement to inspect it. Click Travel Here to set out. F1 opens debug tools.")
+	if not inspected.is_empty():
+		var settlement := _state.settlement(inspected)
+		if settlement != null:
+			_hud.show_settlement(settlement)
+	DebugLogger.info("ui scale committed: screens rebuilt at %d%%" % int(round(GameSettings.ui_scale * 100.0)),
+		"WorldMap")
 
 
 ## Dev-only: begin travelling immediately (see DevFlags). Used by automated runs

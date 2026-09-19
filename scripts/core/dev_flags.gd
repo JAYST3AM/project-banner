@@ -38,6 +38,9 @@ const SETTINGS_PANEL_FLAG := "--settings-panel"
 ## Force a UI scale for one run: "--ui-scale=1.2". Wins over the saved file, because it is the more
 ## deliberate request, and it is how screenshots at other scales are taken.
 const UI_SCALE_PREFIX := "--ui-scale="
+## Move the scale at runtime, four seconds in: "--ui-scale-late=0.6". Verifies that a committed
+## change reaches screens that are already built.
+const UI_SCALE_LATE_PREFIX := "--ui-scale-late="
 ## Save one PNG of the game's own window and (optionally) quit: "--screenshot=<path>", with
 ## "--screenshot-delay=<ms>" and "--screenshot-quit". The game draws into its own viewport, so a
 ## verification shot never depends on the window being on top of anything.
@@ -151,6 +154,14 @@ static func ui_scale() -> float:
 	for arg in _user_args():
 		if arg.begins_with(UI_SCALE_PREFIX):
 			return float(arg.substr(UI_SCALE_PREFIX.length()))
+	return 0.0
+
+
+## The UI scale a run asked to switch to after boot, or 0.0 when it did not.
+static func ui_scale_late() -> float:
+	for arg in _user_args():
+		if arg.begins_with(UI_SCALE_LATE_PREFIX):
+			return float(arg.substr(UI_SCALE_LATE_PREFIX.length()))
 	return 0.0
 
 

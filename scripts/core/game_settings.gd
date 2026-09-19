@@ -41,6 +41,11 @@ const UI_SCALE_DEFAULT := 0.8
 ## suites do with their own save directory.
 var path := PATH
 
+## Emitted when the player lets go of the UI-scale slider: screens that are already built hear it and
+## build themselves again at the new size. Committed, not per tick - a rebuild per dragged pixel would
+## tear the panel the player is dragging (D-137 follow-up).
+signal ui_scale_committed
+
 var window_index := 1
 var window_size_index := 3
 var ui_scale := UI_SCALE_DEFAULT
@@ -64,6 +69,15 @@ func _ready() -> void:
 	elif not had_file:
 		# Still apply once: PixelStyle's scale has to be told what the defaults are.
 		apply()
+
+	# A dev run can move the scale after boot: "--ui-scale-late=0.6" commits the change four seconds
+	# in, which is how "does the slider reach the map's own interface" gets photographed.
+	var late := DevFlags.ui_scale_late()
+	if late > 0.0:
+		get_tree().create_timer(4.0).timeout.connect(func() -> void:
+			ui_scale = clampf(late, UI_SCALE_MIN, UI_SCALE_MAX)
+			apply()
+			commit_ui_scale())
 
 
 ## Read the file if it is there. [param apply_now] is false in tests: applying changes the actual
@@ -100,6 +114,15 @@ func save_settings() -> void:
 	config.set_value("interface", "show_hints", show_hints)
 	if config.save(path) != OK:
 		DebugLogger.warn("settings: could not write %s" % path, "Settings")
+
+
+## The player let go of the scale slider: remember it, and tell every built screen to build itself
+## again at the new size. The owner's report was that the slider changed the panel and nothing else -
+## "the ui on the campaign map" stayed exactly as it was - because a control keeps the text size it
+## was born with, and nothing had ever told the built screens to be born again.
+func commit_ui_scale() -> void:
+	save_settings()
+	ui_scale_committed.emit()
 
 
 ## Push the current choices at the engine. Called on every change, so there is no OK button to

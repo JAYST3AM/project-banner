@@ -36,6 +36,8 @@ var _font: Font = null
 var _settings: SettingsPanel = null
 var _resume_button: Button = null
 var _status: Label = null
+var _column: VBoxContainer = null
+var _styles: Dictionary = {}
 
 
 func _ready() -> void:
@@ -51,6 +53,8 @@ func _ready() -> void:
 	_font = PixelStyle.pixel_font()
 	var styles := PixelStyle.button_styles(BODY, LIGHT, DARK, UiTheme.ACCENT, OUTLINE)
 	_build(styles)
+	# A committed UI-scale change rebuilds the column at the new size (D-137 follow-up).
+	GameSettings.ui_scale_committed.connect(_rebuild_column)
 
 
 func _fill_viewport() -> void:
@@ -102,35 +106,54 @@ func _build(styles: Dictionary) -> void:
 	column.custom_minimum_size = Vector2(COLUMN_WIDTH, 0)
 	column.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	margin.add_child(column)
-
-	column.add_child(_label("PAUSED", TITLE_SIZE, UiTheme.GOLD))
-	column.add_child(_label("The world waits.", SMALL_SIZE, Color(0.72, 0.74, 0.78)))
-	column.add_child(_gap(18))
-
-	_resume_button = _button("Resume", styles)
-	_resume_button.pressed.connect(close)
-	column.add_child(_resume_button)
-	var save_button := _button("Save Game", styles)
-	save_button.pressed.connect(_on_save)
-	column.add_child(save_button)
-	var settings_button := _button("Settings", styles)
-	settings_button.pressed.connect(_on_settings)
-	column.add_child(settings_button)
-	var menu_button := _button("Save & Quit to Menu", styles)
-	menu_button.pressed.connect(_on_menu)
-	column.add_child(menu_button)
-	var quit_button := _button("Quit to Desktop", styles)
-	quit_button.pressed.connect(_on_quit)
-	column.add_child(quit_button)
-	column.add_child(_gap(10))
-
-	_status = _label("Esc resumes.", SMALL_SIZE, Color(0.66, 0.68, 0.72))
-	column.add_child(_status)
+	_column = column
+	_styles = styles
+	_fill_column()
 
 	# The shared settings panel (D-137), centred over the column. It takes its own Esc, so opening
 	# it from here never closes the pause menu with it.
 	_settings = SettingsPanel.new()
 	add_child(_settings)
+
+
+func _fill_column() -> void:
+	_column.add_child(_label("PAUSED", TITLE_SIZE, UiTheme.GOLD))
+	_column.add_child(_label("The world waits.", SMALL_SIZE, Color(0.72, 0.74, 0.78)))
+	_column.add_child(_gap(18))
+
+	_resume_button = _button("Resume", _styles)
+	_resume_button.pressed.connect(close)
+	_column.add_child(_resume_button)
+	var save_button := _button("Save Game", _styles)
+	save_button.pressed.connect(_on_save)
+	_column.add_child(save_button)
+	var settings_button := _button("Settings", _styles)
+	settings_button.pressed.connect(_on_settings)
+	_column.add_child(settings_button)
+	var menu_button := _button("Save & Quit to Menu", _styles)
+	menu_button.pressed.connect(_on_menu)
+	_column.add_child(menu_button)
+	var quit_button := _button("Quit to Desktop", _styles)
+	quit_button.pressed.connect(_on_quit)
+	_column.add_child(quit_button)
+	_column.add_child(_gap(10))
+
+	_status = _label("Esc resumes.", SMALL_SIZE, Color(0.66, 0.68, 0.72))
+	_column.add_child(_status)
+
+
+## Build the column again at the current scale (D-137 follow-up). The settings panel is a sibling of
+## the column, so it keeps its place and its open state while the column's own words re-set around
+## it.
+func _rebuild_column() -> void:
+	if _column == null:
+		return
+	var status_text := _status.text if _status != null else "Esc resumes."
+	for child in _column.get_children():
+		_column.remove_child(child)
+		child.queue_free()
+	_fill_column()
+	_status.text = status_text
 
 
 func _unhandled_input(event: InputEvent) -> void:
