@@ -2,23 +2,47 @@ extends "res://scripts/dev/gpu_crowd.gd"
 
 ## Campaign adapter for the compute battlefield. The inherited scene remains the
 ## developer probe when it receives no BattleContext.
+##
+## [b]A battle from the command line.[/b] With no context and `--side=archer:15,spearman:30` (and
+## `--theirs=` for a different enemy army) the field builds a synthetic roster of that composition
+## for both sides and fights it: the same deployment, stats, sprites and arrows as a campaign
+## battle, assembled from the unit catalogue instead of from a world party. A real battle always
+## carries a context, so this cannot reach one - it is how a battle of a given shape gets looked at
+## without a campaign to walk to it.
+
+const SIDE_FLAG := "--side="
+const THEIRS_FLAG := "--theirs="
 
 var context: BattleContext = null
 var config: GameConfig = null
 var units: Array[BattleUnit] = []
 var winner := ""
 var elapsed := 0.0
+## True when the roster came from the command line rather than from a campaign.
+var synthetic := false
+var _composition: Array[Dictionary] = []
+var _enemy_composition: Array[Dictionary] = []
 var _resolved := false
 
 
 func _ready() -> void:
 	context = SceneManager.consume_payload().get("context") as BattleContext
-	if context == null:
+	_parse_composition()
+	if context == null and _composition.is_empty():
 		DebugLogger.error("battle field opened without a BattleContext", "BattleField")
 		SceneManager.change_scene("world_map")
 		return
 	config = GameManager.config()
-	units = BattleSetup.build_units_prepared(context, config)
+	if context == null:
+		synthetic = true
+		context = _synthetic_context()
+		units = _synthetic_units()
+		# The probe's own knobs - ticks a frame, the seed - are read when the scene runs
+		# standalone; [method _parse_args] is what routes them here.
+		_parse_args()
+		agents = units.size()
+	else:
+		units = BattleSetup.build_units_prepared(context, config)
 	if units.is_empty():
 		DebugLogger.error("battle field has no combatants", "BattleField")
 		SceneManager.change_scene("world_map")
@@ -38,12 +62,106 @@ func _ready() -> void:
 	bodies_per_side = 1
 	seed_value = context.terrain_seed
 	super._ready()
+	# The journal's second line, and the one a demo battle is read for: who took the field, by
+	# type. A buffer has no unit types in it - this is the only place that knows them.
+	var counts := {}
+	for unit_of in units:
+		var key := "%s %s" % [unit_of.side, unit_of.unit_type_id]
+		counts[key] = int(counts.get(key, 0)) + 1
+	if not counts.is_empty():
+		var parts: Array = []
+		for key in counts.keys():
+			parts.append("%s x%d" % [key, counts[key]])
+		parts.sort()
+		journal_note("the roster: %s" % ", ".join(parts))
+
+
+## Read `--side=` and `--theirs=` into type-and-count lists, dropping anything the catalogue does
+## not have - out loud, because a silently empty army is a mystery rather than a short demo.
+func _parse_composition() -> void:
+	var catalog := UnitCatalog.load_from()
+	for arg in OS.get_cmdline_user_args():
+		var target := _composition
+		var text := ""
+		if arg.begins_with(SIDE_FLAG):
+			text = arg.substr(SIDE_FLAG.length())
+		elif arg.begins_with(THEIRS_FLAG):
+			target = _enemy_composition
+			text = arg.substr(THEIRS_FLAG.length())
+		else:
+			continue
+		for part in text.split(",", false):
+			var bits := part.split(":")
+			if bits.size() != 2:
+				continue
+			var type_id := bits[0].strip_edges()
+			var count := int(bits[1])
+			if count <= 0 or not catalog.has(type_id):
+				print("battle field: %s ignores %s (the catalogue has: %s)" % [
+					arg.get_slice("=", 0), part, ", ".join(catalog.ids())])
+				continue
+			target.append({"type": type_id, "count": count})
+	if not _composition.is_empty() and _enemy_composition.is_empty():
+		_enemy_composition = _composition.duplicate(true)
+
+
+## The context a demo battle runs under: the ids and seeds the scene expects and no world party.
+func _synthetic_context() -> BattleContext:
+	var made := BattleContext.new()
+	made.battle_id = "demo"
+	made.battle_seed = seed_value if seed_value > 0 else 2026
+	made.terrain_seed = made.battle_seed
+	made.enemy_display_name = "Demo Enemy"
+	made.weather = "clear"
+	return made
+
+
+## The roster a demo battle fields: every man built from the catalogue's definition for his type,
+## and positioned by the campaign's own [method BattleSetup.deploy] - melee to the front, ranged
+## behind, in ranks that fit the deployment depth.
+func _synthetic_units() -> Array[BattleUnit]:
+	var catalog := UnitCatalog.load_from()
+	var built: Array[BattleUnit] = []
+	var next_id := 0
+	for side in [BattleContext.SIDE_PLAYER, BattleContext.SIDE_ENEMY]:
+		var composition: Array[Dictionary] = _composition \
+			if side == BattleContext.SIDE_PLAYER else _enemy_composition
+		for entry in composition:
+			var definition := catalog.get_definition(str(entry["type"]))
+			for i in int(entry["count"]):
+				built.append(BattleUnit.from_snapshot(_snapshot(definition, next_id), side, next_id))
+				next_id += 1
+	BattleSetup.deploy(built, config)
+	return built
+
+
+## One man's snapshot, in the shape [method BattleUnit.from_snapshot] reads: the definition's own
+## numbers at level one, no traits. A demo soldier is nobody's persistent person.
+func _snapshot(definition: UnitDefinition, id: int) -> Dictionary:
+	var hp := definition.max_hp_at(1, config)
+	return {
+		"soldier_id": "demo_%d" % id,
+		"name": "%s %d" % [definition.display_name, id + 1],
+		"unit_type_id": definition.id,
+		"unit_name": definition.display_name,
+		"level": 1,
+		"max_hp": hp,
+		"hp": hp,
+		"attack": definition.attack_at(1, config),
+		"defence": definition.defence,
+		"move_speed": definition.move_speed,
+		"attack_range": definition.attack_range,
+		"attack_cooldown": definition.attack_cooldown,
+		"ranged": definition.ranged,
+		"traits": [],
+	}
 
 
 func _parse_args() -> void:
-	# A campaign field is completely described by its BattleContext. The inherited
-	# parser is deliberately left untouched for the standalone developer scene.
-	if context == null:
+	# A campaign field is completely described by its BattleContext. The inherited parser is
+	# deliberately left untouched for the standalone developer scene - and for a synthetic roster,
+	# whose knobs (--ticks-per-frame, --seed, --rule-checks) come from the same place.
+	if context == null or synthetic:
 		super._parse_args()
 
 
@@ -196,6 +314,16 @@ func find_unit(id: int) -> BattleUnit:
 
 
 func _resolve(retreated: bool) -> void:
+	if synthetic:
+		# A demo battle has no campaign to write an outcome to: it freezes where it is and stays on
+		# the screen, which is the whole point of looking at it. One line, and the bounds - so a
+		# demo that ended says where everybody finished.
+		if _resolved:
+			return
+		_resolved = true
+		_frozen = true
+		_report_bounds()
+		return
 	if _resolved:
 		return
 	_resolved = true

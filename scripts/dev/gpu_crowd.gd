@@ -73,6 +73,12 @@ const BODY_FILES := 40
 ## would be fighting the separation for ever, which is what a 2.0 threshold measured - the front
 ## settled at 2.11 where the agreed minimum is 2.47, because the bodies were asking for 2.0.
 const CONTACT := SEPARATION
+## How close a body may come to a friendly body standing ahead of it, anchor to anchor, before it
+## stops advancing. This is what keeps archers behind the line rather than inside it: the loose
+## archer body is about nine units deep and the line about eight, so thirteen clears the spearmen's
+## rear rank with a couple of units to spare - and a bow needs the range to match (see the archer's
+## attack_range), or a line that stands properly behind the melee can never shoot over it.
+const KEEP_STATION := 13.0
 ## How close a body gets before it stops leaning in: the men's own separation, with a hair to
 ## spare so the line settles *inside* melee reach instead of on the edge of it. Stopping the press
 ## the moment "somebody is in reach" left the front at 3.2-3.4, where only the occasional pair
@@ -231,7 +237,11 @@ static func _config_tick_rate() -> float:
 	return 60.0
 var _tick_accumulator := 0.0
 var readback_every := 1
-var max_fps := 0
+## Frames a second this field will draw, 0 for whatever the display allows. Three hundred and sixty
+## is the standing cap for battles: fast enough that no simulation step is skipped, and the card
+## stays nowhere near the thousand-plus frames an uncapped vblank-free window reaches on this
+## machine, which is what it was doing before.
+var max_fps := 360
 var run_seconds := 0.0
 ## When the first screenshot is taken, in seconds of wall clock. The default is early; a run whose
 ## armies take longer to meet passes a later value so the shot catches the fighting.
@@ -488,9 +498,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_formation(_selected, "loose")
 			KEY_K:
 				_set_autonomy(not _manual)
-			KEY_F1:
-				if _help_panel != null:
-					_help_panel.visible = not _help_panel.visible
 			KEY_P:
 				_clock_paused = not _clock_paused
 				print("gpu crowd: %s" % ("paused" if _clock_paused else "running"))
@@ -570,6 +577,13 @@ const ARROW_THICKNESS_PIXELS := 2.0
 const COLOR_ARROW := Color("efe7cd")
 ## How far above his picture point a shot leaves his hands.
 const ARROW_HAND_LIFT := 0.6
+## How often the journal says where every body stands and what it is doing: two seconds at thirty
+## ticks a second, which is the cadence a behaviour question is answered at.
+const JOURNAL_BODY_EVERY := 60
+## A man whose position moves further than this between two packs was not walked there: at [constant
+## WALK] and thirty ticks a second a man covers 0.2 units a tick, so anything this size is a jump -
+## the shape "the pathing wigged out" makes in numbers.
+const JOURNAL_BIG_STEP := 2.0
 
 var _art: UnitArt = null
 var _sprites_node: MultiMeshInstance2D = null
@@ -588,6 +602,37 @@ var _man_ranged := PackedByteArray()
 var _dealt_seen := PackedInt32Array()
 ## The first shot of a battle is reported once, so a run says whether the wiring fires.
 var _arrow_reported := false
+## ---------- the journal -------------------------------------------------------
+##
+## The canvas battle writes a [BattleJournal] out of its simulator's transitions - contact, bodies
+## choosing opponents, casualty milestones. The compute field has no simulator object to read: its
+## men live in buffers. So it journals what it does know, and for a battle whose behaviour is in
+## question (archers holding or charging, men shoving, lines that never meet) it journals the
+## numbers that answer it: the roster (the field adds that line), a line per body every
+## [constant JOURNAL_BODY_EVERY] ticks - where it stands, what it was told, how far its men can
+## reach and how much room they have - the two front lines and the gap between them, the pathing
+## anomalies as they cross their thresholds (men outside the ground, men whose step is a jump,
+## men standing inside each other), casualty milestones, a steady line, and the outcome.
+## Off unless a run asks for one with --battlelog, exactly like the canvas battle's.
+var _journal: BattleJournal = null
+var _journal_milestones := 0
+var _journal_next_steady := 0
+var _journal_arrows := 0
+var _journal_next_bodies := 0
+## Shots and reach per body, so a journal line can say what a formation is doing rather than what
+## its men are: the reach is the longest any of its men can strike at, the shots are what its men
+## have loosed.
+var _body_reach := PackedFloat32Array()
+var _body_shots := PackedInt32Array()
+## The previous pack's positions, for the step a man took between them: a step no walk can explain
+## is the cheapest evidence of a man being dropped somewhere, which is what "the pathing wigged out"
+## looks like in numbers.
+var _journal_last_position := PackedVector2Array()
+var _journal_path_reported := false
+## The world position of every man at the last pack, and the pathing numbers last written, so a
+## journal line appears when the anomaly changes rather than once a tick while it persists.
+var _journal_world := PackedVector2Array()
+var _journal_path_seen := Vector2i(-1, -1)
 var _sprite_buffer := PackedFloat32Array()
 var _sprite_offsets := PackedInt32Array()
 var _sprite_stride := 0
@@ -918,6 +963,10 @@ func _build() -> void:
 	defence_mitigation = battle_config.get_float("battle.defence_mitigation", 0.05)
 	_load_unit_stats()
 	_deploy(state, meta, attrs)
+	# What each body's men can strike at, needed by the march whether or not a journal is open: a
+	# body of archers holds at its own range (see [method _engage_room]).
+	_refresh_body_reach()
+	_open_journal()
 
 	buf_state = _storage(state.to_byte_array(), agents * 16)
 	buf_push = _storage(PackedByteArray(), agents * 16)
@@ -976,7 +1025,6 @@ func _build() -> void:
 	_build_ground()
 	_build_view()
 	_build_hud()
-	_build_help()
 	if cam_at != Vector2(INF, INF):
 		# A scripted camera looks at a world point named in world terms; the camera lives in
 		# picture space, so this is where the two are married.
@@ -1165,6 +1213,17 @@ func _body_room(b: int) -> float:
 	return _body_gap[b]
 
 
+## How much room a body needs before it walks forward: the agreed engagement distance, or nine
+## tenths of what its own men can strike at, whichever is further. A melee body's reach is inside
+## the engagement distance, so nothing changes for the line; a body of archers stops with the enemy
+## just inside their range instead of walking in to arm's length. The tenth of the reach held back
+## is what keeps its men actually firing rather than standing exactly on the boundary.
+func _engage_room(b: int) -> float:
+	if b < 0 or b >= _body_reach.size():
+		return ENGAGE
+	return maxf(ENGAGE, _body_reach[b] * 0.9)
+
+
 func _side_of_body(b: int) -> int:
 	if b >= 0 and b < _body_side.size():
 		return _body_side[b]
@@ -1327,6 +1386,13 @@ func _aim_for(b: int) -> Vector2:
 func _advance_bodies() -> void:
 	for b in _bodies:
 		var side := _side_of_body(b)
+		# A body with nobody left in it stops where its last man fell. Its anchor used to keep
+		# marching - it selects a living enemy, engages, and its slots walk on - which dragged the
+		# bodies' corpses across the field and made wiped-out formations the thing the survivors
+		# were standing on at the end of a battle. Measured in the demo journal: our two remaining
+		# archers at (46, 23) with the enemy's dead archer body at (46, 24), still ordered ENGAGE.
+		if b < _body_alive.size() and _body_alive[b] <= 0:
+			continue
 		# Who are we fighting, if anyone? One selection a tick, retained until it is destroyed or
 		# clearly beaten, and it is what the facing and the engagement below are driven by.
 		_select_target(b)
@@ -1377,10 +1443,59 @@ func _advance_bodies() -> void:
 				else:
 					move = (to_point / remaining) * minf(remaining, rate * DT)
 			Order.ENGAGE:
-				if _body_room(b) > ENGAGE:
-					move = forward * (rate * DT)
+				# Never walk through our own line. A body of archers standing behind the melee used to
+				# creep forward every time the fighting opened a gap ahead of it, through the spearmen
+				# it was supposed to be firing over, and finished the battle standing on them: the
+				# demo journal has both bodies on the same anchor at (72, 29) after four minutes, the
+				# archers having inched six units into their own line. Room only counts as room to
+				# move into if the ground ahead belongs to us.
+				var crowding := false
+				for other in _bodies:
+					if other == b or _side_of_body(other) != side:
+						continue
+					var ahead := Vector2(
+						_body_state[other * 8 + 0], _body_state[other * 8 + 1]) - mine
+					if ahead.length() < KEEP_STATION and ahead.dot(forward) > 0.0:
+						crowding = true
+						break
+				# A body's own reach decides where it stops. Melee (reach 2.4) stops on the agreed
+				# engagement distance as it always did; a body of archers (reach 9.0) holds when the
+				# enemy's living edge is already inside their range, which is what "sit back in a line
+				# and shoot" means in numbers - before this they marched to 2.6 units like everybody
+				# else, through their own melee line, and the demo journal caught the two archer bodies
+				# finishing the battle one unit apart in the middle of the field.
+				if not crowding and _body_room(b) > _engage_room(b):
+					# Walk at the body we are fighting, not the way we happen to be facing. A body
+					# advanced on its heading alone, so when its target drifted it sailed past it and
+					# the two marched away together: the demo journal's survivors finished at
+					# (96, 208) and (97, 211), one apart in x and three in y, both still advancing
+					# with nothing in scan range and the count stuck. Closing on the target's anchor
+					# is what actually ends a battle.
+					var aim_at := forward
+					var target := _order_target[b]
+					if target >= 0 and target < _bodies:
+						var towards := Vector2(
+							_body_state[target * 8 + 0], _body_state[target * 8 + 1]) - mine
+						# Walk at the body we are fighting rather than the way we happen to be
+						# facing: a body that advanced on its heading alone sailed past a target
+						# that had drifted, and at the end of a battle the survivors did exactly
+						# that - the journal caught two bodies at (96, 208) and (97, 211), one
+						# apart in x and three in y, still advancing with nothing in scan range.
+						# Closing on the target is what ends a battle. (A "stop at standing room"
+						# rule was tried here too; it parked the two melee lines five units apart
+						# with room 4.5, no blows and no arrows for a hundred and fifty seconds,
+						# because standing room for a three-rank body is well outside its reach.)
+						if towards.length() > 0.05:
+							aim_at = towards.normalized()
+					move = aim_at * (rate * DT)
 		if move != Vector2.ZERO:
 			mine += move
+			# Anchors live on the ground. Nothing clamped them, so a body chasing another body's
+			# anchor could walk off the edge of the field and leave its men pinned against the wall,
+			# unable to reach their places and unable to reach the enemy - see the note in the
+			# ENGAGE branch of the order match.
+			mine.x = clampf(mine.x, 0.0, field.x)
+			mine.y = clampf(mine.y, 0.0, field.y)
 			_body_state[b * 8 + 0] = mine.x
 			_body_state[b * 8 + 1] = mine.y
 	rd.buffer_update(buf_bodies, 0, _body_state.to_byte_array().size(), _body_state.to_byte_array())
@@ -1551,6 +1666,12 @@ func _freeze() -> void:
 	DebugLogger.info("battle over after %d ticks (%.1f s): %s - our side %d standing, theirs %d, fallen %d" % [
 		_tick, float(_tick) / maxf(1.0, tick_hz), _verdict.strip_edges(),
 		_alive.x, _alive.y, _fallen], "BattleField")
+	if _journal != null:
+		_journal.note(_tick, "battle finished: %s - our side %d standing, theirs %d, fallen %d, %d arrows loosed after %.1fs" % [
+			_verdict.strip_edges(), _alive.x, _alive.y, _fallen, _journal_arrows,
+			float(_tick) / maxf(1.0, tick_hz)])
+		_journal.close()
+		_journal = null
 
 
 ## The audit's item 1, taken on every tick the simulation advances: the closest enemy gap
@@ -2138,6 +2259,14 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 		var picture := _iso(position)
 		if _man_picture.size() == agents:
 			_man_picture[i] = picture
+		if _journal != null:
+			# The world positions, kept only while a journal is open: the pathing lines are read out
+			# of these between packs, and a run without a journal pays nothing for them.
+			if _journal_world.size() != agents:
+				_journal_world.resize(agents)
+				_journal_last_position.resize(agents)
+				_journal_last_position.fill(Vector2(-9999.0, -9999.0))
+			_journal_world[i] = position
 		var bi := _man_body[i]
 		var target := target_raw[i * 4 + 0] if target_raw.size() >= i * 4 + 4 else -1
 		_targets[i] = target
@@ -2233,6 +2362,7 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 			_bar_buffer[AT_COLOR + 3]])
 	_alive = Vector2i(alive_player, alive_enemy)
 	_fallen = agents - alive_player - alive_enemy
+	_journal_tick()
 	# The lines, as they now stand: the anchors are held against these next tick.
 	_body_front = front
 	for b in _bodies:
@@ -2289,6 +2419,135 @@ func _build_view() -> void:
 	_focus = field * 0.5
 
 
+## ---------- the journal -------------------------------------------------------
+
+
+## Open this run's journal, if the run asked for one. Called once the roster is deployed, because
+## the first thing a journal should say is what took the field.
+func _open_journal() -> void:
+	if _journal != null or not DevFlags.battle_log_requested():
+		return
+	_journal = BattleJournal.open(DevFlags.battle_log_path())
+	if _journal == null:
+		return
+	_journal.note(-1, "battle start: %d soldiers, %d a side, seed %d, field %.0fx%.0f, %.0f ticks a second" % [
+		agents, agents / 2, seed_value, field.x, field.y, tick_hz])
+
+
+## What each body's men can strike at: the longest of their reaches, which is the number a journal
+## needs to say whether a formation is holding at its range or walking into the fight. Built once,
+## after the deploy has said which men are in which body.
+func _refresh_body_reach() -> void:
+	_body_reach.resize(_bodies)
+	_body_reach.fill(0.0)
+	_body_shots.resize(_bodies)
+	_body_shots.fill(0)
+	for i in agents:
+		if i >= _man_body.size() or _stats.size() < i * 4 + 3:
+			continue
+		var b := _man_body[i]
+		if b >= 0 and b < _bodies:
+			_body_reach[b] = maxf(_body_reach[b], _stats[i * 4 + 2])
+
+
+## A line in this run's journal, for whatever the renderer knows and the journal does not - the
+## roster by unit type is the campaign field's, because only it was handed one.
+func journal_note(message: String) -> void:
+	if _journal != null:
+		_journal.note(_tick, message)
+
+
+## One journal line a milestone, and - every [constant JOURNAL_BODY_EVERY] ticks - where every body
+## stands and what it is doing, which is the picture a question about archers or pathing is answered
+## from. Called once a pack, which is once a tick.
+func _journal_tick() -> void:
+	if _journal == null:
+		return
+	_journal_pathing()
+	var down := agents - (_alive.x + _alive.y)
+	var milestone := down * 10 / maxi(1, agents)
+	if milestone > _journal_milestones:
+		_journal_milestones = milestone
+		_journal.note(_tick, "%d of %d down: %d player and %d enemy still standing, %d arrows loosed" % [
+			down, agents, _alive.x, _alive.y, _journal_arrows])
+	if _tick >= _journal_next_bodies:
+		_journal_next_bodies = _tick + JOURNAL_BODY_EVERY
+		_journal_bodies()
+	if _tick >= _journal_next_steady:
+		_journal_next_steady = _tick + BattleJournal.STEADY_INTERVAL
+		_journal.note(_tick, "still fighting: %d v %d at %.0fs, %d arrows loosed" % [
+			_alive.x, _alive.y, float(_tick) / maxf(1.0, tick_hz), _journal_arrows])
+
+
+## Where each body stands and what it is being asked to do: its anchor, its order, how many of its
+## men are alive, how much room their front has to the enemy's living edge, how far they can strike
+## and how many shafts they have loosed. This is the line that says whether an archer body is
+## holding at its own range or marching into the fight - and the last line says whether the two
+## fronts have met at all.
+func _journal_bodies() -> void:
+	var ours := -INF
+	var theirs := INF
+	for b in _bodies:
+		var side := _side_of_body(b)
+		var anchor := Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
+		_journal.note(_tick, "body %d %s: %d alive, anchor (%.0f, %.0f), %s, room %.1f, reach %.1f, %d shots" % [
+			b, "ours" if side == 0 else "theirs",
+			_body_alive[b] if b < _body_alive.size() else 0, anchor.x, anchor.y,
+			_order_name(_order[b]), _body_room(b), _body_reach[b] if b < _body_reach.size() else REACH,
+			_body_shots[b] if b < _body_shots.size() else 0])
+		var front := _body_front[b] if b < _body_front.size() else (-INF if side == 0 else INF)
+		if side == 0:
+			ours = maxf(ours, front)
+		else:
+			theirs = minf(theirs, front)
+	if is_finite(ours) and is_finite(theirs):
+		_journal.note(_tick, "the lines: our front x %.1f, theirs x %.1f, gap %.1f" % [
+			ours, theirs, theirs - ours])
+
+
+
+
+## The pathing numbers a "the pathing wigged out" report needs: men outside the ground, men whose
+## step between two packs is more than any walk could make, and the worst of them. Position-only, so
+## it says where rather than why - and it is only collected while a journal is open.
+func _journal_pathing() -> void:
+	if _journal_world.size() != agents:
+		return
+	var outside := 0
+	var jumps := 0
+	var worst := 0.0
+	var worst_id := -1
+	for i in agents:
+		var here := _journal_world[i]
+		if here.x < -0.5 or here.y < -0.5 or here.x > field.x + 0.5 or here.y > field.y + 0.5:
+			outside += 1
+		var before := _journal_last_position[i]
+		if before.x > -9000.0:
+			var step := here.distance_to(before)
+			if step > JOURNAL_BIG_STEP:
+				jumps += 1
+				if step > worst:
+					worst = step
+					worst_id = i
+		_journal_last_position[i] = here
+	# Written when the numbers change rather than every tick they persist: an anomaly that lasts a
+	# second is one line, not thirty.
+	if Vector2i(outside, jumps) != _journal_path_seen and (outside > 0 or jumps > 0):
+		_journal_path_seen = Vector2i(outside, jumps)
+		_journal.note(_tick, "pathing: %d outside the ground, %d stepped further than %.1f units in one tick (worst %.1f, soldier %d)" % [
+			outside, jumps, JOURNAL_BIG_STEP, worst, worst_id])
+	elif outside == 0 and jumps == 0:
+		_journal_path_seen = Vector2i(0, 0)
+
+
+func _exit_tree() -> void:
+	# A journal is read after a run, and runs get killed: the file is flushed per line, but a run
+	# that ends by leaving the scene still deserves its closing line.
+	if _journal != null:
+		_journal.close()
+		_journal = null
+
+
 ## The arrow node: one plain Node2D whose draw signal paints the shafts, above the men and their
 ## bars. The canvas battle draws its arrows the same way for the same reason - a handful of lines
 ## is nothing a batch is worth.
@@ -2326,6 +2585,11 @@ func _note_shot(i: int, picture: Vector2) -> void:
 	# the pool's own head_at does the walking.
 	_arrows.spawn(picture + Vector2(0.0, -ARROW_HAND_LIFT), _man_picture[target])
 	_arrow_node.queue_redraw()
+	_journal_arrows += 1
+	if _journal != null and i < _man_body.size():
+		var shooter_body := _man_body[i]
+		if shooter_body >= 0 and shooter_body < _body_shots.size():
+			_body_shots[shooter_body] += 1
 	if not _arrow_reported:
 		# Said once, like the batches' own reports: the wiring from a damage rise to a shaft in the
 		# air, greppable out of a run rather than a lucky frame in a screenshot.
@@ -3164,8 +3428,6 @@ func _update_marks() -> void:
 	_paint.lines = lines
 	_paint.rects = rects
 	_paint.queue_redraw()
-	if _hint_label != null:
-		_hint_label.text = _hint_text()
 
 
 ## Deployment. The battle begins as a plan: the player may drag his formations into place, and the
@@ -3297,105 +3559,6 @@ func _parse_script(arg: String) -> void:
 ## the next move, which changes as the player picks things up and puts them down.
 ##
 ## The rows are data, not code: adding a binding is adding a row, and the panel styles itself.
-const HELP_ROWS := [
-	["IN YOUR HANDS", ""],
-	["left-click", "pick up a unit  ·  shift adds one  ·  drag open ground to box several"],
-	["right-click", "ground: march there      an enemy unit: attack it"],
-	["right-drag", "orbit the camera  (a tap commands, a drag looks)"],
-	["ORDERS", ""],
-	["H  /  U", "hold position  /  engage at will"],
-	["K", "the whole side: fights on its own  /  holds until ordered"],
-	["L  C  O", "line  ·  column  ·  loose"],
-	["ctrl+1-5", "save the selection as a group   ·   1-5 calls it back"],
-	["THE BATTLE", ""],
-	["space", "begin  (and after that, follow the fighting)"],
-	["P", "stop and start the battle clock"],
-	["THE CAMERA", ""],
-	["wheel", "zoom at the cursor  ·  middle-drag pans  ·  WASD pans"],
-	["Q  /  E", "quarter turn     [ ]  tilts     F  frames the field"],
-	["I", "the flat top-down view, for comparison"],
-	["F1", "hide or show this panel"],
-]
-
-var _help_panel: PanelContainer = null
-var _hint_label: Label = null
-
-
-func _build_help() -> void:
-	var layer := CanvasLayer.new()
-	layer.layer = 21
-	add_child(layer)
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
-	panel.anchor_top = 1.0
-	panel.anchor_bottom = 1.0
-	panel.offset_left = 12.0
-	panel.offset_top = -418.0
-	panel.offset_right = 446.0
-	panel.offset_bottom = -12.0
-	layer.add_child(panel)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 2)
-	panel.add_child(column)
-	var title := UiTheme.label("COMMANDING A BATTLE", 12, UiTheme.ACCENT)
-	column.add_child(title)
-	for row in HELP_ROWS:
-		var heading: String = row[0]
-		var body: String = row[1]
-		if body.is_empty():
-			var gap := Control.new()
-			gap.custom_minimum_size = Vector2(0, 6)
-			column.add_child(gap)
-			column.add_child(UiTheme.label(heading, 11, UiTheme.GOLD))
-			continue
-		var line := HBoxContainer.new()
-		line.add_theme_constant_override("separation", 10)
-		column.add_child(line)
-		var key := UiTheme.label(heading, 12, UiTheme.ACCENT)
-		key.custom_minimum_size = Vector2(96, 0)
-		key.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		line.add_child(key)
-		line.add_child(UiTheme.label(body, 12, UiTheme.TEXT))
-	_help_panel = panel
-
-	# The line under the battle: what to do next, said once, where the eye already is.
-	var hint_panel := PanelContainer.new()
-	hint_panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
-	hint_panel.anchor_left = 0.0
-	hint_panel.anchor_right = 1.0
-	hint_panel.anchor_top = 1.0
-	hint_panel.anchor_bottom = 1.0
-	hint_panel.offset_left = 462.0
-	hint_panel.offset_right = -12.0
-	hint_panel.offset_top = -46.0
-	hint_panel.offset_bottom = -12.0
-	layer.add_child(hint_panel)
-	_hint_label = UiTheme.label("", 13, UiTheme.TEXT)
-	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint_panel.add_child(_hint_label)
-
-
-## What the player should do next, given what is in his hand and what stage the battle is at. This
-## is the half of the UI that a reference panel cannot do: it knows the state.
-func _hint_text() -> String:
-	var held := _living_selection().size()
-	if _deploying:
-		if held > 0:
-			return "%d unit%s in your hand — drag to place %s, Space begins the battle" % [
-				held, "s" if held != 1 else "", "them" if held != 1 else "it"]
-		return "Left-click a unit, or drag a box around several, then drag them into place"
-	if held == 0:
-		return "Left-click a unit, or drag a box around several"
-	if _manual:
-		return "%d unit%s in your hand — right-click ground to march, an enemy to attack  ·  K lets them fight on their own" % [
-			held, "s" if held != 1 else ""]
-	return "%d unit%s in your hand, fighting on its own — right-click to redirect  ·  K takes control back" % [
-		held, "s" if held != 1 else ""]
-
-
-## Put the camera on a side's own army. The field's middle is empty ground - the armies stand at its
-## edges - so a deployment that opens looking at the middle looks at nothing at all, which is what
-## the first screenshot of this screen showed.
 func _center_on_side(side: int) -> void:
 	var sum := Vector2.ZERO
 	var count := 0

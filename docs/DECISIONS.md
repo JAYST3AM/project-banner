@@ -4122,3 +4122,124 @@ Verified in a live campaign battle: 11 soldiers of which 1 ranged (Road Bandits 
 and the run's one-shot report says the wiring fired - `first arrow loosed - soldier 10 at soldier 3
 on tick 135`. tests/test_battle_arrows.gd pins the pool (flight, retirement, the cap, clearing):
 16 assertions.
+
+**D-148: the deployment draws men up by role, on the lattice their formation will ask for.**
+
+Owner: "archers are supposed to sit back in a line and shoot projectiles"
+
+The deployment used to be one square grid: `rows = ceil(sqrt(count))`, men laid out column by column
+through the deployment zone. Everything the army held was in that block, so the spearmen and the
+archers came out side by side at the *same* distance from the enemy, in separate lanes rather than in
+depth. The battle journal shows exactly what that produced - our archers at (46, 23) and the enemy's
+at (46, 24), one unit apart, after both bodies had crossed the field and met each other head-on with
+no line in between.
+
+- [b]The zone splits in depth[/b]: missiles stand in the back third of it, the line in the front two
+  thirds. Drawn up that way, the first journal line of a battle reads the way it should - body 0 (30
+  spearmen) at (23, 29), body 1 (15 archers) at (13, 29), and the mirror of it on the other side.
+- [b]Men are placed on their own shape's lattice[/b], not on a grid: the file count and spacing come
+  from the same formation catalog the bodies are about to be given (`line` for the melee, `loose` for
+  the missiles), and the maths mirrors [method BattleFormation.rebuild_slots] - files across the
+  width at the shape's spacing, rank zero at the front, placed symmetrically so the centroid the
+  formation anchors itself on is where the body was drawn up. A body that starts on its marks does
+  not spend the first seconds of a battle walking sideways.
+- [b]The enemy's files run the other way[/b], because a body facing -x has right = -y. Missing that
+  sign mirrored the whole enemy line: every man in it walked across his own ranks to find his place,
+  which the formation suite measured as ranks 7.4 units out of order six seconds after deployment
+  against a 4.0 threshold. The player's line passed while the enemy's failed, which is what gave it
+  away.
+
+The formation suite is back to its baseline one failure after this (`formation_battle`: 132
+assertions, 1 failure - the pre-existing ground-proportion assertion).
+
+**D-149: a body stops where its own men can strike, and archers keep station behind the line.**
+
+Owner: "archers are supposed to sit back in a line and shoot projectiles"
+
+The march treated every body the same: advance while the enemy's living edge is further than the
+agreed engagement distance, 2.6 units. A body of archers - whose men can strike at 9.0 - marched in
+to arm's length like everybody else, through its own melee line, and finished battles standing in the
+middle of the field with the enemy's archers on top of it.
+
+- [b]The body's own reach decides[/b] ([method GpuCrowd._engage_room]): stop when the enemy's living
+  edge is inside nine tenths of what this body's men can strike at, or the engagement distance,
+  whichever is further. Melee does not change (2.4 of reach is inside 2.6); a body of archers holds
+  with the enemy just inside 8.1 instead of walking in to 2.6.
+- [b]And never through our own line[/b] ([constant GpuCrowd.KEEP_STATION], 13 units anchor to anchor,
+  only counted for friends *ahead*): with the reach rule alone the archers still crept - every time
+  the fighting opened a gap in front of them they advanced a little, and after four minutes the
+  journal has both of our bodies on the same anchor at (72, 29), the archers six units inside their
+  own spearmen. Thirteen clears the archer body's depth behind the line's with a couple of units to
+  spare.
+- [b]The bow's range went from 9.0 to 18.0[/b] (both archer types in `data/units/unit_types.json`).
+  This is a balance change and it is one number to undo. It is needed because the geometry does not
+  work otherwise: the line is about eight units deep and the loose archer body about nine, so a body
+  standing properly behind the melee is 11 to 13 units from the enemy's front - and a bow that
+  reaches 9 can never fire a shot from there. Archers are meaningfully stronger for it: they now
+  loose for the whole approach instead of the last few seconds of it.
+
+**D-150: a body with nobody left stops where its last man fell, a chase closes on its target, and
+anchors stay on the ground.**
+
+Owner: "pathing also wigged out" and "they are doing a weird targeting thing" (near the end of the
+fight, from the journal)
+
+Three separate faults, all read out of the new journal lines (D-152):
+
+- [b]A wiped-out body kept marching.[/b] It selected a living enemy, stayed ENGAGEd, and its anchors
+  walked on - which dragged its corpses across the field with it, and left the survivors of a battle
+  standing on a formation that no longer existed. A body with nobody alive in it now stops where its
+  last man fell: frozen at (75, 28) in the run that verified it.
+- [b]A body advanced on its heading, not at its target.[/b] When the target drifted, the body sailed
+  past it - the journal's survivors finished at (96, 208) and (97, 211), one apart in x and three in
+  y, both still advancing with nothing in scan range and the kill count stuck. The march now aims at
+  the target body's anchor. A "stop at standing room" rule was tried alongside it and taken back
+  out: standing room for a three-rank body is 5.2 units between anchors per side, well outside the
+  melee's own reach, so it parked the two lines five units apart with room 4.5, no blows and no
+  arrows for a hundred and fifty seconds of a run. What ends a battle is closing on the enemy, and
+  the reach rule in D-149 is what stops a body that should not close.
+- [b]Nothing clamped the anchors to the field.[/b] Chasing each other's anchors, three survivors
+  walked a ring clean off the map: y 319 to 325 on ground sixty units tall, their men pinned against
+  the wall and unable to reach either their places or the enemy, so the battle never ended. Anchors
+  now live on the ground.
+
+Verified in the following run: no body anchor off the field at any point, a wiped-out body frozen
+where it died, and a battle that resolves rather than counting down.
+
+**D-151: the battlefield is 150 wide, and battles are capped at 360 frames a second.**
+
+Owner: "make the map wider" and "limit to 360fps"
+
+`battle.field_width` goes from 100 to 150, so two armies deploy with 108 units of ground between
+their zones instead of 58 - room for a line to stand back and for a battle to be fought in depth
+rather than met in the middle. The ground is generated from the context's terrain seed *and* the
+field size, so a given context now generates different terrain than before; the terrain suite's
+expectations were already failing on the old terrain and are unaffected by this.
+
+The compute field's `max_fps` was 0 - whatever the display allows - which on this machine is a
+vblank-free 1200-1300 frames drawing a 90-man battle that needs 30 simulation ticks a second. It is
+now 360: still nothing skipped, a third of the heat. The run's own header reports it (`vsync off fps
+cap 360`).
+
+**D-152: the battle journal says where every body stands and what it is being asked to do.**
+
+Owner: "look at the battle logic, I hope you have logs for this" and "make sure you have a whole lot
+of logs to look at to help you work this out"
+
+The compute field's journal opened with three lines and a roster. It now writes, when a run asks for
+one with `--battlelog=<path>`:
+
+- [b]A line per body every two seconds[/b]: tick, seconds, which side, men alive, anchor, order, the
+  room its men have to the enemy's living edge, what its men can strike at, and how many shafts its
+  men have loosed. This is the line behaviour questions are answered from, and it answered all of
+  D-148, D-149 and D-150 above.
+- [b]The lines themselves[/b]: our front and theirs, and the gap between them, every two seconds.
+- [b]Pathing faults[/b]: men outside the ground, and any man whose position moved further than 2.0
+  units between two packs - an order of magnitude past what a walk can do at thirty ticks a second,
+  so a hit is a fault rather than a fast soldier.
+- [b]Milestones and a steady line[/b] every tenth of the armies down, and the arrows loosed with
+  each one, plus the closing verdict and the fallen.
+
+Every line is flushed as it is written, so a run that is killed (or hits its time limit mid-battle)
+still leaves a complete journal up to that point - which is how the run that walked off the map was
+diagnosed.

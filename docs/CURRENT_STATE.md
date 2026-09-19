@@ -48,6 +48,21 @@ bar's lift is derived from the `head` the atlas builder measures rather than han
 - **Arrows**: the compute field flies them for ranged soldiers (D-147) - the same look and
   flight as the canvas battle's, the shot inferred from a rise in the shooter's dealt-damage
   tally. `BattleArrows` is the pool; `tests/test_battle_arrows.gd` pins it.
+- **Battle behaviour** (D-148 to D-150, all found in the new journal lines below): the deployment
+  draws armies up in depth by role (missiles behind, the line in front) on the lattice of the shape
+  each body is about to be given, so a battle opens with the archers standing behind the spearmen
+  instead of alongside them. A body stops where its own men can strike (archers hold at 8.1 of room,
+  not 2.6) and never closes on a friendly body ahead of it within 13 units, which is what keeps the
+  bow line behind the melee; the bow's own range went 9.0 -> 18.0 because a line standing properly
+  behind an eight-deep melee cannot reach the enemy at 9. A wiped-out body stops where its last man
+  fell, a chase closes on its target's anchor rather than on a stale heading, and body anchors are
+  clamped to the field - three runaways that together produced a battle which walked off the map and
+  never resolved.
+- **The battle journal** (D-152): `--battlelog=<path>` now writes a line per body every two seconds
+  (anchor, order, alive, room, reach, shots), the two front lines and the gap between them, pathing
+  faults (men outside the ground, any step over two units between packs), milestones every tenth of
+  the armies down, and the closing verdict - flushed per line, so a killed run still has its log.
+  Every behaviour fault above was read out of these lines.
 - **Shared maths**: `scripts/battle/unit_art.gd` (frame plan, placement, the precomputed
   per-side tables) + `shaders/battle/unit_sprite.gdshader` (frame rect from instance custom
   data). Verified in a windowed run of both renderers; `test_unit_sprites` (new) pins the

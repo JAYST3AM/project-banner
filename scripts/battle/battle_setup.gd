@@ -10,6 +10,13 @@ const SIDE_PLAYER := BattleContext.SIDE_PLAYER
 const SIDE_ENEMY := BattleContext.SIDE_ENEMY
 
 
+## Fallback spacing for a body whose shape cannot be read from the formation catalog - the same
+## number the catalog and the config carry. The deployment normally takes both its files and its
+## spacing from the shape it is about to give the body, so men start on their marks rather than
+## walking sideways to find them.
+const FILE_SPACING := 2.6
+
+
 ## Every unit in the battle, players first, enemy second.
 static func build_units(context: BattleContext) -> Array[BattleUnit]:
 	var units: Array[BattleUnit] = []
@@ -58,6 +65,12 @@ static func deployment_zones(config: GameConfig) -> Array[Rect2]:
 
 ## Place both armies facing each other: player on the left, enemy on the right,
 ## melee to the front and ranged behind, in ranks that fit the deployment depth.
+##
+## Men are placed on the lattice of the shape they are about to be given (see
+## [method assign_default_formations]: a line for the melee, a loose body for the missiles), because
+## the formations lay their slots out from each body's centroid and its own geometry. A deployment
+## that used some other lattice had every man walk sideways to find his place, which the formation
+## suite measured as ranks more than four units out of order after six seconds of dressing.
 static func deploy(units: Array[BattleUnit], config: GameConfig) -> void:
 	var field := field_size(config)
 	var depth := config.get_float("battle.deploy_depth", 20.0)
@@ -71,33 +84,80 @@ static func deploy(units: Array[BattleUnit], config: GameConfig) -> void:
 		else:
 			enemies.append(unit)
 
-	_deploy_side(players, field, depth, margin, true)
-	_deploy_side(enemies, field, depth, margin, false)
+	var types := FormationCatalog.load_from()
+	var line := _lattice(types, config, "line", 10)
+	var loose := _lattice(types, config, "loose", 6)
+	_deploy_side(players, field, depth, margin, true, line, loose)
+	_deploy_side(enemies, field, depth, margin, false, line, loose)
 
 
-static func _deploy_side(units: Array[BattleUnit], field: Vector2, depth: float, margin: float, on_left: bool) -> void:
+
+## The lattice one of the deployment's shapes asks its men to stand on, as (files, spacing). Read
+## from the same catalog the formations are built from, so the two cannot drift apart; the fallbacks
+## are the catalog's own defaults for a shape it cannot supply.
+static func _lattice(types: FormationCatalog, config: GameConfig, id: String, fallback_files: int) -> Vector2:
+	if types != null and types.is_valid() and types.has(id):
+		var base := config.get_float("formation.base_spacing", 2.6)
+		return Vector2(float(types.max_files(id)), maxf(0.2, base * types.spacing_multiplier(id)))
+	return Vector2(float(fallback_files), FILE_SPACING)
+
+
+static func _deploy_side(units: Array[BattleUnit], field: Vector2, depth: float, margin: float, on_left: bool, line: Vector2, loose: Vector2) -> void:
 	if units.is_empty():
 		return
-	# Melee in front (closest to the enemy), ranged behind them.
-	var ordered := _front_to_back(units)
+	# Missiles behind, melee in front: the deployment is laid out in depth by role, not as one
+	# block. It was one block - a square grid of columns and rows - so the front rank and the
+	# archers ended up side by side in separate lanes at the same distance from the enemy, and
+	# both armies' archers met each other head-on with no line in between. The journal of a
+	# 15-archer-and-30-spearman test battle caught exactly that: our archers at (75, 42) and
+	# theirs at (76, 42) after both had crossed the field.
+	#
+	# The zone is split in depth: missiles stand in the back third of it, the line in the front
+	# two thirds, and each body is laid out in ranks of at most nine files across the field.
+	var melee: Array[BattleUnit] = []
+	var ranged: Array[BattleUnit] = []
+	for unit in units:
+		if unit.ranged:
+			ranged.append(unit)
+		else:
+			melee.append(unit)
+	_place_in_ranks(ranged, field, depth * 0.34, margin, 0.0, on_left, loose)
+	_place_in_ranks(melee, field, depth * 0.66, margin, depth * 0.34, on_left, line)
 
-	var count := ordered.size()
-	var rows := maxi(1, int(ceil(sqrt(float(count)))))
-	var columns := maxi(1, int(ceil(float(count) / float(rows))))
 
-	var usable_height := maxf(1.0, field.y - (margin * 2.0))
-	var row_step := usable_height / float(rows)
-	var column_step := depth / float(columns)
-
-	for index in ordered.size():
-		var unit := ordered[index]
-		var column := index % columns
-		var row := index / columns
-		var offset := (float(column) + 0.5) * column_step
-		var x := margin + offset if on_left else field.x - margin - offset
-		var y := margin + (float(row) + 0.5) * row_step
-		unit.position = Vector2(x, y)
-		unit.facing = Vector2.RIGHT if on_left else Vector2.LEFT
+## Lay one body of men out in ranks within a band of the deployment zone, on the lattice of the
+## shape it is about to be given. [param start] is how far into the zone the band begins, measured
+## inward from this army's own end of the field.
+##
+## The maths mirrors [method BattleFormation.rebuild_slots]: files across the width at the shape's
+## spacing, ranks from the anchor back, rank zero at the front. Placement is symmetric about the
+## band's centre, so the centroid the formation anchors itself on is exactly where the body was
+## drawn up.
+static func _place_in_ranks(units: Array[BattleUnit], field: Vector2, band: float, margin: float, start: float, on_left: bool, lattice: Vector2) -> void:
+	var count := units.size()
+	if count == 0:
+		return
+	var files := mini(count, maxi(1, int(lattice.x)))
+	var ranks := int(ceil(float(count) / float(files)))
+	var spacing := maxf(0.2, lattice.y)
+	var half_files := float(files - 1) * 0.5
+	var half_ranks := float(ranks - 1) * 0.5
+	var centre_y := margin + (maxf(1.0, field.y - (margin * 2.0)) * 0.5)
+	var centre_inward := start + (band * 0.5)
+	for index in count:
+		var lateral := (float(index % files) - half_files) * spacing
+		# A body's right is -y when it faces -x, so the enemy's files run the other way down the
+		# field. Getting this sign wrong mirrors the whole body: every man in the enemy's line had
+		# to walk across his own ranks to find his place, which is what the formation suite was
+		# measuring as ranks seven units out of order six seconds after deployment.
+		if not on_left:
+			lateral = -lateral
+		var forward_offset := (half_ranks - float(index / files)) * spacing
+		var inward := centre_inward + forward_offset
+		var x := margin + inward if on_left else field.x - margin - inward
+		var y := clampf(centre_y + lateral, margin, field.y - margin)
+		units[index].position = Vector2(x, y)
+		units[index].facing = Vector2.RIGHT if on_left else Vector2.LEFT
 
 
 static func _front_to_back(units: Array[BattleUnit]) -> Array[BattleUnit]:
