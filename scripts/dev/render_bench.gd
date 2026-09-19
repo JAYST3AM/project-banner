@@ -80,6 +80,8 @@ var _sim_usecs: PackedFloat32Array = PackedFloat32Array()
 var _ready_reported := false
 var _done := false
 var _buffer_layout: Dictionary = {}
+## The sprite batch's layout, so the report says whether the army was characters or discs.
+var _sprite_layout: Dictionary = {}
 var _report_path := ""
 ## Frames drawn before anything is measured or stepped. The first frames of a windowed run
 ## are the engine's, not the scene's - pipelines compile, the terrain is uploaded the first
@@ -133,6 +135,7 @@ func _ready() -> void:
 	print("setup checksum %d:%s" % [
 		simulator.units.size(), ShowcaseBattle.setup_checksum(simulator.units)])
 	print("buffer probe: %s" % [_describe_layout(_buffer_layout)])
+	print("unit sprites: %s" % _describe_sprites(_sprite_layout))
 	print("modes: %s" % [_mode_names()])
 
 
@@ -222,6 +225,10 @@ func _build_battle() -> void:
 	add_child(field)
 	field.build(simulator.units.size())
 	_buffer_layout = field.probe_buffer_layout()
+	# The sprite batch is part of the production renderer now, so the bench measures what the
+	# game draws: the disc-only army the D-107 table was taken with is a run with
+	# PB_UNIT_SPRITES=off.
+	_sprite_layout = field.probe_sprite_layout()
 	field.visible = false
 
 	camera = Camera2D.new()
@@ -250,6 +257,15 @@ func _describe_layout(layout: Dictionary) -> String:
 	for key in ["stride", "x_x", "y_y", "origin_x", "origin_y", "color"]:
 		parts.append("%s=%d" % [key, int(layout.get(key, -1))])
 	return ", ".join(parts)
+
+
+## Whether the sprite batch exists in this run, and its buffer layout when it does. The report
+## has to say which army it measured: the discs are the older renderer and the sprites are what
+## the game draws.
+func _describe_sprites(layout: Dictionary) -> String:
+	if not bool(layout.get("ok", false)):
+		return "off - the army is drawn as discs"
+	return "on - stride %d, custom %d" % [int(layout.get("stride", -1)), int(layout.get("custom", -1))]
 
 
 func _build_hud() -> void:
@@ -409,9 +425,11 @@ func _finish() -> void:
 			_sim_usecs.size(), sim_ms, ", ".join(tick_text)]
 			+ "- frozen for every frame below, so these are render costs and nothing else")
 	lines.append("buffer probe: %s" % _describe_layout(_buffer_layout))
-	lines.append("the instanced path draws bodies, health bars and facing pips; the ranged ring is "
-		+ "not built yet, and selection rings and order lines stay on the canvas path because their "
-		+ "cost follows what a player has selected rather than the size of the army")
+	lines.append("unit sprites: %s" % _describe_sprites(_sprite_layout))
+	lines.append("the instanced path draws the army's discs, the unit sprites when the art is present, "
+		+ "health bars and facing pips; the ranged ring is not built yet, and selection rings and "
+		+ "order lines stay on the canvas path because their cost follows what a player has selected "
+		+ "rather than the size of the army")
 	for stats in _results:
 		lines.append(_format_result(stats))
 	var text := "\n".join(lines)

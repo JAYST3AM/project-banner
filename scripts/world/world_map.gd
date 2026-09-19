@@ -255,10 +255,18 @@ func _ready() -> void:
 ## Dev-only: drop the player next to a hostile party so the encounter path runs
 ## without waiting for one to wander into them. Chooses the smallest band by
 ## default - the fight a careful player would pick.
+##
+## Only bands count as hostile: a caravan is a party on this map whose meeting is a
+## conversation rather than an encounter, so a run teleported onto a wagon proves nothing
+## about the fight path and (before this filter) the smallest party on the map was usually
+## exactly that - a one-guard wagon.
 func _apply_dev_autoengage() -> void:
 	if not DevFlags.autoengage() or _overworld == null:
 		return
-	var parties := _overworld.available_parties()
+	var parties: Array[WorldParty] = []
+	for candidate in _overworld.available_parties():
+		if candidate.kind == Party.KIND_BANDIT:
+			parties.append(candidate)
 	if parties.is_empty():
 		DebugLogger.warn("dev flag: no hostile parties to engage", "WorldMap")
 		return

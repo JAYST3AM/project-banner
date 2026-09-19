@@ -1,0 +1,199 @@
+extends TestCase
+## The battle's unit sprites: the atlas table, the animation plan, and the placement maths.
+##
+## [b]What this guards.[/b] The sprites themselves need a window, a GPU and an imported atlas -
+## none of which a headless run has, which is why the field's instance-buffer layout is measured
+## at runtime and the batch simply does not exist without it. What a headless run [i]can[/i] pin
+## is the arithmetic every frame of every soldier is drawn from: which animation a soldier is in,
+## which frame of it, and where that frame lands. Those are static and pure here, so they are
+## tested against hand-worked numbers rather than against the code that calls them.
+##
+## The atlas table itself is checked only if the pack is on this machine. The art is git-ignored
+## third-party work (Zerie's Tiny RPG pack - see assets/art_source/units/tiny_rpg/README.md), so
+## a fresh clone passes without it and the field draws its discs, exactly as before.
+
+const SEED := 51501
+const PER_SIDE := 4
+
+
+func run() -> void:
+	await _tick()
+	_test_the_priority_order_of_the_animations()
+	_test_a_frame_is_held_for_whole_ticks()
+	_test_the_death_animation_stops_on_its_last_frame()
+	_test_the_placement_puts_the_anchor_at_the_soldiers_feet()
+	_test_a_flip_mirrors_the_frame_without_moving_it()
+	_test_the_fields_own_geometry_clears_the_sprite()
+	_test_the_precomputed_tables_hold_together_when_the_art_is_present()
+	_test_the_atlas_table_holds_together_when_the_art_is_present()
+	# A runtime error inside a test function aborts that function without recording a failure -
+	# GDScript has no try/catch - so a suite whose static calls all failed would still reach
+	# _complete with a handful of assertions and report PASS. The floor is the guard: the full
+	# suite makes well over thirty assertions even with the art absent.
+	greater(float(checks), 25.0, "the suite ran its assertions rather than aborting before them")
+	_complete()
+
+
+func _test_the_priority_order_of_the_animations() -> void:
+	section("death outranks a wound, a wound outranks a blow, a blow outranks a step")
+	var hurt := 12
+	var attack := 12
+	equal(UnitArt.plan(false, true, 0, 0, hurt, attack), UnitArt.DEATH,
+		"a fallen soldier holds his death animation however recently he fought")
+	equal(UnitArt.plan(true, true, 3, 3, hurt, attack), UnitArt.HURT,
+		"struck three ticks ago: he is showing the wound, not mid-swing")
+	equal(UnitArt.plan(true, true, 40, 3, hurt, attack), UnitArt.ATTACK,
+		"the wound has expired and the blow has not: he is swinging")
+	equal(UnitArt.plan(true, true, 40, 40, hurt, attack), UnitArt.WALK,
+		"both windows have expired: a soldier who has moved is walking")
+	equal(UnitArt.plan(true, false, 40, 40, hurt, attack), UnitArt.IDLE,
+		"and a soldier who has not moved is standing")
+	equal(UnitArt.plan(true, true, -1, -1, hurt, attack), UnitArt.WALK,
+		"an age of -1 means it never happened, and never triggers")
+
+
+func _test_a_frame_is_held_for_whole_ticks() -> void:
+	section("a frame is held for whole ticks, and the loops wrap")
+	equal(UnitArt.ticks_per_frame(140.0, 30.0), 4, "an idle frame at 140 ms and 30 ticks a second")
+	equal(UnitArt.ticks_per_frame(140.0, 60.0), 8, "and the same frame at 60")
+	equal(UnitArt.ticks_per_frame(65.0, 30.0), 2, "an attack frame at 65 ms is two ticks")
+	equal(UnitArt.ticks_per_frame(95.0, 30.0), 3, "a walk frame at 95 ms is three")
+	equal(UnitArt.ticks_per_frame(1.0, 30.0), 1, "nothing rounds down to zero ticks")
+	equal(UnitArt.frame(UnitArt.IDLE, 0, 4, 6), 0, "tick zero is the first idle frame")
+	equal(UnitArt.frame(UnitArt.IDLE, 11, 4, 6), 2, "eleven ticks in is frame two")
+	equal(UnitArt.frame(UnitArt.WALK, 12, 3, 8), 4, "the walk cycle advances")
+	equal(UnitArt.frame(UnitArt.WALK, 24, 3, 8), 0, "and wraps to the start")
+
+
+func _test_the_death_animation_stops_on_its_last_frame() -> void:
+	section("a corpse holds its pose")
+	equal(UnitArt.frame(UnitArt.DEATH, 0, 3, 4), 0, "the first frame of the fall")
+	equal(UnitArt.frame(UnitArt.DEATH, 10, 3, 4), 3, "once fallen, the last frame")
+	equal(UnitArt.frame(UnitArt.DEATH, 100000, 3, 4), 3, "and it stays there")
+
+
+func _test_the_placement_puts_the_anchor_at_the_soldiers_feet() -> void:
+	section("the frame's anchor lands on the soldier's feet")
+	# Hand-worked: a 38x31 cell at 0.16 units a pixel, anchor 15.5 px from the cell's left edge,
+	# feet at (10, 20). The quad is centred on its own origin, so the body's centre column lands
+	# at 10 + 38*0.16/2 - 15.5*0.16 = 10.56 and the cell's bottom edge at 20 - 31*0.16/2 = 17.52.
+	var origin := UnitArt.origin(
+		Vector2(10.0, 20.0), Vector2(38.0, 31.0), Vector2(15.5, 0.0), 0.16)
+	approx(origin.x, 10.56, 0.001, "the body's centre column is placed on the soldier's x")
+	approx(origin.y, 17.52, 0.001, "and the cell's bottom edge on his feet")
+	# An anchor at the dead centre of the cell is the plain centred case.
+	var centred := UnitArt.origin(
+		Vector2(10.0, 20.0), Vector2(38.0, 31.0), Vector2(19.0, 0.0), 0.16)
+	approx(centred.x, 10.0, 0.001, "an anchor in the middle of the cell draws the cell centred")
+
+
+func _test_a_flip_mirrors_the_frame_without_moving_it() -> void:
+	section("a flip mirrors the sampling and nothing else")
+	var uv := Rect2(0.25, 0.125, 0.0625, 0.0625)
+	var normal := UnitArt.custom(uv, false)
+	equal(normal, Vector4(0.25, 0.125, 0.0625, 0.0625), "unflipped, the frame is itself")
+	var flipped := UnitArt.custom(uv, true)
+	approx(flipped.x, 0.3125, 0.0001, "flipped, the rect starts at the frame's right edge")
+	approx(flipped.z, -0.0625, 0.0001, "and runs backwards")
+	approx(flipped.y, normal.y, 0.0001, "the row is untouched")
+	approx(flipped.w, normal.w, 0.0001, "and so is the height")
+	# A uv rect's own end, so the assertion reads as the mirror it is: the flipped rect samples
+	# the frame's last column exactly where the unflipped one samples its first.
+	approx(normal.x, 0.25, 0.0001, "the unflipped frame samples its left edge at the quad's left")
+	approx(flipped.x + flipped.z, 0.25, 0.0001, "the flipped frame samples its right edge there")
+
+
+## The field's own numbers, not the art's: where a man stands on his disc, and a bar that clears
+## the tallest frame. They live on [SoldierField] because they belong to that renderer's
+## geometry - and referencing the class here means a field that does not compile fails this
+## suite rather than passing it by never being mentioned.
+func _test_the_fields_own_geometry_clears_the_sprite() -> void:
+	section("the field's bar clears the tallest sprite frame")
+	greater(SoldierField.FOOT_LIFT, 0.0, "the sprite's feet are lifted above the soldier's position")
+	greater(SoldierField.SPRITE_BAR_LIFT, SoldierField.BAR_LIFT,
+		"the bar is lifted higher for the sprites than it was for the discs")
+	greater(SoldierField.SPRITE_BAR_LIFT, SoldierField.FOOT_LIFT,
+		"and higher than the foot lift, or it would be drawn across his chest")
+
+
+## The precomputed tables are what a renderer's per-soldier loop reads, so they are the part of
+## this pipeline most worth pinning: a table that disagreed with [method UnitArt.uv_rect] would
+## draw the wrong frames at speed instead of failing.
+func _test_the_precomputed_tables_hold_together_when_the_art_is_present() -> void:
+	section("the precomputed per-character tables, when the pack is on this machine")
+	var art := UnitArt.load_if_present()
+	if art == null:
+		check(true, "absent art is a legitimate outcome, not a failure")
+		return
+	for key in [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY]:
+		var data := art.renderer_data(key, 30.0)
+		var ticks: PackedInt32Array = data["ticks"]
+		var frames: PackedInt32Array = data["frames"]
+		var uv: PackedVector4Array = data["uv"]
+		var stride := int(data["uv_stride"])
+		var widest := 1
+		for animation in UnitArt.ANIMATIONS.size():
+			widest = maxi(widest, frames[animation])
+		equal(stride, widest, "%s: the uv table's stride is the widest animation" % key)
+		equal(uv.size(), UnitArt.ANIMATIONS.size() * stride, "%s: the table is animations x stride" % key)
+		for animation in UnitArt.ANIMATIONS.size():
+			var rect := art.uv_rect(key, animation, 0)
+			var packed_rect: Vector4 = uv[animation * stride]
+			approx(packed_rect.x, rect.position.x, 0.000001, "%s %s: uv x agrees" % [key, UnitArt.ANIMATIONS[animation]])
+			approx(packed_rect.z, rect.size.x, 0.000001, "%s %s: uv width agrees" % [key, UnitArt.ANIMATIONS[animation]])
+		var common: PackedFloat32Array = data["common"]
+		var cell := art.cell_size(key)
+		var anchor := art.anchor(key)
+		approx(common[0], cell.x, 0.000001, "%s: the cell width is in the block" % key)
+		approx(common[1], cell.y, 0.000001, "%s: and its height" % key)
+		approx(common[2], anchor.x, 0.000001, "%s: the anchor is in it" % key)
+		approx(common[4], art.units_per_pixel(), 0.000001, "%s: and the scale" % key)
+		var hurt_at := UnitArt.ANIMATIONS.find("hurt")
+		equal(common[5], float(int(frames[hurt_at]) * int(ticks[hurt_at])),
+			"%s: the hurt window is its own animation's length" % key)
+		var attack_at := UnitArt.ANIMATIONS.find("attack")
+		equal(common[6], float(int(frames[attack_at]) * int(ticks[attack_at])),
+			"%s: and so is the attack window" % key)
+		# The packed form and the direct one must not disagree about a mirror.
+		var packed: Vector4 = UnitArt.custom_from(uv[0], true)
+		var direct: Vector4 = UnitArt.custom(art.uv_rect(key, 0, 0), true)
+		approx(packed.x, direct.x, 0.000001, "%s: the packed flip matches the direct one" % key)
+		approx(packed.z, direct.z, 0.000001, "%s: including its direction" % key)
+
+
+func _test_the_atlas_table_holds_together_when_the_art_is_present() -> void:
+	section("the atlas table, when the pack is on this machine")
+	var art := UnitArt.load_if_present()
+	if art == null:
+		print("    (the pack is not present: the field draws its discs, and that path is unchanged)")
+		check(true, "absent art is a legitimate outcome, not a failure")
+		return
+	greater(art.atlas_size().x, 0.0, "the atlas has a width")
+	greater(art.atlas_size().y, 0.0, "and a height")
+	greater(art.units_per_pixel(), 0.0, "and a scale")
+	var keys: Array[String] = [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY]
+	for key in keys:
+		check(art.has_character(key), "the table has the %s" % key)
+		var cell := art.cell_size(key)
+		greater(cell.x, 0.0, "%s: the cell has a width" % key)
+		greater(cell.y, 0.0, "%s: and a height" % key)
+		var anchor := art.anchor(key)
+		check(anchor.x >= 0.0 and anchor.x <= cell.x, "%s: the anchor is inside the cell" % key)
+		for animation in UnitArt.ANIMATIONS.size():
+			var name := UnitArt.ANIMATIONS[animation]
+			var frames := art.frames_of(key, animation)
+			greater(float(frames), 0.0, "%s %s: how many frames" % [key, name])
+			greater(art.frame_ms(key, animation), 0.0, "%s %s: how long a frame is held" % [key, name])
+			var rect := art.uv_rect(key, animation, 0)
+			check(rect.position.x >= 0.0 and rect.position.y >= 0.0,
+				"%s %s: the frame starts inside the atlas" % [key, name])
+			check(rect.end.x <= 1.001 and rect.end.y <= 1.001,
+				"%s %s: and ends inside it" % [key, name])
+			if frames > 1:
+				var second := art.uv_rect(key, animation, 1)
+				not_equal(second.position.x, rect.position.x,
+					"%s %s: frame 1 is a different frame" % [key, name])
+			var last := art.uv_rect(key, animation, frames - 1)
+			var clamped := art.uv_rect(key, animation, frames + 5)
+			equal(clamped.position.x, last.position.x,
+				"%s %s: a frame past the end clamps to the last one" % [key, name])

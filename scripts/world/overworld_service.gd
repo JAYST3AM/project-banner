@@ -55,9 +55,31 @@ func spawn_if_needed() -> bool:
 	return spawned > 0
 
 
+## A settlement of the world itself, chosen deterministically from a spawn's own seed index:
+## the same index always walks to the same town in a given world, whatever the world happens
+## to be called. This is where an authored spawn anchor lands in a generated world.
+func _world_settlement(seed_index: int) -> Settlement:
+	var ids: Array = state.settlements.keys()
+	if ids.is_empty():
+		return null
+	ids.sort()
+	return state.settlement(str(ids[posmod(seed_index, ids.size())]))
+
+
 func _spawn_party(spawn: Dictionary, template: Dictionary) -> bool:
 	var spawn_id := str(spawn.get("id", ""))
 	var settlement := state.settlement(str(spawn.get("settlement_id", "")))
+	if settlement == null:
+		# A generated world renames its towns, so a spawn anchored to an authored settlement
+		# has nothing to stand beside - and before this fallback the whole hostile population
+		# of a live campaign silently came to zero ("overworld spawned 0 hostile parties"),
+		# which is a world with no fights in it at all. The fallback keeps the promise the
+		# file makes - a given campaign seed always produces the same world - by choosing a
+		# town of the world itself from the spawn's own seed index.
+		settlement = _world_settlement(int(spawn.get("seed_index", 0)))
+		if settlement != null:
+			DebugLogger.info("spawn '%s': no '%s' here, anchored to %s instead" % [
+				spawn_id, str(spawn.get("settlement_id", "")), settlement.name], "Overworld")
 	if spawn_id.is_empty() or settlement == null:
 		DebugLogger.warn("spawn '%s' has no valid settlement" % spawn_id, "Overworld")
 		return false

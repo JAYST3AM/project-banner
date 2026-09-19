@@ -3935,3 +3935,68 @@ first)" when it is not. The hint line takes the full width the panel used to res
 new flow ("Click a settlement to inspect it, then Enter goes in"). `world_hud` no longer carries
 `save_requested`/`menu_requested`; the map connects only the pause menu's. Suite green
 (world_map, campaign_flow); party_semantics is the documented pre-existing red.
+
+**D-142: the battle's soldiers are characters - the Tiny RPG pack, in both renderers.**
+
+The owner: "use the soldiers for units in my game, for battle system." The free Tiny RPG Character
+Asset Pack 01 v2.0 (Zerie) ships a soldier and an orc, each with idle / walk / attack / hurt /
+death at 100 px cells (the characters themselves are about 17x21 px inside the cell), and both of
+the game's battle renderers now draw them.
+
+- **The art is third-party and stays out of the repository.** Its licence allows commercial use and
+  editing but forbids re-upload and AI training; this repo is public and `assets/art_source/` is
+  already git-ignored, so the pack lives at `assets/art_source/units/tiny_rpg/` beside a README that
+  records all of that. **The game must run without it**: no atlas means the renderers draw exactly
+  what they drew before (the discs), and `PB_UNIT_SPRITES=off` forces that path inside one build so
+  a before/after is a paired run.
+- **One atlas, built by a script, not by hand.** `tools/build_unit_atlas.py` crops every animation to
+  one shared box per character - so a soldier's feet cannot move between animations - lays one row
+  per animation, and writes frame counts, per-frame durations, cell size and anchor into
+  `unit_atlas.json`. The durations and the world-units-per-pixel live in that data, so the look is
+  an edit and a rebuild, not a code change.
+- **One batch, two renderers, one set of maths.** `shaders/battle/unit_sprite.gdshader` maps a quad's
+  UV onto the frame rect carried in per-instance custom data; `UnitArt` owns the renderer-agnostic
+  arithmetic (which animation, which frame, where the quad goes, the flip as a mirrored UV).
+  `SoldierField` (the canvas battle) and `gpu_crowd` (the compute battlefield - **the one the game
+  actually plays**, since the world map opens `battle_field`) each add one `MultiMeshInstance2D`. The
+  instance-buffer layout is measured at runtime, custom block included, and no usable layout or no
+  art means no sprites - never soldiers at each other's coordinates.
+- **The animation rides the simulation's ticks.** A frame is held for a whole number of ticks at the
+  battle's own rate, so a paused battle holds its pose and animation cannot outrun the fight; a death
+  holds its last frame; the per-soldier phase (`id * 7`) keeps a rank off lockstep. The arm is drawn
+  taller than the discs needed, so the health bar's lift moved with it (2.2 canvas / 2.4 compute) and
+  a test pins that it clears the foot lift.
+- **What each renderer can see decides its animations.** The canvas battle knows facing, cooldown
+  jumps (a strike) and `last_attacked_tick` (a wound), so it draws all five exactly. The compute
+  battle's readback carries position, hit points and a standing flag and nothing else, so it infers:
+  moved -> walk, own hit points fell -> hurt, the remembered opponent's hit points fell -> swing,
+  fell -> death. A strike stamp in the readback would make the swing exact; until then the inference
+  is the honest limit and says so at the call site.
+- **The first version was too slow, and the measurement is the lesson.** Asking `UnitArt` per soldier
+  per pack meant string-keyed dictionary walks inside the hottest loop a renderer has: 7.5 us a
+  soldier, 20.6 ms a pack at 2,000 soldiers against 5.3 ms with the batch off. Every renderer now
+  precomputes per side into typed arrays (`renderer_data` -> `_side_ticks/_frames/_uv/_common`), and
+  the suite pins those tables against the direct functions so they cannot drift.
+- **Headless cannot see any of this**: a MultiMesh's `buffer` reads back empty under the headless
+  driver (measured), so the suites pin the arithmetic and the tables and the batch itself is verified
+  in a windowed run - grep `unit sprites on`. That is why the sprite work is split that way instead
+  of being tested end-to-end in CI.
+
+**D-143: a generated world had no bandits in it, and the dev flag that hunts them found wagons.**
+
+Found while verifying D-142 in the live game, not by a suite. `[Overworld] overworld spawned 0
+hostile parties` on seed 2026: `data/encounters/bandit_parties.json` anchors all three spawns to
+authored settlement ids (`thornwood_hollow`, `greywatch`, `redmoor`), a generated world names its own
+towns, so every spawn failed - and a live campaign could never start a battle at all.
+
+- **The fallback keeps the file's own promise.** A spawn whose named settlement is missing anchors to
+  a town of the world itself, chosen deterministically from the spawn's own `seed_index` (sorted
+  settlement ids), and logs the town it landed beside. An authored world - every suite's map - is
+  unchanged, and `test_trade_caravans` (which builds the generated world end to end) stays green.
+- **`--autoengage` was dropping the party on a one-guard wagon.** It picked the smallest of
+  `available_parties()`, which includes caravans - whose meeting is a conversation, not an encounter -
+  so a run that exists to exercise the fight path proved nothing about it. It now filters to
+  `Party.KIND_BANDIT`.
+- With both fixed, a scripted seed-2026 run spawns three bands and reaches a real battle:
+  `[Encounter] battle battle_0001 ... player (6) vs enemy (5)` -> `scene -> battle_field` ->
+  `gpu crowd: unit sprites on - atlas 328x320, 11 soldiers`.

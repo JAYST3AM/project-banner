@@ -34,6 +34,16 @@ extends MultiMeshInstance2D
 ## consulted by anything the battle does. Draw order is the caller's: a [SoldierField] added
 ## after the [BattleView] draws over the ground the view painted, exactly as the per-soldier
 ## loop did.
+##
+## [b]The unit sprites.[/b] A fourth batch draws each soldier as a frame from the Tiny RPG
+## character atlas - idle, walk, attack, hurt and death - instead of a disc. The frame is
+## chosen from the soldier's own state (has he moved since the last tick, has his cooldown
+## just jumped, was he struck, has he fallen) and the animation clock rides the simulation's
+## ticks, so a paused battle holds its pose and animation can never outrun the fight. The art
+## is third-party and git-ignored, so the batch exists only when the atlas is present AND its
+## instance-buffer layout - custom data included - could be read back out of the engine;
+## otherwise the discs are still the whole army, exactly as before.
+## [code]PB_UNIT_SPRITES=off[/code] forces that older path for a paired run in one build.
 
 ## Texture resolution of the generated discs. Enough that the rim survives a squad-level zoom
 ## and cheap enough to regenerate in no time at all.
@@ -52,6 +62,23 @@ const PIP_THICKNESS := 0.28
 const FALLEN_DARKEN := 0.55
 const COLOR_OUTLINE := Color("0b1017")
 
+## ---------- the sprite batch -------------------------------------------------
+## The frame rects come from the atlas built by [code]tools/build_unit_atlas.py[/code], drawn
+## only when it is present. These numbers are the render-side half of that pipeline; the art's
+## own half - cell sizes, frame counts, durations - lives in the atlas JSON, and the shader both
+## renderers use is [constant UnitArt.SHADER_PATH].
+## How far above the soldier's position his frame's anchor point (the body's centre column on
+## the cell's bottom edge) is drawn, in world units. This is what makes the disc read as the
+## ground he stands on rather than a ring around his boots.
+const FOOT_LIFT := 1.35
+## The health bar's lift when the sprites are drawn. The tallest frame in the atlas (a raised
+## sword) reaches about 3.3 units above the anchor, and the bar has to clear it or it is drawn
+## across the soldier's head.
+const SPRITE_BAR_LIFT := 2.2
+## A cooldown jump larger than this between ticks means a blow landed: the soldier's cooldown
+## was reset, which is the only visible trace a strike leaves on the unit.
+const STRIKE_COOLDOWN_JUMP := 0.05
+
 ## How the instance data is written when [method update_from] is used. [code]setters[/code] is
 ## the documented API - [method MultiMesh.set_instance_transform_2d] and
 ## [method MultiMesh.set_instance_color], two calls per instance. [code]buffer[/code] fills one
@@ -63,6 +90,17 @@ var fill_mode: String = "setters"
 ## them below a configured zoom) without changing what the army is.
 var show_bars := true
 var show_facing := true
+
+## Whether the unit sprites are drawn when the art is present. On by default; the environment
+## switch [code]PB_UNIT_SPRITES=off[/code] turns the field back into exactly what it drew
+## before the sprites existed, which is how a before/after is paired inside one build.
+var sprites_enabled: bool = OS.get_environment("PB_UNIT_SPRITES") != "off"
+## The battle's tick rate, for the animation clock: a frame of the atlas is held for a fixed
+## number of ticks, so the animation runs at the simulation's speed rather than the monitor's.
+var anim_rate: float = 30.0
+## The unit art, or null when the pack is absent (the discs are then the whole army, as
+## before). A caller may inject a specific atlas; the first build loads the local one otherwise.
+var art: UnitArt = null
 
 var _body: MultiMesh = null
 var _bars: MultiMesh = null
@@ -83,15 +121,55 @@ var _counts := {"body": 0, "bars": 0, "pips": 0}
 var _buffer_ok := false
 var _layout: Dictionary = {}
 
+## ---------- the sprite batch's own state --------------------------------------
+var _sprites_node: MultiMeshInstance2D = null
+var _sprites: MultiMesh = null
+var _packed_sprites: PackedFloat32Array = PackedFloat32Array()
+var _sprite_count := 0
+## Whether the sprite batch exists and its buffer layout was understood. False means the
+## discs are the whole army, which is a legitimate outcome, not a failure.
+var _sprite_ok := false
+var _sprite_layout: Dictionary = {}
+## The sprite buffer's field offsets as one flat array - x_x, y_y, origin_x, origin_y,
+## colour, custom - and its stride, cached from the probe: a dictionary lookup per soldier per
+## tick is exactly the kind of cost this file exists to avoid.
+var _sprite_offsets: PackedInt32Array = PackedInt32Array()
+var _sprite_stride: int = 0
+## The precomputed per-side tables [method _write_sprite] reads: the ticks a frame is held for,
+## the frame counts, the UV rectangle of every frame, that table's stride, and one typed block of
+## scalars (cell, anchor, units a pixel, the hurt and attack window lengths). Index 0 is the
+## player's side. Typed arrays rather than dictionaries because this runs per soldier per tick.
+var _side_ticks: Array = []
+var _side_frames: Array = []
+var _side_uv: Array = []
+var _side_uv_stride: PackedInt32Array = PackedInt32Array()
+var _side_common: Array = []
+## Per-unit animation state, indexed by unit id: where the soldier stood at the last pack,
+## what his cooldown read, when his blow landed, when he was struck, and when he fell.
+var _anim_last_position := PackedVector2Array()
+var _anim_last_cooldown := PackedFloat32Array()
+var _anim_strike_tick := PackedInt32Array()
+var _anim_hurt_tick := PackedInt32Array()
+var _anim_last_attacked := PackedInt32Array()
+var _anim_died_tick := PackedInt32Array()
+var _anim_seen := PackedByteArray()
+
 
 ## Build a field for [param simulator] and attach it to [param parent], or return null if the
 ## battle should keep drawing its soldiers the way it always has. The caller keeps the field and
 ## drives [method pack] and [method apply]; nothing about the simulation changes either way.
-static func attach(parent: Node2D, view: BattleView, simulator: BattleSimulator) -> SoldierField:
+##
+## [param rate] is the simulation's ticks a second, which is the animation clock: the sprite
+## batch holds each frame for a fixed number of ticks, not for milliseconds of wall time.
+static func attach(parent: Node2D, view: BattleView, simulator: BattleSimulator, rate: float = 30.0) -> SoldierField:
 	var node := SoldierField.new()
+	node.anim_rate = maxf(1.0, rate)
 	parent.add_child(node)
-	node.build(simulator.units.size())
+	# Sized to the highest id rather than the headcount: the animation state is addressed by
+	# unit id, and an army assembled from several parties can have gaps in its ids.
+	node.build(_slot_count(simulator))
 	node.probe_buffer_layout()
+	node.probe_sprite_layout()
 	if node.has_usable_buffer() and view != null:
 		# The army is the field's to draw now. The view keeps the ground, the debug overlay,
 		# the selection rings, the order lines and the damage popups - everything whose cost is
@@ -102,6 +180,15 @@ static func attach(parent: Node2D, view: BattleView, simulator: BattleSimulator)
 		node.pack(simulator)
 		node.apply()
 	return node
+
+
+## How many id-addressed slots the field needs for this army: the highest unit id plus one.
+static func _slot_count(simulator: BattleSimulator) -> int:
+	var slots := simulator.units.size()
+	for unit in simulator.units:
+		if unit != null:
+			slots = maxi(slots, unit.id + 1)
+	return slots
 
 
 ## Whether the instance buffer's layout was read back out of the engine and the fast path is
@@ -126,6 +213,10 @@ func build(capacity: int) -> void:
 	# The generated disc is already antialiased, so it wants to be filtered rather than snapped
 	# to the nearest texel the way the project's default filter would.
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+
+	# The unit sprites, above the discs and under the bars: built here, before the bars and
+	# pips are added, so the child order is also the draw order. A no-op when the art is absent.
+	_build_sprite_batch(_capacity)
 
 	# Health bars: a background and a fill per soldier, so two instances each. A plain white
 	# pixel scaled to the bar's proportions - the same rectangle the canvas path draws.
@@ -205,9 +296,13 @@ func pack(simulator: BattleSimulator) -> Dictionary:
 	_packed_body.resize(_capacity * stride)
 	_packed_bars.resize(_capacity * 2 * stride)
 	_packed_pips.resize(_capacity * stride)
+	if _sprite_ok:
+		_packed_sprites.resize(_capacity * _sprite_stride)
 	var bodies := 0
 	var bars := 0
 	var pips := 0
+	var sprites := 0
+	var tick := simulator.tick_index
 	var units: Array[BattleUnit] = simulator.units
 	for unit in units:
 		if unit == null:
@@ -221,11 +316,15 @@ func pack(simulator: BattleSimulator) -> Dictionary:
 		_write(_packed_body, bodies, stride, x_x, y_y, origin_x, origin_y, color_at,
 			body_scale, body_scale, position, _body_color(unit, team, alive))
 		bodies += 1
+		# And the same soldier as a frame of the atlas, when there is one to draw.
+		if _sprite_ok:
+			_write_sprite(sprites, unit, position, alive, tick)
+			sprites += 1
 		if alive and show_bars:
 			# The bar's background and its fill, in that order: instance order is draw order
 			# inside one multimesh, so the fill lands on top of its own background.
 			var ratio := unit.hp_ratio()
-			var origin := position + Vector2(-BAR_WIDTH * 0.5, -BODY_RADIUS - BAR_LIFT)
+			var origin := position + Vector2(-BAR_WIDTH * 0.5, -BODY_RADIUS - _bar_lift())
 			_write(_packed_bars, bars, stride, x_x, y_y, origin_x, origin_y, color_at,
 				BAR_WIDTH, BAR_HEIGHT, origin + Vector2(BAR_WIDTH * 0.5, BAR_HEIGHT * 0.5),
 				Color(0.0, 0.0, 0.0, 0.65))
@@ -255,7 +354,9 @@ func pack(simulator: BattleSimulator) -> Dictionary:
 	_packed_body = _packed_body.slice(0, bodies * stride)
 	_packed_bars = _packed_bars.slice(0, bars * stride)
 	_packed_pips = _packed_pips.slice(0, pips * stride)
-	_counts = {"body": bodies, "bars": bars, "pips": pips}
+	if _sprite_ok:
+		_packed_sprites = _packed_sprites.slice(0, sprites * _sprite_stride)
+	_counts = {"body": bodies, "bars": bars, "pips": pips, "sprites": sprites}
 	return {
 		"mode": "packed",
 		"count": bodies,
@@ -270,6 +371,8 @@ func apply() -> Dictionary:
 	_assign(_body, _packed_body, int(_counts["body"]))
 	_assign(_bars, _packed_bars, int(_counts["bars"]))
 	_assign(_pips, _packed_pips, int(_counts["pips"]))
+	if _sprite_ok:
+		_assign(_sprites, _packed_sprites, int(_counts.get("sprites", 0)))
 	return {"mode": "packed", "count": int(_counts["body"]), "usec": Time.get_ticks_usec() - started}
 
 
@@ -392,70 +495,193 @@ func _body_color(unit: BattleUnit, team: Color, alive: bool) -> Color:
 ## [code]ok: false[/code] when the layout is not one that path understands - in which case the
 ## field falls back to setters rather than drawing nonsense.
 ##
-## All three batches share this format, so one probe serves them all.
+## All three disc batches share this format, so one probe serves them all. The measuring itself
+## lives in [method UnitArt.measure_layout], because the compute battlefield needs the same
+## answer for the same reason.
 func probe_buffer_layout() -> Dictionary:
-	_layout = {"ok": false, "stride": 0}
-	_buffer_ok = false
-	if _body == null or _body.instance_count < 1:
-		return _layout
-	var probe_position := Vector2(12345.0, 6789.0)
-	var probe_scale := 3.0
-	var probe_colour := Color(0.25, 0.5, 0.75, 1.0)
-	_body.set_instance_transform_2d(
-		0, Transform2D(0.0, Vector2(probe_scale, probe_scale), 0.0, probe_position))
-	_body.set_instance_color(0, probe_colour)
-	var raw: PackedFloat32Array = _body.buffer
-	if raw.is_empty():
-		return _layout
-	var origin_x := -1
-	for i in raw.size():
-		if absf(raw[i] - probe_position.x) < 0.5:
-			origin_x = i
-			break
-	if origin_x < 0:
-		return _layout
-	var origin_y := -1
-	for i in raw.size():
-		if absf(raw[i] - probe_position.y) < 0.5 and i != origin_x:
-			origin_y = i
-			break
-	var color_at := -1
-	for i in raw.size():
-		if absf(raw[i] - float(probe_colour.r)) < 0.01:
-			color_at = i
-			break
-	var x_x := -1
-	var y_y := -1
-	for i in raw.size():
-		if absf(raw[i] - probe_scale) < 0.001 and i != origin_x:
-			if x_x < 0:
-				x_x = i
-			elif y_y < 0:
-				y_y = i
-	if origin_y < 0 or color_at < 0 or x_x < 0 or y_y < 0:
-		return _layout
-	# Slice size: written into a second instance and found again, because one instance's origin
-	# slot says nothing about how far the next one starts.
-	_body.set_instance_transform_2d(
-		1, Transform2D(0.0, Vector2(probe_scale, probe_scale), 0.0, Vector2(111.0, 222.0)))
-	var second: PackedFloat32Array = _body.buffer
-	var second_origin := -1
-	for i in range(origin_x + 1, second.size()):
-		if absf(second[i] - 111.0) < 0.5:
-			second_origin = i
-			break
-	if second_origin < 0:
-		return _layout
-	_layout = {
-		"ok": true,
-		"stride": second_origin - origin_x,
-		"origin_x": origin_x,
-		"origin_y": origin_y,
-		"color": color_at,
-		"x_x": x_x,
-		"y_y": y_y,
-	}
-	_buffer_ok = true
-	# The probe's own values are not soldiers: clear the instances it wrote to.
-	_body.visible_instance_count = 0
+	_layout = UnitArt.measure_layout(_body, false)
+	_buffer_ok = bool(_layout.get("ok", false))
 	return _layout
+
+
+## The sprite batch's layout, probed the same way with the custom-data block on top: the frame
+## rectangle travels per instance in custom data, and where that block sits inside
+## [member MultiMesh.buffer] is measured rather than assumed. No usable layout means no sprite
+## batch and the discs are drawn instead - the same graceful absence as missing art.
+func probe_sprite_layout() -> Dictionary:
+	_sprite_layout = UnitArt.measure_layout(_sprites, true)
+	_sprite_offsets = UnitArt.offsets_from(_sprite_layout)
+	_sprite_stride = int(_sprite_layout.get("stride", 0)) if _sprite_offsets.size() == 6 else 0
+	_sprite_ok = _sprite_stride > 0 and _sprite_offsets.size() == 6
+	return _sprite_layout
+
+
+## ---------- the sprite batch -------------------------------------------------
+
+
+## Build the sprite batch: one multimesh over the whole atlas, an instance per soldier, the
+## frame chosen per instance in custom data and the flip carried by a mirrored UV rect. Called
+## from [method build]; does nothing when the art is absent or the switch is off, and the field
+## then draws exactly what it drew before the sprites existed.
+func _build_sprite_batch(capacity: int) -> void:
+	if not sprites_enabled:
+		return
+	if art == null:
+		art = UnitArt.load_if_present()
+	if art == null or not art.has_character(UnitArt.CHARACTER_PLAYER) \
+			or not art.has_character(UnitArt.CHARACTER_ENEMY):
+		art = null
+		return
+	var shader := load(UnitArt.SHADER_PATH) as Shader
+	if shader == null:
+		art = null
+		return
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	_sprites_node = MultiMeshInstance2D.new()
+	_sprites_node.texture = art.texture()
+	# Pixel art: one texel stays one texel. The disc batch beside it is antialiased and wants
+	# the linear filter; a sprite with a hard pixel edge does not.
+	_sprites_node.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_sprites_node.material = material
+	add_child(_sprites_node)
+	_sprites = UnitArt.build_batch(art.texture(), capacity)
+	_sprites_node.multimesh = _sprites
+	_rebuild_sprite_tables()
+	_reset_animation_state(capacity)
+
+
+## The animation clock, per character: how many ticks a frame of each animation is held for at
+## this battle's rate, how many frames there are, and how long the hurt and attack poses last.
+## All of it comes from the atlas JSON via [method UnitArt.renderer_data], and all of it is
+## precomputed here because [method _write_sprite] runs once per soldier per tick and may not
+## walk a dictionary: an index by side picks a table, and the tables are typed arrays.
+func _rebuild_sprite_tables() -> void:
+	_side_ticks = []
+	_side_frames = []
+	_side_uv = []
+	_side_uv_stride = PackedInt32Array()
+	_side_common = []
+	if art == null:
+		return
+	# Player first: index 0 is the player's side in every side-indexed table here.
+	for key in [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY]:
+		if not art.has_character(key):
+			return
+		var data := art.renderer_data(key, anim_rate)
+		_side_ticks.append(data["ticks"])
+		_side_frames.append(data["frames"])
+		_side_uv.append(data["uv"])
+		_side_common.append(data["common"])
+		_side_uv_stride.append(int(data["uv_stride"]))
+
+
+## Per-unit animation state, sized for [param capacity] id-addressed slots and reset to the
+## "has never happened" stamps.
+func _reset_animation_state(capacity: int) -> void:
+	_anim_last_position.resize(capacity)
+	_anim_last_position.fill(Vector2.ZERO)
+	_anim_last_cooldown.resize(capacity)
+	_anim_last_cooldown.fill(-1.0)
+	_anim_strike_tick.resize(capacity)
+	_anim_strike_tick.fill(UnitArt.NEVER)
+	_anim_hurt_tick.resize(capacity)
+	_anim_hurt_tick.fill(UnitArt.NEVER)
+	_anim_last_attacked.resize(capacity)
+	_anim_last_attacked.fill(-1)
+	_anim_died_tick.resize(capacity)
+	_anim_died_tick.fill(-1)
+	_anim_seen.resize(capacity)
+	_anim_seen.fill(0)
+
+
+## Whether the sprite batch is drawing the army. False means the discs are - which is what a
+## run without the art, without the switch, or with an unreadable buffer produces, and what the
+## battle logs.
+func has_sprites() -> bool:
+	return _sprite_ok
+
+
+## The bar lift this field is drawing with: the sprite frames are taller than the discs, and
+## the bar has to clear a raised sword or it is drawn across the soldier's head.
+func _bar_lift() -> float:
+	return SPRITE_BAR_LIFT if _sprite_ok else BAR_LIFT
+
+
+## One soldier's sprite: his animation and frame chosen from his own state, written into the
+## packed buffer at [param index] as one instance. Nothing else about him changes.
+func _write_sprite(index: int, unit: BattleUnit, position: Vector2, alive: bool, tick: int) -> void:
+	var id := unit.id
+	var known := id >= 0 and id < _capacity
+	var moved := false
+	if known:
+		# First sighting is not a step: the army is deployed standing still, and a walk cycle
+		# at the deployment would be the renderer claiming motion the simulation never made.
+		moved = _anim_seen[id] == 1 \
+			and position.distance_squared_to(_anim_last_position[id]) > UnitArt.MOVE_EPSILON
+		_anim_seen[id] = 1
+		_anim_last_position[id] = position
+		# A cooldown that jumped between packs is the blow landing: it is the only trace a
+		# strike leaves on the unit itself.
+		if unit.cooldown_left > _anim_last_cooldown[id] + STRIKE_COOLDOWN_JUMP:
+			_anim_strike_tick[id] = tick
+		_anim_last_cooldown[id] = unit.cooldown_left
+		if unit.last_attacked_tick > _anim_last_attacked[id]:
+			_anim_last_attacked[id] = unit.last_attacked_tick
+			_anim_hurt_tick[id] = tick
+		if not alive and _anim_died_tick[id] < 0:
+			_anim_died_tick[id] = tick
+	var hurt_age := UnitArt.NEVER
+	var strike_age := UnitArt.NEVER
+	var death_age := 0
+	if known:
+		hurt_age = tick - _anim_hurt_tick[id]
+		strike_age = tick - _anim_strike_tick[id]
+		if _anim_died_tick[id] >= 0:
+			death_age = tick - _anim_died_tick[id]
+	var side := 0 if unit.side == BattleContext.SIDE_PLAYER else 1
+	if side >= _side_common.size():
+		return
+	var common: PackedFloat32Array = _side_common[side]
+	var ticks: PackedInt32Array = _side_ticks[side]
+	var counts: PackedInt32Array = _side_frames[side]
+	var uv_table: PackedVector4Array = _side_uv[side]
+	var uv_stride := _side_uv_stride[side]
+	var anim := UnitArt.plan(alive, moved, hurt_age, strike_age, int(common[5]), int(common[6]))
+	# The phase that desynchronises a rank applies to the loops; a blow, a wound and a death
+	# start at their first frame because the soldier just lived them.
+	var into := tick + id * UnitArt.PHASE_STRIDE
+	if anim == UnitArt.DEATH:
+		into = maxi(0, death_age)
+	elif anim == UnitArt.HURT:
+		into = maxi(0, hurt_age)
+	elif anim == UnitArt.ATTACK:
+		into = maxi(0, strike_age)
+	var cell := Vector2(common[0], common[1])
+	var unit_scale := common[4]
+	var origin := UnitArt.origin(
+		position + Vector2(0.0, FOOT_LIFT), cell, Vector2(common[2], common[3]), unit_scale)
+	var custom := UnitArt.custom_from(
+		uv_table[anim * uv_stride + UnitArt.frame(anim, into, ticks[anim], counts[anim])],
+		unit.facing.x < 0.0)
+	var colour := Color(1.0, 1.0, 1.0, 1.0)
+	if not alive:
+		colour = colour.darkened(FALLEN_DARKEN)
+	_write_sprite_instance(index, origin, cell * unit_scale, colour, custom)
+
+
+## One sprite instance written into the packed buffer, at the offsets the probe measured.
+func _write_sprite_instance(index: int, origin: Vector2, size: Vector2, colour: Color, custom: Vector4) -> void:
+	var base := index * _sprite_stride
+	_packed_sprites[base + _sprite_offsets[0]] = size.x
+	_packed_sprites[base + _sprite_offsets[1]] = size.y
+	_packed_sprites[base + _sprite_offsets[2]] = origin.x
+	_packed_sprites[base + _sprite_offsets[3]] = origin.y
+	_packed_sprites[base + _sprite_offsets[4]] = colour.r
+	_packed_sprites[base + _sprite_offsets[4] + 1] = colour.g
+	_packed_sprites[base + _sprite_offsets[4] + 2] = colour.b
+	_packed_sprites[base + _sprite_offsets[4] + 3] = colour.a
+	_packed_sprites[base + _sprite_offsets[5]] = custom.x
+	_packed_sprites[base + _sprite_offsets[5] + 1] = custom.y
+	_packed_sprites[base + _sprite_offsets[5] + 2] = custom.z
+	_packed_sprites[base + _sprite_offsets[5] + 3] = custom.w

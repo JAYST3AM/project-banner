@@ -6,7 +6,8 @@ What is actually playable and verified **right now**.
 the pace and the eta reading the drawn road and the priced grid left to price only the route (D-124).
 **Engine:** Godot 4.7.2-stable
 **Test status:** Step 8's suites are green - `test_roads` 74/0 (new) and `test_world_map` 116/0 -
-plus `test_core_services` 83/0 with its clock read from the config. The rest of the tree is red
+plus `test_core_services` 83/0 with its clock read from the config, and the new
+`test_unit_sprites` 143/0 (D-142). The rest of the tree is red
 from the 2026-09-19 revert and its fallout: 30 suites, 5,884 assertions, 41 failures, 5 BROKEN -
 and every one of those reproduces at the parent commit, verified suite by suite with the Step 8
 work stashed. See **Known red**, below. The two-process restart check has not been re-run since
@@ -26,6 +27,31 @@ scaling](#step-75---formation-battlefield-focus-scaling), [Step 7.6 - automatic 
 cost scaling](#step-76---automatic-target-search-cost-scaling) and [Step 7.7 - native spatial
 query feasibility spike](#step-77---native-spatial-query-feasibility-spike) and [Step 7.8 -
 separation-pass optimisation](#step-78---separation-pass-optimisation) below.
+
+---
+
+## Unit sprites in the battle (2026-09-19, D-142)
+
+The soldiers are characters now. The free Tiny RPG Character Asset Pack 01 v2.0 (Zerie) supplies
+a soldier and an orc - idle, walk, attack, hurt, death - and both battle renderers draw them:
+`SoldierField` in the canvas battle and `gpu_crowd` in the compute field, which is the one the
+game actually plays (the world map opens `battle_field`).
+
+- **Art**: `assets/art_source/units/tiny_rpg/` (git-ignored on purpose - the licence allows
+  commercial use but forbids re-upload, and this repo is public). Rebuild with
+  `python tools/build_unit_atlas.py` then `--import`. The game runs without it: no atlas means
+  the discs, exactly as before, and `PB_UNIT_SPRITES=off` forces that path in the same build.
+- **Shared maths**: `scripts/battle/unit_art.gd` (frame plan, placement, the precomputed
+  per-side tables) + `shaders/battle/unit_sprite.gdshader` (frame rect from instance custom
+  data). Verified in a windowed run of both renderers; `test_unit_sprites` (new) pins the
+  arithmetic and the tables, 143/0.
+- **The live game had no battles to show it in** (D-143): a generated world's bandit spawns all
+  failed because the spawn file anchors them to authored town names, so `--autoengage` was
+  walking the party onto a wagon. Both fixed; seed 2026 now spawns 3 bands and a scripted run
+  reaches `[Encounter] battle ... player (6) vs enemy (5)` -> `scene -> battle_field`.
+- Measured: the per-soldier sprite write was dictionary-bound at first (7.5 us a soldier,
+  20.6 ms a pack at 2,000) and is precomputed-table-bound now; a windowed re-measure is pending
+  the machine being free of other GPU work.
 
 ---
 

@@ -47,6 +47,9 @@ enum Stage { OPENING, APPROACH, CONTACT, MELEE, ATTRITION, RESULT, DONE }
 var _per_side := 300
 var _ticks_per_frame := 2
 var _max_ticks := 100000
+## A frame rate cap for this run, 0 for uncapped. A benchmark wants the ceiling off; a
+## verification run on the owner's machine wants it at his panel's rate.
+var _max_fps := 0
 var _seed := 780780
 var _shots := true
 var _overlay_enabled := true
@@ -136,9 +139,10 @@ var _last_heartbeat := -1
 
 func _ready() -> void:
 	_parse_args()
-	# Uncapped and unsynchronised: a vsynced frame time is the monitor's, not the game's,
-	# and this run exists to put a number on what the game costs to draw.
-	Engine.max_fps = 0
+	# Uncapped and unsynchronised by default: a vsynced frame time is the monitor's, not the
+	# game's, and this run exists to put a number on what the game costs to draw.
+	# `--max-fps=` caps it, for the runs on the owner's machine that must not spin his GPU.
+	Engine.max_fps = _max_fps
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	DisplayServer.window_set_size(WINDOW_SIZE)
 	get_window().size = WINDOW_SIZE
@@ -175,6 +179,8 @@ func _parse_args() -> void:
 			_probe_every = maxi(0, int(arg.substr(14)))
 		elif arg.begins_with("--max-ticks="):
 			_max_ticks = maxi(1, int(arg.substr(12)))
+		elif arg.begins_with("--max-fps="):
+			_max_fps = maxi(0, int(arg.substr(10)))
 		elif arg.begins_with("--units="):
 			_unit_type = arg.substr(8)
 		elif arg.begins_with("--enemy-units="):

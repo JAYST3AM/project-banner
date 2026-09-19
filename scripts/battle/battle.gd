@@ -144,7 +144,7 @@ func _attach_soldier_field() -> SoldierField:
 		DebugLogger.error(
 			"render: unknown PB_RENDER_BACKEND '%s' - using the canvas path" % requested, "Battle")
 		return null
-	var field := SoldierField.attach(self, _view, _simulator)
+	var field := SoldierField.attach(self, _view, _simulator, _clock.rate())
 	if field == null or not field.has_usable_buffer():
 		if field != null:
 			field.queue_free()
@@ -155,6 +155,16 @@ func _attach_soldier_field() -> SoldierField:
 	DebugLogger.info("render: instanced field for %d soldiers - stride %d, origin %d/%d, colour %d" % [
 		_simulator.units.size(), int(layout.get("stride", 0)), int(layout.get("origin_x", -1)),
 		int(layout.get("origin_y", -1)), int(layout.get("color", -1))], "Battle")
+	# Whether the soldiers are characters or discs is the first thing to check on any
+	# rendering report, so the run says which army it drew rather than leaving the reader to
+	# infer it from the picture.
+	if field.has_sprites():
+		var art: UnitArt = field.art
+		DebugLogger.info("render: unit sprites on - atlas %dx%d, %.3f units a pixel, %d characters" % [
+			int(art.atlas_size().x), int(art.atlas_size().y), art.units_per_pixel(),
+			art.characters().size()], "Battle")
+	else:
+		DebugLogger.info("render: unit sprites off - the army is drawn as discs", "Battle")
 	# The deployed army is drawn before the first tick: [method SoldierField.attach] packs once
 	# so the field does not wait for a frame the battle happens to be running in.
 	var detail := _camera.zoom.x >= _detail_zoom

@@ -533,6 +533,58 @@ var grid := Vector2i(0, 0)
 var mm: MultiMesh
 var instances := PackedFloat32Array()
 
+## ---------- the unit sprites --------------------------------------------------
+##
+## The same Tiny RPG atlas and the same shader the canvas battle's [SoldierField] draws with:
+## one multimesh over the whole atlas, the frame chosen per soldier in instance custom data,
+## the flip carried by a mirrored UV. What this renderer can see is smaller than the canvas
+## battle's - the readback carries a man's position, his hit points and whether he is standing,
+## and nothing else - so the animations here are inferred from those: a man who moved since the
+## last pack walks, a man whose hit points fell was struck, a man whose remembered opponent lost
+## hit points this tick is swinging, and a man who fell holds his last frame. A strike stamp in
+## the readback would make the swing exact instead of inferred; see the note in [method _pack].
+##
+## Sprites are drawn only when the art is on this machine and the batch's buffer layout - custom
+## data included - was measured as one the writer understands; otherwise the discs are the army,
+## exactly as they were. [code]PB_UNIT_SPRITES=off[/code] forces that older picture.
+var draw_sprites: bool = OS.get_environment("PB_UNIT_SPRITES") != "off"
+## How far above the picture point his frame's anchor - the body's centre column on the cell's
+## bottom edge - is drawn, in picture units. The disc's radius here is [constant DISC_RADIUS],
+## so this puts his feet near its lower half.
+const SPRITE_FOOT_LIFT := 0.85
+## The bar lift used while the sprites are drawn: clear of a raised sword, or the bar is drawn
+## across the soldier's head. (The discs only needed [constant BAR_LIFT].)
+const SPRITE_BAR_LIFT := 2.4
+## The tint a fallen soldier's frame is drawn with: the disc goes [constant COLOR_FALLEN], and
+## the sprite has to darken with it or a corpse is the brightest thing on the field.
+const SPRITE_FALLEN_TINT := Color(0.45, 0.45, 0.45, 1.0)
+
+var _art: UnitArt = null
+var _sprites_node: MultiMeshInstance2D = null
+var _sprites: MultiMesh = null
+var _sprite_buffer := PackedFloat32Array()
+var _sprite_offsets := PackedInt32Array()
+var _sprite_stride := 0
+var _sprite_ok := false
+## The precomputed per-side tables [method _write_sprite] reads - ticks a frame is held for, frame
+## counts, every frame's UV rectangle, that table's stride, and one typed block of scalars (cell,
+## anchor, units a pixel, the hurt and attack window lengths). Index 0 is the player's side.
+var _side_ticks: Array = []
+var _side_frames: Array = []
+var _side_uv: Array = []
+var _side_common: Array = []
+var _side_uv_stride: PackedInt32Array = PackedInt32Array()
+## Per-man animation state, indexed like the sim's own arrays: where he stood and what he and
+## his opponent read at the last pack, and when he was first seen hurt, swinging and dying.
+var _anim_last_position := PackedVector2Array()
+var _anim_last_hp := PackedFloat32Array()
+var _anim_target_hp := PackedFloat32Array()
+var _anim_hurt_tick := PackedInt32Array()
+var _anim_strike_tick := PackedInt32Array()
+var _anim_died_tick := PackedInt32Array()
+var _anim_seen := PackedByteArray()
+var _anim_flip := PackedByteArray()
+
 var _tick := 0
 var _tick_usec := 0
 var _readback_usec := 0
@@ -2095,7 +2147,7 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 			# the profile mode that exists to measure what they cost - nothing else changes, and
 			# the count of bars says so, so a run cannot be mistaken for a battle without bars.
 			if draw_bars:
-				var lift := picture + Vector2(-BAR_WIDTH * 0.5, -DISC_RADIUS - BAR_LIFT)
+				var lift := picture + Vector2(-BAR_WIDTH * 0.5, -DISC_RADIUS - _bar_lift())
 				_write_bar(bars, lift, Vector2(BAR_WIDTH, BAR_HEIGHT), Color(0.05, 0.06, 0.07, 0.85))
 				bars += 1
 				var ratio := clampf(meta[i * 4 + 0] / hp_max, 0.0, 1.0)
@@ -2107,10 +2159,22 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 		instances[base + AT_COLOR + 1] = colour.g
 		instances[base + AT_COLOR + 2] = colour.b
 		instances[base + AT_COLOR + 3] = 1.0
+		# And the same man as a frame of the atlas, when there is one to draw. The sprite batch
+		# is written here, in the same walk of the army, so the two pictures cannot disagree
+		# about who is standing where.
+		if _sprite_ok:
+			var target_hp := -1.0
+			if target >= 0 and target < agents:
+				target_hp = meta[target * 4 + 0]
+			_write_sprite(i, position, picture, int(meta[i * 4 + 1]), meta[i * 4 + 0],
+				meta[i * 4 + 2] < 0.5, target, target_hp)
 	_loop_usec = Time.get_ticks_usec() - loop_started
 	var submit_started := Time.get_ticks_usec()
 	_bars.buffer = _bar_buffer
 	_bars.visible_instance_count = bars
+	if _sprite_ok:
+		_sprites.buffer = _sprite_buffer
+		_sprites.visible_instance_count = agents
 	_bars_usec = Time.get_ticks_usec() - submit_started
 	if not _bars_reported:
 		_bars_reported = true
@@ -2157,6 +2221,7 @@ func _build_view() -> void:
 		instances[base + AT_COLOR + 3] = 1.0
 
 	_build_bars()
+	_build_sprites()
 
 	var camera := Camera2D.new()
 	add_child(camera)
@@ -2193,6 +2258,181 @@ func _build_bars() -> void:
 	_bars.visible_instance_count = 0
 	node.multimesh = _bars
 	_bar_buffer.resize(agents * 2 * STRIDE)
+
+
+## The sprite batch: the same atlas, shader and per-instance frame rectangle the canvas battle
+## draws its soldiers with, over the discs and under the bars. A no-op when the art is absent or
+## the switch is off, and the picture then keeps every soldier a disc.
+func _build_sprites() -> void:
+	if not draw_sprites:
+		return
+	_art = UnitArt.load_if_present()
+	if _art == null or not _art.has_character(UnitArt.CHARACTER_PLAYER) \
+			or not _art.has_character(UnitArt.CHARACTER_ENEMY):
+		_art = null
+		return
+	var shader := load(UnitArt.SHADER_PATH) as Shader
+	if shader == null:
+		_art = null
+		return
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	_sprites_node = MultiMeshInstance2D.new()
+	_sprites_node.texture = _art.texture()
+	# Pixel art: one texel stays one texel, as on the canvas battle's field.
+	_sprites_node.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_sprites_node.material = material
+	_sprites_node.z_index = 1
+	add_child(_sprites_node)
+	_sprites = UnitArt.build_batch(_art.texture(), agents)
+	_sprites_node.multimesh = _sprites
+	# Where the frame rectangle lives inside the buffer is measured, never assumed - a different
+	# engine layout means discs, not soldiers drawn at each other's coordinates.
+	var layout := UnitArt.measure_layout(_sprites, true)
+	_sprite_offsets = UnitArt.offsets_from(layout)
+	_sprite_stride = int(layout.get("stride", 0)) if _sprite_offsets.size() == 6 else 0
+	_sprite_ok = _sprite_stride > 0 and _sprite_offsets.size() == 6
+	if not _sprite_ok:
+		_sprites_node.queue_free()
+		_sprites_node = null
+		_sprites = null
+		_art = null
+		DebugLogger.info("gpu crowd: unit sprites off (the layout could not be read back)",
+			"GpuCrowd")
+		return
+	# Precomputed per side, because [method _write_sprite] runs once per soldier per pack and may
+	# not walk a dictionary: index 0 is the player's side, and every table is a typed array.
+	_side_ticks = []
+	_side_frames = []
+	_side_uv = []
+	_side_common = []
+	_side_uv_stride = PackedInt32Array()
+	for key in [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY]:
+		var data := _art.renderer_data(key, 1.0 / maxf(DT, 0.001))
+		_side_ticks.append(data["ticks"])
+		_side_frames.append(data["frames"])
+		_side_uv.append(data["uv"])
+		_side_common.append(data["common"])
+		_side_uv_stride.append(int(data["uv_stride"]))
+	_reset_animation_state()
+	_sprite_buffer.resize(agents * _sprite_stride)
+	DebugLogger.info("gpu crowd: unit sprites on - atlas %dx%d, %d soldiers" % [
+		int(_art.atlas_size().x), int(_art.atlas_size().y), agents], "GpuCrowd")
+
+
+## The per-man animation state, sized for the army and stamped "this has never happened".
+func _reset_animation_state() -> void:
+	_anim_last_position.resize(agents)
+	_anim_last_position.fill(Vector2.ZERO)
+	_anim_last_hp.resize(agents)
+	_anim_last_hp.fill(-1.0)
+	_anim_target_hp.resize(agents)
+	_anim_target_hp.fill(-1.0)
+	_anim_hurt_tick.resize(agents)
+	_anim_hurt_tick.fill(UnitArt.NEVER)
+	_anim_strike_tick.resize(agents)
+	_anim_strike_tick.fill(UnitArt.NEVER)
+	_anim_died_tick.resize(agents)
+	_anim_died_tick.fill(-1)
+	_anim_seen.resize(agents)
+	_anim_seen.fill(0)
+	_anim_flip.resize(agents)
+	_anim_flip.fill(0)
+
+
+## The bar lift this picture is drawn with: the sprite frames are taller than the discs, and a
+## bar drawn at the disc's lift would be drawn across the soldier's head.
+func _bar_lift() -> float:
+	return SPRITE_BAR_LIFT if _sprite_ok else BAR_LIFT
+
+
+## One man's frame, written into the sprite buffer at [param i]. Everything it is given is what
+## the readback carries: where he stands in the world and in the picture, his side, his hit
+## points, whether he is standing, and his remembered opponent's hit points.
+##
+## The animation is inferred from those - the simulation's blows land inside the shader and it
+## reads back no "who struck" stamp - so the swing belongs to the men whose opponent's hit
+## points fell this tick, and the wound to the men whose own fell. A strike stamp in the state or
+## meta readback would make both exact; until then this is the closest the picture can honestly
+## get, and the walk, the death and the idle need no inference at all.
+func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
+		hp: float, alive: bool, target: int, target_hp: float) -> void:
+	if side >= _side_common.size():
+		return
+	var common: PackedFloat32Array = _side_common[side]
+	var moved := false
+	# First sighting is not a step: the army is deployed standing still, and a walk cycle at the
+	# deployment would be the picture claiming motion the simulation never made.
+	if _anim_seen[i] == 1:
+		var delta := position - _anim_last_position[i]
+		moved = delta.length_squared() > UnitArt.MOVE_EPSILON
+		if absf(delta.x) > 0.01:
+			# The readback carries no facing, so which way he is looking is which way he walked.
+			_anim_flip[i] = 1 if delta.x < 0.0 else 0
+	else:
+		_anim_seen[i] = 1
+	_anim_last_position[i] = position
+	# A blow that fell on him: his own hit points read lower than they did at the last pack.
+	if _anim_last_hp[i] >= 0.0 and hp < _anim_last_hp[i] - 0.001:
+		_anim_hurt_tick[i] = _tick
+	_anim_last_hp[i] = hp
+	# A blow that landed from him: his remembered opponent's hit points fell this tick. Several
+	# men engaging one opponent will all swing, which is what a press into one man looks like.
+	if target >= 0 and target < agents and target_hp >= 0.0 and _anim_target_hp[i] >= 0.0 \
+			and target_hp < _anim_target_hp[i] - 0.001:
+		_anim_strike_tick[i] = _tick
+	_anim_target_hp[i] = target_hp
+	if not alive and _anim_died_tick[i] < 0:
+		_anim_died_tick[i] = _tick
+	var ticks: PackedInt32Array = _side_ticks[side]
+	var counts: PackedInt32Array = _side_frames[side]
+	var uv_table: PackedVector4Array = _side_uv[side]
+	var uv_stride := _side_uv_stride[side]
+	var hurt_age := _tick - _anim_hurt_tick[i]
+	var strike_age := _tick - _anim_strike_tick[i]
+	var death_age := 0
+	if _anim_died_tick[i] >= 0:
+		death_age = _tick - _anim_died_tick[i]
+	var anim := UnitArt.plan(alive, moved, hurt_age, strike_age, int(common[5]), int(common[6]))
+	# The phase that desynchronises a rank belongs to the loops; a blow, a wound and a death
+	# start at their first frame because the soldier just lived them.
+	var into := _tick + i * UnitArt.PHASE_STRIDE
+	if anim == UnitArt.DEATH:
+		into = maxi(0, death_age)
+	elif anim == UnitArt.HURT:
+		into = maxi(0, hurt_age)
+	elif anim == UnitArt.ATTACK:
+		into = maxi(0, strike_age)
+	var cell := Vector2(common[0], common[1])
+	var unit_scale := common[4]
+	var origin := UnitArt.origin(
+		picture + Vector2(0.0, SPRITE_FOOT_LIFT),
+		cell, Vector2(common[2], common[3]), unit_scale)
+	var custom := UnitArt.custom_from(
+		uv_table[anim * uv_stride + UnitArt.frame(anim, into, ticks[anim], counts[anim])],
+		_anim_flip[i] == 1)
+	var colour := Color(1.0, 1.0, 1.0, 1.0)
+	if not alive:
+		colour = SPRITE_FALLEN_TINT
+	_write_sprite_instance(i, origin, cell * unit_scale, colour, custom)
+
+
+## One sprite instance, written at the offsets the probe measured.
+func _write_sprite_instance(index: int, origin: Vector2, size: Vector2,
+		colour: Color, custom: Vector4) -> void:
+	var base := index * _sprite_stride
+	_sprite_buffer[base + _sprite_offsets[0]] = size.x
+	_sprite_buffer[base + _sprite_offsets[1]] = size.y
+	_sprite_buffer[base + _sprite_offsets[2]] = origin.x
+	_sprite_buffer[base + _sprite_offsets[3]] = origin.y
+	_sprite_buffer[base + _sprite_offsets[4]] = colour.r
+	_sprite_buffer[base + _sprite_offsets[4] + 1] = colour.g
+	_sprite_buffer[base + _sprite_offsets[4] + 2] = colour.b
+	_sprite_buffer[base + _sprite_offsets[4] + 3] = colour.a
+	_sprite_buffer[base + _sprite_offsets[5]] = custom.x
+	_sprite_buffer[base + _sprite_offsets[5] + 1] = custom.y
+	_sprite_buffer[base + _sprite_offsets[5] + 2] = custom.z
+	_sprite_buffer[base + _sprite_offsets[5] + 3] = custom.w
 
 
 ## One box a body, drawn the way the battle view's formation debug draws it: the ground the
