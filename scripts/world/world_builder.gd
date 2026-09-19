@@ -110,7 +110,11 @@ func _build_procedural() -> void:
 	var sites := WorldSites.build(seed_value)
 	var started := Time.get_ticks_usec()
 	stage = "Choosing where settlements stand"
-	var chosen := sites.settlement_sites(count, centre, radius)
+	# The survey is the longest single phase and the one that used to say nothing: it takes about a third
+	# of the build, so it owns the first third of the bar.
+	var chosen := sites.settlement_sites(count, centre, radius, func(part: float) -> void:
+		progress = part * 0.35
+	)
 	var elapsed := float(Time.get_ticks_usec() - started) / 1000.0
 
 	var largest: Settlement = null
@@ -118,7 +122,7 @@ func _build_procedural() -> void:
 	placing = chosen.size()
 	stage = "Placing settlements and writing their names"
 	for i in chosen.size():
-		progress = float(i) / float(maxi(1, chosen.size()))
+		progress = 0.35 + 0.35 * (float(i) / float(maxi(1, chosen.size())))
 		var site := chosen[i]
 		var position: Vector2 = site["position"]
 		var land := sites.world.sample(position)

@@ -106,13 +106,20 @@ func propose_in_chunk(chunk: Vector2i) -> Dictionary:
 
 ## The candidate sites within [param radius] of a place, best first. The world is scanned chunk by
 ## chunk out from the centre, so the cost is the ground looked at and not the size of the world.
-func sites_near(centre: Vector2, radius: float) -> Array[Dictionary]:
+func sites_near(centre: Vector2, radius: float, on_progress: Callable = Callable()) -> Array[Dictionary]:
 	var found: Array[Dictionary] = []
 	var chunk := WorldChunks.chunk_of(centre)
 	var reach := int(ceil(radius / WorldChunks.CHUNK_SIZE)) + 1
 	var chunks_across := int(WorldChunks.WORLD_SIZE / WorldChunks.CHUNK_SIZE)
+	# Reporting this scan is what stops the loading bar stalling: at a 2900-unit radius it walks some
+	# six hundred chunks, which took about two seconds with nothing on screen moving.
+	var seen := 0
+	var total := maxi(1, (reach * 2 + 1) * (reach * 2 + 1))
 	for dy in range(-reach, reach + 1):
 		for dx in range(-reach, reach + 1):
+			seen += 1
+			if on_progress.is_valid():
+				on_progress.call(float(seen) / float(total))
 			var c := Vector2i(
 				posmod(chunk.x + dx, chunks_across),
 				posmod(chunk.y + dy, chunks_across)
@@ -130,13 +137,13 @@ func sites_near(centre: Vector2, radius: float) -> Array[Dictionary]:
 
 ## A run of sites across the world, spaced apart, each with its kind and name. This is what a new
 ## campaign is built from.
-func settlement_sites(count: int, centre: Vector2, radius: float) -> Array[Dictionary]:
+func settlement_sites(count: int, centre: Vector2, radius: float, on_progress: Callable = Callable()) -> Array[Dictionary]:
 	var settled: Array[Dictionary] = []
 	# A wider and wider search until there are enough sites: a barren corner of a world must not mean
 	# an empty map, it must mean looking further.
 	var reach := radius
 	while settled.size() < count and reach <= WorldChunks.WORLD_SIZE * 0.5:
-		for candidate in sites_near(centre, reach):
+		for candidate in sites_near(centre, reach, on_progress):
 			var position: Vector2 = candidate["position"]
 			if _too_close(position, kind_for(candidate), settled):
 				continue

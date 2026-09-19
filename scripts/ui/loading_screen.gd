@@ -28,6 +28,9 @@ const BAR_HEIGHT := 8.0
 var source: Object = null
 ## The last real number seen, so the bar can ease toward it without ever passing it.
 var _reported := 0.0
+## A figure pushed in from outside - the ground build reports this way, because it runs after the world
+## builder has finished with the source object. The bar takes whichever is further along.
+var _manual := -1.0
 
 var _logo: TextureRect
 var _status: Label
@@ -136,7 +139,9 @@ func _process(delta: float) -> void:
 		_logo.texture = _atlas[_frame]
 
 	var elapsed := Time.get_ticks_msec() / 1000.0 - _started
-	_clock.text = "%.1f s" % elapsed
+	# A percentage and the clock together: the owner asked for a figure he can trust, and the number the
+	# bar is drawn from is the same one printed, so it cannot disagree with itself.
+	_clock.text = "%d%%  ·  %.1f s" % [int(round(_reported * 100.0)), elapsed]
 
 	# The bar follows the builder's own count of settlements placed, eased so it moves smoothly between
 	# one and the next but never passes the last real figure. When the count is unavailable it falls
@@ -147,6 +152,8 @@ func _process(delta: float) -> void:
 	if target <= 0.0:
 		target = clampf(elapsed / 2.4, 0.0, 0.96)
 	_reported = maxf(_reported, target)
+	if _manual >= 0.0:
+		_reported = maxf(_reported, _manual)
 	var shown := _fill.size.x / BAR_WIDTH
 	# Ease at a rate that crosses the gap in about a fifth of a second: fast enough that the bar is
 	# never lagging behind a settlement, slow enough that ninety steps do not read as ninety jolts.
@@ -167,6 +174,11 @@ func _process(delta: float) -> void:
 
 
 ## Name what is happening. The builder cannot report progress, but it can be described.
+## A figure from something that is not the source object - the ground build, mainly.
+func set_progress(value: float) -> void:
+	_manual = maxf(_manual, clampf(value, 0.0, 1.0))
+
+
 ## Watch something that knows how far along it is.
 func watch(what: Object) -> void:
 	source = what

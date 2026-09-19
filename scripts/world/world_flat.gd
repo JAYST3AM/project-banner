@@ -14,13 +14,15 @@ const LOOK_STRENGTH := 0.75
 var _sprite: Sprite2D
 
 
-func setup(seed_value: int, land: Rect2, _config: GameConfig) -> void:
+func setup(seed_value: int, land: Rect2, _config: GameConfig, on_progress: Callable = Callable()) -> void:
 	var started := Time.get_ticks_msec()
 	var cols := int(ceil(land.size.x / FIELD_STEP)) + 1
 	var rows := int(ceil(land.size.y / FIELD_STEP)) + 1
 	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
 	var world := WorldChunks.build(seed_value)
 	for row in rows:
+		if on_progress.is_valid():
+			on_progress.call(float(row) / float(maxi(1, rows)))
 		for col in cols:
 			var point := land.position + Vector2(float(col), float(row)) * FIELD_STEP
 			var here: Dictionary = world.sample(point)

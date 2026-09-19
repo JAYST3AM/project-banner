@@ -15,6 +15,8 @@ var _state: CampaignState = null
 var _config: GameConfig = null
 var _travel: TravelService = null
 var _costs: TravelCosts = null
+## Kept until the ground is built, so the bar is painted until the world is whole.
+var _loader: LoadingScreen = null
 var _debug: DebugPanel = null
 var _overworld: OverworldService = null
 var _encounters: EncounterService = null
@@ -80,10 +82,12 @@ func _ready() -> void:
 	# and this function waits for it while the frames keep coming.
 	var builder := WorldBuilder.new(_state, _config)
 	if builder.needs_build():
-		var loader := LoadingScreen.new()
+		_loader = LoadingScreen.new()
+		var loader := _loader
 		add_child(loader)
 		loader.set_status("Generating the world")
 		loader.watch(builder)
+		loader.set_progress(0.02)
 		var thread := Thread.new()
 		thread.start(builder.build_if_needed)
 		while thread.is_alive():
@@ -91,7 +95,6 @@ func _ready() -> void:
 		thread.wait_to_finish()
 		loader.set_status("Laying the ground under it")
 		await get_tree().process_frame
-		loader.finish()
 	else:
 		builder.build_if_needed()
 
@@ -112,7 +115,13 @@ func _ready() -> void:
 		# rings and the labels, and the map looked like empty terrain with a working UI on top.
 		_terrain.z_index = -20
 		add_child(_terrain)
-		_terrain.setup(_state.campaign_seed, _view.land_rect(), _config)
+		# The ground reports row by row and owns the last third of the bar. It used to be built after the
+		# screen was dismissed, which is the second half of why the bar stalled: the terrain is two
+		# seconds of work nobody could see.
+		_terrain.setup(_state.campaign_seed, _view.land_rect(), _config, func(part: float) -> void:
+			if _loader != null:
+				_loader.set_progress(0.7 + 0.3 * part)
+		)
 		_view.ground_art = true
 	elif not _no_ground:
 		# No art, but a map the owner can still read: flat colours per terrain kind, from the same
