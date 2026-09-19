@@ -3488,3 +3488,30 @@ work (behind the bar, by design), and the per-frame redraw of the map view - the
 justify splitting it today. The battle renderer has its own bench (`render_bench.gd`) for its own
 milestone.
 
+
+## D-130 - the eta quotes at the route scale, and the causeway stays on the map
+
+**Context.** Two findings from a play session the owner ran himself (seed 2108518669). First: the
+opening road leg was QUOTED at 2.4 game hours and WALKED in 1.64 - the eta was pricing a road
+journey as open field in places, because D-126's text promised the eta kept the wide corridor while
+the code shipped it reading the pace's own drawn width (10 u), so its straight-line samples fell
+outside the curvy road. Second: "roads: 3 of 19 links cross water by bridge (widest 396 u)" - a
+396-unit lake crossing carrying a timber span, because no bow the shaper tries can dodge that much
+water on a link that long.
+
+**Decision.** `RoadNetwork.bonus_at(point, radius)` takes the width as a parameter: the pace asks at
+`pace_radius` (10 u, unchanged), the eta's `factor_at_point` asks at `road_radius` (48 u). The two
+yardsticks are asserted at once in the suite, forty units off the line - the walk reads the field
+there, the eta still reads the road. Measured on the same seed after the fix: the Crowwood leg
+quotes **1.6 h** against a 1.64 h walk, where the bug quoted 2.4.
+
+**The causeway.** The bow list grew (2.2x candidates as well as their mirrors) - it did not reduce
+the 396-unit span on this seed, and it will not: a lake too central for the bow reach is beyond
+what a bent bow can do. That crossing is drawn and walked as a real bridge, and the honest fix for
+the general case is road paths that FIND their way around water rather than bending - 
+pathfinding-shaped roads, a design step of its own, noted rather than smuggled in here.
+
+**Lesson kept.** The eta bug was invisible to every suite - the numbers it prints are self-consistent
+- and took a real play log comparing the QUOTE against the VERDICT to catch. When a play log lands,
+read it like a test report.
+

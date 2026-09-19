@@ -389,10 +389,20 @@ func _test_the_pace_follows_the_drawn_road() -> void:
 	approx(travel.factor_at_point(here + across * 6.0), network.bonus_of("road"), 0.0001,
 		"and inside the drawn width it still does")
 	check(network.pace_radius() < network.road_radius(),
-		"the pace counts the drawn width, not the wider wear shoulder")
-	var beyond := here + across * 40.0
+		"the pace and the eta are different questions: drawn width, and route scale")
+	# The two yardsticks measured at once, forty units off the line: the walk is on open ground
+	# there, while the eta - sampling a straight line that cannot see the curve underfoot - still
+	# prices at the route's own scale. Shipping the eta at the pace's drawn width quoted road
+	# journeys 1.5x long (D-130: 2.4 hours for a leg that walked in 1.64).
+	var beside := here + across * 40.0
+	state.world_position = beside
+	approx(travel.ground_factor(), travel._ground_factor_at(beside), 0.0001,
+		"the pace at forty units off reads the field")
+	approx(travel.factor_at_point(beside), network.bonus_of("road"), 0.0001,
+		"while the eta still prices it at the route scale")
+	var beyond := here + across * 66.0
 	approx(travel.factor_at_point(beyond), travel._ground_factor_at(beyond), 0.0001,
-		"past the drawn width the open ground answers")
+		"and past the shoulder even the eta reads the field")
 	check(travel.factor_at_point(beyond) < network.bonus_of("road") - 0.001,
 		"which is slower than the road")
 

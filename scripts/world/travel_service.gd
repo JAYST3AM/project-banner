@@ -144,13 +144,15 @@ func distance_to(point: Vector2) -> float:
 	return state.world_position.distance_to(point)
 
 
-## The speed factor the ground gives at a point. The drawn roads answer first - the pace and the eta
-## both read the line the map draws, so an estimate lands where the walk will actually change speed
-## (D-124) - and the priced grid answers for the route's sake. Open ground falls to the raw field
-## either way.
+## The speed factor the ground gives at a point, for the eta's own sampling and anything else that
+## prices a line rather than a walk. The drawn roads answer at the ROUTE scale (the 48 u shoulder):
+## the eta samples a straight line, which cannot see the curve underfoot, and with the pace's own
+## drawn width a road journey was quoted as if it were walkable only along the line - 2.4 hours for
+## a 481-unit leg that walked in 1.64 (D-130). The walk's own pace is `ground_factor()`, which uses
+## the drawn width; this is deliberately the wider question.
 func factor_at_point(point: Vector2) -> float:
 	if roads != null:
-		var bonus := roads.bonus_at(point)
+		var bonus := roads.bonus_at(point, roads.road_radius())
 		if bonus > 0.0:
 			return bonus
 		return _ground_factor_at(point)

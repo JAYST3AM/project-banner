@@ -46,7 +46,9 @@ static func between(a: Vector2, b: Vector2, terrain: Object = null, water_height
 	var bend := bend_of(a, b)
 	if terrain == null:
 		return shape(a, b, bend)
-	var choices: Array[float] = [bend, -bend, bend * 1.6, -bend * 1.6, 0.0]
+	# Wider bows join the list as well as their mirror: a long link across a broad lake needs reach
+	# the canonical bend does not have (found live: a 396-unit causeway where no bow could dodge).
+	var choices: Array[float] = [bend, -bend, bend * 1.6, -bend * 1.6, bend * 2.2, -bend * 2.2, 0.0]
 	var best := PackedVector2Array()
 	var best_wet := INF
 	for candidate in choices:

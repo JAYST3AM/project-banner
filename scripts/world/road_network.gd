@@ -275,15 +275,17 @@ func on_road(point: Vector2) -> bool:
 ## corridor holds the point, or 0.0 on open ground. The line the map draws is the truth for the
 ## walk - the grid only ever prices the route - so the pace changes exactly at a road's visible
 ## edge, and a march crossing one gets a blip in its own footprint (D-124, D-126: the corridor is
-## the drawn width, not the wider wear shoulder).
-func bonus_at(point: Vector2) -> float:
+## the drawn width, not the wider wear shoulder). [param radius] overrides the width: the eta asks
+## at the route scale instead, because it samples a straight line that cannot see the curve
+## underfoot (D-130).
+func bonus_at(point: Vector2, radius := -1.0) -> float:
 	if state == null:
 		return 0.0
-	var radius := pace_radius()
+	var limit := pace_radius() if radius < 0.0 else radius
 	var best := 0.0
 	var links := mini(_paths.size(), state.roads.size())
 	for i in links:
-		if _distance_to_path(_paths[i], point) > radius:
+		if _distance_to_path(_paths[i], point) > limit:
 			continue
 		var raw: Variant = state.roads[i]
 		if typeof(raw) != TYPE_DICTIONARY:
