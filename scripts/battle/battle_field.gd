@@ -100,6 +100,10 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	_man_body.resize(agents)
 	_man_file.resize(agents)
 	_man_rank.resize(agents)
+	# Who shoots: the roster's own ranged flag, which is what the agent sim's per-man attack range
+	# already came from - this is the same fact told to the picture.
+	_man_ranged.resize(agents)
+	_man_ranged.fill(0)
 
 	for b in groups.size():
 		var group := groups[b]
@@ -140,6 +144,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 			_man_body[i] = b
 			_man_file[i] = member_index % files
 			_man_rank[i] = member_index / files
+			_man_ranged[i] = 1 if unit.ranged else 0
 
 
 func _front_to_back_group(left: Dictionary, right: Dictionary) -> bool:

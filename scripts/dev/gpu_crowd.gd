@@ -561,10 +561,33 @@ const SPRITE_BAR_MARGIN := 0.15
 ## How much a fallen soldier's frame is darkened: the same amount the canvas battle darkens a
 ## corpse by, so a body reads the same in both renderers.
 const SPRITE_FALLEN_DARKEN := 0.55
+## The arrows the picture flies for its ranged soldiers, drawn the way the canvas battle draws them
+## (D-110: screen furniture, sized in pixels at draw time): a shaft behind the head, the same
+## flight time, so a volley reads the same in both renderers. The compute simulation reads back no
+## "who struck whom", so a shot is inferred from the damage a ranged soldier has dealt since the
+## last pack - see [method _note_shot].
+const ARROW_THICKNESS_PIXELS := 2.0
+const COLOR_ARROW := Color("efe7cd")
+## How far above his picture point a shot leaves his hands.
+const ARROW_HAND_LIFT := 0.6
 
 var _art: UnitArt = null
 var _sprites_node: MultiMeshInstance2D = null
 var _sprites: MultiMesh = null
+## The arrows in the air, and the node that draws them: a pool of shafts above the men, in the
+## same picture space everything else is laid out in.
+var _arrows := BattleArrows.new()
+var _arrow_node: Node2D = null
+## How many arrows the node was last drawn with, so the frame the last one lands is redrawn too
+## (otherwise the landed shaft stays painted on the screen forever).
+var _arrow_drawn := 0
+## Per man: is he shooting (the campaign sets this from the roster's unit types; the probe's army is
+## all melee), and the damage tally he had dealt at the last pack - a rise in it is the only
+## evidence a shot leaves on the readback.
+var _man_ranged := PackedByteArray()
+var _dealt_seen := PackedInt32Array()
+## The first shot of a battle is reported once, so a run says whether the wiring fires.
+var _arrow_reported := false
 var _sprite_buffer := PackedFloat32Array()
 var _sprite_offsets := PackedInt32Array()
 var _sprite_stride := 0
@@ -1058,6 +1081,10 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	_man_body.resize(agents)
 	_man_file.resize(agents)
 	_man_rank.resize(agents)
+	# The probe's army is all melee: its stats carry the same reach for everybody, so nothing it
+	# deploys flies an arrow. The campaign's field fills this from the roster's unit types.
+	_man_ranged.resize(agents)
+	_man_ranged.fill(0)
 	for i in agents:
 		var side := 0 if i < per_side else 1
 		var within := i % per_side
@@ -1475,6 +1502,15 @@ func _process(delta: float) -> void:
 		_frame_delta = 0.0
 		_frames = 0
 	_update_camera(delta)
+	# The arrows fly on the frame's clock, not the simulation's: a shot is a tenth of a second of
+	# real time whatever the tick rate, and the last volley keeps flying while a finished battle
+	# is still on the screen - the frame the final one lands is redrawn too, or its shaft stays
+	# painted on the picture.
+	if _arrows.count() > 0 or _arrow_drawn > 0:
+		_arrows.advance(delta)
+		_arrow_drawn = _arrows.count()
+		if _arrow_node != null:
+			_arrow_node.queue_redraw()
 	if _shot_taken == 0 and _elapsed > shot_at:
 		_shot_taken = 1
 		_save_shot(_shot_taken)
@@ -2173,6 +2209,14 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 				target_hp = meta[target * 4 + 0]
 			_write_sprite(i, position, picture, int(meta[i * 4 + 1]), meta[i * 4 + 0],
 				meta[i * 4 + 2] < 0.5, target, target_hp)
+		# A ranged soldier whose dealt-damage tally rose this pack loosed a shot: the compute
+		# simulation reads back no "who struck whom", only what each man has dealt, so an arrow is
+		# what that looks like. The canvas battle gets the same picture from the simulator's own
+		# hit events ([method BattleView._launch_arrow]) - same look, same flight time. Outside
+		# the sprite batch on purpose: the shafts are drawn furniture and fly whether the art is
+		# on this machine or not.
+		if i < _man_ranged.size() and _man_ranged[i] == 1:
+			_note_shot(i, picture)
 	_loop_usec = Time.get_ticks_usec() - loop_started
 	var submit_started := Time.get_ticks_usec()
 	_bars.buffer = _bar_buffer
@@ -2227,6 +2271,7 @@ func _build_view() -> void:
 
 	_build_bars()
 	_build_sprites()
+	_build_arrows()
 
 	var camera := Camera2D.new()
 	add_child(camera)
@@ -2242,6 +2287,66 @@ func _build_view() -> void:
 	_camera_zoom = 1.0
 	_zoom_target = 1.0
 	_focus = field * 0.5
+
+
+## The arrow node: one plain Node2D whose draw signal paints the shafts, above the men and their
+## bars. The canvas battle draws its arrows the same way for the same reason - a handful of lines
+## is nothing a batch is worth.
+func _build_arrows() -> void:
+	_arrow_node = Node2D.new()
+	_arrow_node.z_index = 2
+	_arrow_node.draw.connect(_draw_arrows)
+	add_child(_arrow_node)
+	# Said out loud once, the way the sprite batch reports itself: whether this picture flies
+	# arrows at all, and how many of its men are the ones who shoot them.
+	var shooters := 0
+	for i in _man_ranged.size():
+		shooters += 1 if _man_ranged[i] == 1 else 0
+	DebugLogger.info("gpu crowd: arrows on - %d soldiers, %d of them ranged" % [agents, shooters],
+		"GpuCrowd")
+
+
+## One pack's worth of arrow bookkeeping for a ranged soldier: a rise in the damage he has dealt
+## since the last pack is a shot that landed this pack, and the arrow for it runs from him to the
+## man he is already shooting at. The first pack only records the tally - an army that takes the
+## field with damage already on the books must not volley on sight.
+func _note_shot(i: int, picture: Vector2) -> void:
+	if _dealt_seen.size() != agents:
+		_dealt_seen.resize(agents)
+		_dealt_seen.fill(-1)
+	var dealt := tally(i).y
+	var seen := _dealt_seen[i]
+	_dealt_seen[i] = dealt
+	if seen < 0 or dealt <= seen:
+		return
+	var target := _targets[i] if i < _targets.size() else -1
+	if target < 0 or target >= _man_picture.size():
+		return
+	# From a little above his hands, to the man he is shooting at: the flight is straight, and
+	# the pool's own head_at does the walking.
+	_arrows.spawn(picture + Vector2(0.0, -ARROW_HAND_LIFT), _man_picture[target])
+	_arrow_node.queue_redraw()
+	if not _arrow_reported:
+		# Said once, like the batches' own reports: the wiring from a damage rise to a shaft in the
+		# air, greppable out of a run rather than a lucky frame in a screenshot.
+		_arrow_reported = true
+		DebugLogger.info("gpu crowd: first arrow loosed - soldier %d at soldier %d on tick %d" % [
+			i, target, _tick], "GpuCrowd")
+
+
+## The shafts in the air: a short tail behind the head, thickness in screen pixels so a volley
+## still reads at any zoom (D-110). Drawn in picture space, which is where the men are.
+func _draw_arrows() -> void:
+	if _arrow_node == null:
+		return
+	var thickness := ARROW_THICKNESS_PIXELS / maxf(0.001, _picture_scale())
+	for i in _arrows.count():
+		var head := _arrows.head_at(i)
+		var travel := _arrows.to_at(i) - _arrows.from_at(i)
+		var tail := head
+		if travel.length_squared() > 0.0001:
+			tail = head - travel.normalized() * (thickness * 4.0)
+		_arrow_node.draw_line(tail, head, COLOR_ARROW, thickness)
 
 
 ## Health bars the way the battle view draws them: two instances a soldier, a dark background

@@ -45,6 +45,9 @@ bar's lift is derived from the `head` the atlas builder measures rather than han
   commercial use but forbids re-upload, and this repo is public). Rebuild with
   `python tools/build_unit_atlas.py` then `--import`. The game runs without it: no atlas means
   the discs, exactly as before, and `PB_UNIT_SPRITES=off` forces that path in the same build.
+- **Arrows**: the compute field flies them for ranged soldiers (D-147) - the same look and
+  flight as the canvas battle's, the shot inferred from a rise in the shooter's dealt-damage
+  tally. `BattleArrows` is the pool; `tests/test_battle_arrows.gd` pins it.
 - **Shared maths**: `scripts/battle/unit_art.gd` (frame plan, placement, the precomputed
   per-side tables) + `shaders/battle/unit_sprite.gdshader` (frame rect from instance custom
   data). Verified in a windowed run of both renderers; `test_unit_sprites` (new) pins the

@@ -4090,3 +4090,35 @@ and what the genre does.
 Pinned by the suite (the bar's bottom must sit above the head the atlas declares) and by the probe
 scene, which draws the pipeline's output beside the raw art. Both renderers verified windowed
 after the fix: upright, no discs, sides apart by tint.
+
+
+**D-147: the compute battlefield flies arrows for its archers.**
+
+Owner: "so there's some for him using the bow... you know what you have to wire up?"
+
+The facts first, because the answer decided the work. The agent simulation already gives every man
+his own attack range - the campaign feeds `unit.attack_range` into the per-agent stats, archers 9.0
+against melee 1.8-2.4 - so an archer in the live battle *does* shoot from behind the line. What was
+missing was the picture: [BattleView] (the canvas battle) flies arrows out of the simulator's own
+hit and miss events (D-110), and the compute field, which is the renderer the game actually plays,
+drew no arrow at all. There is also no bow *pose* to wire: the free pack's three attack strips are
+all sword (its Aseprite tags: Attack01/02/03), and the `Arrow01` sprite ships loose.
+
+- [b]BattleArrows[/b] (`scripts/battle/battle_arrows.gd`): the pool. A flight of 0.10 s, the canvas
+  battle's own [constant BattleView.ARROW_FLIGHT] (D-110: the damage number waits for the arrow), a
+  cap of 64 that drops the oldest rather than the newest - a missing shaft in a screen full of them
+  is invisible, a shot that never appears reads as a unit that stopped firing - and `head_at` for
+  the draw. Packed arrays, not dictionaries: it is a per-frame draw.
+- [b]The shot is inferred[/b], the way the swing already is: the readback carries no "who struck
+  whom", only the damage each man has dealt, so a rise in a ranged man's tally since the last pack
+  is a shot loosed at the man he is already shooting at ([method GpuCrowd._note_shot]). The flag is
+  the roster's own (`unit.ranged`), told to the picture by `battle_field` - the same fact the
+  per-man attack range already came from.
+- [b]Drawn the canvas battle's way[/b]: a shaft behind the head, thickness in screen pixels so a
+  volley reads at any zoom (D-110), above the men. The frame the last arrow lands is redrawn too,
+  or a landed shaft stays painted on the picture forever.
+
+Verified in a live campaign battle: 11 soldiers of which 1 ranged (Road Bandits carry an archer),
+and the run's one-shot report says the wiring fired - `first arrow loosed - soldier 10 at soldier 3
+on tick 135`. tests/test_battle_arrows.gd pins the pool (flight, retirement, the cap, clearing):
+16 assertions.
