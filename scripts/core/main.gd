@@ -8,6 +8,7 @@ extends Node2D
 const TITLE := "PROJECT BANNER"
 const SUBTITLE := "Development Environment Operational"
 const SPLASH_SECONDS := 1.1
+const SCREENSHOT_PROBE := preload("res://scripts/dev/screenshot_probe.gd")
 
 @onready var _title: Label = $UI/Title
 @onready var _subtitle: Label = $UI/Subtitle
@@ -29,6 +30,10 @@ func _ready() -> void:
 	if wait > 0.0:
 		await get_tree().create_timer(wait).timeout
 
+	# Before the branch, so a screenshot run gets its shot whether it starts a campaign or just
+	# sits on the menu. The probe lives on the tree root: this scene is about to be replaced.
+	_spawn_screenshot_probe()
+
 	var autostart := DevFlags.autostart_campaign()
 	if bool(autostart.get("enabled", false)):
 		DebugLogger.info("dev flag: autostarting a campaign", "Main")
@@ -37,6 +42,18 @@ func _ready() -> void:
 		return
 
 	SceneManager.change_scene("main_menu")
+
+
+## Dev-only: "--screenshot=<path>" saves the game's own pixels once the scene has arrived, with
+## "--screenshot-delay=<ms>" to wait and "--screenshot-quit" to close up after. The work is done by a
+## probe parented to the tree root, because this scene is replaced almost immediately.
+func _spawn_screenshot_probe() -> void:
+	if DevFlags.screenshot_path().is_empty():
+		return
+	var probe := Node.new()
+	probe.name = "ScreenshotProbe"
+	probe.set_script(SCREENSHOT_PROBE)
+	get_tree().root.add_child.call_deferred(probe)
 
 
 func _is_headless() -> bool:

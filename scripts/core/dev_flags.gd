@@ -38,6 +38,17 @@ const SETTINGS_PANEL_FLAG := "--settings-panel"
 ## Force a UI scale for one run: "--ui-scale=1.2". Wins over the saved file, because it is the more
 ## deliberate request, and it is how screenshots at other scales are taken.
 const UI_SCALE_PREFIX := "--ui-scale="
+## Save one PNG of the game's own window and (optionally) quit: "--screenshot=<path>", with
+## "--screenshot-delay=<ms>" and "--screenshot-quit". The game draws into its own viewport, so a
+## verification shot never depends on the window being on top of anything.
+const SCREENSHOT_PREFIX := "--screenshot="
+const SCREENSHOT_DELAY_PREFIX := "--screenshot-delay="
+const SCREENSHOT_QUIT_FLAG := "--screenshot-quit"
+## How long after boot a screenshot waits for the scene to finish arriving, when not told otherwise.
+const SCREENSHOT_DELAY_DEFAULT_MS := 2500
+## A dev run's own log file name: "--log-name=dev" writes user://logs/dev.log instead of the
+## player's session.log, so check-runs never rotate or clobber a live play session's log.
+const LOG_NAME_PREFIX := "--log-name="
 ## Run a scripted formation drill through the battle scene's real order methods.
 const AUTOFORMATIONS_FLAG := "--autoformations"
 const BATTLESPEED_PREFIX := "--battlespeed="
@@ -141,6 +152,35 @@ static func ui_scale() -> float:
 		if arg.begins_with(UI_SCALE_PREFIX):
 			return float(arg.substr(UI_SCALE_PREFIX.length()))
 	return 0.0
+
+
+## Where a run asked to save one screenshot of its own window, or "" when it did not.
+static func screenshot_path() -> String:
+	for arg in _user_args():
+		if arg.begins_with(SCREENSHOT_PREFIX):
+			return arg.substr(SCREENSHOT_PREFIX.length())
+	return ""
+
+
+## How long that screenshot should wait after boot, in milliseconds.
+static func screenshot_delay_ms() -> int:
+	for arg in _user_args():
+		if arg.begins_with(SCREENSHOT_DELAY_PREFIX):
+			return int(arg.substr(SCREENSHOT_DELAY_PREFIX.length()))
+	return SCREENSHOT_DELAY_DEFAULT_MS
+
+
+## Whether a run wants the game to quit once the screenshot is on disk.
+static func screenshot_quit() -> bool:
+	return _has_flag(SCREENSHOT_QUIT_FLAG)
+
+
+## The log file name a run asked for, or "" for the player's own session log.
+static func log_name() -> String:
+	for arg in _user_args():
+		if arg.begins_with(LOG_NAME_PREFIX):
+			return arg.substr(LOG_NAME_PREFIX.length())
+	return ""
 
 
 ## Accept the first encounter prompt automatically instead of waiting for a click.

@@ -22,6 +22,16 @@ var echo_to_stdout: bool = false
 ## game is running, without a console window and without redirecting stdout.
 const LOG_DIR := "user://logs"
 const LOG_FILE := "user://logs/session.log"
+
+
+## Where this run's log goes. A dev run can ask for its own file with "--log-name=<name>" - the
+## check-runs share the player's machine, and rotating the player's live session log out from under
+## their running game is exactly the interference this avoids.
+func _log_file() -> String:
+	var name := DevFlags.log_name()
+	if name.is_empty():
+		return LOG_FILE
+	return "user://logs/%s.log" % name
 ## Lines are held in memory and written in one go: a write per line is the thing that was slow.
 const FLUSH_EVERY_MS := 1000
 ## When the buffer grows past this without a flush, write it anyway so a crash cannot lose the story.
@@ -53,7 +63,8 @@ func _ready() -> void:
 	# which cost the owner a whole play session's evidence when a suite started beside his running
 	# game ("check the logs" and the log no longer held his play). Rotate instead, keeping exactly
 	# one previous session beside it, so "what did the last run do" is always answerable.
-	var absolute := ProjectSettings.globalize_path(LOG_FILE)
+	var file := _log_file()
+	var absolute := ProjectSettings.globalize_path(file)
 	if FileAccess.file_exists(absolute):
 		var previous := absolute.get_basename() + ".prev.log"
 		if FileAccess.file_exists(previous):
@@ -62,10 +73,10 @@ func _ready() -> void:
 	# Opened once and held: WRITE creates the file, and a handle kept for the session is both
 	# faster than an open per flush and immune to the mistake that made the first version write
 	# nothing - READ_WRITE does not create a file that is not there, and fails quietly.
-	_log_handle = FileAccess.open(LOG_FILE, FileAccess.WRITE)
+	_log_handle = FileAccess.open(file, FileAccess.WRITE)
 	# The session's file starts with a header, so a log found later says which run it is.
 	_pending.append("=== session %s ===" % Time.get_datetime_string_from_system())
-	_log_path = ProjectSettings.globalize_path(LOG_FILE)
+	_log_path = ProjectSettings.globalize_path(file)
 
 
 func _process(_delta: float) -> void:
