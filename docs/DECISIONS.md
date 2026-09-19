@@ -3623,3 +3623,11 @@ that could have caught it.
 **Habit, not just code.** Before starting any run or suite while the owner's session matters, copy
 `session.log` aside first: rotation protects one slot, it does not protect an investigation.
 
+**Follow-up - the debug furniture moved right and off.** The faction overlay and the debug panel
+used to sit top-left with the frame rate, all three stacked over the HUD's own status panel ("this
+ui looks like its overlapping"). The owner: "move the fps one and all that to the right of the
+screen and toggles on/off with f1 (should initially be toggled off)". The overlay anchors to the
+top-right (12 px in, growing leftward) and the debug panel hangs under it at y 58; F1 shows both as
+one thing, and both start hidden. Frame counting and the hitch warnings are independent of
+visibility - verified: a hidden run still logs `[WARN][Perf] hitch: 261.2 ms` through the load.
+

@@ -26,8 +26,11 @@ var _teleport_box: VBoxContainer = null
 func _init() -> void:
 	add_theme_stylebox_override("panel", UiTheme.panel_style(Color("151a24")))
 	custom_minimum_size = Vector2(286.0, 0.0)
-	set_anchors_preset(Control.PRESET_TOP_LEFT)
-	position = Vector2(12.0, 190.0)
+	# Right edge and out of the way: the owner wants the debug furniture on the right, under the
+	# frame-rate overlay, and gone until F1 asks for it.
+	set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	position = Vector2(-12.0, 58.0)
 	visible = false
 	_build()
 

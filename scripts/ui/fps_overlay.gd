@@ -1,10 +1,17 @@
 extends CanvasLayer
-## The frame rate, in the corner, on by default.
+## The frame rate, on the right, off until asked for.
 ##
-## Not a debug panel: the owner asks this machine for frames and wants to see them arriving, and a
-## number that only appears after finding a hotkey is a number nobody reads. It shows what the rate
-## is *against* as well as what it is, because "it is stuck at sixty" is a complaint about a ceiling
-## rather than about the machine, and the two look identical when all you can see is a rate.
+## Not a debug panel: the owner asks this machine for frames and wants to see them arriving - but he
+## wants them out of the HUD's way and gone until he looks: "move the fps one and all that to the
+## right of the screen and toggles on/off with f1 (should initially be toggled off)". F1 shows this
+## overlay and the debug panel together (see world_map's key handler).
+##
+## Counting never stops while it is hidden: the hitch warnings in the session log are the owner's
+## performance record and must not depend on anyone watching the corner.
+##
+## It shows what the rate is *against* as well as what it is, because "it is stuck at sixty" is a
+## complaint about a ceiling rather than about the machine, and the two look identical when all you
+## can see is a rate.
 ##
 ## The ceiling is read from the window, not from a project setting: this file claimed "vsync off"
 ## on a project with no such setting set, on the strength of the engine's frame cap alone, while the
@@ -42,14 +49,24 @@ func _ready() -> void:
 	layer = 100
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_log_frames = DevFlags.framelog()
+	add_to_group("perf_overlay")
 	_build()
+	# Off until F1: the owner wants the corner clear by default.
+	visible = false
+
+
+## Show or hide the overlay. Counting continues either way.
+func toggle() -> void:
+	visible = not visible
 
 
 func _build() -> void:
 	var panel := PanelContainer.new()
 	panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
-	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	panel.position = Vector2(12.0, 12.0)
+	# Right edge, growing leftward, because its width follows the text.
+	panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	panel.position = Vector2(-12.0, 12.0)
 	add_child(panel)
 	_label = UiTheme.label("", 13, UiTheme.TEXT)
 	panel.add_child(_label)

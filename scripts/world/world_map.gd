@@ -565,11 +565,22 @@ func _handle_right_click(world_point: Vector2) -> void:
 		_hud.set_hint("Already here.")
 
 
+## F1 shows the developer's furniture: the debug panel and the frame-rate overlay together, because
+## the owner asked for them as one thing - "move the fps one and all that to the right of the screen
+## and toggles on/off with f1 (should initially be toggled off)". Both start hidden; frame counting
+## and the hitch warnings in the log run regardless.
+func _toggle_perf_overlay() -> void:
+	for node in get_tree().get_nodes_in_group("perf_overlay"):
+		if node.has_method("toggle"):
+			node.call("toggle")
+
+
 func _handle_key(event: InputEventKey) -> void:
 	match event.keycode:
 		KEY_F1:
 			if _debug != null:
 				_debug.toggle()
+			_toggle_perf_overlay()
 		KEY_SPACE:
 			_state.clock.toggle_pause()
 			_hud.set_hint("Time %s." % _state.clock.speed_name().to_lower())
