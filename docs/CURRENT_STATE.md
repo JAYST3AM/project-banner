@@ -29,27 +29,39 @@ separation-pass optimisation](#step-78---separation-pass-optimisation) below.
 
 ---
 
-## Known red - the revert's fallout (all pre-existing)
+## Known red - the revert's fallout (mostly fixed)
 
-The 2026-09-19 revert that took the other session's sweep out of the tree also deleted
-`biome_catalog.gd`, `terrain_ground.gd`, `battlefield_decals.gd` and `terrain_bench.gd` - while
-seven files still reference them, headed by `scripts/battle/battlefield_terrain.gd`. The battle
-terrain cannot compile, and the suites built over it fail. Every line below reproduces at the
-parent commit with the Step 8 work stashed:
+The 2026-09-19 revert deleted `biome_catalog.gd`, `terrain_ground.gd`, `battlefield_decals.gd` and
+`terrain_bench.gd` while seven files still referenced them, headed by
+`scripts/battle/battlefield_terrain.gd`. The owner hit the consequence live - "the battle sim
+didn't load" - and that settled the pending call: the four files are restored from `939da77^`,
+the battle scene loads, and seven suites are green again.
 
-| suite | state | what is known |
+| suite | before | after |
 | --- | --- | --- |
-| `test_terrain`, `test_formation_battle` | BROKEN | parse errors: `BiomeCatalog` does not exist |
-| `test_battle_outcomes`, `test_battle_view`, `test_formation_focus` | BROKEN | ran no assertions - the battle scene does not come up |
-| `test_target_acquisition` | 21 failures | battle phases come back 0 |
-| `test_party_semantics` | 5 failures | the HUD shows `-` where the count belongs |
-| `test_spatial_grid` | 2 failures | the grid signature is empty |
-| `test_combat`, `test_e2e_loop`, `test_encounters` | 1 / 3 / 1 failures | the same cluster |
+| `test_terrain` | BROKEN (parse) | 3 failures - see below |
+| `test_formation_battle` | BROKEN (parse) | 1 failure - see below |
+| `test_battle_outcomes`, `test_battle_view`, `test_formation_focus` | BROKEN - no assertions, scene never came up | PASS |
+| `test_target_acquisition` | 21 failures | PASS |
+| `test_spatial_grid` | 2 failures | PASS |
+| `test_combat`, `test_encounters` | 1 / 1 failures | PASS |
+| `test_e2e_loop` | 3 failures | 1 failure - see below |
+| `test_party_semantics` | 5 failures | 5 failures - unchanged |
 
-Also referencing the removed classes, outside the suites: `scripts/terrain/terrain_generator.gd`,
-`terrain_overlay.gd`, `terrain_props.gd`, `scripts/dev/terrain_lab.gd`, `terrain_probe.gd`,
-`ground_forge.gd`. Owner's call pending: restore the pre-sweep versions, or finish removing what
-the revert broke. The world map, travel and the road network are unaffected.
+Still red, all pre-existing and unrelated to loading:
+
+- `test_terrain` - the suite expects exactly four terrain types where the world's catalogue defines
+  seven; a per-cell multiplier check disagrees with the restored code on 339 of 375 cells; and the
+  same context builds two different battlefields (determinism). The four-type expectation belongs
+  to the milestone-07 era; the multiplier and determinism failures need a proper reconciliation
+  pass, not a guess.
+- `test_formation_battle` - one multiplier in the same family (`~0.602` expected, `0.707` got).
+- `test_e2e_loop` - the battle screen shows a soldier at 6 hp where the campaign holds 3.
+- `test_party_semantics` - the HUD party-count readout, unchanged since the ledger first recorded
+  it; the live HUD shows "0 / 24 ACTIVE" correctly, so this is the suite's own path, not the game's.
+
+Next step when the battle cluster gets its own task: decide which era is canonical (the seven-biome
+world is the live data), then move the suites or the code to meet it.
 
 ## Roads (Step 8)
 
