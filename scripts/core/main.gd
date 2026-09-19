@@ -23,6 +23,7 @@ func _ready() -> void:
 		Engine.get_version_info().get("build", "unknown"),
 		ProjectSettings.get_setting("application/config/version", "0.0.0"),
 	])
+	DebugLogger.info("device: %s" % DeviceReport.one_line(), "Main")
 
 	var wait := 0.0 if _is_headless() else SPLASH_SECONDS
 	if wait > 0.0:

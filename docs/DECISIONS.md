@@ -3515,3 +3515,18 @@ pathfinding-shaped roads, a design step of its own, noted rather than smuggled i
 - and took a real play log comparing the QUOTE against the VERDICT to catch. When a play log lands,
 read it like a test report.
 
+
+## D-131 - the logs check the game's own answers
+
+**Context.** D-130's eta bug was only visible by hand-comparing a quote against a verdict. Three
+additions make the log grade the game by itself, so that comparison happens every journey:
+
+- **The arrival line carries the grade**: the order's quote is kept, and the arrival prints
+  "quoted ~1.6 h, walked 1.64 h (+2%)". Measured live on the first leg after shipping: +2%.
+- **Hitches are always on**: any frame of 50 ms or more goes to the log in every session, flag or
+  no flag, capped to one line a second so a rough load cannot bury the log it feeds. The owner's
+  build never passes flags; his sessions are the performance record.
+- **One device line at boot** (GPU, driver, window, vsync and refresh, CPU): every performance
+  conversation starts with facts instead of "should be fine". The `DeviceReport` helper already
+  existed for the benches; it now has a one-line form for the session log.
+

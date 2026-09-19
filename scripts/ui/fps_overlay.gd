@@ -18,6 +18,10 @@ extends CanvasLayer
 ## How long a reading covers. A quarter of a second is long enough to be steady and short enough
 ## that a stall shows up while it is still happening.
 const SAMPLE_SECONDS := 0.25
+## A frame this slow is a visible stutter and goes to the log in EVERY session, flag or no flag:
+## the owner's own sessions are the performance record, and his build never carries flags. Bursts
+## collapse to at most one line a second, so a rough load cannot bury the log it feeds.
+const HITCH_ALWAYS_MS := 50.0
 ## A frame this slow is called out the moment it happens when the frame log is on: the tail is what
 ## a "runs fine" claim gets wrong, and the average never shows it.
 const HITCH_MS := 25.0
@@ -30,6 +34,8 @@ var _elapsed := 0.0
 var _worst_ms := 0.0
 ## Whether this run asked for the frame pacing on the record ("--framelog").
 var _log_frames := false
+## The last time a hitch was written to the log, for the one-a-second cap.
+var _last_hitch_ms := 0
 
 
 func _ready() -> void:
@@ -53,8 +59,12 @@ func _process(delta: float) -> void:
 	_frames += 1
 	_elapsed += delta
 	_worst_ms = maxf(_worst_ms, delta * 1000.0)
-	if _log_frames and delta * 1000.0 >= HITCH_MS:
-		DebugLogger.warn("hitch: %.1f ms" % (delta * 1000.0), "Perf")
+	var frame_ms := delta * 1000.0
+	if frame_ms >= HITCH_ALWAYS_MS or (_log_frames and frame_ms >= HITCH_MS):
+		var now := Time.get_ticks_msec()
+		if now - _last_hitch_ms >= 1000:
+			_last_hitch_ms = now
+			DebugLogger.warn("hitch: %.1f ms" % frame_ms, "Perf")
 	if _elapsed < SAMPLE_SECONDS:
 		return
 	var fps := float(_frames) / _elapsed

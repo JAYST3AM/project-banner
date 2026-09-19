@@ -79,6 +79,10 @@ var _journey_units := 0.0
 var _journey_on_road := 0.0
 var _journey_max_gap := 0.0
 var _journey_hours := 0.0
+## The hours the order quoted when it was given, so the arrival line can grade the quote against
+## the walk. Every journey checks the eta for free - the class of bug that hid from every suite
+## (D-130) now reports itself in the log.
+var _quoted_hours := 0.0
 var _on_road := false
 var _road_state_known := false
 var _road_check_hours := 0.0
@@ -454,6 +458,7 @@ func _begin_journey() -> void:
 	_journey_on_road = 0.0
 	_journey_max_gap = 0.0
 	_journey_hours = 0.0
+	_quoted_hours = 0.0
 	_on_road = false
 	_road_state_known = false
 	_road_check_hours = 0.0
@@ -533,8 +538,10 @@ func set_destination(settlement_id: String) -> bool:
 	if was_travelling and walked > 1.0:
 		DebugLogger.info("travel: order replaced - %.0f u of the old journey already walked" % walked, "Travel")
 	_begin_journey()
+	var quoted := hours_to_reach(target.position)
+	_quoted_hours = quoted
 	DebugLogger.info("travelling to %s (%.0f units, ~%.1f game hours)" % [
-		target.name, distance_to(target.position), hours_to_reach(target.position),
+		target.name, distance_to(target.position), quoted,
 	], "Travel")
 	return true
 
@@ -564,8 +571,10 @@ func set_destination_point(point: Vector2) -> bool:
 	if was_travelling and walked > 1.0:
 		DebugLogger.info("travel: order replaced - %.0f u of the old journey already walked" % walked, "Travel")
 	_begin_journey()
+	var quoted := hours_to_reach(point)
+	_quoted_hours = quoted
 	DebugLogger.info("marching to open ground (%.0f units, ~%.1f game hours)" % [
-		distance_to(point), hours_to_reach(point),
+		distance_to(point), quoted,
 	], "Travel")
 	return true
 
@@ -713,6 +722,16 @@ func teleport_to(settlement_id: String) -> bool:
 	return true
 
 
+## The journey's quote graded against its walk, for the arrival line: "quoted ~1.6 h, walked
+## 1.62 h (+1%)". Empty when there is nothing to grade (no quote, or no road network to have been
+## walking on). This is the eta checking itself in every session the game ever logs.
+func _quote_report() -> String:
+	if _quoted_hours <= 0.0 or _journey_hours <= 0.0:
+		return ""
+	var error := (_journey_hours - _quoted_hours) / _quoted_hours * 100.0
+	return " - quoted ~%.1f h, walked %.2f h (%+.0f%%)" % [_quoted_hours, _journey_hours, error]
+
+
 ## Arriving at whatever the party was marching to. A settlement is entered and marked visited; open
 ## ground is simply where the march ends, so the order clears and the clock carries on.
 func _finish_travel(report: Dictionary) -> void:
@@ -730,9 +749,13 @@ func _finish_travel(report: Dictionary) -> void:
 			state.current_settlement_id = here.id
 			here.visited = true
 			report["settlement_id"] = here.id
-			DebugLogger.info("arrived at %s on %s" % [here.name, state.clock.full_string()], "Travel")
+			DebugLogger.info("arrived at %s on %s%s" % [
+				here.name, state.clock.full_string(), _quote_report(),
+			], "Travel")
 			return
-		DebugLogger.info("arrived at open ground on %s" % state.clock.full_string(), "Travel")
+		DebugLogger.info("arrived at open ground on %s%s" % [
+			state.clock.full_string(), _quote_report(),
+		], "Travel")
 		return
 	var target := destination()
 	if target == null:
@@ -758,4 +781,6 @@ func _arrive(target: Settlement, report: Dictionary) -> void:
 	target.visited = true
 	report["arrived"] = true
 	report["settlement_id"] = target.id
-	DebugLogger.info("arrived at %s on %s" % [target.name, state.clock.full_string()], "Travel")
+	DebugLogger.info("arrived at %s on %s%s" % [
+		target.name, state.clock.full_string(), _quote_report(),
+	], "Travel")

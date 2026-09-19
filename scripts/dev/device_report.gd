@@ -69,6 +69,22 @@ static func summary() -> String:
 		_string(RenderingServer, "get_video_adapter_type")]
 
 
+## One line for the session log: what machine, what driver, what window, what screen. Every
+## performance conversation starts with facts, and the facts cost one line.
+static func one_line() -> String:
+	var window := DisplayServer.window_get_size()
+	var hz := DisplayServer.screen_get_refresh_rate()
+	var sync := "on" if DisplayServer.window_get_vsync_mode() == DisplayServer.VSYNC_ENABLED else "off"
+	return "%s | %s | window %dx%d | vsync %s%s | %s" % [
+		summary(),
+		_string(RenderingServer, "get_current_rendering_driver_name"),
+		window.x, window.y,
+		sync,
+		"" if hz <= 0.0 else "  %.0f Hz screen" % hz,
+		OS.get_processor_name(),
+	]
+
+
 static func _string(object: Object, method: String) -> String:
 	if object == null or not object.has_method(method):
 		return "-"
