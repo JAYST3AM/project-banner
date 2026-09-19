@@ -165,6 +165,12 @@ void main() {
 	// field (see GpuCrowd._pair_minimum), so it is also the threshold the "inside the minimum"
 	// proof is counted against - solver and proof read the same number.
 	float min_enemy = params.f[12];
+	// How far this man will let anybody stand from him: never further than his own weapon can
+	// reach, because a line whose spacing is wider than its reach is a line that cannot fight.
+	// A spear reaches 2.4 and the shared separation is 2.6, so at their slots the two front ranks
+	// stood a fifth of a unit outside striking distance and a whole melee landed twelve blows in
+	// thirty seconds. Bows keep the shared spacing: a loose screen is a screen, not a shield wall.
+	float my_room = real_strikes ? max(min_enemy, stats.s[gid].z * 0.95) : sep;
 	uint tick_now = uint(params.f[13]);
 	uint cadence = uint(max(params.f[14], 1.0));
 	float retention = params.f[15];
@@ -325,12 +331,19 @@ void main() {
 						// line can actually come to grips. Held at the full separation, a melee
 						// settled at 2.6 while the spear reaches 2.4, and two armies ground against
 						// each other landing nothing at all.
-						float room = enemy ? min(sep, min_enemy) : sep;
+						float room = min(sep, my_room);
+						if (enemy) {
+							room = min(room, min_enemy);
+						}
 						if (dist < room) {
 							acc += ivec2(round((d / dist) * ((room - dist) * 0.5) * FIXED));
-							// An enemy at body's length, or your own man actually overlapping
-							// you: either way your place is taken and you hold it where you are.
-							if (enemy || dist < sep * 0.9) {
+							// An enemy inside the room means the line has closed; your own
+							// man only stops you once he is overlapping you. This read
+							// sep * 0.9 = 2.34 against a spear line's own standing spacing
+							// of 2.28: every man of every rank was "in contact" from the
+							// first tick, nobody walked to his place, and both lines
+							// stopped ten units apart with nobody within reach of anybody.
+							if (enemy || dist < room * 0.9) {
 								contact = true;
 							}
 						}
@@ -570,7 +583,10 @@ void main() {
 					if (d2 > 0.000001) {
 						float dist = sqrt(d2);
 						bool foe = meta.m[other].y != my_side;
-						float room = foe ? min(sep, min_enemy) : sep;
+						float room = min(sep, my_room);
+						if (foe) {
+							room = min(room, min_enemy);
+						}
 						if (dist < room) {
 							// The enemy gets no share of this: he never displaces me, I move
 							// myself clear of him, the whole overlap, every round. Sharing it

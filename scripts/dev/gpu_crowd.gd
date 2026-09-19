@@ -268,8 +268,11 @@ const TILT_STEP := 0.02
 const YAW_DRAG := 0.006
 var yaw := 0.0
 var squash := 0.5
-## The flat, top-down view this scene started with, kept because a comparison shot is evidence.
-var flat_view := false
+## The view is top down, and only top down. The scene once drew the field as 2:1 diamonds with an
+## orbiting, tilting camera (Total War fashion); the owner's ask is plain: "make only top down, no
+## more iso." The isometric machinery is left in place below - it is a projection, not a simulation
+## change, and flipping this one line is all it takes to see it again - but nothing turns it on.
+var flat_view := true
 var _camera_zoom := 1.0
 var _zoom_target := 1.0
 var _follow_action := true
@@ -484,8 +487,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_follow_action = not _follow_action
 			KEY_I:
-				flat_view = not flat_view
-				print("gpu crowd: view | %s" % ("flat, looking straight down" if flat_view else "isometric"))
+				print("gpu crowd: view | top down (the isometric view is gone; the field is drawn straight overhead)")
 			KEY_H:
 				_order_stance(_selected, true)
 			KEY_U:
@@ -534,6 +536,10 @@ var _bodies := 0
 ## The owner of each body. The probe has an equal number on both sides, while campaign
 ## battles may not; keeping this separate avoids manufacturing empty formations.
 var _body_side := PackedInt32Array()
+## The shape each body is standing in, by the catalog's own names (line, loose, column). Set when
+## the body takes the field and kept up to date by every re-form, so the journal can say which
+## formation it is reporting on rather than leaving a reader to reverse it out of files and ranks.
+var _body_shape_kind := PackedStringArray()
 
 var field := Vector2(200.0, 120.0)
 var grid := Vector2i(0, 0)
@@ -726,6 +732,10 @@ var _hold_ordered := PackedInt32Array()
 ## numbers that say whether a body is still a body. Both come free from the pack that draws the
 ## picture; neither is estimated here.
 var _body_alive := PackedInt32Array()
+## The most men a body has ever had. A target with a quarter of this left is beaten, not fought:
+## the selection below stops retaining it and hunts the next whole body instead. The owner:
+## "the ai doesn't hunt after killing some units."
+var _body_started := PackedInt32Array()
 var _body_cohesion := PackedFloat32Array()
 ## Each man's body, file and rank, kept from the deployment so the pack can measure how far he
 ## stands from his place in the line without reading the attributes back off the GPU every tick.
@@ -1050,8 +1060,8 @@ func _build() -> void:
 		print("gpu crowd: view | scripted camera at world (%.0f, %.0f), yaw %.0f deg, pitch %.2f, zoom %.2f" % [
 			cam_at.x, cam_at.y, rad_to_deg(yaw), squash, _zoom_target])
 	else:
-		print("gpu crowd: view | %s, yaw %.0f deg, pitch %.2f (right-drag orbits, wheel zooms at the cursor, middle-drag pans, WASD pans, Q/E quarter turn, [ ] tilts, F frames, I toggles flat)" % [
-			"flat" if flat_view else "isometric", rad_to_deg(yaw), squash])
+		print("gpu crowd: view | %s, yaw %.0f deg, pitch %.2f (right-drag orbits, wheel zooms at the cursor, middle-drag pans, WASD pans, Q/E quarter turn, [ ] tilts, F frames - the view is top down)" % [
+			"top down", rad_to_deg(yaw), squash])
 	if _deploying:
 		_center_on_side(0)
 	print("gpu crowd: command | left-click select (shift adds), drag a box, right-click ground to move, right-click an enemy to attack, H hold, U engage, L/C/O line-column-loose, Ctrl+1..5 group, 1..5 recall, Space starts the battle, P pauses" if _deploying else \
@@ -1108,6 +1118,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	_order_target.resize(_bodies)
 	_order_point.resize(_bodies)
 	_body_alive.resize(_bodies)
+	_body_started.resize(_bodies)
 	_body_cohesion.resize(_bodies)
 	_hold_ordered.resize(_bodies)
 	for b in _bodies:
@@ -1231,6 +1242,23 @@ func _body_room(b: int) -> float:
 	return _body_gap[b]
 
 
+## How much room is left between this body's front rank and its opponent's, measured the way the
+## contact scan measures it: between the anchors, less half the depth of each. The shader's per-body
+## room is the closest *pair* anywhere on the field, and one man at a corner closes it for the whole
+## formation - so a line pressed until a single pair could strike while the rest stood a rank short
+## of its own reach, and sixty spearmen in contact landed twenty-six blows in a whole battle. The
+## anchors and the depths are the line's own geometry; this is the number that says it has closed.
+func _line_room(b: int) -> float:
+	var target := _order_target[b]
+	if target < 0 or target >= _bodies:
+		return _body_room(b)
+	var mine := Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
+	var far := Vector2(_body_state[target * 8 + 0], _body_state[target * 8 + 1])
+	var my_depth := (_body_state[b * 8 + 5] - 1.0) * _body_state[b * 8 + 6]
+	var their_depth := (_body_state[target * 8 + 5] - 1.0) * _body_state[target * 8 + 6]
+	return mine.distance_to(far) - (my_depth + their_depth) * 0.5
+
+
 ## Whether this body is being crowded by a friendly body standing ahead of it: a friend within
 ## [constant KEEP_STATION], in front of this body's own facing, which is what stops a bow line
 ## walking through the spears it should be shooting over.
@@ -1313,6 +1341,10 @@ func _note_switch(text: String) -> void:
 	_target_switches += 1
 	_last_switch = text
 	print("gpu crowd: target switch | %s" % text)
+	# And into the journal, which survives a run that is killed at the clock: a body choosing its
+	# next enemy is the whole of the hunt, and it must be readable after the fact.
+	if _journal != null:
+		_journal.note(_tick, "target switch: %s" % text)
 
 
 ## Destroy an enemy body - or a fraction of it, when a rule check needs survivors nearby - at a
@@ -1383,6 +1415,7 @@ func _select_target(b: int) -> void:
 	var mine := Vector2(_body_state[b * 8 + 0], _body_state[b * 8 + 1])
 	var best := -1
 	var best_distance := INF
+	var best_worth := false
 	for other in _bodies:
 		if _side_of_body(other) == side:
 			continue
@@ -1390,7 +1423,16 @@ func _select_target(b: int) -> void:
 			continue
 		var distance := mine.distance_to(
 			Vector2(_body_state[other * 8 + 0], _body_state[other * 8 + 1]))
-		if distance < best_distance:
+		# A body with a quarter of its men left is beaten, not fought. While any enemy still worth
+		# fighting stands, the hunt goes there; the remnants are for the endgame. A body that kept
+		# facing one ravaged remnant while whole companies stood untouched is the "the ai doesn't
+		# hunt after killing some units" the owner watched.
+		var worth := not _body_beaten(other)
+		if worth and not best_worth:
+			best = other
+			best_distance = distance
+			best_worth = true
+		elif worth == best_worth and distance < best_distance:
 			best_distance = distance
 			best = other
 	var current := _order_target[b]
@@ -1404,7 +1446,9 @@ func _select_target(b: int) -> void:
 	if current >= 0 and current != best and _body_alive[current] > 0:
 		var current_distance := mine.distance_to(
 			Vector2(_body_state[current * 8 + 0], _body_state[current * 8 + 1]))
-		if current_distance <= best_distance * RETENTION:
+		# A beaten target is never worth the retention: the body moves on even if the remnant is
+		# close at hand. Otherwise the old law holds - keep the near one you are fighting.
+		if not _body_beaten(current) and current_distance <= best_distance * RETENTION:
 			return
 		_note_switch("%s: %s -> %s at tick %d (%.1f better than %.1f)" % [
 			_body_name(b), _body_name(current), _body_name(best), _tick, best_distance, current_distance])
@@ -1415,6 +1459,18 @@ func _select_target(b: int) -> void:
 	if _order[b] == Order.HOLD and _hold_ordered[b] == 0:
 		# It was only standing because it had nothing to fight. Now it has.
 		_order[b] = Order.ENGAGE
+
+
+## Whether a body is beaten: a quarter of its strongest day, or fewer than four men. A judgement,
+## not a rule of nature, and deliberately generous: hunt too early and the body pays a march, hunt
+## too late and the owner watches an idle army while a remnant stands.
+func _body_beaten(b: int) -> bool:
+	if b >= _body_started.size():
+		return false
+	var started := _body_started[b]
+	if started <= 0:
+		return false
+	return _body_alive[b] * 4 < started or _body_alive[b] < 4
 
 
 ## Where a body should be looking: at the target it selected. Zero when there is nothing left to
@@ -1498,13 +1554,11 @@ func _advance_bodies() -> void:
 				# archers having inched six units into their own line. Room only counts as room to
 				# move into if the ground ahead belongs to us.
 				var crowding := _crowding(b)
-				# A body's own reach decides where it stops. Melee (reach 2.4) stops on the agreed
-				# engagement distance as it always did; a body of archers (reach 9.0) holds when the
-				# enemy's living edge is already inside their range, which is what "sit back in a line
-				# and shoot" means in numbers - before this they marched to 2.6 units like everybody
-				# else, through their own melee line, and the demo journal caught the two archer bodies
-				# finishing the battle one unit apart in the middle of the field.
-				if not crowding and _body_room(b) > _engage_room(b):
+				# A body's own reach decides where it stops. Melee (reach 2.4) stops on nine
+				# tenths of it; a body of archers (reach 18) holds when the enemy's line is already
+				# inside their range, which is what "sit back in a line and shoot" means in numbers.
+				# The measurement is the line's, not the closest pair's - see [method _line_room].
+				if not crowding and _line_room(b) > _engage_room(b):
 					# Walk at the body we are fighting, not the way we happen to be facing. A body
 					# advanced on its heading alone, so when its target drifted it sailed past it and
 					# the two marched away together: the demo journal's survivors finished at
@@ -1528,6 +1582,13 @@ func _advance_bodies() -> void:
 						if towards.length() > 0.05:
 							aim_at = towards.normalized()
 					move = aim_at * (rate * DT)
+		# What the march decided, and why: both rooms, whether a friend ahead is crowding the body,
+		# and the length of the step it actually took. A body that should be closing and is standing
+		# still is answered here - every "nothing is happening" report starts from this line.
+		if _journal != null and _body_alive[b] > 0 and _tick % JOURNAL_BODY_EVERY == 0:
+			_journal.note(_tick, "advance: body %d order %s room %.2f engage %.2f crowding %s step %.2f" % [
+				b, _order_name(_order[b]), _line_room(b), _engage_room(b),
+				"yes" if _crowding(b) else "no", move.length()])
 		if move != Vector2.ZERO:
 			mine += move
 			# Anchors live on the ground. Nothing clamped them, so a body chasing another body's
@@ -2396,15 +2457,19 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 		var swung := _anim_last_cooldown[i] >= 0.0 and clock > _anim_last_cooldown[i] + 0.5
 		_anim_last_cooldown[i] = clock
 		var attacked := swung or struck
+		# A bowman has no attack pose to play: the free pack's three attack strips are all sword,
+		# so his shot used to read as an archer swinging a blade at nothing. His shot is the arrow,
+		# and the arrow is drawn below; the sword stays sheathed until there is a bow pose to use.
+		var bowman := i < _man_ranged.size() and _man_ranged[i] == 1
 		if _sprite_ok:
 			_write_sprite(i, position, picture, int(meta[i * 4 + 1]), meta[i * 4 + 0],
-				meta[i * 4 + 2] < 0.5, attacked)
+				meta[i * 4 + 2] < 0.5, attacked and not bowman)
 		# A landed blow from a bowman is a shaft in the air: the compute simulation reads back no
 		# "who struck whom", only what each man has dealt. The canvas battle gets the same picture
 		# from the simulator's own hit events ([method BattleView._launch_arrow]) - same look, same
 		# flight time. Outside the sprite batch on purpose: the shafts are drawn furniture and fly
 		# whether the art is on this machine or not.
-		if attacked and i < _man_ranged.size() and _man_ranged[i] == 1:
+		if attacked and bowman:
 			_note_shot(i, picture)
 	_loop_usec = Time.get_ticks_usec() - loop_started
 	var submit_started := Time.get_ticks_usec()
@@ -2427,6 +2492,8 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 	_body_front = front
 	for b in _bodies:
 		_body_alive[b] = living_men[b]
+		if b < _body_started.size():
+			_body_started[b] = maxi(_body_started[b], living_men[b])
 		if _tick % COHESION_EVERY == 0:
 			# Only on the ticks it was actually measured: the other three keep the last reading,
 			# which is what "sampled five times a second" has to mean if it is to be honest.
@@ -2597,8 +2664,10 @@ func _journal_bodies() -> void:
 		if _crowding(b):
 			note_flags += ", crowded"
 		var aiming := _man_targeting(b)
-		_journal.note(_tick, "body %d %s: %d alive, anchor (%.0f, %.0f), %s, room %.1f, reach %.1f, %d shots, facing %.0f deg%s, holding %d, nearest %.1f, weapon %.1f" % [
+		_journal.note(_tick, "body %d %s [%s %dx%d @%.1f]: %d alive, anchor (%.0f, %.0f), %s, room %.1f, reach %.1f, %d shots, facing %.0f deg%s, holding %d, nearest %.1f, weapon %.1f" % [
 			b, "ours" if side == 0 else "theirs",
+			_body_shape_kind[b] if b < _body_shape_kind.size() else "unformed",
+			int(_body_state[b * 8 + 4]), int(_body_state[b * 8 + 5]), _body_state[b * 8 + 6],
 			_body_alive[b] if b < _body_alive.size() else 0, anchor.x, anchor.y,
 			_order_name(_order[b]), _body_room(b), _body_reach[b] if b < _body_reach.size() else REACH,
 			_body_shots[b] if b < _body_shots.size() else 0, rad_to_deg(_heading[b]) if b < _heading.size() else 0.0,
@@ -3137,6 +3206,20 @@ func _build_hud() -> void:
 	layer.add_child(panel)
 	_label = UiTheme.label("", 13, UiTheme.TEXT)
 	panel.add_child(_label)
+	# One muted line in the corner, and not one pixel more: the keys are real and nothing on screen
+	# said so - the owner's "the controls aren't there yet." The full help panel he had removed stays
+	# removed; this is the whole of the controls UI.
+	var keys := UiTheme.label(
+		"U attack  ·  H hold  ·  L / C / O line, column, loose  ·  WASD pan  ·  wheel zoom  ·  F frame",
+		11, UiTheme.DIM)
+	keys.anchor_top = 1.0
+	keys.anchor_bottom = 1.0
+	keys.offset_left = 12.0
+	keys.offset_top = -30.0
+	keys.offset_right = 480.0
+	keys.offset_bottom = -10.0
+	keys.modulate.a = 0.85
+	layer.add_child(keys)
 
 
 func _save_shot(index: int) -> void:
@@ -3532,6 +3615,8 @@ func _set_formation(bodies: Array, kind: String) -> void:
 			continue
 		if _relay_body(b, shape):
 			changed += 1
+			if b < _body_shape_kind.size():
+				_body_shape_kind[b] = kind
 	if changed > 0:
 		print("gpu crowd: %s re-formed as %s" % [names, kind])
 

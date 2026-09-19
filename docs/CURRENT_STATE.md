@@ -2283,3 +2283,22 @@ them: the press-forward cache was predicted at 16-18 ms from its price and measu
 collapse was predicted at 10-16 and measured 21.8; the native batch was predicted near twenty and
 measured 3.2. Every slice is chosen on its price and accepted on its paired run, which is why every
 switch keeps its reference in the same build.
+
+## The live battle, 2026-09-20 (D-154 to D-157)
+
+The compute battlefield is now the thing the owner asked for, end to end: top down and only top down
+(the isometric camera is pinned off, one line to bring back); the formations the canvas battle has always
+had (line / column / loose, from the catalogue) applied at deployment per role, and named in every journal
+body line; a man's spacing capped by his own weapon's reach, so a spear line can actually reach the men in
+front of it; and a melee that swings - the attack pose beats the flinch, and a bowman shows his shot with
+the arrow, never a sword the pack drew for somebody else.
+
+The melee's blows are the headline number. Same seed, same roster: nine blows and sixteen fallen before
+the fixes, three hundred-odd blows and thirty-two fallen after, with the closest enemy pair at 1.82 (the
+solver's floor is 1.92) and 2252 pair-readings inside it. Melee attack speeds are 1.5x faster by the
+owner's call (spearman 1.0 s; the bows keep their 2.0 and 2.2). One muted line of keys sits in the corner
+and nothing else.
+
+Verified: 15 archers + 30 spearmen a side, seed 5150, 1x, 360 fps cap - captures at 12 s and 34 s read top
+down with a live contact line; the journal reads `body 0 ... [line 10x3 @2.3]` and `body 1 ... [loose 6x3
+@4.4]`; suites 229 sprites, 262 combat, 282 encounters, all passing.

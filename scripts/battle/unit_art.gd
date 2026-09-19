@@ -292,18 +292,21 @@ static func head_units(entry: Dictionary, cell: Vector2, units: float) -> float:
 
 ## Which animation a soldier is in, from the things a renderer knows about him. Pure and static
 ## so the priority order can be pinned by a suite without a battle: a fallen soldier holds his
-## death animation, a blow just struck or taken plays out over its own length, a soldier who has
-## moved since the last pack walks, and everyone else stands.
+## death animation, a blow struck plays over a blow taken, either plays out over its own length, a
+## soldier who has moved since the last pack walks, and everyone else stands.
 static func plan(
 	alive: bool, moved: bool, hurt_age: int, strike_age: int,
 	hurt_window: int, attack_window: int
 ) -> int:
 	if not alive:
 		return DEATH
-	if hurt_age >= 0 and hurt_age < hurt_window:
-		return HURT
+	# A blow struck outranks a blow taken. In a press every man is hit while he swings, so the
+	# flinch checked first hid every attack in a melee while the archers - seldom hit - showed
+	# theirs: the swing has to be the man's own act, or a scrum looks like men standing being hit.
 	if strike_age >= 0 and strike_age < attack_window:
 		return ATTACK
+	if hurt_age >= 0 and hurt_age < hurt_window:
+		return HURT
 	if moved:
 		return WALK
 	return IDLE

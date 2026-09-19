@@ -43,8 +43,13 @@ func _test_the_priority_order_of_the_animations() -> void:
 	var attack := 12
 	equal(UnitArt.plan(false, true, 0, 0, hurt, attack), UnitArt.DEATH,
 		"a fallen soldier holds his death animation however recently he fought")
-	equal(UnitArt.plan(true, true, 3, 3, hurt, attack), UnitArt.HURT,
+	# Owner: "the melee isn't using the sword swing". Every man in a press is hit while he swings,
+	# and the flinch used to be checked first - so the attack pose was never reached in a melee.
+	# A strike made outranks a strike taken; a wound taken alone still plays.
+	equal(UnitArt.plan(true, true, 3, 3, hurt, attack), UnitArt.ATTACK,
 		"struck three ticks ago: he is showing the wound, not mid-swing")
+	equal(UnitArt.plan(true, true, 3, 40, hurt, attack), UnitArt.HURT,
+		"a blow taken, and no blow struck, is a flinch")
 	equal(UnitArt.plan(true, true, 40, 3, hurt, attack), UnitArt.ATTACK,
 		"the wound has expired and the blow has not: he is swinging")
 	equal(UnitArt.plan(true, true, 40, 40, hurt, attack), UnitArt.WALK,

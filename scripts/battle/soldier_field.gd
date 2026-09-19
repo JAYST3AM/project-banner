@@ -679,7 +679,10 @@ func _write_sprite(index: int, unit: BattleUnit, position: Vector2, alive: bool,
 		_anim_last_position[id] = position
 		# A cooldown that jumped between packs is the blow landing: it is the only trace a
 		# strike leaves on the unit itself.
-		if not first and unit.cooldown_left > _anim_last_cooldown[id] + STRIKE_COOLDOWN_JUMP:
+		# A bowman looses, he does not swing: the pack's attack strips are all sword, so the pose
+		# is left to the idle and the arrow is the tell (the battle view flies it from the
+		# simulator's own events). The clock stamp still runs for everyone else.
+		if not first and not unit.ranged 				and unit.cooldown_left > _anim_last_cooldown[id] + STRIKE_COOLDOWN_JUMP:
 			_anim_strike_tick[id] = tick
 		_anim_last_cooldown[id] = unit.cooldown_left
 		if unit.last_attacked_tick > _anim_last_attacked[id]:

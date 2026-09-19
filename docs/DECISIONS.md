@@ -4310,3 +4310,98 @@ the frame the screenshot caught. Balance note for the owner: with the model actu
 archers are strong - 18 reach, a shot every 1.5 seconds, and the end-game is a bow line executing
 whatever is left from fifteen units. That is the behaviour asked for; the numbers to tune are
 `attack_range`, `attack_cooldown` and `attack` in `data/units/unit_types.json`.
+
+**D-154: the attack pose belongs to the man who struck, and a bowman has none to play.**
+
+Owner: "the archers are still using the sword swing to shoot bows, and the melee isn't using the sword
+swing, this needs to change." Two faults sat behind the one complaint. The pose plan checked the flinch
+(HURT) before the strike (ATTACK) - and in a press every man is hit while he swings, so the melee's
+attacks hid behind their own wounds while the archers, seldom reached, showed theirs cleanly. A blow
+struck now outranks a blow taken, and the suite pins both halves: a strike made plays ATTACK even while
+taking one, a wound taken alone plays HURT.
+
+The archers: the free pack's three attack strips are all sword - there is no bow pose to play - so a
+bowman's shot played as a swordsman swinging at nothing. A bowman now keeps his idle pose when he looses:
+the shot is the arrow, in the field drawn from the weapon clock, in the canvas battle from the
+simulator's hits and misses. The sword stays sheathed for ranged men until there is a bow strip in the
+pack's format, at which point the atlas builder takes it from there and the suppression comes out.
+Verified on a captured frame: four to six men of the contact line clearly mid-swing, no archer swinging.
+Fixing the pose exposed the deeper fault in D-156: after the rule, a whole melee still landed nothing.
+
+
+**D-155: the live battle uses the formations too.**
+
+Owner: "give them formations to use too." The field had shapes and keys since the probe - line, column,
+loose, L/C/O - but every body *deployed* in the line's own geometry whatever it carried: a bow line
+stood in a spear line's formation, and "loose" had to be asked for by hand. The catalogue
+(data/formations/formation_types.json) drove the canvas deployment and the field's re-forming, and not
+the field's deployment.
+
+Now the deploy gives each body the shape its role asks for - a line for the melee, a loose screen for the
+missiles - with files, ranks and spacing taken from the same catalogue the canvas battle reads, each body
+remembers its shape, re-forming updates it, and every journal body line names it: `body 1 ours [loose 6x3
+@4.4]` against `body 0 ours [line 10x3 @2.3]`. Verified over the 15/30 battle on seed 5150: VICTORY, 80
+fallen, 576 arrows loosed, 60.8 seconds.
+
+
+**D-156: a man stands no further apart than he can reach.**
+
+The same seed that had fallen 16 in ninety seconds fell 2, and a whole melee landed nine blows in
+thirty-eight seconds - one blow per nine man-seconds where the weapon clock alone asks for one every one
+and a half. Three faults stacked on top of each other, each invisible behind the one above it.
+
+One. What stopped a body was the closest *pair* anywhere on the field (the shader's per-body room). A
+single contact closed it, and the rest of the line stood a rank short of its own reach while its body's
+anchor reported contact. A body now measures the room between the two *lines*: the anchors less half the
+depth of each, the anchors and depths being the line's own geometry. One body, one number, the whole line.
+
+Two. The spacing. A spear reaches 2.4 and the shared separation is 2.6, so at their slots the two front
+ranks stood a fifth of a unit outside striking distance - a lattice wider than the weapon. The room a man
+keeps is now min(shared spacing, his own reach x 0.95), in both solvers, and the deploy gives a body a
+lattice no wider than its members can reach: spears stand at 2.28, bows keep the shared spacing and their
+4.4 screen - a screen is not a shield wall.
+
+Three. The walk. The "in contact, hold where you are" threshold read sep x 0.9 = 2.34 against the new
+standing spacing of 2.28, so every man of every rank was in contact from the first tick, nobody walked to
+his place, and both lines stopped ten units apart with nobody within reach of anybody. The threshold is
+the man's own room now: 2.05. Measured after the three: closest enemy pair 1.82, 2252 pair-readings inside
+the pair minimum, 32 fallen where the same seed had fallen 2.
+
+The owner's rate: "melee doesn't attack enough, needs to be 1.5x faster." Every melee cooldown is divided
+by 1.5 - spearman 1.50 to 1.00 seconds, peasant 1.25 to 0.83, ruffian 1.40 to 0.93, brigand 1.60 to 1.07.
+The bows are untouched: 2.0 and 2.2 seconds, their rate was not the complaint. The field prints the
+result on its unit lines, so a run now says "a blow every 1.00 s (30 ticks)" and the log can be read
+against the data file.
+
+
+**D-157: top down, and only top down.**
+
+Owner: "make only top down. no more iso." The field drew the battle as 2:1 diamonds with an orbiting,
+tilting camera - the code's own words, "Total War fashion." The view is pinned flat now: positions land
+in the picture unchanged, the ground with them, and nothing turns it on. The isometric machinery is left
+in place, because it is a projection and never touched the simulation - flipping one line in gpu_crowd.gd
+brings it back - but no key, no drag and no flag reaches it. The corner now carries one muted line naming
+the keys (U attack, H hold, L/C/O formation, WASD pan, wheel zoom, F frame): the owner had the full help
+panel removed and noticed the loss ("the controls aren't there yet"); this is the whole of the controls UI.
+
+**D-158: the hunt moves on from a beaten remnant, on a 240 by 135 field.**
+
+Owner: "1. the ai doesn't hunt after killing some units. 2. map still needs to be wider! or is it longer? it
+needs to be a landscape map on the battlefield or a massive box."
+
+The hunt. The selection already moved on when a target was *destroyed* - whole body dead, one living man was
+enough to keep it. So a body would grind a ravaged remnant - three survivors out of thirty - while whole
+companies stood untouched a short march away, which is exactly what the owner watched. A body's peak
+strength is now remembered (`_body_started`, kept at the per-tick recount), and a target below a quarter of
+it, or under four men, is judged beaten: the hunt goes to the nearest body still worth fighting, and a
+beaten body is never retained, however close it stands. The remnants are for the mop-up, and the judgement
+is deliberately generous - hunt too early and the body pays a march, hunt too late and the owner watches an
+idle army. Every switch is now named in the journal as well as in stdout, because the hunt is the fault the
+owner reported and it has to be readable after a run that was killed at the clock.
+
+The field. 150 x 60 to 240 x 135 - the old shape fits a fit-the-field camera width-bound on a 16:9 screen,
+which left dead bands above and below and read as "the map needs to be wider"; 240 x 135 fills the frame
+edge to edge and doubles the ground an army can manoeuvre over. Deployment, terrain generation and the
+encounter placement all read the size from `battle_config` and needed no other change. First battle on it,
+same seed and roster: 36 fallen in 145 seconds with 317 arrows loosed, on a field the lines now march
+across rather than stand at the edge of.

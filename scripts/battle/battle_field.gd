@@ -213,6 +213,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	_order_target.resize(_bodies)
 	_order_point.resize(_bodies)
 	_body_alive.resize(_bodies)
+	_body_started.resize(_bodies)
 	_body_cohesion.resize(_bodies)
 	_hold_ordered.resize(_bodies)
 	_man_body.resize(agents)
@@ -222,6 +223,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# already came from - this is the same fact told to the picture.
 	_man_ranged.resize(agents)
 	_man_ranged.fill(0)
+	_body_shape_kind.resize(_bodies)
 
 	for b in groups.size():
 		var group := groups[b]
@@ -237,8 +239,30 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 		for member_value in members:
 			anchor += (member_value as BattleUnit).position
 		anchor /= float(members.size())
-		var files := mini(BODY_FILES, maxi(1, members.size()))
+		# The shape this body takes the field in, from the same catalog the canvas deployment and the
+		# field's own re-forming read: a line for the melee, a loose screen for the missiles. The
+		# field used to give every body the line's own geometry whatever it carried, so a bow line
+		# stood in a spear line's formation and every "loose" order the player gave had to be asked
+		# for by hand. The journal names the shape on every body line.
+		var kind := "loose" if (members[0] as BattleUnit).ranged else "line"
+		var shape := _formation_shape(kind)
+		var wide := float(mini(BODY_FILES, maxi(1, members.size())))
+		var cap := float(shape.get("files_cap", 999.0))
+		var wanted := wide * cap if cap < 1.0 else minf(wide, cap)
+		var files := maxi(1, int(clampf(round(wanted), 1.0, wide)))
 		var ranks := ceili(float(members.size()) / float(files))
+		# A body stands no further apart than its men can reach: a spear line at the shared 2.6
+		# spacing stood a fifth of a unit outside its own 2.4 reach and could not fight at all.
+		# The bow bodies keep the shared spacing - their reach is eighteen, and a loose screen is
+		# meant to be loose.
+		var member_reach := 0.0
+		for member_value in members:
+			member_reach = maxf(member_reach, (member_value as BattleUnit).attack_range)
+		var stand := SEPARATION * float(shape.get("spacing", 1.0))
+		if member_reach > 0.0:
+			stand = minf(stand, member_reach * 0.95)
+		var spacing := stand
+		_body_shape_kind[b] = kind
 		var forward := Vector2.RIGHT if side == 0 else Vector2.LEFT
 		_heading[b] = forward.angle()
 		_body_state[b * 8 + 0] = anchor.x
@@ -247,7 +271,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 		_body_state[b * 8 + 3] = forward.y
 		_body_state[b * 8 + 4] = float(files)
 		_body_state[b * 8 + 5] = float(ranks)
-		_body_state[b * 8 + 6] = SEPARATION
+		_body_state[b * 8 + 6] = spacing
 		_body_state[b * 8 + 7] = 0.0
 		for member_index in members.size():
 			var unit := members[member_index] as BattleUnit
@@ -263,6 +287,14 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 			_man_file[i] = member_index % files
 			_man_rank[i] = member_index / files
 			_man_ranged[i] = 1 if unit.ranged else 0
+
+
+## The catalog's numbers for one of its shapes, as the deployment needs them: files_cap is the
+## width the shape is willing to spread to (a fraction of the line's own width for a loose screen,
+## a count of files for a column), and spacing is a multiplier on the shared separation.
+func _formation_shape(kind: String) -> Dictionary:
+	_load_shapes()
+	return _shapes.get(kind, _shapes.get("line", {"files_cap": 999.0, "spacing": 1.0}))
 
 
 func _front_to_back_group(left: Dictionary, right: Dictionary) -> bool:
