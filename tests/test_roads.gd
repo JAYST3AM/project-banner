@@ -7,6 +7,25 @@ extends TestCase
 ## The world here is the authored one (the runner points world.procedural at false), so the elder
 ## roads between the four known settlements are the starting state and nothing about the map is
 ## random.
+##
+## The water rule (the owner: "don't let them run over water, but we could do bridges over water")
+## is checked against stand-in terrains - a vertical band of water, a river when narrow and a lake
+## when wide - so the shaping, the spans and the bridge walking are provable without hunting for a
+## seed whose map happens to have a river in the right place.
+
+
+## One vertical band of water at every height: a river when narrow, a lake when wide, dry land
+## either side.
+class BandTerrain extends RefCounted:
+	var centre := 0.0
+	var half := 0.0
+
+	func _init(p_centre: float, p_half: float) -> void:
+		centre = p_centre
+		half = p_half
+
+	func sample(point: Vector2) -> Dictionary:
+		return {"height": 0.2 if absf(point.x - centre) <= half else 0.8}
 
 
 func run() -> void:
@@ -20,6 +39,8 @@ func run() -> void:
 	_test_grid_prices_each_tier()
 	_test_travel_wears_and_walks_faster()
 	_test_the_pace_follows_the_drawn_road()
+	_test_water_is_bridged_or_bent()
+	_test_a_bridge_walks_like_a_road()
 	_test_the_walk_follows_the_line()
 	_test_roads_survive_a_save()
 	SaveManager.delete_all_saves()
@@ -32,6 +53,15 @@ func _fresh_campaign(campaign_name: String, seed_value: int) -> CampaignState:
 	var builder := WorldBuilder.new(state, GameManager.config())
 	builder.build_if_needed()
 	return state
+
+
+## The curve production shapes for a link: the terrain-aware between() with the config's own water
+## settings - the same call the network, the grid, the view and the walking all make. Tests that
+## want "the drawn road" want this one, never the terrain-less bend.
+func _shaped(state: CampaignState, config: GameConfig, from: Vector2, to: Vector2) -> PackedVector2Array:
+	return RoadPath.between(from, to, WorldChunks.build(state.campaign_seed),
+		config.get_float("travel.water_height", 0.335),
+		config.get_float("roads.bridge_max_span", 64.0))
 
 
 ## The link between two settlements, whichever way its ends are stored.
@@ -144,7 +174,7 @@ func _test_traffic_wears_a_road_up() -> void:
 	}
 	state.roads.append(link)
 	network.refresh_paths()
-	var path := RoadPath.between(a.position, b.position)
+	var path := _shaped(state, config, a.position, b.position)
 	var threshold := config.get_float("roads.upgrade_traffic.dirt", 0.0)
 	greater(threshold, 0.0, "the config names what dirt needs to become a track")
 
@@ -217,7 +247,7 @@ func _test_roadless_and_revival() -> void:
 	network.refresh_paths()
 	var costs := TravelCosts.new()
 	costs.build(state.campaign_seed, config, state.roads, state.settlements)
-	var path := RoadPath.between(a.position, b.position)
+	var path := _shaped(state, config, a.position, b.position)
 	var middle: Vector2 = path[path.size() / 2]
 
 	approx(costs.cost_of(costs.cell_at(middle)), 1.0 / (base * network.bonus_of("road")), 0.00001,
@@ -265,7 +295,7 @@ func _test_grid_prices_each_tier() -> void:
 		var a := state.settlement(str(pair[0]))
 		var b := state.settlement(str(pair[1]))
 		var tier := str(pair[2])
-		var path := RoadPath.between(a.position, b.position)
+		var path := _shaped(state, config, a.position, b.position)
 		var middle: Vector2 = path[path.size() / 2]
 		var expected := 1.0 / (base * network.bonus_of(tier))
 		approx(costs.cost_of(costs.cell_at(middle)), expected, 0.00001,
@@ -290,7 +320,7 @@ func _test_travel_wears_and_walks_faster() -> void:
 	# Standing on a road, the pace is the road's; standing on plain ground, it is the ground's.
 	var a := state.settlement("greywatch")
 	var b := state.settlement("redmoor")
-	var path := RoadPath.between(a.position, b.position)
+	var path := _shaped(state, config, a.position, b.position)
 	var on_road: Vector2 = path[path.size() / 2]
 	state.world_position = on_road
 	approx(travel.ground_factor(), network.bonus_of("road"), 0.01,
@@ -348,7 +378,7 @@ func _test_the_pace_follows_the_drawn_road() -> void:
 
 	var a := state.settlement("greywatch")
 	var b := state.settlement("redmoor")
-	var path := RoadPath.between(a.position, b.position)
+	var path := _shaped(state, config, a.position, b.position)
 	var mid := path.size() / 2
 	var here: Vector2 = path[mid]
 	var across := (path[mid + 1] - path[mid - 1]).orthogonal().normalized()
@@ -390,6 +420,122 @@ func _test_the_pace_follows_the_drawn_road() -> void:
 		check(travel.factor_at_point(leak_point) < network.bonus_of("road") - 0.001,
 			"and the pace no longer takes its speed from that block")
 	GameManager.end_campaign()
+
+
+## The water rule: a shaped curve never simply runs over water. A crossing narrow enough to bridge
+## is crossed, and recorded as a bridge span; anything wider is dodged by re-bending, and can never
+## come out wetter than the plain bend would have been.
+func _test_water_is_bridged_or_bent() -> void:
+	section("a road does not run over water: it bridges a river and bends around a lake")
+	var a := Vector2(200.0, 500.0)
+	var b := Vector2(1100.0, 500.0)
+
+	# A river: every candidate shape crosses it, so it must be crossed as a bridge within the limit.
+	var river := BandTerrain.new(650.0, 20.0)
+	var path := RoadPath.between(a, b, river)
+	check(path.size() > 2, "the shaped road is a real curve")
+	var spans := RoadPath.water_spans(path, river)
+	greater(spans.size(), 0, "a road crossing a river is bridged")
+	check(_water_inside_spans(path, river, spans), "and every unit of water lies on a recorded span")
+	less(_water_run(path, river), RoadPath.BRIDGE_MAX_SPAN + 0.001, "no wider than the bridge limit")
+
+	# The same crossing shapes the same road twice: terrain and all, the shaping is deterministic.
+	approx(_path_checksum(RoadPath.between(a, b, river)), _path_checksum(path), 0.0001,
+		"the same crossing shapes the same road twice")
+
+	# A lake far wider than any bridge: every candidate is wet, so the least-wet one wins - and it
+	# can never be wetter than the bare bend, nor worse than the straight crossing, the floor.
+	var lake := BandTerrain.new(650.0, 300.0)
+	var shaped := RoadPath.between(a, b, lake)
+	var plain := RoadPath.shape(a, b, RoadPath.bend_of(a, b))
+	check(_water_run(shaped, lake) <= _water_run(plain, lake) + 0.001,
+		"a lake makes the road no wetter than the bare bend would be")
+	check(_water_run(shaped, lake) <= _water_run(RoadPath.shape(a, b, 0.0), lake) + 0.001,
+		"nor worse than the straight crossing, which is the floor")
+
+	# Dry land draws exactly the historic bend: no terrain, no change.
+	var dry := BandTerrain.new(-4000.0, 1.0)
+	approx(_path_checksum(RoadPath.between(a, b, dry)), _path_checksum(plain), 0.0001,
+		"and a dry land draws exactly the historic bend")
+
+
+## A bridge is road ground: standing on one walks at the link's own speed, because the pace reads
+## the curve and the curve is where the bridge is drawn.
+func _test_a_bridge_walks_like_a_road() -> void:
+	section("a bridge walks like a road")
+	var state := _fresh_campaign("Roads Test", 782)
+	var config := GameManager.config()
+	var network := RoadNetwork.new(state, config)
+	# Find a link with real horizontal reach and drop a river across its middle: the network must
+	# shape that link as a bridge, whatever the hash happened to bend it into.
+	var link_index := -1
+	var left := Vector2.ZERO
+	var right := Vector2.ZERO
+	for i in state.roads.size():
+		var raw: Variant = state.roads[i]
+		if typeof(raw) != TYPE_DICTIONARY:
+			continue
+		var link := raw as Dictionary
+		var a := state.settlement(str(link.get("a", "")))
+		var b := state.settlement(str(link.get("b", "")))
+		if a == null or b == null:
+			continue
+		if absf(a.position.x - b.position.x) >= 120.0:
+			link_index = i
+			left = a.position
+			right = b.position
+			break
+	check(link_index >= 0, "the world has a link long enough to put a river across")
+	if link_index < 0:
+		GameManager.end_campaign()
+		return
+	network.world = BandTerrain.new((left.x + right.x) * 0.5, 20.0)
+	network.refresh_paths()
+	var spans := network.bridge_spans(link_index)
+	greater(spans.size(), 0, "the link crosses the river by bridge")
+	var curve := network.link_curve(link_index)
+	var bridge: Vector2i = spans[0]
+	var middle: Vector2 = curve[(int(bridge.x) + int(bridge.y)) / 2]
+	approx(network.bonus_at(middle), network.bonus_of("road"), 0.0001,
+		"and standing on the bridge walks at the link's own speed")
+	GameManager.end_campaign()
+
+
+## The longest unbroken run of water under a curve, in units - the same arithmetic the shaping
+## minimises, computed independently so the test is not reading the code's own answer back.
+func _water_run(path: PackedVector2Array, terrain) -> float:
+	var longest := 0.0
+	var run := 0.0
+	for i in range(1, path.size()):
+		if float(terrain.sample(path[i]).get("height", 1.0)) < 0.335:
+			run += path[i - 1].distance_to(path[i])
+			longest = maxf(longest, run)
+		else:
+			run = 0.0
+	return longest
+
+
+## Whether every watery point of the curve sits inside one of the recorded bridge spans.
+func _water_inside_spans(path: PackedVector2Array, terrain, spans: Array) -> bool:
+	for i in path.size():
+		if float(terrain.sample(path[i]).get("height", 1.0)) >= 0.335:
+			continue
+		var inside := false
+		for bridge in spans:
+			if i >= int(bridge.x) and i <= int(bridge.y):
+				inside = true
+				break
+		if not inside:
+			return false
+	return true
+
+
+## A cheap order-sensitive fingerprint of a curve, for "the same road twice" comparisons.
+func _path_checksum(path: PackedVector2Array) -> float:
+	var total := 0.0
+	for i in path.size():
+		total += path[i].x * 0.7071 + path[i].y * 0.3737 + float(i)
+	return total
 
 
 ## The owner, watching a journey: "I see my pawn moving in a straight line... I think the game

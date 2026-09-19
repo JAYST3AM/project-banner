@@ -7,11 +7,24 @@ const COLOR_BG := Color("0e1218")
 const COLOR_LAND := Color("243026")
 const COLOR_GRID := Color("2c3a2e")
 const COLOR_LAND_EDGE := Color("3a4a3c")
-## Brightened when the terrain arrived. The old values were picked to read against a flat dark
-## slab, and against painted ground a brown road on brown earth is simply not there.
-const COLOR_ROAD := Color("9a8452")
-const COLOR_TRACK := Color("6a5f49")
-const COLOR_DIRT := Color("5c4b38")
+## Earth tones pulled from the ground's own flat-shader palette (worn earth, dry grass, sand), so a
+## road reads as ground that has been walked rather than a line drawn over the map - the owner:
+## "make the roads look more like terrain". Each tier is a soft trampled margin, a core, and - on a
+## proper road - a faint worn centre.
+const COLOR_ROAD := Color("8f7a55")
+const COLOR_TRACK := Color("7d6c4e")
+const COLOR_DIRT := Color("6b5d43")
+## The soft margin each road sits in: wide, faint, low-contrast earth. It replaces the old hard
+## casing, which read as a UI stroke; this reads as ground that has been trodden.
+const COLOR_ROAD_MARGIN := Color(0.30, 0.26, 0.18, 0.38)
+const COLOR_TRACK_MARGIN := Color(0.27, 0.24, 0.17, 0.30)
+const COLOR_DIRT_MARGIN := Color(0.25, 0.22, 0.16, 0.24)
+## The worn centre of a proper road: the strip where feet and cartwheels have taken the grass away.
+const COLOR_ROAD_WORN := Color(0.72, 0.64, 0.46, 0.30)
+## Timber: a bridge is the one piece of a road that is built rather than worn, so it is drawn as its
+## own thing - a dark planked span with a post at each bank.
+const COLOR_BRIDGE := Color("6d4f33")
+const COLOR_BRIDGE_MARGIN := Color(0.16, 0.12, 0.08, 0.45)
 ## The dark edge under a road. Casing is what makes a line legible over whatever it crosses - it is
 ## the trick contour maps have always used, and the reason the roads vanished without it.
 const COLOR_CASING := Color(0.02, 0.03, 0.04, 0.55)
@@ -31,6 +44,9 @@ const COLOR_PARTY_OUTLINE := Color("0b1017")
 var state: CampaignState = null
 var config: GameConfig = null
 var travel: TravelService = null
+## The road network, when one is wired: the view draws the network's own shaped curves (the ones the
+## snap and the grid read) and the bridges they carry.
+var roads: RoadNetwork = null
 
 var selected_id: String = ""
 var hovered_id: String = ""
@@ -189,41 +205,87 @@ func _draw_cost_grid() -> void:
 
 func _draw_roads() -> void:
 	var visible := _visible_world_rect()
-	for road in state.roads:
+	for index in state.roads.size():
+		var raw: Variant = state.roads[index]
+		if typeof(raw) != TYPE_DICTIONARY:
+			continue
+		var road := raw as Dictionary
 		var a := state.settlement(str(road.get("a", "")))
 		var b := state.settlement(str(road.get("b", "")))
 		if a == null or b == null:
 			continue
 		# A road is drawn if its own box touches the view. Rect2.expand() builds it from the two ends,
 		# which for a road that bends is a cheap approximation of its extent and always a safe one.
-		var span := Rect2(a.position, Vector2.ZERO).expand(b.position)
-		if not visible.intersects(span):
+		var bound := Rect2(a.position, Vector2.ZERO).expand(b.position)
+		if not visible.intersects(bound):
 			continue
-		# The tier is the drawing: a road is the full width with a highlight, a track is narrower
-		# and plainer, a dirt road is a thin line, and a roadless link is not drawn at all.
 		var tier := str(road.get("kind", "road"))
 		if tier == "none":
 			continue
-		var color := COLOR_ROAD
-		var width := 5.0
+		# The network's own shaped curve - the one the snap, the grid and the walking read - so what
+		# is drawn and what is walked cannot drift apart; a fresh shape only when no network is wired.
+		var path: PackedVector2Array = PackedVector2Array()
+		var bridges: Array = []
+		if roads != null:
+			path = roads.link_curve(index)
+			bridges = roads.bridge_spans(index)
+		if path.size() < 2:
+			path = RoadPath.between(a.position, b.position)
+			bridges = []
+		var core := COLOR_ROAD
+		var margin := COLOR_ROAD_MARGIN
+		var width := 4.6
 		match tier:
 			"dirt":
-				color = COLOR_DIRT
-				width = 2.0
+				core = COLOR_DIRT
+				margin = COLOR_DIRT_MARGIN
+				width = 1.8
 			"track":
-				color = COLOR_TRACK
-				width = 3.5
-			"road":
-				pass
-			_:
-				color = COLOR_TRACK
-				width = 3.5
-		var path := RoadPath.between(a.position, b.position)
-		var casing := 3.0 if tier != "dirt" else 2.0
-		draw_polyline(path, COLOR_CASING, width + casing, true)
-		draw_polyline(path, color, width, true)
+				core = COLOR_TRACK
+				margin = COLOR_TRACK_MARGIN
+				width = 3.2
+		# Ground that has been walked: the trampled margin, then the core - timber where the curve
+		# crosses water - and, on a proper road, the worn centre.
+		draw_polyline(path, margin, width + 5.0, true)
+		_draw_road_core(path, core, width, bridges)
 		if tier == "road":
-			draw_polyline(path, color.lightened(0.3), 1.0, true)
+			_draw_road_strip(path, COLOR_ROAD_WORN, 2.0, bridges)
+
+
+## The core line, split around any bridge spans: dry ground in the tier's own colour, water in
+## timber with a post at each bank.
+func _draw_road_core(path: PackedVector2Array, core: Color, width: float, bridges: Array) -> void:
+	var from := 0
+	for bridge in bridges:
+		var start := maxi(int(bridge.x) - 1, 0)
+		var stop := mini(int(bridge.y) + 1, path.size() - 1)
+		if start > from:
+			draw_polyline(path.slice(from, start + 1), core, width, true)
+		var planks := path.slice(start, stop + 1)
+		if planks.size() >= 2:
+			draw_polyline(planks, COLOR_BRIDGE_MARGIN, width + 3.4, true)
+			draw_polyline(planks, COLOR_BRIDGE, width + 1.0, true)
+			var across := (planks[planks.size() - 1] - planks[0]).orthogonal().normalized()
+			draw_line(planks[0] - across * 3.4, planks[0] + across * 3.4, COLOR_BRIDGE, 1.8)
+			draw_line(planks[planks.size() - 1] - across * 3.4,
+				planks[planks.size() - 1] + across * 3.4, COLOR_BRIDGE, 1.8)
+		from = stop
+	if from < path.size() - 1:
+		draw_polyline(path.slice(from, path.size()), core, width, true)
+
+
+## A thin strip along the dry stretches only - the worn centre of a road, which a bridge does not
+## have: a road does not wear its own planks.
+func _draw_road_strip(path: PackedVector2Array, color: Color, width: float, bridges: Array) -> void:
+	var from := 0
+	for bridge in bridges:
+		var start := maxi(int(bridge.x) - 1, 0)
+		var stop := mini(int(bridge.y) + 1, path.size() - 1)
+		if start > from:
+			draw_polyline(path.slice(from, start + 1), color, width, true)
+		from = stop
+	if from < path.size() - 1:
+		draw_polyline(path.slice(from, path.size()), color, width, true)
 
 
 func _draw_travel_line() -> void:

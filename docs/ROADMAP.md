@@ -919,4 +919,8 @@ the pace and the eta the same truth (D-124): `RoadNetwork.bonus_at` reads the dr
 wear scan and the snap already use, the grid went back to doing only what it is good at - pricing
 the route - so the speed changes exactly at the road's visible edge, a crossing march gets its
 blip, and a painted block can no longer leak road speed past the drawn line. The pace counts the
-road by its drawn width (10 u, D-126) while wear and the snap keep the 48 u shoulder.
+road by its drawn width (10 u, D-126) while wear and the snap keep the 48 u shoulder. And the road
+curve now reads the terrain (D-127): a road never simply runs over water - a crossing within
+`roads.bridge_max_span` is crossed by a **bridge** (timber, posted, priced and walked as road) and a
+wider lake bends the road around it - while the roads themselves draw as trodden earth, not UI
+strokes.

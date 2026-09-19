@@ -320,11 +320,16 @@ func build_route(to: Settlement) -> void:
 	# and the map's line are the same line.
 	var points := PackedVector2Array([state.world_position])
 	var previous := from
+	if _world == null:
+		_world = WorldChunks.build(state.campaign_seed)
 	for id in chain:
 		var node := state.settlement(id)
 		if node == null:
 			continue
-		for point in RoadPath.between(previous.position, node.position):
+		var shaped := RoadPath.between(previous.position, node.position, _world,
+			config.get_float("travel.water_height", 0.335),
+			config.get_float("roads.bridge_max_span", 64.0))
+		for point in shaped:
 			points.append(point)
 		previous = node
 	points.append(to.position)

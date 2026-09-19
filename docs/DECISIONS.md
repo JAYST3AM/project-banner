@@ -3400,3 +3400,39 @@ field does; the pace radius is asserted narrower than the wear shoulder; the blo
 still passes - 75 assertions, 0 failures. All suites green (test_world_map 116/0,
 test_campaign_flow 41/0, test_core_services 83/0).
 
+
+## D-127 - roads answer to the water, and look like ground
+
+**Context.** The owner, with the pace finally right: "can we make the roads look more like terrain?
+also I want to add a few rules to them, 1st one to add and test, don't let them run over water, but
+we could do bridges over water." Both land in one place, because the curve already was the single
+source of truth - `RoadPath.between()` shapes what the map draws, what the grid stamps, what the
+party walks and what the snap splices onto - and terrain was the one input it never read.
+
+**The water rule.** `between()` now takes the terrain (and the water height and a bridge limit).
+The canonical bend is tried first, then its mirror and wider bows, and the first shape that is dry -
+or whose only water is a stay within `roads.bridge_max_span` (64 u) - wins. Such a stay is recorded
+as a *bridge span*: `RoadPath.water_spans()` gives the [start, end] index pairs that the map draws
+as timber and the walk crosses at road speed, because the grid stamps the span as road ground
+(which is exactly what a bridge is for). A lake wider than the limit is bent around; when no bow can
+avoid it, the least-wet shape wins and can never be wetter than the plain bend. Deterministic like
+everything else about the curve: same campaign, same water, same road. All four consumers now pass
+the same shared `WorldChunks` instance - memoised per seed as of this change, because four seams
+were each re-generating the same chunks - so the drawn line, the stamped cells and the walked line
+cannot disagree about where the water is.
+
+**The look.** The roads stopped being UI strokes drawn over the map: the hard dark casing and the
+bright highlight are gone, replaced by a soft trampled margin in low-alpha earth, an earth-toned
+core pulled from the ground's own flat-shader palette (worn earth, dry grass, sand), and - on a
+proper road - a worn centre strip; bridges draw as dark planked spans with a post at each bank. The
+visual pass was judged from desktop screenshots and crops rather than code reading: two rounds, the
+second one darker and earthier after the first read as "pale flat line, pasted on".
+
+**Proved.** `test_roads` grew two sections: a river (a stand-in band terrain) is crossed and only
+crossed inside recorded spans, no wider than the limit, the same road twice; a wide lake is never
+wetter than the bare bend or the straight crossing; dry land draws exactly the historic bend; and a
+network given a stand-in terrain shapes its link as a bridge and walks it at the link's own speed.
+86 assertions, 0 failures. Loading cost of the rule: costs 99 -> 315 ms and first-run loading
+~1.8 -> 2.0 s - the price of every link being shaped against the field; worth watching, not yet
+worth optimising.
+

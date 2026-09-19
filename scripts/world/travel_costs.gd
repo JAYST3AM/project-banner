@@ -35,6 +35,7 @@ func build(seed_value: int, config: GameConfig, roads: Array, settlements: Dicti
 	var marsh := config.get_float("travel.marsh_speed_factor", 0.55)
 	var water_height := config.get_float("travel.water_height", 0.335)
 	var marsh_height := config.get_float("travel.marsh_height", 0.375)
+	var bridge_max := config.get_float("roads.bridge_max_span", 64.0)
 
 	for row in ROWS:
 		for column in COLUMNS:
@@ -69,7 +70,9 @@ func build(seed_value: int, config: GameConfig, roads: Array, settlements: Dicti
 		if a == null or b == null:
 			continue
 		var road_cost := 1.0 / (base * _tier_bonus(config, tier))
-		var path := RoadPath.between(a.position, b.position)
+		# The same terrain-shaped curve the map draws, bridges included: a bridge is road-priced
+		# ground, which is exactly what a bridge is for.
+		var path := RoadPath.between(a.position, b.position, world, water_height, bridge_max)
 		for i in path.size() - 1:
 			var from := path[i]
 			var to := path[i + 1]

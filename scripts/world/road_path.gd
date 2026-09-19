@@ -9,6 +9,11 @@ class_name RoadPath
 ## same road the same way, a save reloads to the roads it had, and nothing about it is stored.
 
 const SEGMENTS := 48
+## Fallbacks for the terrain shaping; callers pass their config's own figures.
+const WATER_HEIGHT := 0.335
+## How wide a water crossing may be and still count as a bridgeable river rather than a lake to
+## bend around.
+const BRIDGE_MAX_SPAN := 64.0
 
 
 ## Which way, and how hard, a road bends - a property of the road, not of the direction it is read in.
@@ -28,21 +33,86 @@ static func bend_of(a: Vector2, b: Vector2) -> float:
 	return (raw - floorf(raw)) * 2.0 - 1.0
 
 
-static func between(a: Vector2, b: Vector2) -> PackedVector2Array:
+## The road's own line from a to b. Without a terrain this is the historic bend and nothing else;
+## with one, water decides: a road never simply runs over it. The canonical bend is tried first, then
+## its mirror and wider bows - the first shape that is dry, or crosses only water a bridge spans, is
+## the road. A lake the line cannot dodge keeps the least-wet shape, which is the fewest units of
+## water possible. The owner's first road rule: "don't let them run over water, but we could do
+## bridges over water."
+static func between(a: Vector2, b: Vector2, terrain: Object = null, water_height := WATER_HEIGHT, bridge_max_span := BRIDGE_MAX_SPAN) -> PackedVector2Array:
 	var span := a.distance_to(b)
-	var path := PackedVector2Array([a, b])
 	if span < 24.0:
-		return path
-	var side := Vector2(b.y - a.y, a.x - b.x).normalized()
+		return PackedVector2Array([a, b])
 	var bend := bend_of(a, b)
-	path = PackedVector2Array()
+	if terrain == null:
+		return shape(a, b, bend)
+	var choices: Array[float] = [bend, -bend, bend * 1.6, -bend * 1.6, 0.0]
+	var best := PackedVector2Array()
+	var best_wet := INF
+	for candidate in choices:
+		var path := shape(a, b, candidate)
+		var wet := _longest_water_run(path, terrain, water_height)
+		if wet <= bridge_max_span:
+			return path
+		if wet < best_wet:
+			best_wet = wet
+			best = path
+	return best
+
+
+## The bare shape, for a given bend: every term is multiplied by a window that is zero at both ends,
+## so the offset is exactly zero at each settlement - the road meets its towns by construction, not
+## by luck.
+static func shape(a: Vector2, b: Vector2, bend: float) -> PackedVector2Array:
+	var span := a.distance_to(b)
+	var side := Vector2(b.y - a.y, a.x - b.x).normalized()
+	var path := PackedVector2Array()
 	for i in SEGMENTS + 1:
 		var t := float(i) / float(SEGMENTS)
-		# Every term is multiplied by a window that is zero at both ends, so the offset is exactly
-		# zero at each settlement: the road meets its towns by construction, not by luck.
 		var window := sin(t * PI)
 		var offset := window * bend * span * 0.15
 		offset += sin(t * PI * 3.0 + bend * 5.0) * span * 0.032 * window
 		offset += sin(t * PI * 5.0 + bend * 11.0) * span * 0.010 * window
 		path.append(a.lerp(b, t) + side * offset)
 	return path
+
+
+## The stretches of a shaped curve that lie over water: [start, end] index pairs into the path -
+## where the map draws a bridge and the walk crosses by one. The bank point is included at each end,
+## so the bridge visibly rests on land. Empty when the road never touches water.
+static func water_spans(path: PackedVector2Array, terrain: Object, water_height := WATER_HEIGHT) -> Array:
+	var spans: Array = []
+	if terrain == null or path.size() < 2:
+		return spans
+	var start := -1
+	for i in range(1, path.size()):
+		if _is_water(terrain, path[i], water_height):
+			if start < 0:
+				start = i - 1
+		elif start >= 0:
+			spans.append(Vector2i(start, i))
+			start = -1
+	if start >= 0:
+		spans.append(Vector2i(start, path.size() - 1))
+	return spans
+
+
+## The longest unbroken stretch of water under a curve, in units - the number the shaping brings
+## under the bridge limit.
+static func _longest_water_run(path: PackedVector2Array, terrain: Object, water_height: float) -> float:
+	var longest := 0.0
+	var run := 0.0
+	for i in range(1, path.size()):
+		if _is_water(terrain, path[i], water_height):
+			run += path[i - 1].distance_to(path[i])
+			longest = maxf(longest, run)
+		else:
+			run = 0.0
+	return longest
+
+
+static func _is_water(terrain: Object, point: Vector2, water_height: float) -> bool:
+	var here: Variant = terrain.call("sample", point)
+	if typeof(here) != TYPE_DICTIONARY:
+		return false
+	return float((here as Dictionary).get("height", 1.0)) < water_height

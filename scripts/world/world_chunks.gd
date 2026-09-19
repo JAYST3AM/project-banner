@@ -49,9 +49,18 @@ var _generated: int = 0
 var _generation_usec: int = 0
 
 
+## One instance per seed, shared: the same field answers the ground painter, the priced grid, the
+## road shaping and the walk. Building a fresh one per caller was harmless while sampling was rare;
+## the water rule made it three or four seams that each re-generated the same chunks.
+static var _shared: Dictionary = {}
+
+
 static func build(p_seed: int) -> WorldChunks:
+	if _shared.has(p_seed):
+		return _shared[p_seed] as WorldChunks
 	var world := WorldChunks.new()
 	world.seed_value = p_seed
+	_shared[p_seed] = world
 	return world
 
 

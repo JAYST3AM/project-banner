@@ -24,6 +24,9 @@ var config: GameConfig
 ## The curve of each link, cached: endpoints never move, so a link's shape is constant even as its
 ## tier changes. Indexed exactly like [member CampaignState.roads].
 var _paths: Array[PackedVector2Array] = []
+## Where each link's curve crosses water, [start, end] index pairs per link - the bridges the map
+## draws and the walk crosses by.
+var _spans: Array = []
 ## The stretch of walking not yet attributed to a link, held until a scan window fills.
 var _window_open := false
 var _window_from := Vector2.ZERO
@@ -86,19 +89,84 @@ func normalize() -> void:
 ## was built - the curve of an existing link never changes.
 func refresh_paths() -> void:
 	_paths.clear()
+	_spans.clear()
 	if state == null:
 		return
+	var terrain := _terrain()
+	var water_height := _water_height()
+	var bridge_max := _bridge_max_span()
 	for raw in state.roads:
 		if typeof(raw) != TYPE_DICTIONARY:
 			_paths.append(PackedVector2Array())
+			_spans.append([])
 			continue
 		var link := raw as Dictionary
 		var a := state.settlement(str(link.get("a", "")))
 		var b := state.settlement(str(link.get("b", "")))
 		if a == null or b == null:
 			_paths.append(PackedVector2Array())
+			_spans.append([])
 			continue
-		_paths.append(RoadPath.between(a.position, b.position))
+		var path := RoadPath.between(a.position, b.position, terrain, water_height, bridge_max)
+		_paths.append(path)
+		_spans.append(RoadPath.water_spans(path, terrain, water_height))
+	_log_bridges()
+
+
+## One line of the road waters at load: how many links cross a river by bridge and the widest such
+## crossing - the owner's first road rule, visible in a run without a debugger.
+func _log_bridges() -> void:
+	var bridged := 0
+	var longest := 0.0
+	for i in _spans.size():
+		var spans: Array = _spans[i]
+		if spans.is_empty():
+			continue
+		bridged += 1
+		var path: PackedVector2Array = _paths[i]
+		for span in spans:
+			longest = maxf(longest, _span_length(path, int(span.x), int(span.y)))
+	if bridged > 0:
+		DebugLogger.info("roads: %d of %d links cross water by bridge (widest %d u)" % [
+			bridged, _paths.size(), int(round(longest)),
+		], CATEGORY)
+
+
+static func _span_length(path: PackedVector2Array, from: int, to: int) -> float:
+	var length := 0.0
+	for i in range(from + 1, mini(to + 1, path.size())):
+		length += path[i - 1].distance_to(path[i])
+	return length
+
+
+## The terrain the roads are shaped against. Built from the campaign seed and shared with every
+## other reader of the same field; a test may set it to a stand-in before refreshing the paths.
+var world: Object = null
+
+
+func _terrain() -> Object:
+	if world == null and state != null:
+		world = WorldChunks.build(state.campaign_seed)
+	return world
+
+
+func _water_height() -> float:
+	if config == null:
+		return RoadPath.WATER_HEIGHT
+	return config.get_float("travel.water_height", RoadPath.WATER_HEIGHT)
+
+
+func _bridge_max_span() -> float:
+	if config == null:
+		return RoadPath.BRIDGE_MAX_SPAN
+	return config.get_float("roads.bridge_max_span", RoadPath.BRIDGE_MAX_SPAN)
+
+
+## Where a link's curve crosses water, as [start, end] index pairs - what the map draws as a bridge.
+func bridge_spans(index: int) -> Array:
+	if index < 0 or index >= _spans.size():
+		return []
+	return _spans[index]
 
 
 ## A settlement founded into the world links itself to its nearest neighbour as a dirt road:
@@ -131,7 +199,9 @@ func connect_settlement(settlement: Settlement) -> Dictionary:
 		"used_hours": now,
 	}
 	state.roads.append(link)
-	_paths.append(RoadPath.between(settlement.position, nearest.position))
+	var path := RoadPath.between(settlement.position, nearest.position, _terrain(), _water_height(), _bridge_max_span())
+	_paths.append(path)
+	_spans.append(RoadPath.water_spans(path, _terrain(), _water_height()))
 	DebugLogger.info("%s is founded, linked to %s by a dirt road" % [
 		settlement.name, nearest.name,
 	], CATEGORY)

@@ -75,6 +75,12 @@ exactly at a road's visible edge, a march crossing one gets its blip, and a road
 no longer leak speed past the drawn line. And the pace counts a road by its **drawn width**
 (`roads.pace_radius`, 10 u) rather than the wider wear shoulder (48 u, D-126) - so the speed flips
 where the road visibly begins and ends; the wear credit and the snap keep the shoulder.
+**The water rule (D-127):** a road never simply runs over water - a crossing within
+`roads.bridge_max_span` (64 u) is a **bridge** (drawn as planked timber, walked at road speed,
+priced as road in the grid) and anything wider bends the curve around it; bridges show up in the
+log ("roads: N of M links cross water by bridge"). **The look (D-127):** roads draw as trodden
+earth - a soft low-alpha margin, an earth core from the ground's own palette, a worn centre on
+proper roads - not as UI strokes.
 
 ## The vertical slice is complete
 

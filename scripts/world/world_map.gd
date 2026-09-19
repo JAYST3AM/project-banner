@@ -120,6 +120,7 @@ func _ready() -> void:
 	_stage_name = "view bind"
 	_mark = Time.get_ticks_msec()
 	_view.bind(_state, _config, _travel)
+	_view.roads = _roads
 	# The ground goes in before the map view and behind it: the view draws roads, settlements and
 	# parties on top of terrain it no longer has to paint itself.
 	if not _no_ground and not art_missing:

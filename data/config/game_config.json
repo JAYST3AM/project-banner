@@ -42,7 +42,7 @@
     "min_speed_fraction": 0.55
   },
   "roads": {
-    "_comment": "The road network as a living thing. A link between two settlements carries a tier; the priced grid, the eta and the walking pace all read the tier's speed bonus. A settlement founded later links itself to its nearest neighbour as a dirt road - 'a very small bonus'. Traffic (world units walked on the link) raises a tier once upgrade_traffic is met; a link nobody has used for decay_days_per_tier of game days falls one tier, and can eventually be roadless again, which takes years: 'roadless, it takes years though, so I doubt it will ever happen.'",
+    "_comment": "The road network as a living thing. A link between two settlements carries a tier; the priced grid, the eta and the walking pace all read the tier's speed bonus. A settlement founded later links itself to its nearest neighbour as a dirt road - 'a very small bonus'. Traffic (world units walked on the link) raises a tier once upgrade_traffic is met; a link nobody has used for decay_days_per_tier of game days falls one tier, and can eventually be roadless again, which takes years: 'roadless, it takes years though, so I doubt it will ever happen.' A road never simply runs over water: a crossing no wider than bridge_max_span becomes a bridge, and a wider lake bends the road around it.",
     "tiers": ["none", "dirt", "track", "road"],
     "speed_bonus": {
       "none": 1.0,
@@ -58,6 +58,7 @@
     "decay_days_per_tier": 3650.0,
     "traffic_radius": 48.0,
     "pace_radius": 10.0,
+    "bridge_max_span": 64.0,
     "traffic_scan_hours": 0.1,
     "review_hours": 6.0
   },
