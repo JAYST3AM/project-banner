@@ -900,7 +900,7 @@ happen"), recorded as D-120 and D-121.
 | pace and eta read the ground's own number; walking wears the link | `scripts/world/travel_service.gd` |
 | tier drawing - width and colour per tier, `none` not drawn | `scripts/world/world_map_view.gd` |
 | wiring, the review clock, the grid re-price on a tier change | `scripts/world/world_map.gd` |
-| the checks | `tests/test_roads.gd` (new, 58) and `test_world_map` rebuilt to 109/0 |
+| the checks | `tests/test_roads.gd` (new, 61) and `test_world_map` rebuilt to 109/0 |
 
 **Settings** live in `data/config/game_config.json` under `roads`: the ladder and its bonuses, the
 traffic each tier needs to rise, the decay span, and the scan/review windows. **Verified** by the

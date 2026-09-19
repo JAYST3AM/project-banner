@@ -3231,7 +3231,7 @@ and plainer, dirt a thin line, `none` not at all - and the priced grid stamps ea
 own tier's bonus (`none` stamps nothing). The world opens with its elder towns already at `road`; the
 dynamics are for what gets built after.
 
-**Proved, not asserted.** `tests/test_roads.gd` (58 assertions): the ladder and every bonus ordering,
+**Proved, not asserted.** `tests/test_roads.gd` (61 assertions): the ladder and every bonus ordering,
 normalising (including the stamp-now reading), a founded settlement's dirt link to its nearest
 neighbour, upgrades on threshold with the spill kept and no climb without traffic, the full decay
 ladder over 3650-day spans down to the roadless floor, the roadless re-stamp of the grid and revival

@@ -72,6 +72,16 @@ var route_leg := 0
 ## its pace reads the ground's price exactly as the grid priced it. Fixtures that build a travel
 ## service on their own leave this null, in which case nothing is worn and the field answers alone.
 var roads: RoadNetwork = null
+## The road accounting for the journey under way: distance walked, distance walked on a road, and
+## what the last check found. Every new order resets it, so each arrival line counts its own
+## journey.
+var _journey_units := 0.0
+var _journey_on_road := 0.0
+var _journey_max_gap := 0.0
+var _on_road := false
+var _road_state_known := false
+var _road_check_hours := 0.0
+var _road_log_hours := 0.0
 
 ## On a road the owner wants speed; off it, the ground decides. Read from the world's own field - the
 ## same one the map paints from - so a marsh is slow on the map and slow to cross.
@@ -137,6 +147,10 @@ func factor_at_point(point: Vector2) -> float:
 
 ## How far apart the eta's samples are, in world units.
 const ETA_SAMPLE_UNITS := 32.0
+## How much game time passes between road-state checks while travelling. The owner watched the map
+## and said the party "visually... aren't following the roads"; this is the cadence at which the
+## log says where the party actually stands relative to the links it should be walking.
+const ROAD_CHECK_HOURS := 0.1
 
 
 ## Game hours the party needs to reach a point, priced along the line rather than at one end: a
@@ -246,6 +260,7 @@ func build_route(to: Settlement) -> void:
 		# One path, priced by the ground and by the roads, with no comparison to make: a road is cheap
 		# cells and a marsh is dear ones, and the pathfinder has one job.
 		route = costs.path_between(state.world_position, to.position)
+		_log_route_share()
 		return
 	var from := current_settlement()
 	if from == null:
@@ -308,6 +323,86 @@ func build_route(to: Settlement) -> void:
 	else:
 		route = points
 		print("travel: along the roads, %.1f h against %.1f straight" % [road_hours, direct_hours])
+	_log_route_share()
+
+
+## Say what the route that was just built is made of: how much of its length runs on a road. The
+## owner, watching the map: "visually they aren't following the roads" - this is the number that
+## separates "the picture is wrong" from "the path was never on the road".
+func _log_route_share() -> void:
+	if roads == null or route.size() < 2:
+		return
+	var total := 0.0
+	var on_road_units := 0.0
+	var previous := route[0]
+	for i in range(1, route.size()):
+		var point := route[i]
+		var span := previous.distance_to(point)
+		if span > 0.0001:
+			var samples := maxi(1, int(ceil(span / ETA_SAMPLE_UNITS)))
+			for s in range(1, samples + 1):
+				var at: Vector2 = previous.lerp(point, float(s) / float(samples))
+				total += span / float(samples)
+				if roads.on_road(at):
+					on_road_units += span / float(samples)
+		previous = point
+	if total > 0.0:
+		DebugLogger.info("travel: route is %.0f%% on roads (%.0f units)" % [
+			100.0 * on_road_units / total, total,
+		], "Travel")
+
+
+## A new order resets the journey's road accounting, so each arrival line counts its own journey.
+func _begin_journey() -> void:
+	_journey_units = 0.0
+	_journey_on_road = 0.0
+	_journey_max_gap = 0.0
+	_on_road = false
+	_road_state_known = false
+	_road_check_hours = 0.0
+	_road_log_hours = 0.0
+
+
+## The journey's verdict, in the same units as the route line: how much of what was actually
+## walked lay on a road, and how far off a line the walk wandered at its worst.
+func _log_journey_share() -> void:
+	if roads == null or _journey_units <= 1.0:
+		return
+	DebugLogger.info("travel: journey ends - %.0f%% of %.0f units walked on roads, worst %.0f u off a line" % [
+		100.0 * _journey_on_road / _journey_units, _journey_units, _journey_max_gap,
+	], "Travel")
+
+
+## Say where the party stands relative to the roads: a line whenever that changes, and a periodic
+## trace while it does not, because the transition lines alone cannot say whether the walk hugs the
+## drawn line or merely stays inside the corridor the wear counts.
+func _watch_road_state(game_hours: float) -> void:
+	_road_check_hours += game_hours
+	if _road_state_known and _road_check_hours < ROAD_CHECK_HOURS:
+		return
+	_road_check_hours = 0.0
+	var here := state.world_position
+	var on := roads.on_road(here)
+	var gap := roads.distance_to_nearest_link(here)
+	_journey_max_gap = maxf(_journey_max_gap, gap)
+	var who := roads.link_label(roads.nearest_link(here, -1.0))
+	var line := ""
+	if on:
+		line = "travel: on the road - %s, %.0f u off its line" % [who, gap]
+	elif who.is_empty():
+		line = "travel: off the road - %.0f u from any link" % gap
+	else:
+		line = "travel: off the road - %.0f u from %s" % [gap, who]
+	if not _road_state_known or on != _on_road:
+		DebugLogger.info(line, "Travel")
+		_on_road = on
+		_road_state_known = true
+		_road_log_hours = 0.0
+		return
+	_road_log_hours += ROAD_CHECK_HOURS
+	if _road_log_hours >= 0.5:
+		_road_log_hours = 0.0
+		DebugLogger.info(line, "Travel")
 
 
 func set_destination(settlement_id: String) -> bool:
@@ -331,6 +426,7 @@ func set_destination(settlement_id: String) -> bool:
 		return false
 	state.destination_id = target.id
 	state.current_settlement_id = ""
+	_begin_journey()
 	DebugLogger.info("travelling to %s (%.0f units, ~%.1f game hours)" % [
 		target.name, distance_to(target.position), hours_to_reach(target.position),
 	], "Travel")
@@ -349,6 +445,7 @@ func set_destination_point(point: Vector2) -> bool:
 	state.destination_point = point
 	state.destination_id = ""
 	state.current_settlement_id = ""
+	_begin_journey()
 	DebugLogger.info("marching to open ground (%.0f units, ~%.1f game hours)" % [
 		distance_to(point), hours_to_reach(point),
 	], "Travel")
@@ -398,7 +495,7 @@ func step(game_hours: float) -> Dictionary:
 	if route.size() < 2:
 		# No route - marching to open ground, or a destination with no road between: a straight walk.
 		var straight := _step_straight(game_hours, report)
-		_wear_roads(start_point, game_hours, straight)
+		_report_walk(start_point, game_hours, straight)
 		return straight
 
 	# Never more than a step's worth of distance, however much game time the step was handed, and
@@ -432,7 +529,7 @@ func step(game_hours: float) -> Dictionary:
 	# Arriving is reaching the end of the route, and only that.
 	if leg >= route.size() - 1 and state.world_position.distance_to(route[route.size() - 1]) <= arrival_radius():
 		_finish_travel(report)
-	_wear_roads(start_point, game_hours, report)
+	_report_walk(start_point, game_hours, report)
 	return report
 
 
@@ -457,15 +554,20 @@ func _step_straight(game_hours: float, report: Dictionary) -> Dictionary:
 	return report
 
 
-## Hand the ground just walked to the road network, so the link the party is on is credited with
-## the wear. The network throttles its own scans; this only reports what happened.
-func _wear_roads(from_point: Vector2, game_hours: float, report: Dictionary) -> void:
+## Hand what was just walked to the road network and to the journey's own accounting: wear for the
+## link that was used, and the on-road ledger the travel log reports. The network throttles its own
+## scans; this only reports what happened.
+func _report_walk(from_point: Vector2, game_hours: float, report: Dictionary) -> void:
 	if roads == null:
 		return
 	var walked := float(report.get("distance_travelled", 0.0))
 	if walked <= 0.001:
 		return
 	roads.charge_move(from_point, state.world_position, walked, game_hours)
+	if _on_road:
+		_journey_on_road += walked
+	_journey_units += walked
+	_watch_road_state(game_hours)
 
 
 ## Teleport (debug panel / tests). Skips travel entirely but still consumes no time.
@@ -486,6 +588,7 @@ func teleport_to(settlement_id: String) -> bool:
 ## Arriving at whatever the party was marching to. A settlement is entered and marked visited; open
 ## ground is simply where the march ends, so the order clears and the clock carries on.
 func _finish_travel(report: Dictionary) -> void:
+	_log_journey_share()
 	if state.destination_is_point:
 		state.destination_is_point = false
 		report["arrived"] = true

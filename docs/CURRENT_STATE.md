@@ -5,7 +5,7 @@ What is actually playable and verified **right now**.
 **Last updated:** Step 8 - roads as a living thing: tiers, traffic and decay on every link, and
 the eta, the pace and the priced grid reading one number.
 **Engine:** Godot 4.7.2-stable
-**Test status:** Step 8's suites are green - `test_roads` 58/0 (new) and `test_world_map` 109/0 -
+**Test status:** Step 8's suites are green - `test_roads` 61/0 (new) and `test_world_map` 109/0 -
 plus `test_core_services` 83/0 with its clock read from the config. The rest of the tree is red
 from the 2026-09-19 revert and its fallout: 30 suites, 5,884 assertions, 41 failures, 5 BROKEN -
 and every one of those reproduces at the parent commit, verified suite by suite with the Step 8

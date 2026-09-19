@@ -297,6 +297,10 @@ func _test_travel_wears_and_walks_faster() -> void:
 	state.world_position = plain
 	var factor_plain := travel.ground_factor()
 	check(factor_plain < network.bonus_of("road") - 0.001, "ground away from the links is slower")
+	check(network.on_road(on_road), "a link's midpoint reads as on-road")
+	check(not network.on_road(plain), "and ground away from every link does not")
+	contains(network.link_label(network.nearest_link(on_road)), "Greywatch",
+		"and the log can name the link the party is standing on")
 
 	# The same slice of game time covers more road than plain ground, in the ratio of the factors.
 	state.world_position = on_road

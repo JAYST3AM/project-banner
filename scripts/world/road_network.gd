@@ -172,10 +172,11 @@ func _flush_window(to_point: Vector2) -> void:
 	_window_distance = 0.0
 
 
-## The link nearest a point, within the traffic radius, or -1. The wear scan reads the same curves
-## the map draws.
-func _nearest_link(point: Vector2) -> int:
-	var best := _traffic_radius()
+## The link nearest a point, or -1 when none lies within [param within] (a negative value means
+## anywhere). The wear scan, the travel log and the probes all read the same curves the map draws.
+func nearest_link(point: Vector2, within := -1.0) -> int:
+	var limit := INF if within < 0.0 else within
+	var best := limit
 	var found := -1
 	for i in _paths.size():
 		var distance := _distance_to_path(_paths[i], point)
@@ -183,6 +184,33 @@ func _nearest_link(point: Vector2) -> int:
 			best = distance
 			found = i
 	return found
+
+
+## The wear scan's own question: the nearest link, but only inside the traffic radius - the width
+## within which walking counts as using the road.
+func _nearest_link(point: Vector2) -> int:
+	return nearest_link(point, _traffic_radius())
+
+
+## Whether a point lies on some link's road, by the same radius the wear scan uses.
+func on_road(point: Vector2) -> bool:
+	return _nearest_link(point) >= 0
+
+
+## A link's name for the log: both ends, as a sentence reads them. Empty when the index names
+## nothing.
+func link_label(index: int) -> String:
+	if state == null or index < 0 or index >= state.roads.size():
+		return ""
+	var raw: Variant = state.roads[index]
+	if typeof(raw) != TYPE_DICTIONARY:
+		return ""
+	var link := raw as Dictionary
+	var a := state.settlement(str(link.get("a", "")))
+	var b := state.settlement(str(link.get("b", "")))
+	var left := a.name if a != null else str(link.get("a", ""))
+	var right := b.name if b != null else str(link.get("b", ""))
+	return "%s to %s" % [left, right]
 
 
 ## How far the nearest link's curve runs from a point; INF when there are none. Public because
