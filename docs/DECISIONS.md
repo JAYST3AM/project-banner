@@ -3231,7 +3231,7 @@ and plainer, dirt a thin line, `none` not at all - and the priced grid stamps ea
 own tier's bonus (`none` stamps nothing). The world opens with its elder towns already at `road`; the
 dynamics are for what gets built after.
 
-**Proved, not asserted.** `tests/test_roads.gd` (61 assertions): the ladder and every bonus ordering,
+**Proved, not asserted.** `tests/test_roads.gd` (68 assertions): the ladder and every bonus ordering,
 normalising (including the stamp-now reading), a founded settlement's dirt link to its nearest
 neighbour, upgrades on threshold with the spill kept and no climb without traffic, the full decay
 ladder over 3650-day spans down to the roadless floor, the roadless re-stamp of the grid and revival
@@ -3263,5 +3263,59 @@ real seconds to the game hour against a config that says ten. The tests now asse
 config terms - the eta bounded between best-road and worst-water, a step covering its own hours at
 `min(pace x factor x hours, cap)` and never outrunning the cap however much time it is handed, and the
 clock read from `time.seconds_per_game_hour` and `time.speed_multipliers` rather than literals - so a
-retune of the config retunes the suite with it. 109 assertions, 0 failures.
+retune of the config retunes the suite with it. 116 assertions, 0 failures.
+
+
+## D-122 - the walk follows the drawn road, because the blocks were never the road
+
+**Context.** Step 8's first cut made the pace and the price read the grid's blocks: a 64-unit cell
+the road curve passes through is priced at the road's speed, so anything inside that block walks at
+1.4x. The drawing, though, is a thin curve, and the route the pathfinder returns is cell centres -
+so the walk split the difference. The owner, watching his pawn, put it exactly right: "if the game
+thinks I'm on the road, and I see that I'm off the road, and I see my pawn moving in a straight
+line, I think the game thinks that block is road. is that how this is wired up?" It was. The
+on/off-road travel log, added for exactly this question, measured the walk wandering up to 31 units
+off the drawn line while still reading "100% on roads" by the wear corridor.
+
+**Decision.** A route's road stretches are spliced onto the link's own curve - the same 48 points
+the map draws and the grid stamps - before the party walks them. `build_route` samples the A*
+answer every 16 units, groups the samples by the link they are nearest (inside the corridor the
+wear scan uses, so "snapped" and "credited with wear" are one condition), and replaces each run
+with the curve points between its entry and exit projections, walked in the route's own order.
+Off-road stretches keep the pathfinder's line, corner for corner; both endpoints are kept exactly;
+the same order builds the same route twice (asserted). Everything downstream is unchanged: the grid
+still prices blocks, the pace still reads the block's factor, wear and the eta read positions - the
+walk simply *is* the line now, which is the only thing the eye ever saw.
+
+**Measured.** Debug-1 pass, seed 5150: before, three legs logged worst gaps of 15 / 31 / 14 units
+off a line; after, the trace reads "0 u off its line" through the legs. The suite section "the walk
+follows the drawn line" walks a real journey and asserts the worst gap stays under a dozen units,
+the endpoints land exactly, and the route is deterministic.
+
+**The question built its own answer.** The owner asked for on/off-road logging before any fix -
+"that way you can see whats actually happening" - and the logging is what proved the blocks
+disagree with the line, to the unit. Instrument before arguing about a picture.
+
+
+## D-123 - a march to open ground is a real march, and the pace is on the panel
+
+**Context.** Two things the owner found within a minute of playing. First: "I can't click on random
+spots, only locations (settlements)". The right click was wired and `set_destination_point` worked -
+in a *fresh* campaign. But a point order never cleared the route a previous settlement order had
+built, and once the party had arrived at the end of that route, the next march "arrived" on its
+first step without moving: the stale geometry finished under the party's feet. Second: "I don't see
+a speed increase on the roads" - the bonus was working (his own session's log: 273 units walked in
+1.35 game hours is 202 u/h against a 150 u/h base), but nothing on screen put a number on it.
+
+**Decision.** `set_destination_point()` and `clear_destination()` drop the route with the order; the
+march is a straight walk from where the party actually stands. The debug panel's pace line now
+shows the pace a player actually gets - `speed x ground factor`, so a road reads
+"210 u/h (ground x1.40)" and open field "150 u/h (ground x1.00)" - because a bonus nobody can see
+is a bonus nobody believes. Road strength itself is untouched; it is a config number
+(`roads.speed_bonus`) if the owner wants a stronger feel.
+
+**Proved by reproduction, not by reading.** `test_world_map`'s march section now walks a full road
+journey, then marches to open ground, and asserts the party moves, does not insta-arrive, and heads
+toward the clicked spot. With the fix stashed the three asserts fail with exactly the owner's
+symptom (distance travelled 0.0); with it, 116/0.
 

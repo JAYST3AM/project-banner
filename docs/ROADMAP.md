@@ -900,10 +900,18 @@ happen"), recorded as D-120 and D-121.
 | pace and eta read the ground's own number; walking wears the link | `scripts/world/travel_service.gd` |
 | tier drawing - width and colour per tier, `none` not drawn | `scripts/world/world_map_view.gd` |
 | wiring, the review clock, the grid re-price on a tier change | `scripts/world/world_map.gd` |
-| the checks | `tests/test_roads.gd` (new, 61) and `test_world_map` rebuilt to 109/0 |
+| the checks | `tests/test_roads.gd` (new, 68) and `test_world_map` rebuilt to 116/0 |
 
 **Settings** live in `data/config/game_config.json` under `roads`: the ladder and its bonuses, the
 traffic each tier needs to rise, the decay span, and the scan/review windows. **Verified** by the
 suite and by a live debug-1 run that walks a route, enters, recruits and returns with no script
 errors. **Next**: nothing in the world founds settlements at runtime yet - the road side of that
 exists as `connect_settlement`; the settlement side is its own milestone.
+
+**Follow-ups from the owner playing it (same day).** The walk now hugs the drawn curves: a route's
+road stretches are spliced onto the link curves (D-122), after the on/off-road travel log - added
+at the owner's request, "that way you can see whats actually happening" - proved the priced blocks
+disagreed with the line by up to 31 units. A march to open ground is a real march again (a stale
+route from a previous settlement order no longer finishes under the party's feet, D-123), and the
+debug panel's pace line shows the effective pace with its ground factor - "210 u/h (ground x1.40)"
+on a road - so the road bonus is visible in play rather than only in the log.

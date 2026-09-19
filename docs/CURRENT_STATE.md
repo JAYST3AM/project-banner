@@ -5,7 +5,7 @@ What is actually playable and verified **right now**.
 **Last updated:** Step 8 - roads as a living thing: tiers, traffic and decay on every link, and
 the eta, the pace and the priced grid reading one number.
 **Engine:** Godot 4.7.2-stable
-**Test status:** Step 8's suites are green - `test_roads` 61/0 (new) and `test_world_map` 109/0 -
+**Test status:** Step 8's suites are green - `test_roads` 68/0 (new) and `test_world_map` 116/0 -
 plus `test_core_services` 83/0 with its clock read from the config. The rest of the tree is red
 from the 2026-09-19 revert and its fallout: 30 suites, 5,884 assertions, 41 failures, 5 BROKEN -
 and every one of those reproduces at the parent commit, verified suite by suite with the Step 8
@@ -61,6 +61,14 @@ game days per tier - wears it down, roadless at the floor, and traffic can wear 
 Settings: `data/config/game_config.json` under `roads`. Model and measurements: D-120, D-121 and
 the Step 8 section of `ROADMAP.md`. Nothing founds settlements at runtime yet - the road side is
 `RoadNetwork.connect_settlement`, waiting on the settlement side.
+
+Played-it follow-ups (D-122, D-123): the walk **hugs the drawn curves** - a route's road stretches
+are spliced onto the link curves, so the marker walks the line (the on/off-road travel log measures
+it: "0 u off its line" in the legs of a debug-1 run, against 15-31 u before). A **march to open
+ground is a real march** again - a point order drops any route a previous settlement order left
+behind, where before the stale geometry "arrived" on the first step and the party never moved. And
+the debug panel's pace line now shows the **effective pace** with its ground factor
+("210 u/h (ground x1.40)" on a road) so the road bonus is visible in play.
 
 ## The vertical slice is complete
 
