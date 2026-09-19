@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "note": "The modular settlement building catalogue (D-138). Buildings carry category, kinds, biomes, purposes, wealth gates, notes and goods; materials and conditions are biomes and wealth speaking. Built to the owner's art plan: system first, sprites after.",
+
+  "counts": {
+    "village": [4, 6],
+    "town": [6, 10],
+    "fort": [5, 8],
+    "castle": [5, 8]
+  },
+
+  "conditions": {
+    "poor": {
+      "weights": {"poor": 62, "average": 26, "damaged": 9, "abandoned": 3},
+      "words": ["patched roof", "missing tiles", "warped timber", "dirt yard", "rough fence", "few windows"]
+    },
+    "modest": {
+      "weights": {"average": 55, "poor": 18, "repaired": 20, "wealthy": 7},
+      "words": ["maintained timber", "functional clutter", "tidy sheds", "smoke from the chimney"]
+    },
+    "wealthy": {
+      "weights": {"wealthy": 52, "average": 38, "repaired": 10},
+      "words": ["clean plaster", "decorative timber", "brass fittings", "stone foundations", "a banner over the door", "better glass"]
+    },
+    "display": {
+      "poor": "patched and rough",
+      "average": "maintained",
+      "damaged": "storm-damaged",
+      "abandoned": "abandoned",
+      "repaired": "newly repaired",
+      "wealthy": "well-kept"
+    }
+  },
+
+  "materials": {
+    "Plains": {
+      "roofs": ["brown tile", "red tile", "thatch", "weathered tile"],
+      "walls": ["clean plaster", "dirty plaster", "lighter timber"],
+      "attachments": ["fence", "garden", "cart", "hay_bales", "bucket"]
+    },
+    "Forest": {
+      "roofs": ["dark tile", "thatch", "weathered tile"],
+      "walls": ["darker timber", "mossy timber", "dirty plaster"],
+      "attachments": ["woodpile", "fence", "chopping_block", "animal_pen", "lean_to_shed"]
+    },
+    "Highlands": {
+      "roofs": ["slate", "dark tile", "stone slab"],
+      "walls": ["stone lower wall", "thick stone", "darker timber"],
+      "attachments": ["chimney", "stairs", "fence", "woodpile"]
+    },
+    "Coastal": {
+      "roofs": ["weathered tile", "thatch", "dark tile"],
+      "walls": ["pale plaster", "weathered timber", "salt-stained timber"],
+      "attachments": ["barrel", "crate", "rope", "nets", "water_trough"]
+    },
+    "Arid": {
+      "roofs": ["flat clay", "clay tile", "cloth-shaded"],
+      "walls": ["lighter plaster", "dusty plaster", "mudbrick"],
+      "attachments": ["awning", "basket", "water_trough", "table"]
+    }
+  },
+
+  "purposes": {
+    "fishing":  {"weights": {"residential": 3, "commercial": 3, "utility": 4, "military": 1, "special": 1}, "must": ["docks"]},
+    "mining":   {"weights": {"residential": 3, "commercial": 2, "utility": 3, "military": 2, "special": 1}, "must": ["mine_head"]},
+    "farming":  {"weights": {"residential": 4, "commercial": 2, "utility": 4, "military": 1, "special": 1}, "must": []},
+    "market":   {"weights": {"residential": 4, "commercial": 5, "utility": 2, "military": 1, "special": 3}, "must": ["market_square"]},
+    "military": {"weights": {"residential": 2, "commercial": 1, "utility": 3, "military": 5, "special": 1}, "must": []},
+    "mixed":    {"weights": {"residential": 4, "commercial": 3, "utility": 3, "military": 2, "special": 2}, "must": []}
+  },
+
+  "types": [
+    {"id": "cottage", "name": "Cottages", "category": "residential", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "note": "Small houses along the lanes, timber and plaster, each one leaning slightly differently."},
+    {"id": "hovel", "name": "Rough hovels", "category": "residential", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "wealth": "poor", "note": "Warped timber, patched roofs, and a yard that is mostly mud."},
+    {"id": "farmhouse", "name": "Farmhouses", "category": "residential", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "purposes": ["farming"], "note": "A house with its working side attached: byre, loft, and a yard of tools."},
+    {"id": "townhouse", "name": "Townhouses", "category": "residential", "kinds": ["town", "fort", "castle"], "enables": [],
+     "note": "Two floors, a shop-front in some, and neighbours close enough to borrow salt."},
+    {"id": "manor_house", "name": "Manor house", "category": "residential", "kinds": ["town", "castle"], "enables": [],
+     "wealth": "wealthy", "note": "The owning house's town seat: better glass, worse tempers."},
+
+    {"id": "general_shop", "name": "General shop", "category": "commercial", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "note": "Salt, nails, thread, and everything else, behind one counter."},
+    {"id": "smithy", "name": "Smithy", "category": "commercial", "kinds": ["village", "town", "fort", "castle"], "enables": ["tools"],
+     "note": "Nails, hinges, and the odd spearhead."},
+    {"id": "brewhouse", "name": "Brewhouse", "category": "commercial", "kinds": ["village", "town", "fort", "castle"], "enables": ["ale"],
+     "note": "The town ale, brewed strong and drunk young."},
+    {"id": "tavern", "name": "Tavern", "category": "commercial", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "note": "Ale, gossip and a fire - where rumours will wait, once taverns tell them."},
+    {"id": "large_inn", "name": "Large inn", "category": "commercial", "kinds": ["town", "castle"], "enables": [],
+     "purposes": ["market"], "note": "Beds, board, and stabling for those who can pay."},
+    {"id": "market_stall", "name": "Market stalls", "category": "commercial", "kinds": ["village", "town"], "enables": [],
+     "purposes": ["market", "farming"], "note": "Trestles and canvas, up at dawn, gone by dark."},
+    {"id": "workshop", "name": "Workshop", "category": "commercial", "kinds": ["town", "fort", "castle"], "enables": [],
+     "note": "Sawdust, offcuts, and a trade apprenticed into it."},
+    {"id": "merchants_house", "name": "Merchant's house", "category": "commercial", "kinds": ["town"], "enables": [],
+     "wealth": "wealthy", "purposes": ["market"], "note": "Counting-house below, family above, ledgers everywhere."},
+    {"id": "weavers_hall", "name": "Weaver's hall", "category": "commercial", "kinds": ["town"], "enables": ["wool cloth"],
+     "note": "Loom after loom, and the cloth the whole valley wears."},
+    {"id": "tannery", "name": "Tannery", "category": "commercial", "kinds": ["town", "fort"], "enables": ["leather"],
+     "note": "On the downwind edge, for everyone's sake."},
+    {"id": "smokehouse", "name": "Smokehouse", "category": "commercial", "kinds": ["town"], "enables": ["salted meat"],
+     "note": "Salted and smoked meat, off to the castles."},
+    {"id": "potters_yard", "name": "Potter's yard", "category": "commercial", "kinds": ["town"], "enables": ["pottery"],
+     "note": "Kiln smoke and stacked amphorae."},
+    {"id": "docks", "name": "Docks", "category": "commercial", "kinds": ["village", "town", "fort"], "enables": ["fish"],
+     "biomes": ["Coastal"], "purposes": ["fishing"], "note": "Boats out at first light; the catch sold on the boards by noon."},
+
+    {"id": "mill", "name": "Mill", "category": "utility", "kinds": ["village", "town", "fort"], "enables": ["grain"],
+     "purposes": ["farming"], "note": "Grinds the village's grain; at harvest the whole valley smells of it."},
+    {"id": "barn", "name": "Barn", "category": "utility", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "purposes": ["farming"], "note": "Big doors, a threshing floor, and a cat that earns its keep."},
+    {"id": "granary", "name": "Granary", "category": "utility", "kinds": ["town", "fort", "castle"], "enables": [],
+     "note": "Holds what has to survive the winter."},
+    {"id": "warehouse", "name": "Warehouse", "category": "utility", "kinds": ["town", "fort"], "enables": [],
+     "purposes": ["market", "fishing", "mining"], "note": "Goods in, goods out, and a tally of both."},
+    {"id": "sheepfold", "name": "Sheepfold", "category": "utility", "kinds": ["village", "town"], "enables": ["wool"],
+     "purposes": ["farming"], "note": "Wool on the hoof, and the village's winter coat."},
+    {"id": "dairy", "name": "Dairy", "category": "utility", "kinds": ["village", "town"], "enables": ["cheese"],
+     "purposes": ["farming"], "note": "Cheese and butter, sold at the next market down the road."},
+    {"id": "kitchen_garden", "name": "Kitchen gardens", "category": "utility", "kinds": ["village", "town", "fort"], "enables": ["turnips"],
+     "purposes": ["farming"], "note": "Rows of turnips and beans behind the palisade."},
+    {"id": "stockyard", "name": "Stockyard", "category": "utility", "kinds": ["village", "town"], "enables": ["hides"],
+     "purposes": ["farming"], "note": "Cattle pens along the road out; the hides go with the drovers."},
+    {"id": "woodshed", "name": "Woodshed", "category": "utility", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "biomes": ["Forest", "Highlands"], "note": "Dry wood under a tight roof, worth more than it looks in a bad month."},
+    {"id": "woodcutters_yard", "name": "Woodcutter's yard", "category": "utility", "kinds": ["village", "town", "fort"], "enables": ["firewood"],
+     "biomes": ["Forest", "Highlands", "Plains"], "note": "Firewood stacked higher than the roofs."},
+    {"id": "well", "name": "Well", "category": "utility", "kinds": ["village", "town", "fort"], "enables": [],
+     "note": "Clean water, and the place news is traded."},
+    {"id": "deep_well", "name": "Deep well", "category": "utility", "kinds": ["castle"], "enables": [],
+     "note": "Dug inside the wall on purpose, and deeper than the siege."},
+    {"id": "stables", "name": "Stables", "category": "utility", "kinds": ["fort", "castle"], "enables": ["horse tack", "horses"],
+     "note": "The army's horses, and the smith's temper."},
+    {"id": "charcoal_burner", "name": "Charcoal burner", "category": "utility", "kinds": ["fort", "castle"], "enables": ["charcoal"],
+     "biomes": ["Forest", "Highlands"], "note": "Pits in the woods, smoking day and night."},
+    {"id": "quarry", "name": "Quarry", "category": "utility", "kinds": ["castle"], "enables": ["stone"],
+     "biomes": ["Highlands"], "note": "Good stone, cut where the road can carry it."},
+    {"id": "fish_racks", "name": "Fish racks", "category": "utility", "kinds": ["village", "town", "fort"], "enables": ["salted fish"],
+     "biomes": ["Coastal"], "purposes": ["fishing"], "note": "Split fish drying in rows, and the gulls already know."},
+    {"id": "mine_head", "name": "Mine head", "category": "utility", "kinds": ["village", "town", "fort"], "enables": ["iron"],
+     "biomes": ["Highlands"], "purposes": ["mining"], "note": "A hole in the hill, a windlass over it, and a road of spoil below."},
+    {"id": "ore_shed", "name": "Ore shed", "category": "utility", "kinds": ["village", "town", "fort"], "enables": ["coal"],
+     "biomes": ["Highlands"], "purposes": ["mining"], "note": "Sorted ore and charcoal under one roof, and a man who counts it."},
+
+    {"id": "barracks", "name": "Barracks", "category": "military", "kinds": ["town", "fort", "castle"], "enables": [],
+     "note": "A watch that drills twice a week, when nothing else needs doing."},
+    {"id": "armoury", "name": "Armoury", "category": "military", "kinds": ["fort", "castle"], "enables": [],
+     "note": "Spears, shields, and a tally of both."},
+    {"id": "guard_house", "name": "Guard house", "category": "military", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "note": "A fire, a rack of spears, and someone awake."},
+    {"id": "militia_hall", "name": "Militia hall", "category": "military", "kinds": ["village", "town"], "enables": [],
+     "purposes": ["military"], "note": "Where the levy keeps its spears and argues about drills."},
+    {"id": "watchtower", "name": "Watchtower", "category": "military", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "biomes": ["Highlands", "Coastal"], "note": "Sightlines down the road, and a brazier for the nights that matter."},
+    {"id": "gatehouse", "name": "Gatehouse", "category": "military", "kinds": ["town", "fort", "castle"], "enables": [],
+     "note": "Chains, and a portcullis older than the gate it closes."},
+    {"id": "palisade", "name": "Palisade", "category": "military", "kinds": ["town", "fort"], "enables": [],
+     "note": "Timber, and enough of it."},
+    {"id": "stone_walls", "name": "Stone walls", "category": "military", "kinds": ["town", "castle"], "enables": [],
+     "wealth": "modest", "note": "Low, patched, and better than none."},
+
+    {"id": "chapel", "name": "Chapel", "category": "special", "kinds": ["village", "town", "fort", "castle"], "enables": [],
+     "note": "A priest, a bell, and benches worn smooth."},
+    {"id": "market_square", "name": "Market square", "category": "special", "kinds": ["town"], "enables": [],
+     "purposes": ["market"], "note": "Stalls, a weigh-house, and a bell to open it."},
+    {"id": "town_hall", "name": "Town hall", "category": "special", "kinds": ["town"], "enables": [],
+     "wealth": "modest", "purposes": ["market"], "note": "Where the guilds argue and the taxes are reckoned."},
+    {"id": "guild_hall", "name": "Guild hall", "category": "special", "kinds": ["town"], "enables": [],
+     "wealth": "wealthy", "purposes": ["market"], "note": "A charter on the wall and a strongbox under it."},
+    {"id": "keep", "name": "Keep", "category": "special", "kinds": ["castle"], "enables": [],
+     "note": "The last wall, and the family that owns it."},
+    {"id": "great_hall", "name": "Great hall", "category": "special", "kinds": ["castle"], "enables": [],
+     "note": "Where the houses settle things, loudly."},
+    {"id": "old_stones", "name": "Old stones", "category": "special", "kinds": ["village", "town", "fort"], "enables": [],
+     "note": "Older than the town, and older than the town's name for them."}
+  ],
+
+  "attachments": [
+    {"id": "chimney", "name": "Chimney", "kind": "structural"},
+    {"id": "dormer", "name": "Dormer window", "kind": "structural"},
+    {"id": "awning", "name": "Awning", "kind": "structural"},
+    {"id": "porch", "name": "Porch", "kind": "structural"},
+    {"id": "lean_to_shed", "name": "Lean-to shed", "kind": "structural"},
+    {"id": "stairs", "name": "Outside stairs", "kind": "structural"},
+    {"id": "balcony", "name": "Balcony", "kind": "structural"},
+    {"id": "fence", "name": "Fence", "kind": "structural"},
+    {"id": "gate", "name": "Gate", "kind": "structural"},
+    {"id": "side_extension", "name": "Side extension", "kind": "structural"},
+    {"id": "barrel", "name": "Barrels", "kind": "clutter"},
+    {"id": "crate", "name": "Crates", "kind": "clutter"},
+    {"id": "sack", "name": "Sacks", "kind": "clutter"},
+    {"id": "woodpile", "name": "Firewood pile", "kind": "clutter"},
+    {"id": "cart", "name": "Cart", "kind": "clutter"},
+    {"id": "wagon", "name": "Wagon", "kind": "clutter"},
+    {"id": "tools", "name": "Tools", "kind": "clutter"},
+    {"id": "bucket", "name": "Bucket", "kind": "clutter"},
+    {"id": "bench", "name": "Bench", "kind": "clutter"},
+    {"id": "table", "name": "Table", "kind": "clutter"},
+    {"id": "basket", "name": "Baskets", "kind": "clutter"},
+    {"id": "hay_bales", "name": "Hay bales", "kind": "clutter"},
+    {"id": "hanging_sign", "name": "Hanging sign", "kind": "life"},
+    {"id": "lantern", "name": "Lantern", "kind": "life"},
+    {"id": "banner", "name": "Banner", "kind": "life"},
+    {"id": "laundry", "name": "Laundry line", "kind": "life"},
+    {"id": "market_goods", "name": "Market goods", "kind": "life"},
+    {"id": "animal_pen", "name": "Animal pen", "kind": "life"},
+    {"id": "garden", "name": "Garden patch", "kind": "life"},
+    {"id": "chopping_block", "name": "Chopping block", "kind": "life"},
+    {"id": "water_trough", "name": "Water trough", "kind": "life"},
+    {"id": "rope", "name": "Rope", "kind": "life"},
+    {"id": "nets", "name": "Fishing nets", "kind": "life"}
+  ]
+}

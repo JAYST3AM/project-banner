@@ -41,6 +41,9 @@ var last_visited_day: int = 0
 ## houses hold it, how rich and how defended. Empty on a save written before this existed; the world
 ## map backfills on entry.
 var buildings: Array = []
+## The ground the settlement stands on (D-138), as the building system reads it: Plains, Forest,
+## Highlands, Coastal or Arid. Named, not authored - it is a reading of the world's own sample.
+var biome: String = ""
 var produces: Array[String] = []
 var wants: Array[String] = []
 ## [{ "id": "house_caldreth", "name": "House Caldreth", "power": 61 }], biggest first, sums to 100.
@@ -123,6 +126,7 @@ static func from_dict(data: Dictionary) -> Settlement:
 	s.visited = bool(data.get("visited", false))
 	s.last_visited_day = int(data.get("last_visited_day", 0))
 	s.buildings = (data.get("buildings", []) as Array).duplicate(true)
+	s.biome = str(data.get("biome", ""))
 	var produces_raw: Array = data.get("produces", []) as Array
 	for item in produces_raw:
 		s.produces.append(str(item))

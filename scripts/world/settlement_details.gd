@@ -12,65 +12,19 @@ extends RefCounted
 ## read out of the buildings. Each building names the goods it can provide, produces are drawn from
 ## that union, and wants are drawn from the kind's list with everything the town can make removed.
 ## A town cannot sell wool it has no sheepfold for, and cannot want what its own smithy supplies.
+##
+## Since D-138 the buildings themselves come from [SettlementBuildings]: the modular catalogue that
+## decides what stands where from the town's kind, size, wealth, ground and work - and dresses each
+## building with a condition, materials and attachments, which is what a sprite will one day be
+## assembled from. This file still owns the trade rule above, the houses, the wealth and the
+## garrison.
 
 ## Bump when the generation rules change: a save whose detail predates this is regenerated on the
 ## next map entry, because the old rolls no longer describe the same town.
-const DETAILS_VERSION := 2
-
-## What may stand in each kind of place: [name, note, [goods it can provide]]. The note is one
-## line, shown as a tooltip. Infrastructure buildings provide nothing and exist for the look of the
-## place - the repair pass below only draws on the ones that do.
-const BUILDINGS := {
-	"village": [
-		["Mill", "Grinds the village's grain; at harvest the whole valley smells of it.", ["grain"]],
-		["Kitchen garden", "Rows of turnips and beans behind the palisade.", ["turnips"]],
-		["Sheepfold", "Wool on the hoof, and the village's winter coat.", ["wool"]],
-		["Dairy", "Cheese and butter, sold at the next market down the road.", ["cheese"]],
-		["Woodcutter's yard", "Firewood stacked higher than the roofs.", ["firewood"]],
-		["Stockyard", "Cattle pens along the road out; the hides go with the drovers.", ["hides"]],
-		["Smithy", "Nails, hinges, and the odd spearhead.", ["tools"]],
-		["Brewhouse", "The village ale, brewed strong and drunk young.", ["ale"]],
-		["Tavern", "Ale, gossip and a fire - where rumours will wait, once taverns tell them.", []],
-		["Well", "Clean water, and the place news is traded.", []],
-		["Chapel", "A priest, a bell, and benches worn smooth.", []],
-	],
-	"town": [
-		["Market square", "Stalls, a weigh-house, and a bell to open it.", []],
-		["Weaver's hall", "Loom after loom, and the cloth the whole valley wears.", ["wool cloth"]],
-		["Tannery", "On the downwind edge, for everyone's sake.", ["leather"]],
-		["Smokehouse", "Salted and smoked meat, off to the castles.", ["salted meat"]],
-		["Potter's yard", "Kiln smoke and stacked amphorae.", ["pottery"]],
-		["Smithy", "Busier than a village's, and hungrier for iron.", ["tools"]],
-		["Brewhouse", "The town ale, brewed strong and drunk young.", ["ale"]],
-		["Tavern", "Ale, gossip and a fire - where rumours will wait, once taverns tell them.", []],
-		["Stone walls", "Low, patched, and better than none.", []],
-		["Barracks", "A watch that drills twice a week, when nothing else needs doing.", []],
-		["Granary", "Holds what has to survive the winter.", []],
-		["Chapel", "A priest, a bell, and benches worn smooth.", []],
-		["Well", "Clean water, and the place news is traded.", []],
-	],
-	"fort": [
-		["Barracks", "Every man here has a place in the line and knows it.", []],
-		["Armoury", "Spears, shields, and a tally of both.", []],
-		["Palisade", "Timber, and enough of it.", []],
-		["Stables", "The army's horses, and the smith's temper.", ["horse tack"]],
-		["Smithy", "Field repairs and cheap blades.", ["tools"]],
-		["Charcoal burner", "Pits in the woods, smoking day and night.", ["charcoal"]],
-		["Tannery", "On the downwind edge, for everyone's sake.", ["hides"]],
-		["Well", "Dug inside the wall on purpose.", []],
-	],
-	"castle": [
-		["Keep", "The last wall, and the family that owns it.", []],
-		["Armoury", "Spears, shields, and a tally of both.", []],
-		["Stables", "The army's horses, and the smith's temper.", ["horses"]],
-		["Quarry", "Good stone, cut where the road can carry it.", ["stone"]],
-		["Charcoal burner", "Pits in the woods, smoking day and night.", ["charcoal"]],
-		["Smithy", "Field repairs and cheap blades.", ["tools"]],
-		["Great hall", "Where the houses settle things, loudly.", []],
-		["Chapel", "A priest, a bell, and benches worn smooth.", []],
-		["Deep well", "Dug inside the wall on purpose, and deeper than the siege.", []],
-	],
-}
+##
+## v3 (D-138): buildings come from the modular catalogue - category, condition, materials and
+## attachments - instead of the kind's flat list.
+const DETAILS_VERSION := 3
 
 ## What each kind of place wants, before the buildings take their cut. Deliberately disjoint from
 ## every good the kind's buildings can provide, so the subtraction below is belt and braces rather
@@ -107,100 +61,35 @@ static func fill(settlement: Settlement, campaign_seed: int) -> void:
 	rng.seed = campaign_seed + hash(settlement.id)
 	var kind := settlement.type
 
-	# Buildings first, repaired until they can provide at least three goods; then trade read out of
-	# them, so the card can never show a good the town has no building for.
-	var picked := _pick_buildings(kind, rng)
-	var enabled := _enabled_goods(picked)
-	settlement.buildings = _as_dicts(picked)
+	# Wealth first: the building plan reads it for gates, conditions and the pocket, so it cannot be
+	# rolled after the town it describes.
+	settlement.wealth = _wealth(settlement.population, rng)
+	# The town itself, from the modular system (D-138): what the ground and the work make of it.
+	var planned := SettlementBuildings.plan(settlement, campaign_seed, settlement.wealth)
+	settlement.biome = str(planned.get("biome", ""))
+	settlement.buildings = planned.get("buildings", []) as Array
+	# Then trade read out of the buildings, so the card can never show a good the town has no
+	# building for (D-136).
+	var enabled := _enabled_goods(settlement.buildings)
 	settlement.produces = _pick_from(enabled, rng)
 	settlement.wants = _pick_wants(kind, enabled, rng)
 	settlement.families = _families(settlement, rng)
-	settlement.wealth = _wealth(settlement.population, rng)
 	settlement.garrison = _garrison(kind, settlement.population, rng)
 	settlement.details_version = DETAILS_VERSION
 
 
 ## ---------- buildings ----------------------------------------------------
 
-## Three to seven buildings for the kind, with one repair pass: while the set can provide fewer
-## than three goods, a building that provides nothing is swapped for a random one that does. The
-## owner's rule needs the town to be able to make what it sells.
-static func _pick_buildings(kind: String, rng: RandomNumberGenerator) -> Array:
-	var pool: Array = BUILDINGS.get(kind, BUILDINGS["village"]) as Array
-	var low := 3
-	var high := 5
-	match kind:
-		"town", "fort":
-			low = 4
-			high = 6
-		"castle":
-			low = 5
-			high = 7
-	var count := clampi(rng.randi_range(low, high), 3, pool.size())
-	var bag: Array = pool.duplicate()
-	var picked: Array = []
-	for i in count:
-		picked.append(_take(bag, rng.randi_range(0, bag.size() - 1)))
-
-	while _enabled_goods(picked).size() < 3:
-		var victim := _quietest(picked)
-		if victim < 0:
-			break
-		var donor := _take_producer(bag, rng)
-		if donor.is_empty():
-			break
-		picked[victim] = donor
-	return picked
-
-
-## The first building that provides nothing, or -1 when every pick already trades.
-static func _quietest(picked: Array) -> int:
-	for index in picked.size():
-		var entry: Array = picked[index] as Array
-		if (entry[2] as Array).is_empty():
-			return index
-	return -1
-
-
-## A random building from the bag that provides something, removed from it. Empty when none is left.
-static func _take_producer(bag: Array, rng: RandomNumberGenerator) -> Array:
-	var choices: Array = []
-	for index in bag.size():
-		var entry: Array = bag[index] as Array
-		if not (entry[2] as Array).is_empty():
-			choices.append(index)
-	if choices.is_empty():
-		return []
-	return _take(bag, rng.randi_range(0, choices.size() - 1))
-
-
-static func _take(bag: Array, index: int) -> Array:
-	var entry: Array = bag[index] as Array
-	bag.remove_at(index)
-	return entry
-
-
-## Every good the chosen buildings can provide, in the order they were picked.
-static func _enabled_goods(picked: Array) -> Array[String]:
+## Every good the chosen buildings can provide, in the order they were picked. Reads the building
+## dictionaries the plan produced, so the trade rule follows whatever the catalogue decides.
+static func _enabled_goods(buildings: Array) -> Array[String]:
 	var goods: Array[String] = []
-	for entry_any in picked:
-		var entry: Array = entry_any as Array
-		for good_any in (entry[2] as Array):
+	for entry in buildings:
+		for good_any in ((entry as Dictionary).get("enables", []) as Array):
 			var good := str(good_any)
 			if not goods.has(good):
 				goods.append(good)
 	return goods
-
-
-static func _as_dicts(picked: Array) -> Array:
-	var buildings: Array = []
-	for entry_any in picked:
-		var entry: Array = entry_any as Array
-		var enables: Array[String] = []
-		for good_any in (entry[2] as Array):
-			enables.append(str(good_any))
-		buildings.append({"name": str(entry[0]), "note": str(entry[1]), "enables": enables})
-	return buildings
 
 
 ## ---------- trade --------------------------------------------------------

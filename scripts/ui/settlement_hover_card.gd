@@ -151,9 +151,29 @@ func _building_section(settlement: Settlement) -> void:
 		var info: Dictionary = entry as Dictionary
 		var chip_node := PixelStyle.chip(str(info.get("name", "?")), "", CHIP_BODY,
 			LIGHT.darkened(0.6), UiTheme.TEXT, UiTheme.TEXT)
-		chip_node.tooltip_text = str(info.get("note", ""))
+		chip_node.tooltip_text = _building_tooltip(info)
 		flow.add_child(chip_node)
 	_body.add_child(flow)
+
+
+## The note, plus the state and the materials the building system dressed the building in (D-138).
+## Words live in the tooltip (D-133), and the same fields are what a sprite will one day be
+## assembled from - so the card is already showing the system's work.
+func _building_tooltip(info: Dictionary) -> String:
+	var lines: Array[String] = [str(info.get("note", ""))]
+	var parts: Array[String] = []
+	if info.has("condition_word"):
+		parts.append(str(info.get("condition_word")))
+	if info.has("roof"):
+		parts.append("%s roof" % str(info.get("roof")))
+	if info.has("wall"):
+		parts.append("%s walls" % str(info.get("wall")))
+	if not parts.is_empty():
+		lines.append("It looks %s." % ", ".join(parts))
+	var around: Array = info.get("attachment_names", []) as Array
+	if not around.is_empty():
+		lines.append("Around it: %s." % ", ".join(around))
+	return "\n".join(lines)
 
 
 func _trade_section(settlement: Settlement) -> void:

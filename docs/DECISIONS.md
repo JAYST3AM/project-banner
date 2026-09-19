@@ -3749,6 +3749,49 @@ overlay autoload. `--ui-scale-late=0.6` moves the scale four seconds into a run 
 photographed: boot 80% → commit 60% shrinks the stats text from ~22 px to ~16 px, in ratio, with the
 log reading "ui scale committed: screens rebuilt at 60%".
 
+**D-138: the modular building system — decide from the town, dress every building.**
+The owner handed over an art plan for settlement buildings ("PROJECT BANNER — MODULAR SETTLEMENT
+BUILDING ART PLAN") with one instruction standing out: "Build the SYSTEM first. Then polish
+individual structures." So the system is what shipped: a catalogue of how buildings are chosen and
+described, with the sprite work next - every field the plan needs (categories, conditions, materials,
+attachments, silhouette detail flags) is a decision the system already makes, and the art pipeline
+will draw from its shopping list rather than invent one.
+
+- `data/config/settlement_buildings.json` (D-138): **51 building types** in five categories
+  (residential, commercial, utility, military, special), each with the kinds of place it stands in,
+  the biomes and purposes that favour it, an optional wealth gate, its note and the goods it
+  enables; **33 attachments** in the plan's three families (structural, clutter, life); material
+  sets per ground (roofs and walls); condition tables per wealth; count bands per kind; six
+  purposes.
+- `scripts/world/settlement_buildings.gd` is the planner. **The ground is read, not rolled** -
+  `biome_at` uses the same reading the town's own description already used (low and damp = Coastal,
+  high and bare = Highlands, edge of the wild = Forest, dry = Arid, else Plains), so no town can
+  look like one place and be built like another. Purpose follows walls first (fort and castle are
+  military whatever the fields), then the ground (coastal = fishing, highlands = mining), then the
+  market (a rich town is a market town, everyone else farms).
+- **A town is a selection, not a stamp**: purpose must-haves, a house ladder that follows the size
+  and wealth (cottages; rough hovels in poor places; farmhouses where the work is farming;
+  townhouses in towns; a manor for the wealthy), then weighted category draws without repeating a
+  type. Every building is dressed: a condition rolled on the settlement's wealth and spoken in
+  words ("patched and rough", "newly repaired", "well-kept"), a roof and walls from its own
+  ground's materials, one or two attachments, and the plan's detail toggles (chimney, clutter,
+  sign, fence, garden).
+- The trade rule survives: the repair pass still guarantees three sellable goods, but it now gives
+  up a non-residential building's place first - the first version ate the town's cottages, which
+  the suite caught ("every village has its cottages").
+- `Settlement.biome` joins the detail; `DETAILS_VERSION` goes to 3 so every existing save's towns
+  regenerate on next entry, and the hover card's building tooltips now speak the state and the
+  materials ("It looks well-kept, slate roof, stone lower wall. Around it: Firewood pile.").
+- `tests/test_settlement_buildings.gd`: catalogue integrity, the biome reading, purpose purity,
+  wealth through conditions and gates, the house ladder, a closed vocabulary (every roof, wall,
+  attachment and toggle exists), determinism - and a printed report of four example towns, because
+  "believable and varied" is judged by eye. The count pin in `test_settlement_details` moved from
+  a flat 3-7 to the catalogue's per-kind bands (village 4-6, town 6-10, fort and castle 5-8).
+- Known and deliberate: the world's seven ground names include Swamp and Tundra, but the terrain
+  sample has no climate notion yet - five grounds are read today, and the other two wait for the
+  world to grow that distinction rather than being faked at the building layer.
+
+
 **Follow-up 3 - the check-runs stop touching the player's machine.** Two lessons paid for the hard way.
 `--log-name=<name>` gives a dev run its own log file, because a check-run rotating the player's live
 `session.log` out from under his running game is interference, not diligence. And `--screenshot=<path>`

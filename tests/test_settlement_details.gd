@@ -11,6 +11,13 @@ extends TestCase
 
 const SEED := 5150
 const KINDS := ["village", "town", "fort", "castle"]
+## How many buildings each kind of place lists (D-138; the catalogue's own counts).
+const KIND_BUILDING_BOUNDS := {
+	"village": [4, 6],
+	"town": [6, 10],
+	"fort": [5, 8],
+	"castle": [5, 8],
+}
 
 
 func run() -> void:
@@ -85,13 +92,14 @@ func _test_owner_leads_and_powers_sum() -> void:
 
 
 func _test_buildings_are_a_list_of_places() -> void:
-	section("every town stands somewhere: three to seven named buildings")
+	section("every town stands somewhere: named buildings, in the kind's count band")
 	var counts_ok := true
 	var named_ok := true
 	var unique_ok := true
 	for i in 40:
 		var s := _town("b%d" % i, KINDS[i % KINDS.size()])
-		if s.buildings.size() < 3 or s.buildings.size() > 7:
+		var bounds: Array = KIND_BUILDING_BOUNDS.get(s.type, [4, 6]) as Array
+		if s.buildings.size() < int(bounds[0]) or s.buildings.size() > int(bounds[1]):
 			counts_ok = false
 		var seen := {}
 		for entry in s.buildings:
@@ -101,7 +109,7 @@ func _test_buildings_are_a_list_of_places() -> void:
 			if seen.has(str(info.get("name", ""))):
 				unique_ok = false
 			seen[str(info.get("name", ""))] = true
-	check(counts_ok, "every settlement lists three to seven buildings")
+	check(counts_ok, "every settlement lists the buildings its kind's band allows (D-138)")
 	check(named_ok, "and every building has a name and a note")
 	check(unique_ok, "and no building is listed twice")
 
