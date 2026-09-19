@@ -3594,3 +3594,9 @@ keep their exact wording. `test_party_semantics` stays at its known-red 5 failur
 pre-existing, the HUD shows "-" because the suite's world never finishes wiring under the revert
 fallout, not because of the dressing.
 
+**The right gutter.** A `ScrollContainer` reserves the scrollbar's width, so every right-aligned
+value in a scrolled pane ended flush against it - the owner, on the soldier record: "the text on
+the right needs to shift more to the left". The content of all three scrolled panes now sits in a
+`MarginContainer` with a 16 px right margin, which gives the values one consistent gutter, shared
+between the party rows and the record below them.
+

@@ -181,10 +181,18 @@ func _build_recruit_panel() -> Control:
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(scroll)
 
+	# The panels inside a scroll reserve the scrollbar's width, so anything right-aligned sat flush
+	# against it - the owner, on the detail pane: "the text on the right needs to shift more to the
+	# left". A right margin on the content, not a narrower pane: the frames stay where they are.
+	var scroll_margin := MarginContainer.new()
+	scroll_margin.add_theme_constant_override("margin_right", 16)
+	scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(scroll_margin)
+
 	_recruit_list = VBoxContainer.new()
 	_recruit_list.add_theme_constant_override("separation", 8)
 	_recruit_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_recruit_list)
+	scroll_margin.add_child(_recruit_list)
 
 	_status = PixelStyle.body_label("", SMALL_SIZE, UiTheme.DIM, true)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -212,10 +220,15 @@ func _build_party_panel() -> Control:
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(scroll)
 
+	var scroll_margin := MarginContainer.new()
+	scroll_margin.add_theme_constant_override("margin_right", 16)
+	scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(scroll_margin)
+
 	_roster_list = VBoxContainer.new()
 	_roster_list.add_theme_constant_override("separation", 5)
 	_roster_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_roster_list)
+	scroll_margin.add_child(_roster_list)
 
 	box.add_child(PixelStyle.rule(DARK))
 
@@ -225,10 +238,17 @@ func _build_party_panel() -> Control:
 	detail_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(detail_scroll)
 
+	# The record's values are right-aligned, so the same reservation applies: without it the column
+	# of numbers ends under the scrollbar instead of beside a margin.
+	var detail_margin := MarginContainer.new()
+	detail_margin.add_theme_constant_override("margin_right", 16)
+	detail_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	detail_scroll.add_child(detail_margin)
+
 	_detail_box = VBoxContainer.new()
 	_detail_box.add_theme_constant_override("separation", 7)
 	_detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	detail_scroll.add_child(_detail_box)
+	detail_margin.add_child(_detail_box)
 	return panel
 
 
