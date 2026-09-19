@@ -25,6 +25,7 @@ func run() -> void:
 	_test_a_flip_mirrors_the_frame_without_moving_it()
 	_test_the_fields_own_geometry_clears_the_sprite()
 	_test_the_precomputed_tables_hold_together_when_the_art_is_present()
+	_test_the_instance_write_follows_the_layout()
 	_test_the_atlas_table_holds_together_when_the_art_is_present()
 	# A runtime error inside a test function aborts that function without recording a failure -
 	# GDScript has no try/catch - so a suite whose static calls all failed would still reach
@@ -159,6 +160,51 @@ func _test_the_precomputed_tables_hold_together_when_the_art_is_present() -> voi
 		var direct: Vector4 = UnitArt.custom(art.uv_rect(key, 0, 0), true)
 		approx(packed.x, direct.x, 0.000001, "%s: the packed flip matches the direct one" % key)
 		approx(packed.z, direct.z, 0.000001, "%s: including its direction" % key)
+
+
+## The instance write itself. A headless run has no instance buffers to read back - the engine's
+## own [member MultiMesh.buffer] comes back empty under the dummy driver - but the buffer the
+## renderer builds is its own [PackedFloat32Array], and the layout it writes into can be injected.
+## So the write can be pinned after all: the origin lands where the anchor maths says, the size is
+## the character's cell scaled, and the frame rect is a real rectangle of the atlas.
+func _test_the_instance_write_follows_the_layout() -> void:
+	section("what one packed sprite instance actually contains")
+	var art := UnitArt.load_if_present()
+	if art == null:
+		check(true, "absent art is a legitimate outcome, not a failure")
+		return
+	var field := SoldierField.new()
+	field.art = art
+	field.build(8)
+	check(not field.has_sprites(), "with no measured layout the batch is not drawn")
+	# The engine's own layout for a 2D transform plus colour plus custom data - the shape the
+	# render bench probes on this build, injected here because a headless run cannot probe it.
+	check(field.adopt_sprite_layout({
+		"ok": true, "stride": 16, "x_x": 0, "y_y": 5,
+		"origin_x": 3, "origin_y": 7, "color": 8, "custom": 12,
+	}), "an injected layout turns the write on")
+	var built := ShowcaseBattle.build(
+		GameManager.config(), UnitCatalog.load_from(), FormationCatalog.load_from(), 2, SEED)
+	var simulator: BattleSimulator = built["simulator"]
+	field.pack(simulator)
+	equal(field.sprite_count(), simulator.units.size(), "one instance a soldier")
+	for i in simulator.units.size():
+		var unit: BattleUnit = simulator.units[i]
+		var key := UnitArt.key_for_side(unit.side)
+		var cell := art.cell_size(key)
+		var scale := art.units_per_pixel()
+		var rect := field.sprite_instance_rect(i)
+		approx(rect.size.x, cell.x * scale, 0.001, "the drawn width is the character's cell")
+		approx(rect.size.y, cell.y * scale, 0.001, "and its height")
+		var expected := UnitArt.origin(
+			unit.position + Vector2(0.0, SoldierField.FOOT_LIFT), cell, art.anchor(key), scale)
+		approx(rect.position.x, expected.x, 0.001, "the frame's anchor lands on his x")
+		approx(rect.position.y, expected.y, 0.001, "and its bottom edge on his feet")
+		var custom := field.sprite_instance_custom(i)
+		check(custom.x >= 0.0 and custom.x <= 1.0 and custom.y >= 0.0 and custom.y <= 1.0,
+			"the frame rect starts inside the atlas")
+		check(custom.z != 0.0 and custom.w != 0.0, "and has a size")
+	field.free()
 
 
 func _test_the_atlas_table_holds_together_when_the_art_is_present() -> void:

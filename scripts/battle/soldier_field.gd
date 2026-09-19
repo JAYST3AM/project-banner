@@ -510,10 +510,46 @@ func probe_buffer_layout() -> Dictionary:
 ## batch and the discs are drawn instead - the same graceful absence as missing art.
 func probe_sprite_layout() -> Dictionary:
 	_sprite_layout = UnitArt.measure_layout(_sprites, true)
-	_sprite_offsets = UnitArt.offsets_from(_sprite_layout)
-	_sprite_stride = int(_sprite_layout.get("stride", 0)) if _sprite_offsets.size() == 6 else 0
-	_sprite_ok = _sprite_stride > 0 and _sprite_offsets.size() == 6
+	_sprite_ok = adopt_sprite_layout(_sprite_layout)
 	return _sprite_layout
+
+
+## Adopt a sprite buffer layout measured somewhere else, and report whether it is one the writer
+## understands. The layout is the dictionary [method UnitArt.measure_layout] returns; this is the
+## seam for a caller that cannot read an instance buffer back - a headless run has no buffers at
+## all (measured: `buffer` is empty under the dummy driver), and the render bench takes its layout
+## from its own probe - so the instance write can still be exercised and asserted.
+func adopt_sprite_layout(layout: Dictionary) -> bool:
+	_sprite_offsets = UnitArt.offsets_from(layout)
+	_sprite_stride = int(layout.get("stride", 0)) if _sprite_offsets.size() == 6 else 0
+	_sprite_ok = _sprite_stride > 0 and _sprite_offsets.size() == 6
+	return _sprite_ok
+
+
+## How many sprite instances the last [method pack] wrote.
+func sprite_count() -> int:
+	return int(_counts.get("sprites", 0))
+
+
+## The drawn rectangle (origin and size, in world units) of one packed sprite instance - read out
+## of the buffer the renderer built, so a caller can assert what was written without a GPU.
+func sprite_instance_rect(index: int) -> Rect2:
+	var base := index * _sprite_stride
+	if _sprite_offsets.size() < 6 or base + _sprite_stride > _packed_sprites.size():
+		return Rect2()
+	return Rect2(
+		Vector2(_packed_sprites[base + _sprite_offsets[2]], _packed_sprites[base + _sprite_offsets[3]]),
+		Vector2(_packed_sprites[base + _sprite_offsets[0]], _packed_sprites[base + _sprite_offsets[1]]))
+
+
+## The frame rectangle one packed sprite instance carries, as the shader will read it.
+func sprite_instance_custom(index: int) -> Vector4:
+	var base := index * _sprite_stride
+	if _sprite_offsets.size() < 6 or base + _sprite_stride > _packed_sprites.size():
+		return Vector4.ZERO
+	var at := _sprite_offsets[5]
+	return Vector4(_packed_sprites[base + at], _packed_sprites[base + at + 1],
+		_packed_sprites[base + at + 2], _packed_sprites[base + at + 3])
 
 
 ## ---------- the sprite batch -------------------------------------------------
