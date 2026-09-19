@@ -8,7 +8,11 @@ extends Node2D
 ## instead of a white rectangle. It deliberately touches none of WorldTerrain's files.
 
 const SHADER := "res://shaders/world/world_flat.gdshader"
-const FIELD_STEP := 16.0
+## How far apart the ground's samples are. Sixteen units meant 66,000 field samples at 33 microseconds
+## each - 2.2 seconds of a load the owner is watching. At 32 it is 16,600 samples and half a second, and
+## nothing visible changes: this is the resolution of the *blend weights*, not of the colouring, and the
+## shader interpolates between them anyway.
+const FIELD_STEP := 32.0
 const LOOK_STRENGTH := 0.75
 
 var _sprite: Sprite2D
