@@ -53,6 +53,11 @@ the revert broke. The world map, travel and the road network are unaffected.
 
 ## Roads (Step 8)
 
+**Spacing (D-128):** settlements keep real country between them - village 460 u minimum, castle 760
+- and the build logs it ("country: closest pair N u apart, average nearest neighbour M u"). A world
+now holds ~17-20 settlements rather than 36, and a hop between neighbours is two to three game
+hours.
+
 A link between two settlements carries a **tier** - `none | dirt | track | road`, speed bonus
 1.0 / 1.1 / 1.5 / 2.0 - stored in the link's own `kind`, and the priced grid, the eta and the
 walking pace all read it. A settlement founded later links itself to its nearest neighbour as a

@@ -119,6 +119,11 @@ func _build_procedural() -> void:
 	)
 	var elapsed := float(Time.get_ticks_usec() - started) / 1000.0
 	DebugLogger.info("  survey: %.0f ms for %d sites" % [elapsed, chosen.size()], "WorldBuilder")
+	# The number the owner asks about by eye: how much country actually stands between the towns.
+	var spacing := _spacing_report(chosen)
+	DebugLogger.info("  country: closest pair %.0f u apart, average nearest neighbour %.0f u" % [
+		spacing.x, spacing.y,
+	], "WorldBuilder")
 
 	var largest: Settlement = null
 	var names: Array[String] = []
@@ -240,6 +245,24 @@ static func _slug(name: String, taken: Array) -> String:
 		candidate = "%s_%d" % [base, counter]
 		counter += 1
 	return candidate
+
+
+## How much country stands between the settlements: the closest pair in the world, and the average
+## distance from a settlement to its nearest neighbour. The log's own evidence for "they are too
+## close" - and for "they are not, any more".
+static func _spacing_report(sites: Array[Dictionary]) -> Vector2:
+	var closest := INF
+	var neighbour_total := 0.0
+	for i in sites.size():
+		var nearest := INF
+		for j in sites.size():
+			if i == j:
+				continue
+			var d := WorldSites._wrapped_distance(sites[i]["position"], sites[j]["position"])
+			nearest = minf(nearest, d)
+			closest = minf(closest, d)
+		neighbour_total += nearest
+	return Vector2(closest, neighbour_total / float(maxi(1, sites.size())))
 
 
 ## Roads as a spanning tree: every settlement reachable, no pointless crossings. Prim's, cheapest

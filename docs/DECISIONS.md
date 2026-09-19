@@ -3436,3 +3436,26 @@ network given a stand-in terrain shapes its link as a bridge and walks it at the
 ~1.8 -> 2.0 s - the price of every link being shaped against the field; worth watching, not yet
 worth optimising.
 
+
+## D-128 - the country between the settlements
+
+**Context.** The owner, playing the map after the roads work: "the space between settlements are way
+too close still." The world could fill with 36 sites because a village's spacing floor was 240 u - a
+quarter of a grid block between neighbours - so the survey happily packed the map until nearly
+every chunk's best spot was taken.
+
+**Decision.** The ladder lifted (and the count asked for lowered, 36 -> 20): village 240 -> 460,
+fort 300 -> 500, town 460 -> 600, castle 620 -> 760 - the same owner rule as ever (a castle keeps a
+county, a fort may sit close to the town it serves), just spaced for a map you can breathe in. The
+survey's candidate pool is finite (~36 qualifying sites per seed), so the spacing floor decides the
+final count: at 460 the world places 17-20 settlements, closest pair ~462 u, average nearest
+neighbour ~503 u, against ~341 before. A hop between neighbours is now two to three game hours where
+it was one - which is the point.
+
+**Instrument.** The world build now logs what the eye was asking: "country: closest pair N u apart,
+average nearest neighbour M u" - the numbers this decision was tuned against, visible in every run.
+
+**Measured.** Seed 5150: 17 sites, closest 462, average 503. Seed 1234: 20 sites, closest 466,
+average 505. Tests: `test_world_sites`' floor assertion follows the constant (closest pair 465.9 u
+measured against a 460 floor); test_roads 86/0, test_world_map 116/0, test_campaign_flow 41/0.
+

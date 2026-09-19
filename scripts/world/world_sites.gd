@@ -18,7 +18,9 @@ extends RefCounted
 ## the same site is always the same name.
 
 ## Settlements this close or closer to each other are one settlement: the closer of the two keeps it.
-## Roughly a long bowshot times six, which is about an hour's ride at campaign speed.
+## A village now keeps half a day's country around it (560 u - two game hours on a road - where it
+## used to keep 240), and a castle keeps a county. The ladder was lifted after the owner played it:
+## "the space between settlements are way too close still."
 ## How close two settlements may stand, by kind, in world units.
 ##
 ## The owner's rule, in his words: "not the same spacing for everything, obviously towns would settle
@@ -30,13 +32,13 @@ extends RefCounted
 ## wins and a fort cannot crowd a castle even though forts crowd each other.
 ## The tightest any two sites may be, whatever they are: the smallest figure in SPACING. Kept as its
 ## own name because the tests and callers ask "what is the floor", and the floor is a village's.
-const MIN_SPACING := 240.0
+const MIN_SPACING := 460.0
 
 const SPACING := {
-	"castle": 620.0,
-	"town": 460.0,
-	"fort": 300.0,
-	"village": 240.0,
+	"castle": 760.0,
+	"town": 600.0,
+	"fort": 500.0,
+	"village": 460.0,
 }
 
 
