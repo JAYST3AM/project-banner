@@ -51,9 +51,13 @@ side reads from the sprite's tint (D-144).
   failed because the spawn file anchors them to authored town names, so `--autoengage` was
   walking the party onto a wagon. Both fixed; seed 2026 now spawns 3 bands and a scripted run
   reaches `[Encounter] battle ... player (6) vs enemy (5)` -> `scene -> battle_field`.
-- Measured: the per-soldier sprite write was dictionary-bound at first (7.5 us a soldier,
-  20.6 ms a pack at 2,000) and is precomputed-table-bound now; a windowed re-measure is pending
-  the machine being free of other GPU work.
+- Measured, paired on a quiet machine at 2,000 soldiers (the compute probe, sprites on vs off):
+  the pack loop is 9.7-10.3 ms against 3.7-4.2 ms, i.e. about 3 us a soldier for the plan and the
+  12-float write, down from 7.5 before the precomputed tables. The probes' frame rates are 77
+  against 155, but their battles diverge - the probe advances its formation bodies on the CPU per
+  frame - so read the pack numbers as the pair and the frame rates as indicative. Gameplay battles
+  are ten to a hundred men (the live campaign battle ran at ~970 fps with 11), so this only matters
+  if twenty-thousand-man fields become gameplay.
 
 ---
 
