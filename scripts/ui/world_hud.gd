@@ -13,8 +13,6 @@ extends CanvasLayer
 signal speed_requested(speed_name: String)
 signal enter_settlement_requested(settlement_id: String)
 signal travel_requested(settlement_id: String)
-signal save_requested()
-signal menu_requested()
 
 const STAT_COLUMNS := 4
 
@@ -31,7 +29,6 @@ var _title: Label = null
 var _subtitle: Label = null
 var _hint: Label = null
 var _speed_buttons: Dictionary = {}
-var _enter_button: Button = null
 var _selection: SettlementPanel = null
 var _button_styles: Dictionary = {}
 
@@ -106,38 +103,16 @@ func _build() -> void:
 		speed_box.add_child(button)
 		_speed_buttons[speed_name] = button
 
-	# --- actions (bottom-right) ------------------------------------------
-	var action_bar := PixelStyle.dressed_panel(RAIL_BODY, LIGHT.darkened(0.55), OUTLINE)
-	action_bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	action_bar.position = Vector2(-236.0, -158.0)
-	add_child(action_bar)
-
-	var action_box := VBoxContainer.new()
-	action_box.add_theme_constant_override("separation", 6)
-	action_bar.add_child(action_box)
-	action_box.add_child(PixelStyle.pixel_label("ACTIONS", 12, UiTheme.ACCENT))
-
-	_enter_button = PixelStyle.text_button("Enter Settlement", _button_styles, 11,
-		Vector2(200.0, 34.0), UiTheme.GOLD, UiTheme.DIM)
-	_enter_button.disabled = true
-	_enter_button.pressed.connect(_on_enter_pressed)
-	action_box.add_child(_enter_button)
-
-	var save_button := PixelStyle.text_button("Save Game", _button_styles, 11,
-		Vector2(200.0, 34.0), UiTheme.TEXT, UiTheme.DIM)
-	save_button.pressed.connect(func() -> void: save_requested.emit())
-	action_box.add_child(save_button)
-
-	var menu_button := PixelStyle.text_button("Save & Quit to Menu", _button_styles, 11,
-		Vector2(200.0, 34.0), UiTheme.TEXT, UiTheme.DIM)
-	menu_button.pressed.connect(func() -> void: menu_requested.emit())
-	action_box.add_child(menu_button)
+	# The old bottom-right ACTIONS panel is gone (the owner: "there's no need for it", and the save
+	# buttons belong in the Esc menu, which has had them since D-137). Entering a settlement lives
+	# where the settlement does: click it, and the panel's own Enter button - worded "Enter" when the
+	# party is there, "Enter (march there first)" when it is not - is the way in.
 
 	# --- hint line (bottom-centre) ---------------------------------------
 	_hint = PixelStyle.body_label("", 14, UiTheme.DIM, true)
 	_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_hint.position = Vector2(12.0, -30.0)
-	_hint.offset_right = -240.0
+	_hint.offset_right = -12.0
 	# The Settings panel can turn the hint line off (D-137); it is read here at build, so a change
 	# lands on the next entry to the map rather than mid-session.
 	_hint.visible = GameSettings.show_hints
@@ -214,13 +189,6 @@ func refresh() -> void:
 		var button := _speed_buttons[speed_name] as Button
 		button.button_pressed = (_state.clock.speed_name() == speed_name)
 
-	if here != null and _travel.is_within_settlement(here):
-		_enter_button.text = "Enter %s" % here.name
-		_enter_button.disabled = false
-	else:
-		_enter_button.text = "Enter Settlement"
-		_enter_button.disabled = true
-
 	if not _selection.visible:
 		return
 	_selection.set_arrival_state(_travel.is_at_settlement(_shown_settlement_id))
@@ -268,10 +236,3 @@ func _speed_button(speed_name: String, index: int) -> Button:
 		glyph.ink = UiTheme.GOLD if on else UiTheme.DIM)
 	return button
 
-
-func _on_enter_pressed() -> void:
-	if _travel == null:
-		return
-	var here := _travel.current_settlement()
-	if here != null:
-		enter_settlement_requested.emit(here.id)

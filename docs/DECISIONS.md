@@ -3921,3 +3921,17 @@ one the owner actually plays - had never been exercised by the trade tests.
 **Left for later, deliberately**: prices that move with supply and demand; the player trading at a
 market counter (the market data exists - the produces/wants the caravans already use); robbing a
 caravan (purses now make that worth doing); nobles' purses compounding over a long campaign.
+
+
+**D-141: the map's Actions panel is gone; entering a settlement belongs to the settlement.**
+
+The owner: "can we remove the actions ui? there's no need for it, also save and main menu buttons
+belong in the esc menu." The bottom-right ACTIONS panel (Enter Settlement / Save Game / Save & Quit
+to Menu) is deleted from `world_hud` - and the two save buttons were already in the Esc menu since
+D-137 (Save Game, Settings, Save & Quit to Menu, Quit to Desktop), so the panel was a second door to
+the same room. Entering a settlement now lives where the settlement does: clicking a town opens its
+panel, whose own Enter button reads "Enter" when the party is standing there and "Enter (march there
+first)" when it is not. The hint line takes the full width the panel used to reserve and teaches the
+new flow ("Click a settlement to inspect it, then Enter goes in"). `world_hud` no longer carries
+`save_requested`/`menu_requested`; the map connects only the pause menu's. Suite green
+(world_map, campaign_flow); party_semantics is the documented pre-existing red.

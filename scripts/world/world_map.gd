@@ -237,7 +237,7 @@ func _ready() -> void:
 	_focus_camera_on_party()
 	_restore_selection_from_payload()
 	_refresh()
-	_hud.set_hint("Click a settlement to inspect it. Click Travel Here to set out. F1 opens debug tools.")
+	_hud.set_hint("Click a settlement to inspect it, then Enter goes in. F1 opens debug tools.")
 
 	_apply_dev_autoengage()
 	_apply_dev_autotravel()
@@ -286,8 +286,6 @@ func _build_hud_and_overlays() -> void:
 	_hud.speed_requested.connect(_on_speed_requested)
 	_hud.travel_requested.connect(_on_travel_requested)
 	_hud.enter_settlement_requested.connect(_on_enter_settlement)
-	_hud.save_requested.connect(_on_save_requested)
-	_hud.menu_requested.connect(_on_menu_requested)
 
 	_dialog = EncounterDialog.new()
 	_hud.add_child(_dialog)
@@ -326,7 +324,7 @@ func _rebuild_hud() -> void:
 	_hover_shown_id = ""
 	_hover_candidate_id = ""
 	_refresh()
-	_hud.set_hint("Click a settlement to inspect it. Click Travel Here to set out. F1 opens debug tools.")
+	_hud.set_hint("Click a settlement to inspect it, then Enter goes in. F1 opens debug tools.")
 	if not inspected.is_empty():
 		var settlement := _state.settlement(inspected)
 		if settlement != null:
@@ -551,7 +549,7 @@ func _on_caravan_farewell() -> void:
 	if _caravan_dialog != null:
 		_caravan_dialog.hide_dialog()
 	_state.clock.set_speed(_speed_before_dialog as CampaignClock.Speed)
-	_hud.set_hint("Click a settlement to inspect it. Click Travel Here to set out. F1 opens debug tools.")
+	_hud.set_hint("Click a settlement to inspect it, then Enter goes in. F1 opens debug tools.")
 
 
 func _on_encounter_attack() -> void:
