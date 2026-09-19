@@ -19,6 +19,7 @@ func run() -> void:
 	_test_roadless_and_revival()
 	_test_grid_prices_each_tier()
 	_test_travel_wears_and_walks_faster()
+	_test_the_walk_follows_the_line()
 	_test_roads_survive_a_save()
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
@@ -327,6 +328,45 @@ func _test_travel_wears_and_walks_faster() -> void:
 		travel.step(0.1)
 	check(float(link.get("traffic", 0.0)) > worn_before, "walking the link wears it")
 	travel.clear_destination()
+	GameManager.end_campaign()
+
+
+## The owner, watching a journey: "I see my pawn moving in a straight line... I think the game
+## thinks that block is road." It did - the grid prices blocks, the drawing is a line, and the walk
+## split the difference. A route that runs along a road is now spliced onto that road's own curve,
+## so the marker walks the line the map draws. This section is the proof, in the same units the
+## travel log reports: the distance from the walking party to the nearest link's curve.
+func _test_the_walk_follows_the_line() -> void:
+	section("the walk follows the drawn line")
+	var state := _fresh_campaign("Roads Test", 785)
+	var config := GameManager.config()
+	var network := RoadNetwork.new(state, config)
+	var costs := TravelCosts.new()
+	costs.build(state.campaign_seed, config, state.roads, state.settlements)
+	var travel := TravelService.new(state, config)
+	travel.costs = costs
+	travel.roads = network
+
+	check(travel.set_destination("redmoor"), "a route to the next town is accepted")
+	travel.build_route(state.settlement("redmoor"))
+	var once := travel.route.duplicate()
+	travel.build_route(state.settlement("redmoor"))
+	equal(travel.route, once, "and the same order builds the same route twice")
+
+	var worst := 0.0
+	var slices := 0
+	var guard := 0
+	while travel.is_travelling() and guard < 500:
+		guard += 1
+		travel.step(0.1)
+		worst = maxf(worst, network.distance_to_nearest_link(state.world_position))
+		slices += 1
+	check(not travel.is_travelling(), "the journey finishes")
+	greater(float(slices), 10.0, "it was a real journey")
+	less(worst, 12.0, "and the walk never wanders more than a dozen units off a line")
+	check(network.on_road(state.world_position), "the walk ends standing on the road to redmoor")
+	approx(state.world_position.distance_to(state.settlement("redmoor").position), 0.0, 0.001,
+		"and lands exactly on the settlement, as before")
 	GameManager.end_campaign()
 
 

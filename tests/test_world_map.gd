@@ -103,6 +103,31 @@ func _test_march_to_open_ground() -> void:
 	check(restored.destination_is_point, "a point destination survives a save")
 	approx(restored.destination_point.distance_to(state.destination_point), 0.0, 0.001,
 		"with its position intact")
+
+	# An order that followed a road, then a march to open ground: the march must be a real straight
+	# walk, not the leftover road route. The failure the owner hit - "I can't click on random
+	# spots, only locations (settlements)" - happened once the road journey was *finished*: the
+	# stale route ended under the party's feet, so the next march "arrived" on its first step
+	# without moving.
+	var marching := _fresh_campaign("Point After Road", 4243)
+	var walker := TravelService.new(marching, GameManager.config())
+	check(walker.set_destination("brackenford"), "a settlement order is accepted")
+	var walk_guard := 0
+	while walker.is_travelling() and walk_guard < 400:
+		walk_guard += 1
+		walker.step(1.0)
+	check(not walker.is_travelling(), "the road journey finishes")
+	check(walker.route.size() > 2, "having walked a built route")
+	var from_here := marching.world_position
+	var ordered := from_here + Vector2(300.0, 0.0)
+	check(walker.set_destination_point(ordered), "then a march to open ground is accepted")
+	var march_report := walker.step(0.5)
+	greater(float(march_report.get("distance_travelled", 0.0)), 1.0,
+		"the march actually moves the party")
+	check(not bool(march_report.get("arrived", false)),
+		"instead of finishing instantly at the old route's end")
+	check(marching.world_position.distance_to(ordered) < from_here.distance_to(ordered) - 5.0,
+		"and it moves toward the spot that was clicked")
 	GameManager.end_campaign()
 
 

@@ -132,5 +132,11 @@ func refresh() -> void:
 		"seed        %d" % _state.campaign_seed,
 	]
 	if _travel != null:
-		lines.append("pace        %.0f u/h" % _travel.speed_units_per_game_hour())
+		# The pace a player actually walks at, not the bare number: the ground's own factor is
+		# included, so a road reads x1.40 and open field x1.00 and the boot is visible - the owner,
+		# watching a road: "I don't see a speed increase on the roads".
+		var factor := _travel.ground_factor()
+		lines.append("pace        %.0f u/h  (ground x%.2f)" % [
+			_travel.speed_units_per_game_hour() * factor, factor,
+		])
 	_readout.text = "\n".join(lines)

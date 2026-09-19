@@ -197,6 +197,20 @@ func on_road(point: Vector2) -> bool:
 	return _nearest_link(point) >= 0
 
 
+## The width within which walking counts as using a road: the wear scan's corridor, and the width
+## inside which a route is snapped onto the drawn line.
+func road_radius() -> float:
+	return _traffic_radius()
+
+
+## The link's own curve - the one the map draws and the grid stamps. A route running along this
+## link is spliced with these very points, so the walk and the drawing are one line.
+func link_curve(index: int) -> PackedVector2Array:
+	if index < 0 or index >= _paths.size():
+		return PackedVector2Array()
+	return _paths[index]
+
+
 ## A link's name for the log: both ends, as a sentence reads them. Empty when the index names
 ## nothing.
 func link_label(index: int) -> String:

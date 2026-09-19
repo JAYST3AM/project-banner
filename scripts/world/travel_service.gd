@@ -151,6 +151,9 @@ const ETA_SAMPLE_UNITS := 32.0
 ## and said the party "visually... aren't following the roads"; this is the cadence at which the
 ## log says where the party actually stands relative to the links it should be walking.
 const ROAD_CHECK_HOURS := 0.1
+## How far apart the route is sampled when looking for road stretches to snap onto the drawn line,
+## in world units.
+const SNAP_SAMPLE_UNITS := 16.0
 
 
 ## Game hours the party needs to reach a point, priced along the line rather than at one end: a
@@ -258,8 +261,10 @@ func build_route(to: Settlement) -> void:
 	route_leg = 0
 	if costs != null and costs.is_ready() and to != null:
 		# One path, priced by the ground and by the roads, with no comparison to make: a road is cheap
-		# cells and a marsh is dear ones, and the pathfinder has one job.
-		route = costs.path_between(state.world_position, to.position)
+		# cells and a marsh is dear ones, and the pathfinder has one job. The pathfinder's answer is
+		# made of cell centres; the road stretches of it are then spliced onto the drawn curves so
+		# the walk is the line the player can see.
+		route = _snap_to_roads(costs.path_between(state.world_position, to.position))
 		_log_route_share()
 		return
 	var from := current_settlement()
@@ -324,6 +329,76 @@ func build_route(to: Settlement) -> void:
 		route = points
 		print("travel: along the roads, %.1f h against %.1f straight" % [road_hours, direct_hours])
 	_log_route_share()
+
+
+## Replace the stretches of a route that run along a road with that road's own curve - the same
+## points the map draws - so the marker walks the line instead of a chain of cell-centre chords
+## beside it. The owner, watching it: "I see my pawn moving in a straight line... I think the game
+## thinks that block is road" - and it did: the grid prices blocks, the drawing is a line, and the
+## walk split the difference. Where the route is genuinely off-road the pathfinder's own line
+## stands; only corridor stretches change, and both endpoints are kept exactly.
+func _snap_to_roads(points: PackedVector2Array) -> PackedVector2Array:
+	if roads == null or points.size() < 2:
+		return points
+	var radius := roads.road_radius()
+	var snapped := PackedVector2Array()
+	snapped.append(points[0])
+	var run_link := -1
+	var run_entry := points[0]
+	for i in range(1, points.size()):
+		var a := points[i - 1]
+		var b := points[i]
+		var span := a.distance_to(b)
+		var steps := maxi(1, int(ceil(span / SNAP_SAMPLE_UNITS)))
+		for s in range(1, steps + 1):
+			var at: Vector2 = a.lerp(b, float(s) / float(steps))
+			var link := roads.nearest_link(at, radius)
+			if link != run_link:
+				if run_link >= 0:
+					_splice_curve(snapped, run_link, run_entry, at)
+				run_link = link
+				run_entry = at
+		if run_link < 0:
+			# Off-road: the pathfinder's own line stands, corner for corner.
+			snapped.append(b)
+	if run_link >= 0:
+		_splice_curve(snapped, run_link, run_entry, points[points.size() - 1])
+	var destination: Vector2 = points[points.size() - 1]
+	if snapped[snapped.size() - 1].distance_to(destination) > 0.001:
+		snapped.append(destination)
+	return snapped
+
+
+## Append a link's own curve between the two stretch ends, in the order the route met them: the
+## index order is the walk's order, so a route heading for one end of a link and one heading for
+## the other both come out right.
+func _splice_curve(out: PackedVector2Array, link: int, from_point: Vector2, to_point: Vector2) -> void:
+	var curve := roads.link_curve(link)
+	if curve.size() < 2:
+		return
+	var first := _nearest_curve_index(curve, from_point)
+	var last := _nearest_curve_index(curve, to_point)
+	var step := 1 if last >= first else -1
+	var index := first
+	while true:
+		var at := curve[index]
+		if out[out.size() - 1].distance_to(at) > 0.01:
+			out.append(at)
+		if index == last:
+			break
+		index += step
+
+
+## The curve index nearest a point: where a route stretch enters or leaves the drawn line.
+func _nearest_curve_index(curve: PackedVector2Array, point: Vector2) -> int:
+	var best := INF
+	var found := 0
+	for i in curve.size():
+		var distance := curve[i].distance_squared_to(point)
+		if distance < best:
+			best = distance
+			found = i
+	return found
 
 
 ## Say what the route that was just built is made of: how much of its length runs on a road. The
@@ -445,6 +520,12 @@ func set_destination_point(point: Vector2) -> bool:
 	state.destination_point = point
 	state.destination_id = ""
 	state.current_settlement_id = ""
+	# A point march is always walked straight: any route a settlement order left behind is dropped,
+	# or the party keeps following the old road to the old place and "arrives" the moment it is
+	# ordered - the owner: "I can't click on random spots, only locations (settlements)".
+	route = PackedVector2Array()
+	route_leg = 0
+	_route_target = ""
 	_begin_journey()
 	DebugLogger.info("marching to open ground (%.0f units, ~%.1f game hours)" % [
 		distance_to(point), hours_to_reach(point),
@@ -456,6 +537,11 @@ func clear_destination() -> void:
 	if state != null:
 		state.destination_id = ""
 		state.destination_is_point = false
+	# Cancelling drops the route with the order, so the next march starts from where the party
+	# actually stands rather than continuing the road it was on.
+	route = PackedVector2Array()
+	route_leg = 0
+	_route_target = ""
 
 
 ## Advance travel by [param game_hours]. Returns a small report dictionary:
