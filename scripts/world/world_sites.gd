@@ -87,7 +87,11 @@ func propose_in_chunk(chunk: Vector2i) -> Dictionary:
 	var origin := WorldChunks.chunk_origin(chunk)
 	var best := {}
 	var best_score := 0.0
-	var stride := WorldChunks.CELL_SIZE * 2.0
+	# 32 units, not 16. This scan is the entire cost of generating a world: at 16 it is 256 points a
+	# chunk, each scored from five field samples, over some six hundred chunks - measured at 3,747 ms
+	# for 36 settlements, of which the placing was 6 ms. Sites end up hundreds of units apart, so
+	# scanning at half that resolution was four times finer than the answer needed.
+	var stride := WorldChunks.CELL_SIZE * 4.0
 	var steps := int(WorldChunks.CHUNK_SIZE / stride)
 	for cy in steps:
 		for cx in steps:
