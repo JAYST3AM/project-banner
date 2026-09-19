@@ -28,9 +28,14 @@ const FPS_LABELS: Array[String] = ["Uncapped", "60", "120", "144", "240", "360"]
 const FPS_CAPS: Array[int] = [0, 60, 120, 144, 240, 360]
 ## UI scale: what every interface size is multiplied by. The slider's range and step live here so
 ## the panel and the service cannot disagree.
-const UI_SCALE_MIN := 0.8
+##
+## The default is 0.8, not 1.0: the base sizes were tuned while every screen was being redressed,
+## and at 1440p the owner's verdict on the result was "the default ui size needs to be much
+## smaller". 0.8 is what the interface is meant to look like now; the slider can still go up.
+const UI_SCALE_MIN := 0.6
 const UI_SCALE_MAX := 1.4
 const UI_SCALE_STEP := 0.05
+const UI_SCALE_DEFAULT := 0.8
 
 ## Where settings are read and written. Tests point this at their own file, exactly as the save
 ## suites do with their own save directory.
@@ -38,7 +43,7 @@ var path := PATH
 
 var window_index := 1
 var window_size_index := 3
-var ui_scale := 1.0
+var ui_scale := UI_SCALE_DEFAULT
 var vsync_index := 1
 var fps_index := 5
 ## Whether the frame-rate overlay opens visible. F1 still toggles it by hand either way.

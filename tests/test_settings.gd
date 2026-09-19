@@ -37,6 +37,9 @@ func _test_scale_bounds() -> void:
 	section("the UI scale stays inside its slider's range")
 	greater(GameSettings.UI_SCALE_MAX, GameSettings.UI_SCALE_MIN, "the range has room")
 	greater(GameSettings.UI_SCALE_STEP, 0.0, "the step moves")
+	check(GameSettings.UI_SCALE_DEFAULT >= GameSettings.UI_SCALE_MIN
+		and GameSettings.UI_SCALE_DEFAULT <= GameSettings.UI_SCALE_MAX,
+		"and the default sits inside the slider, wherever it is tuned to")
 
 
 func _test_scaled_sizes() -> void:
