@@ -537,27 +537,31 @@ var instances := PackedFloat32Array()
 ##
 ## The same Tiny RPG atlas and the same shader the canvas battle's [SoldierField] draws with:
 ## one multimesh over the whole atlas, the frame chosen per soldier in instance custom data,
-## the flip carried by a mirrored UV. What this renderer can see is smaller than the canvas
-## battle's - the readback carries a man's position, his hit points and whether he is standing,
-## and nothing else - so the animations here are inferred from those: a man who moved since the
-## last pack walks, a man whose hit points fell was struck, a man whose remembered opponent lost
-## hit points this tick is swinging, and a man who fell holds his last frame. A strike stamp in
-## the readback would make the swing exact instead of inferred; see the note in [method _pack].
+## the flip carried by a mirrored UV. While the sprites are drawn the disc batch is not - the
+## sprite is the unit, not a marker on a base (the owner: "they aren't attachments, replace the
+## circles with the knights") - and both sides are the same character, separated by
+## [method UnitArt.side_tint].
+##
+## What this renderer can see is smaller than the canvas battle's - the readback carries a man's
+## position, his hit points and whether he is standing, and nothing else - so the animations here
+## are inferred from those: a man who moved since the last pack walks, a man whose hit points fell
+## was struck, a man whose remembered opponent lost hit points this tick is swinging, and a man
+## who fell holds his last frame. A strike stamp in the readback would make the swing exact
+## instead of inferred; see the note in [method _pack].
 ##
 ## Sprites are drawn only when the art is on this machine and the batch's buffer layout - custom
 ## data included - was measured as one the writer understands; otherwise the discs are the army,
 ## exactly as they were. [code]PB_UNIT_SPRITES=off[/code] forces that older picture.
 var draw_sprites: bool = OS.get_environment("PB_UNIT_SPRITES") != "off"
-## How far above the picture point his frame's anchor - the body's centre column on the cell's
-## bottom edge - is drawn, in picture units. The disc's radius here is [constant DISC_RADIUS],
-## so this puts his feet near its lower half.
+## How far below the picture point his frame's anchor - the body's centre column on the cell's
+## bottom edge - is drawn, in picture units.
 const SPRITE_FOOT_LIFT := 0.85
 ## The bar lift used while the sprites are drawn: clear of a raised sword, or the bar is drawn
 ## across the soldier's head. (The discs only needed [constant BAR_LIFT].)
 const SPRITE_BAR_LIFT := 2.4
-## The tint a fallen soldier's frame is drawn with: the disc goes [constant COLOR_FALLEN], and
-## the sprite has to darken with it or a corpse is the brightest thing on the field.
-const SPRITE_FALLEN_TINT := Color(0.45, 0.45, 0.45, 1.0)
+## How much a fallen soldier's frame is darkened: the same amount the canvas battle darkens a
+## corpse by, so a body reads the same in both renderers.
+const SPRITE_FALLEN_DARKEN := 0.55
 
 var _art: UnitArt = null
 var _sprites_node: MultiMeshInstance2D = null
@@ -2105,8 +2109,12 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 		var bi := _man_body[i]
 		var target := target_raw[i * 4 + 0] if target_raw.size() >= i * 4 + 4 else -1
 		_targets[i] = target
-		instances[base + AT_ORIGIN_X] = picture.x
-		instances[base + AT_ORIGIN_Y] = picture.y
+		# The disc is written only when there is no sprite to draw him with: the sprite is the
+		# unit, not a marker on a base, so while the batch is on the disc multimesh is left
+		# empty (its visible count is zeroed where the batch is built).
+		if not _sprite_ok:
+			instances[base + AT_ORIGIN_X] = picture.x
+			instances[base + AT_ORIGIN_Y] = picture.y
 		var colour := COLOR_FALLEN
 		if meta[i * 4 + 2] < 0.5:
 			# The lowest hit points anyone alive is carrying: if the line is locked and nobody is
@@ -2155,10 +2163,11 @@ func _pack(state_bytes: PackedByteArray, meta_bytes: PackedByteArray, target_byt
 				_write_bar(bars, lift + Vector2(BAR_WIDTH * (1.0 - ratio) * 0.5, 0.0),
 					Vector2(maxf(BAR_WIDTH * ratio, 0.05), BAR_HEIGHT), fill)
 				bars += 1
-		instances[base + AT_COLOR + 0] = colour.r
-		instances[base + AT_COLOR + 1] = colour.g
-		instances[base + AT_COLOR + 2] = colour.b
-		instances[base + AT_COLOR + 3] = 1.0
+		if not _sprite_ok:
+			instances[base + AT_COLOR + 0] = colour.r
+			instances[base + AT_COLOR + 1] = colour.g
+			instances[base + AT_COLOR + 2] = colour.b
+			instances[base + AT_COLOR + 3] = 1.0
 		# And the same man as a frame of the atlas, when there is one to draw. The sprite batch
 		# is written here, in the same walk of the army, so the two pictures cannot disagree
 		# about who is standing where.
@@ -2316,6 +2325,8 @@ func _build_sprites() -> void:
 		_side_uv_stride.append(int(data["uv_stride"]))
 	_reset_animation_state()
 	_sprite_buffer.resize(agents * _sprite_stride)
+	# The discs stand down now: the sprites are the army, not markers on bases.
+	mm.visible_instance_count = 0
 	DebugLogger.info("gpu crowd: unit sprites on - atlas %dx%d, %d soldiers" % [
 		int(_art.atlas_size().x), int(_art.atlas_size().y), agents], "GpuCrowd")
 
@@ -2411,9 +2422,11 @@ func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
 	var custom := UnitArt.custom_from(
 		uv_table[anim * uv_stride + UnitArt.frame(anim, into, ticks[anim], counts[anim])],
 		_anim_flip[i] == 1)
-	var colour := Color(1.0, 1.0, 1.0, 1.0)
+	# The side's tint, then the corpse's darkening on top of it: both sides are the soldier now,
+	# so the colour is what separates them.
+	var colour := UnitArt.side_tint(side == 0)
 	if not alive:
-		colour = SPRITE_FALLEN_TINT
+		colour = colour.darkened(SPRITE_FALLEN_DARKEN)
 	_write_sprite_instance(i, origin, cell * unit_scale, colour, custom)
 
 

@@ -4000,3 +4000,24 @@ towns, so every spawn failed - and a live campaign could never start a battle at
 - With both fixed, a scripted seed-2026 run spawns three bands and reaches a real battle:
   `[Encounter] battle battle_0001 ... player (6) vs enemy (5)` -> `scene -> battle_field` ->
   `gpu crowd: unit sprites on - atlas 328x320, 11 soldiers`.
+
+**D-144: no orcs, and the sprite IS the unit - the disc goes.**
+
+The owner, watching the first cut: "dont use the orks, and they aren't attachments replace the
+circles with the knifes" (knights).
+
+- **Both sides draw the soldier.** `UnitArt.CHARACTER_ENEMY` resolves to the soldier key now. The
+  orc rows stay in the atlas, unused - a monster, or an enemy character whose silhouette reads
+  apart from a soldier's - and changing the mapping back is one line.
+- **The disc batch stands down while the sprite batch is drawn**, in both renderers: the sprite is
+  the unit, not a marker on a base. That is what "they aren't attachments" asked for, and it is
+  why the discs are still the whole army when the art is absent or `PB_UNIT_SPRITES=off` - they
+  are the fallback, not a layer. `pack()` reports `discs` beside `count`, so a bench or a report
+  says which army it measured instead of leaving the reader to infer it.
+- **Team colour moves onto the sprite.** The player's soldier is left natural - his own blue steel
+  already reads as "ours", which the pack's art does for free - and the enemy is multiplied warm,
+  `(1.0, 0.62, 0.55)`. Chosen against the art at battle scale: a stronger tint (T3, reds halved)
+  separated the lines but muddied the helmet, face, shield and sword at sprite size, and a milder
+  one (T2) read as lighting rather than a faction. The suite pins the mapping and that the two
+  tints differ, so neither "we quietly went back to orcs" nor "both sides tinted the same" can
+  happen without a failure.

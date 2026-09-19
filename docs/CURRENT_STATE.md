@@ -35,7 +35,9 @@ separation-pass optimisation](#step-78---separation-pass-optimisation) below.
 The soldiers are characters now. The free Tiny RPG Character Asset Pack 01 v2.0 (Zerie) supplies
 a soldier and an orc - idle, walk, attack, hurt, death - and both battle renderers draw them:
 `SoldierField` in the canvas battle and `gpu_crowd` in the compute field, which is the one the
-game actually plays (the world map opens `battle_field`).
+game actually plays (the world map opens `battle_field`). Both sides are drawn as the soldier
+(the owner: "dont use the orks"), the sprite replaces the disc rather than sitting on it, and the
+side reads from the sprite's tint (D-144).
 
 - **Art**: `assets/art_source/units/tiny_rpg/` (git-ignored on purpose - the licence allows
   commercial use but forbids re-upload, and this repo is public). Rebuild with

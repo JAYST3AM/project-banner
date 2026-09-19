@@ -24,6 +24,7 @@ func run() -> void:
 	_test_the_placement_puts_the_anchor_at_the_soldiers_feet()
 	_test_a_flip_mirrors_the_frame_without_moving_it()
 	_test_the_fields_own_geometry_clears_the_sprite()
+	_test_both_sides_are_the_soldier_and_read_from_the_tint()
 	_test_the_precomputed_tables_hold_together_when_the_art_is_present()
 	_test_the_instance_write_follows_the_layout()
 	_test_the_atlas_table_holds_together_when_the_art_is_present()
@@ -117,6 +118,17 @@ func _test_the_fields_own_geometry_clears_the_sprite() -> void:
 		"and higher than the foot lift, or it would be drawn across his chest")
 
 
+func _test_both_sides_are_the_soldier_and_read_from_the_tint() -> void:
+	section("both sides are the soldier, separated by the tint")
+	equal(UnitArt.key_for_side(BattleContext.SIDE_PLAYER), UnitArt.CHARACTER_PLAYER,
+		"the player's side is the soldier")
+	equal(UnitArt.key_for_side(BattleContext.SIDE_ENEMY), UnitArt.CHARACTER_PLAYER,
+		"and so is the enemy's - the owner's call, the orc is not used")
+	not_equal(UnitArt.side_tint(true), UnitArt.side_tint(false),
+		"the two sides are tinted apart, or nobody could tell them apart")
+	equal(UnitArt.side_tint(true), UnitArt.TINT_PLAYER, "the player's soldier is left natural")
+
+
 ## The precomputed tables are what a renderer's per-soldier loop reads, so they are the part of
 ## this pipeline most worth pinning: a table that disagreed with [method UnitArt.uv_rect] would
 ## draw the wrong frames at speed instead of failing.
@@ -186,8 +198,10 @@ func _test_the_instance_write_follows_the_layout() -> void:
 	var built := ShowcaseBattle.build(
 		GameManager.config(), UnitCatalog.load_from(), FormationCatalog.load_from(), 2, SEED)
 	var simulator: BattleSimulator = built["simulator"]
-	field.pack(simulator)
+	var packed := field.pack(simulator)
 	equal(field.sprite_count(), simulator.units.size(), "one instance a soldier")
+	equal(field.disc_count(), 0, "and no discs: the sprite is the unit, not a marker on a base")
+	equal(int(packed.get("discs", -1)), 0, "the pack says so too, for the bench's report")
 	for i in simulator.units.size():
 		var unit: BattleUnit = simulator.units[i]
 		var key := UnitArt.key_for_side(unit.side)

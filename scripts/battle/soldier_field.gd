@@ -36,13 +36,15 @@ extends MultiMeshInstance2D
 ## loop did.
 ##
 ## [b]The unit sprites.[/b] A fourth batch draws each soldier as a frame from the Tiny RPG
-## character atlas - idle, walk, attack, hurt and death - instead of a disc. The frame is
-## chosen from the soldier's own state (has he moved since the last tick, has his cooldown
-## just jumped, was he struck, has he fallen) and the animation clock rides the simulation's
-## ticks, so a paused battle holds its pose and animation can never outrun the fight. The art
-## is third-party and git-ignored, so the batch exists only when the atlas is present AND its
-## instance-buffer layout - custom data included - could be read back out of the engine;
-## otherwise the discs are still the whole army, exactly as before.
+## character atlas - idle, walk, attack, hurt and death - and while it is drawn the disc batch is
+## not: the sprite is the unit, not a marker on a base (the owner: "they aren't attachments,
+## replace the circles with the knights"). Both sides are the same character, separated by the
+## side's tint. The frame is chosen from the soldier's own state (has he moved since the last
+## tick, has his cooldown just jumped, was he struck, has he fallen) and the animation clock
+## rides the simulation's ticks, so a paused battle holds its pose and animation can never
+## outrun the fight. The art is third-party and git-ignored, so the batch exists only when the
+## atlas is present AND its instance-buffer layout - custom data included - could be read back
+## out of the engine; otherwise the discs are still the whole army, exactly as before.
 ## [code]PB_UNIT_SPRITES=off[/code] forces that older path for a paired run in one build.
 
 ## Texture resolution of the generated discs. Enough that the rim survives a squad-level zoom
@@ -67,9 +69,10 @@ const COLOR_OUTLINE := Color("0b1017")
 ## only when it is present. These numbers are the render-side half of that pipeline; the art's
 ## own half - cell sizes, frame counts, durations - lives in the atlas JSON, and the shader both
 ## renderers use is [constant UnitArt.SHADER_PATH].
-## How far above the soldier's position his frame's anchor point (the body's centre column on
-## the cell's bottom edge) is drawn, in world units. This is what makes the disc read as the
-## ground he stands on rather than a ring around his boots.
+## How far below the soldier's position his frame's anchor point (the body's centre column on
+## the cell's bottom edge) is drawn, in world units: his position is the middle of the ground he
+## occupies, and his feet belong a little below it so the man stands on his patch rather than
+## floating over it.
 const FOOT_LIFT := 1.35
 ## The health bar's lift when the sprites are drawn. The tallest frame in the atlas (a raised
 ## sword) reaches about 3.3 units above the anchor, and the bar has to clear it or it is drawn
@@ -312,9 +315,13 @@ func pack(simulator: BattleSimulator) -> Dictionary:
 		var alive := unit.is_alive()
 		var team := _team_color(unit)
 		var position := unit.position
-		# The soldier himself.
-		_write(_packed_body, bodies, stride, x_x, y_y, origin_x, origin_y, color_at,
-			body_scale, body_scale, position, _body_color(unit, team, alive))
+		# The soldier himself - as a disc only when there is no sprite to draw him with. The
+		# owner: "they aren't attachments, replace the circles with the knights" - so while the
+		# sprite batch is drawn, the disc batch is not: the sprite is the unit, not a marker on
+		# a base. With no art (or PB_UNIT_SPRITES=off) the discs are the whole army as before.
+		if not _sprite_ok:
+			_write(_packed_body, bodies, stride, x_x, y_y, origin_x, origin_y, color_at,
+				body_scale, body_scale, position, _body_color(unit, team, alive))
 		bodies += 1
 		# And the same soldier as a frame of the atlas, when there is one to draw.
 		if _sprite_ok:
@@ -351,15 +358,17 @@ func pack(simulator: BattleSimulator) -> Dictionary:
 			pips += 1
 	# Only the drawn slices are handed over: a longer buffer than the instance count would
 	# leave the engine reading stale transforms for men who are no longer standing.
-	_packed_body = _packed_body.slice(0, bodies * stride)
+	var discs := bodies if not _sprite_ok else 0
+	_packed_body = _packed_body.slice(0, discs * stride)
 	_packed_bars = _packed_bars.slice(0, bars * stride)
 	_packed_pips = _packed_pips.slice(0, pips * stride)
 	if _sprite_ok:
 		_packed_sprites = _packed_sprites.slice(0, sprites * _sprite_stride)
-	_counts = {"body": bodies, "bars": bars, "pips": pips, "sprites": sprites}
+	_counts = {"body": discs, "bars": bars, "pips": pips, "sprites": sprites}
 	return {
 		"mode": "packed",
 		"count": bodies,
+		"discs": discs,
 		"usec": Time.get_ticks_usec() - started,
 	}
 
@@ -531,6 +540,12 @@ func sprite_count() -> int:
 	return int(_counts.get("sprites", 0))
 
 
+## How many disc instances the last [method pack] wrote. Zero while the sprites are drawn: the
+## discs are the fallback army, not a base under the men (the owner: "they aren't attachments").
+func disc_count() -> int:
+	return int(_counts.get("body", 0))
+
+
 ## The drawn rectangle (origin and size, in world units) of one packed sprite instance - read out
 ## of the buffer the renderer built, so a caller can assert what was written without a GPU.
 func sprite_instance_rect(index: int) -> Rect2:
@@ -700,7 +715,9 @@ func _write_sprite(index: int, unit: BattleUnit, position: Vector2, alive: bool,
 	var custom := UnitArt.custom_from(
 		uv_table[anim * uv_stride + UnitArt.frame(anim, into, ticks[anim], counts[anim])],
 		unit.facing.x < 0.0)
-	var colour := Color(1.0, 1.0, 1.0, 1.0)
+	# The side's tint, then the corpse's darkening on top of it: both sides are the soldier now,
+	# so the colour is what separates them.
+	var colour := UnitArt.side_tint(unit.side == BattleContext.SIDE_PLAYER)
 	if not alive:
 		colour = colour.darkened(FALLEN_DARKEN)
 	_write_sprite_instance(index, origin, cell * unit_scale, colour, custom)

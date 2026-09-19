@@ -31,10 +31,19 @@ const HURT := 3
 const DEATH := 4
 const ANIMATIONS: Array[String] = ["idle", "walk", "attack", "hurt", "death"]
 
-## Which character a side is drawn as. The pack's two characters are the two sides: the
-## soldier fights for the player, the orc for the enemy - one mapping, one line to change.
+## Which character a side is drawn as. [b]Both sides are the soldier[/b] - the owner: "dont use the
+## orks" - so the orc rows stay in the atlas unused for now (a monster, or an enemy character
+## whose silhouette reads apart from a soldier). Because both sides are the same character, the
+## side has to read from the tint below, not the art.
 const CHARACTER_PLAYER := "soldier"
-const CHARACTER_ENEMY := "orc"
+const CHARACTER_ENEMY := CHARACTER_PLAYER
+
+## The per-side tint every sprite instance is drawn with. The player's soldier is left natural -
+## his own blue steel already reads as "ours" - and the enemy is multiplied warm: verified against
+## the art at battle scale, it separates the lines at a glance while the helmet, face, shield and
+## sword stay legible, where a stronger tint muddies the small sprite.
+const TINT_PLAYER := Color(1.0, 1.0, 1.0, 1.0)
+const TINT_ENEMY := Color(1.0, 0.62, 0.55, 1.0)
 
 ## Half a texel, in texels: the UV rect is inset by this at every edge so the outermost
 ## texel's centre lands on the quad's edge and nearest sampling cannot pick up the padding.
@@ -118,6 +127,11 @@ func _read() -> bool:
 ## The key of the character the given side is drawn as.
 static func key_for_side(side: String) -> String:
 	return CHARACTER_PLAYER if side == BattleContext.SIDE_PLAYER else CHARACTER_ENEMY
+
+
+## The tint the given side's sprites are drawn with.
+static func side_tint(is_player: bool) -> Color:
+	return TINT_PLAYER if is_player else TINT_ENEMY
 
 
 func texture() -> Texture2D:
