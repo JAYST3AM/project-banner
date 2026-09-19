@@ -48,6 +48,10 @@ const FIELD_STEP := WorldChunks.CELL_SIZE * 2.0
 
 const TILE_UNITS := 64.0
 
+## How worn the ground inside a settlement's clearing is - the place where feet, carts and smoke work
+## the land hardest. Blended into the natural weights across the clearing's band.
+const CLEARING_WORN := 0.55
+
 const CATALOGUE := "res://data/terrain/biomes.json"
 
 var seed_value: int = 0
@@ -57,10 +61,11 @@ var generated_ms: float = 0.0
 ## Builds the field and the material. [param land] is the rectangle on the map the ground covers.
 ## [param config] is read for nothing yet; it is here because the next thing this needs to know is
 ## how big a campaign cell is, and taking it now saves changing every caller later.
-func setup(p_seed: int, land: Rect2, _config: GameConfig) -> void:
+func setup(p_seed: int, land: Rect2, _config: GameConfig, _on_progress: Callable = Callable(),
+		settlements: Array = []) -> void:
 	seed_value = p_seed
 	var started := Time.get_ticks_usec()
-	var field := _build_field(land)
+	var field := _build_field(land, settlements)
 	generated_ms = float(Time.get_ticks_usec() - started) / 1000.0
 	centered = false
 	position = land.position
@@ -134,11 +139,12 @@ func _looks() -> Array:
 ## frequencies and its own idea of where the hills were, which is exactly the arrangement in which a
 ## place can look like one thing and behave like another. One source of truth, at the world's own cell
 ## size.
-func _build_field(land: Rect2) -> Image:
+func _build_field(land: Rect2, settlements: Array = []) -> Image:
 	var cols := int(ceil(land.size.x / FIELD_STEP)) + 1
 	var rows := int(ceil(land.size.y / FIELD_STEP)) + 1
 	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
 	var world := WorldChunks.build(seed_value)
+	var clearings := SettlementSprites.clearing_index(settlements, world)
 	var half := maxf(0.0001, BLEND_WIDTH_CELLS / float(maxi(cols, rows)) * 3.0)
 	for row in rows:
 		for col in cols:
@@ -152,6 +158,20 @@ func _build_field(land: Rect2) -> Image:
 			var lush := plain * moisture * region * LOOK_STRENGTH
 			var dry := plain * (1.0 - moisture) * region * LOOK_STRENGTH
 			worn *= LOOK_STRENGTH
+			# Settlement clearings: the land a town stands on is built for it - flattened to the
+			# town's own height and worn by feet - so the structure stands on a plot rather than on
+			# whatever slope the noise left. Past the clearing the country takes back over, blended
+			# the same banded way the looks blend.
+			var height := float(here["height"])
+			for clearing in SettlementSprites.clearings_at(clearings, point):
+				var distance := point.distance_to(clearing["position"])
+				if distance >= float(clearing["outer"]):
+					continue
+				var k := 1.0 - smoothstep(float(clearing["inner"]), float(clearing["outer"]), distance)
+				height = lerpf(height, float(clearing["height"]), k)
+				lush *= 1.0 - k
+				dry *= 1.0 - k
+				worn = maxf(worn, CLEARING_WORN * k)
 			# The shader derives Standard as whatever is left over, so this only stops the three
 			# stored weights summing past one and letting the fourth look show through as a hole.
 			var used := lush + dry + worn
@@ -160,7 +180,7 @@ func _build_field(land: Rect2) -> Image:
 				lush *= overflow
 				dry *= overflow
 				worn *= overflow
-			image.set_pixel(col, row, Color(lush, dry, worn, float(here["height"])))
+			image.set_pixel(col, row, Color(lush, dry, worn, height))
 	return image
 
 

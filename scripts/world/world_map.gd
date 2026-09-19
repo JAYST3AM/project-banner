@@ -181,7 +181,7 @@ func _ready() -> void:
 		await _terrain.setup(_state.campaign_seed, _view.land_rect(), _config, func(part: float) -> void:
 			if _loader != null:
 				_loader.set_progress(0.7 + 0.3 * part)
-		)
+		, _state.settlements.values())
 		_view.ground_art = true
 	elif not _no_ground:
 		# No art, but a map the owner can still read: flat colours per terrain kind, from the same
@@ -195,7 +195,7 @@ func _ready() -> void:
 		await _terrain.setup(_state.campaign_seed, _view.land_rect(), _config, func(part: float) -> void:
 			if _loader != null:
 				_loader.set_progress(0.7 + 0.3 * part)
-		, cached_ground)
+		, cached_ground, _state.settlements.values())
 		# Kept on the campaign so the next entry - every return from a town - is instant (D-132).
 		_state.ground_field = _terrain.field_image
 		ground_from_cache = cached_ground != null

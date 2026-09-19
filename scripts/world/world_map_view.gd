@@ -107,13 +107,16 @@ func settlement_at(point: Vector2) -> Settlement:
 	if state == null:
 		return null
 	var best: Settlement = null
-	var best_distance := interact_radius()
+	var best_distance := INF
 	for key in state.settlements.keys():
 		var settlement := state.settlements[key] as Settlement
 		if settlement == null:
 			continue
+		# The pick follows the art: a settlement that stands 160 units wide is selectable across
+		# its footprint, not only inside the old marker's radius.
+		var reach := maxf(interact_radius(), SettlementSprites.map_width(settlement.type) * 0.5)
 		var distance := point.distance_to(settlement.position)
-		if distance <= best_distance:
+		if distance <= reach and distance < best_distance:
 			best_distance = distance
 			best = settlement
 	return best
@@ -319,41 +322,42 @@ func _draw_settlements() -> void:
 		var color := settlement_color(settlement)
 		var radius := _settlement_radius(settlement.type)
 
-		# The marker says what the place is in three ways at once - shape, size and colour - because
-		# the map has to be readable at a glance and a player should not have to read a label to know
-		# whether the thing ahead is somewhere to trade or somewhere to be shot at.
-		#
-		#   village  small disc
-		#   town     large disc
-		#   fort     square, steel
-		#   castle   square with four corner towers, gold
-		#
-		# Placeholders, and the owner asked for placeholders: real icons are art, and art comes after
-		# the systems it describes.
-		match settlement.type:
-			Settlement.TYPE_FORT:
-				_draw_square_marker(settlement.position, radius, color, false)
-			Settlement.TYPE_CASTLE:
-				_draw_square_marker(settlement.position, radius, color, true)
-			_:
-				draw_circle(settlement.position, radius + 2.0, COLOR_PARTY_OUTLINE)
-				draw_circle(settlement.position, radius, color)
-				draw_arc(settlement.position, radius + 4.0, 0.0, TAU, 32, color.darkened(0.35), 2.0)
-				# A town wears a mark inside the disc. Size alone was not enough: at map zoom a village
-				# and a town were the same shape at slightly different scales, and a marker that needs
-				# the label read to be understood is not doing its job.
-				if settlement.type == Settlement.TYPE_TOWN:
-					draw_circle(settlement.position, radius * 0.4, COLOR_BG)
+		# The art from here on (2026-09-19): the accepted structure sprites stand where the
+		# placeholder discs and squares did. The sprite itself now says what the place is - a
+		# longhouse reads as a village, a moated keep as a coastal castle - while size, colour,
+		# the rings and the label still carry what the map needs at a glance. Wilderness keeps
+		# its disc: there is no sprite for a place that is not settled.
+		var sprite_height := 0.0
+		var base := radius
+		if settlement.type != Settlement.TYPE_WILDERNESS:
+			var texture := SettlementSprites.texture_for(settlement)
+			var width := SettlementSprites.map_width(settlement.type)
+			var size := Vector2(width, width * float(texture.get_height()) / float(texture.get_width()))
+			sprite_height = size.y
+			base = width * 0.5
+			# Grounded the way the sprite was drawn: a soft shadow, then the structure standing
+			# bottom-centre on the spot. The clearing under it is carved into the terrain field
+			# itself (SettlementSprites.clearing_index), so the shadow only grounds the base.
+			draw_circle(settlement.position, base * 0.6, Color(0.0, 0.0, 0.0, 0.22))
+			draw_texture_rect(texture, Rect2(settlement.position - Vector2(size.x * 0.5, size.y), size), false)
+		else:
+			draw_circle(settlement.position, radius + 2.0, COLOR_PARTY_OUTLINE)
+			draw_circle(settlement.position, radius, color)
+			draw_arc(settlement.position, radius + 4.0, 0.0, TAU, 32, color.darkened(0.35), 2.0)
 
+		# The rings follow the art: at this scale a ring drawn at the old marker radius would ring
+		# the town's doorway rather than the town.
+		var ring := maxf(radius, base * 0.62)
 		if settlement.visited:
-			draw_arc(settlement.position, radius + 8.0, 0.0, TAU, 32, COLOR_HOVERED.darkened(0.3), 1.0)
+			draw_arc(settlement.position, ring + 8.0, 0.0, TAU, 32, COLOR_HOVERED.darkened(0.3), 1.0)
 
 		if settlement.id == selected_id:
-			draw_arc(settlement.position, radius + 12.0, 0.0, TAU, 48, COLOR_SELECTED, 3.0)
+			draw_arc(settlement.position, ring + 12.0, 0.0, TAU, 48, COLOR_SELECTED, 3.0)
 		elif settlement.id == hovered_id:
-			draw_arc(settlement.position, radius + 12.0, 0.0, TAU, 48, COLOR_HOVERED, 2.0)
+			draw_arc(settlement.position, ring + 12.0, 0.0, TAU, 48, COLOR_HOVERED, 2.0)
 
-		_draw_label(settlement.name, settlement.position + Vector2(0.0, -radius - 20.0), color, font_size)
+		var label_lift := sprite_height if sprite_height > 0.0 else radius
+		_draw_label(settlement.name, Vector2(settlement.position.x, settlement.position.y - label_lift - 20.0), color, font_size)
 
 
 func _draw_player_party() -> void:
@@ -418,26 +422,6 @@ static func _settlement_radius(type: String) -> float:
 		_:
 			return 8.0
 
-
-## A walled settlement: a filled square with a dark edge, and for a castle a turret at each corner -
-## four small squares, offset off the corners, which is the oldest shorthand there is for "this one is
-## fortified harder than that one".
-func _draw_square_marker(centre: Vector2, half: float, color: Color, towers: bool) -> void:
-	var body := Rect2(centre - Vector2(half, half), Vector2(half, half) * 2.0)
-	draw_rect(body.grow(2.0), COLOR_PARTY_OUTLINE, true)
-	draw_rect(body, color, true)
-	draw_rect(body, color.darkened(0.35), false, 2.0)
-	if not towers:
-		return
-	var turret := half * 0.42
-	var offsets: Array[Vector2] = [
-		Vector2(-half, -half), Vector2(half, -half), Vector2(-half, half), Vector2(half, half),
-	]
-	for offset in offsets:
-		var at := centre + offset
-		var square := Rect2(at - Vector2(turret, turret), Vector2(turret, turret) * 2.0)
-		draw_rect(square.grow(1.5), COLOR_PARTY_OUTLINE, true)
-		draw_rect(square, color, true)
 
 
 func _draw_label(text: String, position: Vector2, color: Color, font_size: int) -> void:
