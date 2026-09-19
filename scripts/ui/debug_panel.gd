@@ -29,8 +29,14 @@ func _init() -> void:
 	# Right edge and out of the way: the owner wants the debug furniture on the right, under the
 	# frame-rate overlay, and gone until F1 asks for it.
 	set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	# Explicit offsets, not `position` and not grow direction: with the right anchor the rect has to
+	# END at the right edge, and growing leftward from `position` did not survive the first layout
+	# pass - the panel hung off the screen edge, a sliver of its left edge the only thing visible.
+	offset_right = -12.0
+	offset_left = -12.0 - custom_minimum_size.x
+	offset_top = 58.0
+	offset_bottom = 58.0
 	grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	position = Vector2(-12.0, 58.0)
 	visible = false
 	_build()
 

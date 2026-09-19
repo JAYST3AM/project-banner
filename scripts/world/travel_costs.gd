@@ -10,13 +10,15 @@ class_name TravelCosts
 ## for exactly the same reason it avoids a marsh. The straight-line-versus-road comparison that used to
 ## live in the travel service has nothing left to compare.
 ##
-## The grid is 64 world units a cell, and that is a measurement rather than a taste. A field sample costs
-## 33 microseconds; at 64 units a world of 4096 is 4,096 cells and about 136 ms to build once, where at
-## the field's own 8 units it would be 262,144 cells and eight and a half seconds.
-
-const CELL := 64.0
-const COLUMNS := 64
-const ROWS := 64
+## The grid is 32 world units a cell. It began at 64, chosen by measurement (a field sample costs 33
+## microseconds, so 64 units was 4,096 cells and about 136 ms once, against eight and a half seconds
+## at the field's own 8 units) - and then the owner looked at the debug overlay and asked for finer
+## blocks: "I noticed the blocks when in debug mode, can we make the grid blocks smaller?" At 32 the
+## grid is 16,384 cells: the sampling is four times the work, paid once per campaign and cached on
+## the campaign afterwards (D-129), and every route now hugs a drawn road twice as tightly.
+const CELL := 32.0
+const COLUMNS := 128
+const ROWS := 128
 
 ## Game hours to cross one world unit. Indexed row * COLUMNS + column.
 var _cost := PackedFloat32Array()

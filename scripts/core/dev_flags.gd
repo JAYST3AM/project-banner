@@ -24,6 +24,10 @@ const AUTOSTART_BATTLE_FLAG := "--autostart-battle"
 ## Frame pacing on the record: "--framelog" logs the frame rate, frame-time mean and worst, and any
 ## hitch the moment it happens. A frame rate you can grep beats one you have to watch.
 const FRAMELOG_FLAG := "--framelog"
+## Start with the developer's furniture showing: the debug panel (with its priced-grid overlay) and
+## the frame-rate overlay. F1 toggles them by hand; a script and a screenshot cannot press a key,
+## and "show me the debug grid" is a request that arrives as one.
+const DEBUG_PANEL_FLAG := "--debug-panel"
 ## Run a scripted formation drill through the battle scene's real order methods.
 const AUTOFORMATIONS_FLAG := "--autoformations"
 const BATTLESPEED_PREFIX := "--battlespeed="
@@ -97,6 +101,12 @@ static func autorecruit_count() -> int:
 ## Jump the player straight onto the nearest hostile party so an encounter fires.
 static func autoengage() -> bool:
 	return _has_flag(AUTOENGAGE_FLAG)
+
+
+## Start with the developer's furniture on screen - the debug panel and the frame-rate overlay -
+## for a scripted run or a screenshot that cannot press F1.
+static func debug_panel() -> bool:
+	return _has_flag(DEBUG_PANEL_FLAG)
 
 
 ## Accept the first encounter prompt automatically instead of waiting for a click.

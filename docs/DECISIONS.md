@@ -3631,3 +3631,36 @@ top-right (12 px in, growing leftward) and the debug panel hangs under it at y 5
 one thing, and both start hidden. Frame counting and the hitch warnings are independent of
 visibility - verified: a hidden run still logs `[WARN][Perf] hitch: 261.2 ms` through the load.
 
+Two repairs on top of that: the debug panel's right-anchor used explicit offsets after it hung off
+the screen edge on the first attempt (only a sliver visible), and `--debug-panel` (DevFlags) opens
+with the debug panel + overlay showing, because a scripted run and a screenshot cannot press F1.
+
+
+## D-135 - the pricing grid goes to 32 units a cell, and squares stay while hex is considered
+
+**Context.** The owner, watching the F1 overlay: "I noticed the blocks when in debug mode, can we
+make the grid blocks smaller?" - and then, with the smaller blocks on screen: "question would a hex
+system be better?"
+
+**Decision - the cell size.** `TravelCosts.CELL` 64 -> 32 (128x128 cells, 16,384). The sampling is
+four times the work: measured **593 ms** once on a fresh campaign, against the 136-220 ms at 64 -
+paid once and then cached on the campaign (D-129), so re-entry still costs 0 ms. Every route now
+hugs a drawn road twice as tightly, and the debug overlay's blocks are four times finer (~15-20
+squares between towns instead of 4-6). The doc header keeps the measurement history: 64 was chosen
+at 136 ms against 8.5 s at the field's own 8 units.
+
+**Decision - square versus hex: squares, and why.** Hex's headline benefit - no diagonal shortcut -
+does not exist here: nothing moves on the grid. The party walks continuous world units along drawn
+curves, battles are continuous fields, and the grid only prices routes, with diagonals already
+priced at sqrt(2). Hex becomes the better answer only when movement becomes tile-stepped or the
+campaign grows ring/radius rules (zones of control, facing, tiles-of-reach); until then a hex
+rebuild of the pricing layer, its stamping, its re-stamp equivalence and the debug drawing is a
+refactor with zero gameplay difference. Recorded so the question is answered once rather than
+re-litigated.
+
+**The fixture that had to change.** `test_roads`' "the grid paints road beyond the drawn corridor"
+search was window-sized for 64 u blocks and no longer found a probe by luck; it now constructs the
+probe from the two radii (the centre of the cell the line passes through: inside the 48 u stamp
+corridor, outside the 10 u pace corridor), and its follow-on assert moved from the eta to the pace
+- the eta reads the route scale there deliberately (D-130). 90 assertions, green.
+

@@ -125,8 +125,9 @@ func _ready() -> void:
 		_roads = RoadNetwork.new(_state, _config)
 		_state.road_network = _roads
 	_travel.roads = _roads
-	# One pathfinder for the campaign: 4,096 cells at 64 units each, about 136 milliseconds once
-	# measured, and every order after this is an A* over a grid that is already priced.
+	# One pathfinder for the campaign: 16,384 cells at 32 units each (it was 4,096 at 64, until the
+	# owner asked for finer debug blocks), and every order after this is an A* over a grid that is
+	# already priced.
 	# The priced grid is cached on the campaign (D-129): it changes only when a road changes tier, and
 	# a fresh build on every visit to the map froze it for a fifth of a second each time.
 	_costs = _state.travel_costs
@@ -215,6 +216,11 @@ func _ready() -> void:
 	_debug.gold_requested.connect(_on_gold_requested)
 	_debug.speed_requested.connect(_on_speed_requested)
 	_debug.state_requested.connect(_refresh)
+	# Dev-only: "--debug-panel" opens with the developer's furniture showing, priced grid included.
+	# A scripted run cannot press F1, and "show me the grid" arrives as a screenshot request.
+	if DevFlags.debug_panel():
+		_debug.visible = _debug.is_available()
+		_toggle_perf_overlay()
 
 	_focus_camera_on_party()
 	_restore_selection_from_payload()

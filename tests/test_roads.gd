@@ -408,27 +408,28 @@ func _test_the_pace_follows_the_drawn_road() -> void:
 
 	# The corner the whole change turns on: somewhere the grid paints road while the drawn line is
 	# beyond its corridor. The block used to hand out its speed there; now the line decides. The
-	# probe must also be outside *every* corridor, or the road itself is legitimately near.
+	# probe is constructed from the two radii rather than searched for, because D-135 halved the
+	# cells and the old window - offsets of 1.1 to 2.0 times the 48 u shoulder - no longer finds one
+	# by luck: the centre of the cell the line itself passes through is at most half a cell diagonal
+	# from the curve (23 u at 32 u cells), which is inside the 48 u stamp corridor and outside the
+	# 10 u pace corridor whenever the line does not run over the centre itself.
 	var leaked := false
 	var leak_point := Vector2.ZERO
 	for index in range(4, path.size() - 4, 2):
-		var side_across := (path[index + 1] - path[index - 1]).orthogonal().normalized()
-		for side in [-1.0, 1.0]:
-			for step in [1.1, 1.4, 1.7, 2.0]:
-				var probe: Vector2 = path[index] + side_across * (network.road_radius() * step) * side
-				if network.bonus_at(probe) > 0.0:
-					continue
-				if costs.factor_at(probe) > network.bonus_of("road") - 0.001:
-					leaked = true
-					leak_point = probe
-					break
-			if leaked:
-				break
-		if leaked:
+		var centre := costs.centre(costs.cell_at(path[index]))
+		if network.bonus_at(centre) > 0.0:
+			continue
+		if costs.factor_at(centre) > network.bonus_of("road") - 0.001:
+			leaked = true
+			leak_point = centre
 			break
-	check(leaked, "the grid does paint road beyond the drawn line's corridor somewhere here")
+	check(leaked, "the grid still prices a whole cell as road where the drawn width does not")
 	if leaked:
-		check(travel.factor_at_point(leak_point) < network.bonus_of("road") - 0.001,
+		# The pace, asked of a walker standing on that cell centre: it is outside the 10 u corridor,
+		# so the block's road price does not reach the walk. (The eta still reads the route scale at
+		# such a point, deliberately - D-130 - which is why this asserts the pace and not the eta.)
+		state.world_position = leak_point
+		check(travel.ground_factor() < network.bonus_of("road") - 0.001,
 			"and the pace no longer takes its speed from that block")
 	GameManager.end_campaign()
 
