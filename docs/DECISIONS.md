@@ -3319,3 +3319,37 @@ journey, then marches to open ground, and asserts the party moves, does not inst
 toward the clicked spot. With the fix stashed the three asserts fail with exactly the owner's
 symptom (distance travelled 0.0); with it, 116/0.
 
+
+## D-124 - the pace and the eta read the drawn road; the grid only prices
+
+**Context.** D-122 made the *walk* follow the drawn curve, but the speed it walked at still came
+from the priced grid's 64-unit blocks. So x1.4 switched on and off up to tens of units away from
+the drawn road's edges - the owner, after watching: "still don't see the speed increase when on
+roads". The bonus was in effect (his own session logs: 197-208 u/h road legs against a 150 u/h
+base), but a speed change you cannot attach to anything you can see is a speed change you cannot
+see. And the block was the *third* yardstick for one question: the wear scan, the on/off-road log
+and the snap all read the drawn corridor; only the pace and the eta read blocks.
+
+**Decision.** One yardstick for "how fast am I walking here": the drawn roads answer first.
+`RoadNetwork.bonus_at(point)` returns the best tier bonus among the links whose corridor (the
+`traffic_radius` the wear scan and the snap already use) holds the point, or 0 on open ground;
+`TravelService.ground_factor()` and `factor_at_point()` read it, and fall back to the raw field
+when no road is near. The priced grid is unchanged and keeps the one job it is good at: pricing the
+route for the pathfinder (`build_route`), where 64-unit resolution is fine because the router only
+needs to know that roads are cheaper.
+
+**Consequences.** The pace changes exactly at a road's visible edge (the ~48 u corridor the snap and
+the wear scan already agreed on), a march crossing a road gets a speed blip inside that road's own
+footprint, and pace, wear, the on/off log and the eta all speak one language; only the router speaks
+block. Because the grid's road stamps no longer leak into the walk, a point inside a road-painted
+block but beyond the corridor walks at field speed - the exact complaint, closed.
+
+**Proved.** A new `test_roads` section: on the line the road answers, inside the corridor it still
+does, past it the field does; and a search finds a point the grid paints as road while the line is
+beyond its corridor, asserting the pace no longer inherits the block's speed (74 assertions, 0
+failures). Live, a dev-1 pass walked its road legs at 194 u/h against the 150 base and its
+half-road legs at 137-166, worst 0-11 u off-line, no script errors: the walk is the line, and the
+speed is the line's. (That pass also had a human at the controls - point marches appeared, which
+only input orders, and the time-speed changed with them - so its wall-clock figures are skewed; the
+game-hour speeds above are the ones that matter.)
+

@@ -900,7 +900,7 @@ happen"), recorded as D-120 and D-121.
 | pace and eta read the ground's own number; walking wears the link | `scripts/world/travel_service.gd` |
 | tier drawing - width and colour per tier, `none` not drawn | `scripts/world/world_map_view.gd` |
 | wiring, the review clock, the grid re-price on a tier change | `scripts/world/world_map.gd` |
-| the checks | `tests/test_roads.gd` (new, 68) and `test_world_map` rebuilt to 116/0 |
+| the checks | `tests/test_roads.gd` (new, 74) and `test_world_map` rebuilt to 116/0 |
 
 **Settings** live in `data/config/game_config.json` under `roads`: the ladder and its bonuses, the
 traffic each tier needs to rise, the decay span, and the scan/review windows. **Verified** by the
@@ -914,4 +914,8 @@ at the owner's request, "that way you can see whats actually happening" - proved
 disagreed with the line by up to 31 units. A march to open ground is a real march again (a stale
 route from a previous settlement order no longer finishes under the party's feet, D-123), and the
 debug panel's pace line shows the effective pace with its ground factor - "210 u/h (ground x1.40)"
-on a road - so the road bonus is visible in play rather than only in the log.
+on a road - so the road bonus is visible in play rather than only in the log. And a last pass gave
+the pace and the eta the same truth (D-124): `RoadNetwork.bonus_at` reads the drawn corridor the
+wear scan and the snap already use, the grid went back to doing only what it is good at - pricing
+the route - so the speed changes exactly at the road's visible edge, a crossing march gets its
+blip, and a painted block can no longer leak road speed past the drawn line.

@@ -2,10 +2,10 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** Step 8 - roads as a living thing: tiers, traffic and decay on every link, and
-the eta, the pace and the priced grid reading one number.
+**Last updated:** Step 8 - roads as a living thing: tiers, traffic and decay on every link, with
+the pace and the eta reading the drawn road and the priced grid left to price only the route (D-124).
 **Engine:** Godot 4.7.2-stable
-**Test status:** Step 8's suites are green - `test_roads` 68/0 (new) and `test_world_map` 116/0 -
+**Test status:** Step 8's suites are green - `test_roads` 74/0 (new) and `test_world_map` 116/0 -
 plus `test_core_services` 83/0 with its clock read from the config. The rest of the tree is red
 from the 2026-09-19 revert and its fallout: 30 suites, 5,884 assertions, 41 failures, 5 BROKEN -
 and every one of those reproduces at the parent commit, verified suite by suite with the Step 8
@@ -68,7 +68,11 @@ it: "0 u off its line" in the legs of a debug-1 run, against 15-31 u before). A 
 ground is a real march** again - a point order drops any route a previous settlement order left
 behind, where before the stale geometry "arrived" on the first step and the party never moved. And
 the debug panel's pace line now shows the **effective pace** with its ground factor
-("210 u/h (ground x1.40)" on a road) so the road bonus is visible in play.
+("210 u/h (ground x1.40)" on a road) so the road bonus is visible in play. And the pace and the eta
+read the **drawn road itself** (D-124): `RoadNetwork.bonus_at` answers with the corridor the wear
+scan and the snap already use, the grid went back to only pricing the route - so speed changes
+exactly at a road's visible edge, a march crossing one gets its blip, and a road-painted block can
+no longer leak speed past the drawn line.
 
 ## The vertical slice is complete
 
