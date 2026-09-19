@@ -83,8 +83,8 @@ static func button_styles(body: Color, light: Color, dark: Color, accent: Color,
 		"normal": button_style(body, light, dark, outline),
 		"hover": button_style(body.lightened(0.10), accent, dark, accent),
 		"pressed": button_style(body.darkened(0.12), light, dark, outline, true),
-		"disabled": button_style(body.darkened(0.35), light.darkened(0.4), dark.darkened(0.3),
-			outline.darkened(0.2)),
+		"disabled": button_style(body.darkened(0.5), light.darkened(0.6), dark.darkened(0.4),
+			outline.darkened(0.35)),
 	}
 
 
@@ -203,6 +203,38 @@ static func tooltip_theme(body: Color, edge: Color, text_colour: Color) -> Theme
 	theme.set_font_size("font_size", "TooltipLabel", 14)
 	theme.set_color("font_color", "TooltipLabel", text_colour)
 	return theme
+
+
+## A panel in the pixel furniture, in one call.
+static func dressed_panel(body: Color, edge: Color, outline: Color,
+		min_size := Vector2.ZERO) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", panel_style(body, edge, outline))
+	panel.custom_minimum_size = min_size
+	return panel
+
+
+## A button in the pixel furniture, in one call: dress it and size it, nothing else.
+static func text_button(text: String, styles: Dictionary, font_size: int, min_size: Vector2,
+		text_colour: Color, dim_colour: Color) -> Button:
+	var node := Button.new()
+	node.text = text
+	dress_button(node, styles, pixel_font(), font_size, text_colour, dim_colour)
+	node.custom_minimum_size = min_size
+	return node
+
+
+## label left (serif, dim, taking the slack), value right (usually Silkscreen): the shape every
+## stat line in the interface shares, so the numbers line up down the panel edge.
+static func stat_row(label_text: String, value: Label, label_size := 14,
+		label_colour := Color(0.58, 0.63, 0.68)) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var label := body_label(label_text, label_size, label_colour)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+	row.add_child(value)
+	return row
 
 
 static func pixel_font() -> Font:

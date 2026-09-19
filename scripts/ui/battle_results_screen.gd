@@ -4,15 +4,29 @@ extends Control
 ## Reads a [BattleResult] from the scene payload. Holds no game state of its own -
 ## by the time this screen exists, the consequences have already been written to
 ## the campaign.
+##
+## Dressed in the interface's one language (D-133). Deliberately chrome-only: the suites read this
+## screen's [method displayed_text] to prove the real fight reached it, so every figure stays a
+## visible Label exactly as before, only the furniture changed.
 
 const WORLD_MAP_KEY := "world_map"
 
+const BODY := Color(0.13, 0.15, 0.19)
+const LIGHT := Color(0.38, 0.42, 0.48)
+const DARK := Color(0.06, 0.07, 0.09)
+const OUTLINE := Color(0.02, 0.02, 0.03)
+const RAIL_BODY := Color(0.075, 0.088, 0.11)
+const CARD_BODY := Color(0.10, 0.118, 0.15)
+
 var _result: BattleResult = null
 var _root: VBoxContainer = null
+var _button_styles: Dictionary = {}
 
 
 func _ready() -> void:
 	$Background.color = UiTheme.BG
+	_button_styles = PixelStyle.button_styles(BODY, LIGHT, DARK, UiTheme.ACCENT, OUTLINE)
+	theme = PixelStyle.tooltip_theme(CARD_BODY, LIGHT.darkened(0.45), UiTheme.TEXT)
 	var payload := SceneManager.consume_payload()
 	_result = payload.get("result") as BattleResult
 
@@ -22,8 +36,7 @@ func _ready() -> void:
 		margin.add_theme_constant_override(side, 20)
 	add_child(margin)
 
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
+	var panel := PixelStyle.dressed_panel(RAIL_BODY, LIGHT.darkened(0.55), OUTLINE)
 	margin.add_child(panel)
 
 	_root = VBoxContainer.new()
@@ -31,8 +44,9 @@ func _ready() -> void:
 	panel.add_child(_root)
 
 	if _result == null:
-		_root.add_child(UiTheme.header("Battle Results", 24))
-		_root.add_child(UiTheme.dim_label("No battle result was passed to this screen."))
+		_root.add_child(PixelStyle.pixel_label("Battle Results", 22, UiTheme.GOLD))
+		_root.add_child(PixelStyle.body_label("No battle result was passed to this screen.", 14,
+			UiTheme.DIM, true))
 		_add_continue_button()
 		return
 
@@ -46,21 +60,24 @@ func _build_result() -> void:
 	elif _result.is_withdrawal():
 		outcome_color = UiTheme.DIM
 
-	var title := UiTheme.label(_result.title(), 40, outcome_color)
+	var title := PixelStyle.pixel_label(_result.title(), 34, outcome_color)
 	_root.add_child(title)
-	_root.add_child(UiTheme.label(_result.headline(), 17, UiTheme.TEXT))
+	_root.add_child(PixelStyle.body_label(_result.headline(), 16, UiTheme.TEXT))
 	if _result.is_withdrawal():
-		_root.add_child(UiTheme.dim_label(
+		var note := PixelStyle.body_label(
 			"Breaking off is not a battle survived, and the field was not yours to take. "
-			+ "Kills already made still stand, and the enemy is still out there."
-		))
-	_root.add_child(UiTheme.dim_label("Day %d, %s   |   lasted %s   |   battle %s" % [
+			+ "Kills already made still stand, and the enemy is still out there.",
+			13, UiTheme.DIM, true)
+		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		note.custom_minimum_size = Vector2(1000.0, 0.0)
+		_root.add_child(note)
+	_root.add_child(PixelStyle.pixel_label("Day %d, %s   |   lasted %s   |   battle %s" % [
 		_result.campaign_day,
 		CampaignClock.time_string_from_hour(_result.campaign_hour),
 		_result.duration_string(),
 		_result.battle_id,
-	]))
-	_root.add_child(UiTheme.heading_rule())
+	], 10, UiTheme.DIM))
+	_root.add_child(PixelStyle.rule(DARK))
 
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 14)
@@ -77,15 +94,16 @@ func _build_result() -> void:
 func _build_losses_panel() -> Control:
 	var box := _section("Your losses")
 	if _result.player_dead.is_empty():
-		box.add_child(UiTheme.label("None. Everyone came back.", 14, UiTheme.GOOD))
+		box.add_child(PixelStyle.body_label("None. Everyone came back.", 14, UiTheme.GOOD))
 		return _wrap(box)
 
 	for entry in _result.player_dead:
-		box.add_child(UiTheme.label(str(entry.get("name", "?")), 15, UiTheme.BAD))
-		box.add_child(UiTheme.dim_label("      %s" % str(entry.get("death_note", ""))))
+		box.add_child(PixelStyle.body_label(str(entry.get("name", "?")), 15, UiTheme.BAD))
+		box.add_child(PixelStyle.body_label("      %s" % str(entry.get("death_note", "")),
+			12.5, UiTheme.DIM, true))
 
-	box.add_child(UiTheme.heading_rule())
-	box.add_child(UiTheme.label("%d of %d fell" % [_result.player_casualties(), _result.player_total],
+	box.add_child(PixelStyle.rule(DARK))
+	box.add_child(PixelStyle.body_label("%d of %d fell" % [_result.player_casualties(), _result.player_total],
 		14, UiTheme.TEXT))
 	return _wrap(box)
 
@@ -93,7 +111,7 @@ func _build_losses_panel() -> Control:
 func _build_survivors_panel() -> Control:
 	var box := _section("Survivors")
 	if _result.player_survivors.is_empty():
-		box.add_child(UiTheme.label("Nobody.", 15, UiTheme.BAD))
+		box.add_child(PixelStyle.body_label("Nobody.", 15, UiTheme.BAD))
 		return _wrap(box)
 
 	for entry in _result.player_survivors:
@@ -101,20 +119,20 @@ func _build_survivors_panel() -> Control:
 		var levels := int(entry.get("levels_gained", 0))
 		if levels > 0:
 			name_text += "   (level %d)" % int(entry.get("level", 1)) + (" +%d" % levels)
-		box.add_child(UiTheme.label(name_text, 15, UiTheme.TEXT))
+		box.add_child(PixelStyle.body_label(name_text, 15, UiTheme.TEXT))
 		var detail := "      +%d XP" % int(entry.get("xp_gained", 0))
 		var kills := int(entry.get("kills", 0))
 		detail += "   %d kill%s" % [kills, "" if kills == 1 else "s"]
 		detail += "   %d/%d HP" % [int(entry.get("hp", 0)), int(entry.get("max_hp", 0))]
-		box.add_child(UiTheme.dim_label(detail))
+		box.add_child(PixelStyle.body_label(detail, 12.5, UiTheme.DIM))
 
-	box.add_child(UiTheme.heading_rule())
+	box.add_child(PixelStyle.rule(DARK))
 	if _result.is_withdrawal():
-		box.add_child(UiTheme.label("%d of %d came away   |   %d XP earned" % [
+		box.add_child(PixelStyle.body_label("%d of %d came away   |   %d XP earned" % [
 			_result.player_survivors.size(), _result.player_total, _result.xp_awarded,
 		], 14, UiTheme.TEXT))
 	else:
-		box.add_child(UiTheme.label("%d of %d survived   |   %d XP earned" % [
+		box.add_child(PixelStyle.body_label("%d of %d survived   |   %d XP earned" % [
 			_result.player_survivors.size(), _result.player_total, _result.xp_awarded,
 		], 14, UiTheme.TEXT))
 	return _wrap(box)
@@ -123,33 +141,39 @@ func _build_survivors_panel() -> Control:
 func _build_spoils_panel() -> Control:
 	var box := _section("Loot")
 	if _result.gold_total() <= 0:
-		box.add_child(UiTheme.label(
+		box.add_child(PixelStyle.body_label(
 			"You left the field. Nothing was taken." if _result.is_withdrawal() else "Nothing was taken.",
 			14, UiTheme.DIM,
 		))
 	else:
-		box.add_child(UiTheme.label("%d gold" % _result.gold_total(), 22, UiTheme.GOLD))
+		box.add_child(PixelStyle.pixel_label("%d gold" % _result.gold_total(), 20, UiTheme.GOLD))
 		if _result.gold_from_enemies > 0:
-			box.add_child(UiTheme.dim_label("      %d from the fallen" % _result.gold_from_enemies))
+			box.add_child(PixelStyle.body_label("      %d from the fallen" % _result.gold_from_enemies,
+				12.5, UiTheme.DIM))
 		if _result.gold_from_victory > 0:
-			box.add_child(UiTheme.dim_label("      %d for holding the field" % _result.gold_from_victory))
+			box.add_child(PixelStyle.body_label("      %d for holding the field" % _result.gold_from_victory,
+				12.5, UiTheme.DIM))
 
 	if not _result.loot.is_empty():
-		box.add_child(UiTheme.heading_rule())
+		box.add_child(PixelStyle.rule(DARK))
 		for item in _result.loot:
-			box.add_child(UiTheme.label(str(item.get("name", "something")), 14, UiTheme.TEXT))
-			box.add_child(UiTheme.dim_label("      sold for %d gold" % int(item.get("value", 0))))
-		box.add_child(UiTheme.dim_label("There is nowhere to keep gear yet, so loot is sold on the spot."))
+			box.add_child(PixelStyle.body_label(str(item.get("name", "something")), 14, UiTheme.TEXT))
+			box.add_child(PixelStyle.body_label("      sold for %d gold" % int(item.get("value", 0)),
+				12.5, UiTheme.DIM))
+		box.add_child(PixelStyle.body_label(
+			"There is nowhere to keep gear yet, so loot is sold on the spot.", 12.5, UiTheme.DIM, true))
 
-	box.add_child(UiTheme.heading_rule())
-	box.add_child(UiTheme.label("Enemy: %d of %d put down" % [
+	box.add_child(PixelStyle.rule(DARK))
+	box.add_child(PixelStyle.body_label("Enemy: %d of %d put down" % [
 		_result.enemy_dead.size(), _result.enemy_total,
 	], 14, UiTheme.TEXT))
 	if _result.enemy_survivor_count() > 0:
-		box.add_child(UiTheme.dim_label("      %d still standing, and they keep the wounds they took" % (
-			_result.enemy_survivor_count()
-		)))
-	box.add_child(UiTheme.label("Your kills: %d" % _result.total_player_kills(), 14, UiTheme.TEXT))
+		box.add_child(PixelStyle.body_label(
+			"      %d still standing, and they keep the wounds they took" % (
+				_result.enemy_survivor_count()
+			), 12.5, UiTheme.DIM))
+	box.add_child(PixelStyle.body_label("Your kills: %d" % _result.total_player_kills(), 14,
+		UiTheme.TEXT))
 	return _wrap(box)
 
 
@@ -157,14 +181,13 @@ func _section(title: String) -> VBoxContainer:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 3)
 	box.custom_minimum_size = Vector2(360.0, 0.0)
-	box.add_child(UiTheme.header(title, 17))
-	box.add_child(UiTheme.heading_rule())
+	box.add_child(PixelStyle.pixel_label(title.to_upper(), 13, UiTheme.ACCENT))
+	box.add_child(PixelStyle.rule(DARK))
 	return box
 
 
 func _wrap(box: VBoxContainer) -> Control:
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style())
+	var panel := PixelStyle.dressed_panel(CARD_BODY, LIGHT.darkened(0.6), OUTLINE)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.add_child(box)
 	return panel
@@ -174,8 +197,8 @@ func _add_continue_button() -> void:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
 	_root.add_child(row)
-	var button := UiTheme.button("Continue", 200.0)
-	button.custom_minimum_size = Vector2(220.0, 42.0)
+	var button := PixelStyle.text_button("Continue", _button_styles, 12, Vector2(220.0, 42.0),
+		UiTheme.GOLD, UiTheme.DIM)
 	button.pressed.connect(continue_to_world_map)
 	row.add_child(button)
 	button.grab_focus()

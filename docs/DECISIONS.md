@@ -3583,3 +3583,14 @@ just maybe a hover tool tip maybe?".
 chips readable at 1440p, the selected soldier's record complete. Portrait slots show initials until
 the art factory bakes heads.
 
+**Follow-through.** The pass carried to every remaining screen: `world_hud` (status grid, speed bar,
+actions, hint), `settlement_panel` (the town inspector, its blurb on hover), `encounter_dialog`,
+`battle_results_screen`, and `loading_screen` (pixel title and status, the bar in a nine-patch
+frame, `|` in place of a middle dot the pixel face may not carry), plus a much darker
+disabled-button state - the old one read as enabled at 11 px. Two screens are read by suites, so
+their restyle is deliberately chrome-only: `displayed_text()` collects every Label and Button
+string from the results screen, and the HUD's party wording is asserted through `stat_text()`. Both
+keep their exact wording. `test_party_semantics` stays at its known-red 5 failures - stash-proved
+pre-existing, the HUD shows "-" because the suite's world never finishes wiring under the revert
+fallout, not because of the dressing.
+

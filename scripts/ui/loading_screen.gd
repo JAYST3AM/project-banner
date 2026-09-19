@@ -85,41 +85,36 @@ func _ready() -> void:
 		push_error("loading screen: no sheet at %s" % SHEET)
 	centre.add_child(_logo)
 
-	var title := Label.new()
-	title.text = "The Banner"
-	title.add_theme_font_size_override("font_size", 40)
-	title.add_theme_color_override("font_color", Color(0.93, 0.9, 0.84))
+	var title := PixelStyle.pixel_label("The Banner", 34, Color(0.93, 0.9, 0.84))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	centre.add_child(title)
 
-	_status = Label.new()
-	_status.text = "Generating the world"
-	_status.add_theme_font_size_override("font_size", 16)
-	_status.add_theme_color_override("font_color", Color(0.72, 0.7, 0.64))
+	_status = PixelStyle.pixel_label("Generating the world", 11, Color(0.72, 0.7, 0.64))
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	centre.add_child(_status)
 
-	# --- the bar, directly beneath the loader
+	# --- the bar, directly beneath the loader: a trough, a fill, and the interface's own frame
+	# around both (D-133), so the screen the player stares at longest is already the game's
+	# furniture.
+	var frame := PixelStyle.dressed_panel(Color(0.06, 0.07, 0.09),
+		Color(0.38, 0.42, 0.48).darkened(0.5), Color(0.02, 0.02, 0.03))
+	frame.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	centre.add_child(frame)
 	var holder := Control.new()
 	holder.custom_minimum_size = Vector2(BAR_WIDTH, BAR_HEIGHT)
-	# Shrink-centred rather than stretched: in a full-width container a plain Control would span the
-	# whole screen and the bar would stop being a bar.
 	holder.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	centre.add_child(holder)
+	frame.add_child(holder)
 	_trough = ColorRect.new()
-	_trough.color = Color(0.16, 0.17, 0.19)
+	_trough.color = Color(0.13, 0.15, 0.19)
 	_trough.set_anchors_preset(Control.PRESET_FULL_RECT)
 	holder.add_child(_trough)
 	_fill = ColorRect.new()
-	_fill.color = Color(0.85, 0.62, 0.28)
+	_fill.color = Color("e8823c")
 	_fill.position = Vector2.ZERO
 	_fill.size = Vector2(0.0, BAR_HEIGHT)
 	holder.add_child(_fill)
 
-	_clock = Label.new()
-	_clock.text = "0.0 s"
-	_clock.add_theme_font_size_override("font_size", 12)
-	_clock.add_theme_color_override("font_color", Color(0.5, 0.49, 0.46))
+	_clock = PixelStyle.pixel_label("0.0 s", 10, Color(0.5, 0.49, 0.46))
 	_clock.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	centre.add_child(_clock)
 
@@ -141,7 +136,7 @@ func _process(delta: float) -> void:
 	var elapsed := Time.get_ticks_msec() / 1000.0 - _started
 	# A percentage and the clock together: the owner asked for a figure he can trust, and the number the
 	# bar is drawn from is the same one printed, so it cannot disagree with itself.
-	_clock.text = "%d%%  ·  %.1f s" % [int(round(_reported * 100.0)), elapsed]
+	_clock.text = "%d%%   |   %.1f s" % [int(round(_reported * 100.0)), elapsed]
 
 	# The bar follows the builder's own count of settlements placed, eased so it moves smoothly between
 	# one and the next but never passes the last real figure. When the count is unavailable it falls

@@ -5,6 +5,10 @@ extends CanvasLayer
 ## Built in script rather than in a .tscn so all HUD behaviour (what is shown,
 ## when a button is enabled, what it emits) lives in one file. The HUD never
 ## mutates campaign state - it emits a signal and the world map decides.
+##
+## Dressed in the interface's one language (D-133): the menus' pixel chrome, values in Silkscreen,
+## labels in the serif. The stat wording is load-bearing - test_party_semantics reads the party line
+## through [method stat_text] - so it is deliberately untouched by the dressing.
 
 signal speed_requested(speed_name: String)
 signal enter_settlement_requested(settlement_id: String)
@@ -14,6 +18,13 @@ signal menu_requested()
 
 const STAT_COLUMNS := 4
 
+## The menus' palette, so the HUD and the menu are one game. Same values as main_menu.gd.
+const BODY := Color(0.13, 0.15, 0.19)
+const LIGHT := Color(0.38, 0.42, 0.48)
+const DARK := Color(0.06, 0.07, 0.09)
+const OUTLINE := Color(0.02, 0.02, 0.03)
+const RAIL_BODY := Color(0.075, 0.088, 0.11)
+
 var _stats: GridContainer = null
 var _stat_values: Dictionary = {}
 var _title: Label = null
@@ -22,6 +33,7 @@ var _hint: Label = null
 var _speed_buttons: Dictionary = {}
 var _enter_button: Button = null
 var _selection: SettlementPanel = null
+var _button_styles: Dictionary = {}
 
 var _state: CampaignState = null
 var _travel: TravelService = null
@@ -43,9 +55,10 @@ func setup(state: CampaignState, config: GameConfig, travel: TravelService) -> v
 
 
 func _build() -> void:
+	_button_styles = PixelStyle.button_styles(BODY, LIGHT, DARK, UiTheme.ACCENT, OUTLINE)
+
 	# --- top-left status panel -------------------------------------------
-	var top_bar := PanelContainer.new()
-	top_bar.add_theme_stylebox_override("panel", UiTheme.panel_style())
+	var top_bar := PixelStyle.dressed_panel(RAIL_BODY, LIGHT.darkened(0.55), OUTLINE)
 	top_bar.position = Vector2(12.0, 12.0)
 	add_child(top_bar)
 
@@ -53,68 +66,72 @@ func _build() -> void:
 	top_box.add_theme_constant_override("separation", 4)
 	top_bar.add_child(top_box)
 
-	_title = UiTheme.label("", 20, UiTheme.GOLD)
+	_title = PixelStyle.pixel_label("", 17, UiTheme.GOLD)
 	top_box.add_child(_title)
-	_subtitle = UiTheme.dim_label("")
+	_subtitle = PixelStyle.pixel_label("", 9.5, UiTheme.DIM)
 	top_box.add_child(_subtitle)
-	top_box.add_child(UiTheme.heading_rule())
+	top_box.add_child(PixelStyle.rule(DARK))
 
 	_stats = GridContainer.new()
 	_stats.columns = STAT_COLUMNS
 	_stats.add_theme_constant_override("h_separation", 18)
-	_stats.add_theme_constant_override("v_separation", 2)
+	_stats.add_theme_constant_override("v_separation", 3)
 	top_box.add_child(_stats)
 	for stat_name in ["Gold", "Party", "Date", "Speed", "Destination", "Position", "At", "Settlements"]:
-		_stats.add_child(UiTheme.dim_label(stat_name))
-		var value := UiTheme.value_label("-")
+		_stats.add_child(PixelStyle.body_label(stat_name, 13.5, UiTheme.DIM))
+		var value := PixelStyle.pixel_label("-", 10.5, UiTheme.TEXT)
 		_stat_values[stat_name] = value
 		_stats.add_child(value)
 
 	# --- speed controls (bottom-left) ------------------------------------
-	var speed_bar := PanelContainer.new()
-	speed_bar.add_theme_stylebox_override("panel", UiTheme.panel_style())
+	var speed_bar := PixelStyle.dressed_panel(RAIL_BODY, LIGHT.darkened(0.55), OUTLINE)
 	speed_bar.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	speed_bar.position = Vector2(12.0, -62.0)
+	speed_bar.position = Vector2(12.0, -66.0)
 	add_child(speed_bar)
 
 	var speed_box := HBoxContainer.new()
 	speed_box.add_theme_constant_override("separation", 6)
 	speed_bar.add_child(speed_box)
-	speed_box.add_child(UiTheme.dim_label("Time"))
+	var time_label := PixelStyle.body_label("Time", 13.5, UiTheme.DIM)
+	time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	speed_box.add_child(time_label)
 	for speed_name in CampaignClock.SPEED_NAMES:
-		var button := UiTheme.button(speed_name, 74.0)
+		var button := PixelStyle.text_button(speed_name, _button_styles, 11, Vector2(74.0, 30.0),
+			UiTheme.TEXT, UiTheme.DIM)
 		button.toggle_mode = true
 		button.pressed.connect(_on_speed_pressed.bind(speed_name))
 		speed_box.add_child(button)
 		_speed_buttons[speed_name] = button
 
 	# --- actions (bottom-right) ------------------------------------------
-	var action_bar := PanelContainer.new()
-	action_bar.add_theme_stylebox_override("panel", UiTheme.panel_style())
+	var action_bar := PixelStyle.dressed_panel(RAIL_BODY, LIGHT.darkened(0.55), OUTLINE)
 	action_bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	action_bar.position = Vector2(-232.0, -146.0)
+	action_bar.position = Vector2(-236.0, -158.0)
 	add_child(action_bar)
 
 	var action_box := VBoxContainer.new()
 	action_box.add_theme_constant_override("separation", 6)
 	action_bar.add_child(action_box)
-	action_box.add_child(UiTheme.header("Actions", 14))
+	action_box.add_child(PixelStyle.pixel_label("ACTIONS", 12, UiTheme.ACCENT))
 
-	_enter_button = UiTheme.button("Enter Settlement", 196.0)
+	_enter_button = PixelStyle.text_button("Enter Settlement", _button_styles, 11,
+		Vector2(200.0, 34.0), UiTheme.GOLD, UiTheme.DIM)
 	_enter_button.disabled = true
 	_enter_button.pressed.connect(_on_enter_pressed)
 	action_box.add_child(_enter_button)
 
-	var save_button := UiTheme.button("Save Game", 196.0)
+	var save_button := PixelStyle.text_button("Save Game", _button_styles, 11,
+		Vector2(200.0, 34.0), UiTheme.TEXT, UiTheme.DIM)
 	save_button.pressed.connect(func() -> void: save_requested.emit())
 	action_box.add_child(save_button)
 
-	var menu_button := UiTheme.button("Save & Quit to Menu", 196.0)
+	var menu_button := PixelStyle.text_button("Save & Quit to Menu", _button_styles, 11,
+		Vector2(200.0, 34.0), UiTheme.TEXT, UiTheme.DIM)
 	menu_button.pressed.connect(func() -> void: menu_requested.emit())
 	action_box.add_child(menu_button)
 
 	# --- hint line (bottom-centre) ---------------------------------------
-	_hint = UiTheme.label("", 14, UiTheme.DIM)
+	_hint = PixelStyle.body_label("", 14, UiTheme.DIM, true)
 	_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_hint.position = Vector2(12.0, -30.0)
 	_hint.offset_right = -240.0
