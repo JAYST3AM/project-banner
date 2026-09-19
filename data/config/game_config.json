@@ -57,6 +57,7 @@
     },
     "decay_days_per_tier": 3650.0,
     "traffic_radius": 48.0,
+    "pace_radius": 10.0,
     "traffic_scan_hours": 0.1,
     "review_hours": 6.0
   },

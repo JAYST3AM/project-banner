@@ -918,4 +918,5 @@ on a road - so the road bonus is visible in play rather than only in the log. An
 the pace and the eta the same truth (D-124): `RoadNetwork.bonus_at` reads the drawn corridor the
 wear scan and the snap already use, the grid went back to doing only what it is good at - pricing
 the route - so the speed changes exactly at the road's visible edge, a crossing march gets its
-blip, and a painted block can no longer leak road speed past the drawn line.
+blip, and a painted block can no longer leak road speed past the drawn line. The pace counts the
+road by its drawn width (10 u, D-126) while wear and the snap keep the 48 u shoulder.

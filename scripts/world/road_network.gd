@@ -192,19 +192,21 @@ func _nearest_link(point: Vector2) -> int:
 	return nearest_link(point, _traffic_radius())
 
 
-## Whether a point lies on some link's road, by the same radius the wear scan uses.
+## Whether a point lies on some link's road, in the sense the pace counts it: within the drawn
+## line's own width, so the on/off log narrates the flip the player can see.
 func on_road(point: Vector2) -> bool:
-	return _nearest_link(point) >= 0
+	return nearest_link(point, pace_radius()) >= 0
 
 
 ## The speed bonus the drawn roads give a walker standing here: the best bonus among the links whose
 ## corridor holds the point, or 0.0 on open ground. The line the map draws is the truth for the
 ## walk - the grid only ever prices the route - so the pace changes exactly at a road's visible
-## edge, and a march crossing one gets a blip in its own footprint (D-124).
+## edge, and a march crossing one gets a blip in its own footprint (D-124, D-126: the corridor is
+## the drawn width, not the wider wear shoulder).
 func bonus_at(point: Vector2) -> float:
 	if state == null:
 		return 0.0
-	var radius := _traffic_radius()
+	var radius := pace_radius()
 	var best := 0.0
 	var links := mini(_paths.size(), state.roads.size())
 	for i in links:
@@ -215,6 +217,13 @@ func bonus_at(point: Vector2) -> float:
 			continue
 		best = maxf(best, bonus_of(str((raw as Dictionary).get("kind", "none"))))
 	return best
+
+
+## The width within which the pace counts the party as ON the road: the drawn line's own scale, so
+## the speed flips where the eye sees the road begin and end. The wear credit and the snap still use
+## the wider traffic radius - their question ("did this walking wear this road?") wants a shoulder.
+func pace_radius() -> float:
+	return maxf(1.0, config.get_float("roads.pace_radius", 10.0))
 
 
 ## The width within which walking counts as using a road: the wear scan's corridor, and the width

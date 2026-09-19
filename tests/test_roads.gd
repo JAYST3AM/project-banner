@@ -355,12 +355,14 @@ func _test_the_pace_follows_the_drawn_road() -> void:
 
 	approx(travel.factor_at_point(here), network.bonus_of("road"), 0.0001,
 		"on the drawn line the road's own speed answers")
-	approx(travel.factor_at_point(here + across * 40.0), network.bonus_of("road"), 0.0001,
-		"and anywhere inside the corridor it still does")
-	var away := here + across * (network.road_radius() + 20.0)
-	approx(travel.factor_at_point(away), travel._ground_factor_at(away), 0.0001,
-		"past the corridor the open ground answers")
-	check(travel.factor_at_point(away) < network.bonus_of("road") - 0.001,
+	approx(travel.factor_at_point(here + across * 6.0), network.bonus_of("road"), 0.0001,
+		"and inside the drawn width it still does")
+	check(network.pace_radius() < network.road_radius(),
+		"the pace counts the drawn width, not the wider wear shoulder")
+	var beyond := here + across * 40.0
+	approx(travel.factor_at_point(beyond), travel._ground_factor_at(beyond), 0.0001,
+		"past the drawn width the open ground answers")
+	check(travel.factor_at_point(beyond) < network.bonus_of("road") - 0.001,
 		"which is slower than the road")
 
 	# The corner the whole change turns on: somewhere the grid paints road while the drawn line is

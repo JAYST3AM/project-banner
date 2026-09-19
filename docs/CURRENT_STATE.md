@@ -72,7 +72,9 @@ the debug panel's pace line now shows the **effective pace** with its ground fac
 read the **drawn road itself** (D-124): `RoadNetwork.bonus_at` answers with the corridor the wear
 scan and the snap already use, the grid went back to only pricing the route - so speed changes
 exactly at a road's visible edge, a march crossing one gets its blip, and a road-painted block can
-no longer leak speed past the drawn line.
+no longer leak speed past the drawn line. And the pace counts a road by its **drawn width**
+(`roads.pace_radius`, 10 u) rather than the wider wear shoulder (48 u, D-126) - so the speed flips
+where the road visibly begins and ends; the wear credit and the snap keep the shoulder.
 
 ## The vertical slice is complete
 

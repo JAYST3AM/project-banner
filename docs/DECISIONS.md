@@ -3373,3 +3373,30 @@ its job - it caught 1.15 and sent the number back to the band.
 decision, not a network decision. Too arcade? `roads.speed_bonus.road` in
 `data/config/game_config.json`: 1.8 and 1.6 are the natural steps back.
 
+
+## D-126 - the pace counts the road you can see (10 u), not the wear shoulder (48)
+
+**Context.** D-125 made the difference felt, and the owner, watching it with real contrast for the
+first time: "the speed changes dont come in until I leave that block, that's the issue, and why I
+never saw the changes." The pace (and the on/off log) read `roads.traffic_radius` - 48 units, the
+corridor chosen so that walking *near* a road wears it. That is six to ten times the drawn line's
+width, so the boot landed up to a corridor's width past the road's visible edge, and the flip could
+coincide with what looks like a block boundary. At x1.4 the misplacement vanished into the jitter;
+x2.0 made it a complaint - which is the whole argument for spacing things extreme enough to see.
+
+**Decision.** Two radii, each answering its own question, both in the config:
+- `roads.pace_radius` (10 u) - "are the party's feet on the road?" - the pace (`bonus_at`), the
+  on/off log and the journey ledger's share. The flip now lands within the party marker's own width
+  of the line in both directions, and a crossing march blips for ~20 u instead of ~100.
+- `roads.traffic_radius` (48 u) - "did this walking wear this road?" - the wear credit and the
+  snap's pull onto the curve, both unchanged: a walk on the road's shoulder still wears it, and the
+  pathfinder's chords are still pulled onto the drawn line so the marker rides it.
+- The eta deliberately keeps the wide corridor: it samples a straight line, which cannot see the
+  curve underfoot, and the wide reading is what kept quoted hours matching arrived hours (1.5->1.6,
+  1.7->1.7, 2.6->2.7 in the owner's own session).
+
+**Proved.** test_roads: on the line the road answers; at six units off it still does; at forty the
+field does; the pace radius is asserted narrower than the wear shoulder; the block-leak search
+still passes - 75 assertions, 0 failures. All suites green (test_world_map 116/0,
+test_campaign_flow 41/0, test_core_services 83/0).
+
