@@ -83,23 +83,26 @@ func _build() -> void:
 		_stat_values[stat_name] = value
 		_stats.add_child(value)
 
-	# --- speed controls (bottom-left) ------------------------------------
-	var speed_bar := PixelStyle.dressed_panel(RAIL_BODY, LIGHT.darkened(0.55), OUTLINE)
-	speed_bar.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	speed_bar.position = Vector2(12.0, -66.0)
-	add_child(speed_bar)
+	# --- time controls (top-centre) --------------------------------------
+	# The owner: "I want the pause, normal and faster in the top center of the hud, and I want
+	# symbols not words." A full-width strip with a centred box keeps the cluster centred whatever
+	# the UI scale, and the strip itself ignores the mouse so the map under it still takes clicks.
+	var centre_strip := HBoxContainer.new()
+	centre_strip.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	centre_strip.offset_top = 10.0
+	centre_strip.offset_bottom = 64.0
+	centre_strip.alignment = BoxContainer.ALIGNMENT_CENTER
+	centre_strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(centre_strip)
 
+	var speed_bar := PixelStyle.dressed_panel(RAIL_BODY, LIGHT.darkened(0.55), OUTLINE)
+	centre_strip.add_child(speed_bar)
 	var speed_box := HBoxContainer.new()
 	speed_box.add_theme_constant_override("separation", 6)
 	speed_bar.add_child(speed_box)
-	var time_label := PixelStyle.body_label("Time", 13.5, UiTheme.DIM)
-	time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	speed_box.add_child(time_label)
-	for speed_name in CampaignClock.SPEED_NAMES:
-		var button := PixelStyle.text_button(speed_name, _button_styles, 11, Vector2(74.0, 30.0),
-			UiTheme.TEXT, UiTheme.DIM)
-		button.toggle_mode = true
-		button.pressed.connect(_on_speed_pressed.bind(speed_name))
+	for i in CampaignClock.SPEED_NAMES.size():
+		var speed_name := CampaignClock.SPEED_NAMES[i]
+		var button := _speed_button(speed_name, i)
 		speed_box.add_child(button)
 		_speed_buttons[speed_name] = button
 
@@ -241,6 +244,29 @@ func stat_text(stat_name: String) -> String:
 
 func _on_speed_pressed(speed_name: String) -> void:
 	speed_requested.emit(speed_name)
+
+
+## One time control: a square button whose face is a drawn symbol, with the word kept to the tooltip
+## (D-133: words explain on hover; the face stays an interface). The glyph turns gold when its speed
+## is the current one, whether the click or [method refresh] set it.
+func _speed_button(speed_name: String, index: int) -> Button:
+	var button := PixelStyle.text_button("", _button_styles, 11, Vector2(52.0, 36.0),
+		UiTheme.TEXT, UiTheme.DIM)
+	button.toggle_mode = true
+	# No focus ring: with three icon buttons, a keyboard focus outline reads as a second selection.
+	# The gold glyph is the one and only "this is the current speed" signal.
+	button.focus_mode = Control.FOCUS_NONE
+	button.tooltip_text = speed_name
+	# The theme rides on the button: this HUD is a CanvasLayer, which has no theme of its own, and
+	# the tooltip is the only thing here that needs one.
+	button.theme = PixelStyle.tooltip_theme(RAIL_BODY, LIGHT.darkened(0.45), UiTheme.TEXT)
+	button.pressed.connect(_on_speed_pressed.bind(speed_name))
+	var glyph := SpeedGlyph.new(index)
+	glyph.ink = UiTheme.DIM
+	button.add_child(glyph)
+	button.toggled.connect(func(on: bool) -> void:
+		glyph.ink = UiTheme.GOLD if on else UiTheme.DIM)
+	return button
 
 
 func _on_enter_pressed() -> void:
