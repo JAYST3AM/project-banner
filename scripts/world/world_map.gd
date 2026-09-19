@@ -21,12 +21,18 @@ var _loader: LoadingScreen = null
 var _debug: DebugPanel = null
 ## The settlement detail card (D-136), shown on hover by _update_hover.
 var _hover_card: SettlementHoverCard = null
+## The traders' card (D-139), shown on hover by the same pass.
+var _caravan_card: CaravanHoverCard = null
+## The meeting prompt (D-139): open while the player talks to a caravan on the road.
+var _caravan_dialog: CaravanDialog = null
+var _caravan_meet: WorldParty = null
 var _hover_candidate_id := ""
 var _hover_shown_id := ""
 var _hover_started_ms := 0
 var _hover_mouse := Vector2.ZERO
 var _overworld: OverworldService = null
 var _encounters: EncounterService = null
+var _caravans: CaravanService = null
 var _dialog: EncounterDialog = null
 var _dialog_party_id: String = ""
 var _speed_before_dialog: int = CampaignClock.Speed.NORMAL
@@ -208,6 +214,10 @@ func _ready() -> void:
 	_overworld = OverworldService.build(_state, _config)
 	_overworld.spawn_if_needed()
 	_encounters = EncounterService.build(_state, _config)
+	# The roads' own life (D-139): caravans trade between the towns on the clock, below. They walk
+	# the network's own link curves, so the roads below are theirs too.
+	_caravans = CaravanService.build(_state, _config, _roads)
+	_caravans.spawn_if_needed()
 
 	_build_hud_and_overlays()
 	_build_pause_menu()
@@ -268,6 +278,8 @@ func _build_hud_and_overlays() -> void:
 	_hud.setup(_state, _config, _travel)
 	_hover_card = SettlementHoverCard.new()
 	_hud.add_child(_hover_card)
+	_caravan_card = CaravanHoverCard.new()
+	_hud.add_child(_caravan_card)
 	_hud.speed_requested.connect(_on_speed_requested)
 	_hud.travel_requested.connect(_on_travel_requested)
 	_hud.enter_settlement_requested.connect(_on_enter_settlement)
@@ -278,6 +290,12 @@ func _build_hud_and_overlays() -> void:
 	_hud.add_child(_dialog)
 	_dialog.attack_requested.connect(_on_encounter_attack)
 	_dialog.retreat_requested.connect(_on_encounter_retreat)
+
+	_caravan_dialog = CaravanDialog.new()
+	_hud.add_child(_caravan_dialog)
+	_caravan_dialog.trade_requested.connect(_on_caravan_trade)
+	_caravan_dialog.ask_requested.connect(_on_caravan_ask)
+	_caravan_dialog.farewell_requested.connect(_on_caravan_farewell)
 
 	_debug = DebugPanel.new()
 	_hud.add_child(_debug)
@@ -293,7 +311,7 @@ func _build_hud_and_overlays() -> void:
 ## rebuilt - the player is inside it, holding the slider that asked for this.
 func _rebuild_hud() -> void:
 	var inspected := _hud.shown_settlement_id()
-	for node in [_hud, _hover_card, _dialog, _debug]:
+	for node in [_hud, _hover_card, _caravan_card, _dialog, _caravan_dialog, _debug]:
 		if node != null:
 			node.free()
 	_hud = WorldHud.new()
@@ -371,6 +389,9 @@ func _process(delta: float) -> void:
 				_on_arrived(str(report.get("settlement_id", "")))
 			if _overworld != null:
 				_overworld.step(game_hours)
+			if _caravans != null:
+				_caravans.step(game_hours)
+				_check_caravan_meeting()
 	# The roads age and grow on the same clock: a link worn by traffic rises a tier, one nobody has
 	# used for years falls one, and the map re-prices the ground when either happens - an event of
 	# about a seventh of a second, not a per-frame cost.
@@ -473,6 +494,59 @@ func _close_encounter_dialog() -> void:
 	_dialog_party_id = ""
 	_dialog.hide_dialog()
 	_state.clock.set_speed(_speed_before_dialog as CampaignClock.Speed)
+
+
+## ---------- caravans (D-139) ---------------------------------------------
+
+## Meeting a caravan on the road: close enough and off cooldown, the traders have their say. The
+## world pauses while the meeting is open, like an encounter - but nobody here is drawing steel.
+func _check_caravan_meeting() -> void:
+	if _caravans == null or _caravan_dialog == null or _caravan_dialog.visible:
+		return
+	if _dialog != null and _dialog.visible:
+		return
+	if _state == null or _state.clock == null:
+		return
+	var caravan := _caravans.nearest_meetable(_state.world_position,
+		_config.get_float("trade.meeting_radius", 42.0))
+	if caravan == null:
+		return
+	_caravan_meet = caravan
+	_speed_before_dialog = _state.clock.speed
+	_state.clock.set_speed(CampaignClock.Speed.PAUSED)
+	_caravan_dialog.show_meeting(caravan, _caravans, _state)
+	_hud.set_hint("Traders on the road. The world waits while you talk.")
+	DebugLogger.info("met %s on the road (%s)" % [caravan.display_name,
+		_state.clock.full_string()], "Trade")
+
+
+func _on_caravan_trade() -> void:
+	if _caravan_meet == null or _caravans == null:
+		return
+	var sale := _caravans.sell_one_crate(_caravan_meet)
+	if bool(sale.get("ok", false)):
+		_caravan_dialog.set_note("You buy a crate of %s for %d coin." % [
+			TradeService.name_of(str(sale.get("good", ""))).to_lower(), int(sale.get("price", 0))])
+		_caravan_dialog.refresh_after_trade(_caravan_meet)
+		_refresh()
+	else:
+		_caravan_dialog.set_note("No sale: %s." % str(sale.get("reason", "no reason given")))
+
+
+func _on_caravan_ask() -> void:
+	if _caravan_meet != null and _caravans != null:
+		_caravan_dialog.set_note(_caravans.road_report(_caravan_meet))
+
+
+func _on_caravan_farewell() -> void:
+	if _caravan_meet != null:
+		_caravan_meet.encounter_cooldown_until_hours = _state.clock.total_hours() \
+			+ _config.get_float("trade.meeting_cooldown_hours", 20.0)
+		_caravan_meet = null
+	if _caravan_dialog != null:
+		_caravan_dialog.hide_dialog()
+	_state.clock.set_speed(_speed_before_dialog as CampaignClock.Speed)
+	_hud.set_hint("Click a settlement to inspect it. Click Travel Here to set out. F1 opens debug tools.")
 
 
 func _on_encounter_attack() -> void:
@@ -656,11 +730,37 @@ const HOVER_DELAY_MS := 250
 func _update_hover_candidate() -> void:
 	if _view == null:
 		return
+	var key := ""
 	var under := _view.settlement_at(_view.get_global_mouse_position())
-	var id := under.id if under != null else ""
-	if id != _hover_candidate_id:
-		_hover_candidate_id = id
+	if under != null:
+		key = "s." + under.id
+	else:
+		var caravan := _caravan_under(_view.get_global_mouse_position())
+		if caravan != null:
+			key = "c." + caravan.id
+	if key != _hover_candidate_id:
+		_hover_candidate_id = key
 		_hover_started_ms = Time.get_ticks_msec()
+
+
+## The caravan under the cursor, within a few pixels - a moving thing is harder to hit than a town,
+## so the traders get a slightly larger hand.
+func _caravan_under(point: Vector2) -> WorldParty:
+	if _state == null:
+		return null
+	var best: WorldParty = null
+	var best_distance := 16.0
+	for key in _state.parties.keys():
+		var world_party := _state.parties[key] as WorldParty
+		if world_party == null or not world_party.is_available():
+			continue
+		if world_party.kind != Party.KIND_CARAVAN:
+			continue
+		var distance := point.distance_to(world_party.position)
+		if distance <= best_distance:
+			best_distance = distance
+			best = world_party
+	return best
 
 
 ## Once a frame: show the card for whatever has been rested on long enough, keep it near the
@@ -672,6 +772,8 @@ func _update_hover() -> void:
 		if not _hover_shown_id.is_empty():
 			_hover_shown_id = ""
 			_hover_card.hide_card()
+			if _caravan_card != null:
+				_caravan_card.hide_card()
 		return
 	if _hover_shown_id == _hover_candidate_id:
 		_position_hover_card()
@@ -680,11 +782,23 @@ func _update_hover() -> void:
 		_show_hover_card(_hover_candidate_id)
 
 
-func _show_hover_card(settlement_id: String) -> void:
-	var settlement := _state.settlement(settlement_id)
+func _show_hover_card(key: String) -> void:
+	# Caravan keys are "c.<id>"; settlement keys are "s.<id>" (older callers pass a bare id, which
+	# is a settlement - unchanged from before this pass).
+	if key.begins_with("c."):
+		var caravan := _state.parties.get(key.substr(2), null) as WorldParty
+		if caravan == null or _caravans == null:
+			return
+		_hover_shown_id = key
+		_hover_card.hide_card()
+		_caravan_card.show_caravan(caravan, _caravans, _state)
+		return
+	var settlement := _state.settlement(key.substr(2) if key.begins_with("s.") else key)
 	if settlement == null:
 		return
-	_hover_shown_id = settlement_id
+	_hover_shown_id = key
+	if _caravan_card != null:
+		_caravan_card.hide_card()
 	_hover_card.show_settlement(settlement,
 		"Travel here: ~%.1f game hours" % _travel.hours_to_reach(settlement.position))
 	_position_hover_card()
@@ -693,16 +807,19 @@ func _show_hover_card(settlement_id: String) -> void:
 ## Near the cursor, clamped inside the screen: never under the pointer's own corner, never hanging
 ## off an edge.
 func _position_hover_card() -> void:
-	if _hover_card == null:
+	var card: Control = _hover_card
+	if _caravan_card != null and _caravan_card.visible:
+		card = _caravan_card
+	if card == null:
 		return
-	var card_size := _hover_card.size
+	var card_size := card.size
 	if card_size == Vector2.ZERO:
-		card_size = _hover_card.get_combined_minimum_size()
+		card_size = card.get_combined_minimum_size()
 	var screen := get_viewport().get_visible_rect().size
 	var at := _hover_mouse + Vector2(22.0, 18.0)
 	at.x = clampf(at.x, 8.0, maxf(8.0, screen.x - card_size.x - 8.0))
 	at.y = clampf(at.y, 8.0, maxf(8.0, screen.y - card_size.y - 8.0))
-	_hover_card.position = at
+	card.position = at
 
 
 ## Dev-only: "--hover-card" (or "--hover-card=<id>") shows the card at boot. Bare, it prefers the
@@ -711,6 +828,15 @@ func _position_hover_card() -> void:
 func _apply_dev_hover_card() -> void:
 	var wanted := DevFlags.hover_card()
 	if wanted.is_empty():
+		return
+	# "--hover-card=caravan_00" shows the traders' card (D-139); anything else is a settlement id or
+	# "nearest", exactly as before.
+	if wanted.begins_with("caravan_"):
+		var caravan := _state.parties.get(wanted, null) as WorldParty
+		if caravan != null and _caravans != null:
+			_hover_mouse = get_viewport().get_visible_rect().size * 0.42
+			_hover_candidate_id = "c." + caravan.id
+			_show_hover_card(_hover_candidate_id)
 		return
 	var target: Settlement = null
 	if wanted != "nearest":

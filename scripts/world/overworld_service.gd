@@ -179,6 +179,10 @@ func step(game_hours: float) -> int:
 
 
 func _step_party(world_party: WorldParty, game_hours: float) -> bool:
+	# Traders are not the overworld's to move (D-139): CaravanService walks them along their road
+	# curve, and two steps fighting over one position would make them stutter.
+	if world_party.behaviour == WorldParty.BEHAVIOUR_TRADE:
+		return false
 	var party := state.party_of(world_party)
 	if party == null or state.active_members(party).is_empty():
 		# A party with nobody left standing is simply gone.
@@ -192,8 +196,9 @@ func _step_party(world_party: WorldParty, game_hours: float) -> bool:
 	var distance_to_player := world_party.position.distance_to(player_position)
 
 	var target := world_party.destination
-	if distance_to_player <= aggro_radius:
-		# Chase: hostile parties close on a nearby player party.
+	if distance_to_player <= aggro_radius and world_party.kind == Party.KIND_BANDIT:
+		# Chase: hostile parties close on a nearby player party. Only hostiles - a caravan that
+		# hunted the player across the county was the first thing this gate fixed (D-139).
 		target = player_position
 	else:
 		if world_party.behaviour == WorldParty.BEHAVIOUR_STATIONARY:

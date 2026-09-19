@@ -3810,3 +3810,39 @@ coroutine dies with its node. A stale call left behind by that refactor broke `m
 every launch from source showed a game that never loads - which is the one thing the owner saw and
 said out loud.
 
+
+
+**D-139: trade caravans - the roads' own life, with guards, a card and a meeting.**
+
+- `data/config/goods.json`: the goods catalogue (base value + category per good). `TradeService`
+  answers the three questions everything else asks: what is a good worth, what does a town want,
+  and which legs turn a profit. `CaravanService` spawns the caravans themselves: [WorldParty] of
+  kind `caravan`, one start town each where there are towns to go round, a route picked by
+  cheapest-legs-first over the road network, and a `trips` ledger of completed deliveries.
+- **The pathing is the network's.** A route is a chain of towns, each consecutive pair a link the
+  map actually draws; the caravan walks the link's own cached curve, and only an unlinked pair (old
+  save, hand-made road) falls back to the direct path. `_path_over_links` runs Dijkstra over live
+  links; a town off the network is no route at all, and a town whose only buyers are unreachable
+  gets no caravan - that gap the first test run found, and this is the fix.
+- **The pace is capped.** `caravan_speed` = the walker's own `world_units_per_game_hour` times
+  `speed_multiplier` (0.75), minus `cargo_speed_penalty_per_good` (6%) per crate, hard-clamped to
+  **1.0x - a caravan is never faster than the player**, loaded or empty. The loaded cart is slower
+  than the empty one, and the suite pins all three facts.
+- **Guards are soldiers, not a number.** Each caravan hires `guards_min..guards_max` (2-4) real
+  soldiers into a `Party` kept in the campaign's `caravan_parties` (`party_of` reads it after the
+  enemies); deterministic per caravan, named from the same generator as everyone else, saved and
+  loaded with the campaign. A tooltip saying "3 spears" is therefore saying three men exist.
+- **The hover card** (D-136's language, its own class): name, deliveries, pace as a fraction of a
+  walker's, where it is bound plus vias, what is on the cart with its value, who guards it, how far
+  out it is, and what it is: traders. `--hover-card=caravan_00` shows it at boot for dev runs.
+- **The meeting**: walk within `meeting_radius` (42 u) of a caravan and the traders have their say -
+  the world pauses while the prompt is open, exactly like an encounter, but nobody is drawing.
+  Three replies: **buy a crate** (the cart's first good at catalogue value plus `markup` 1.2, paid
+  out of the campaign's own coin - the first real sink for `player_gold`), **ask about the road**
+  (the caravan's own honest route report), and **farewell**, after which it keeps its distance for
+  `meeting_cooldown_hours` (20). The suite drives the card and the prompt headless and asserts the
+  strings a player would read, because the meeting's claims are data.
+- **Behaviour is logged** under the `Trade` channel: spawn, plan (route, cargo, hours), arrival
+  trade, purchase, meeting, and warnings when a caravan cannot plan a leg. Caravans are excluded
+  from the overworld's wandering and chasing and from hostile encounter selection; the map draws
+  them wagon-gold with their guard count beside the name.

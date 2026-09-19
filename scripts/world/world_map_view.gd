@@ -21,6 +21,8 @@ const COLOR_TRACK_MARGIN := Color(0.27, 0.24, 0.17, 0.30)
 const COLOR_DIRT_MARGIN := Color(0.25, 0.22, 0.16, 0.24)
 ## The worn centre of a proper road: the strip where feet and cartwheels have taken the grass away.
 const COLOR_ROAD_WORN := Color(0.72, 0.64, 0.46, 0.30)
+## Traders (D-139): a warm wagon gold, distinct from the enemy red at a glance.
+const COLOR_CARAVAN := Color("d9b96a")
 ## Timber: a bridge is the one piece of a road that is built rather than worn, so it is drawn as its
 ## own thing - a dark planked span with a post at each bank.
 const COLOR_BRIDGE := Color("6d4f33")
@@ -380,7 +382,11 @@ func _draw_world_parties() -> void:
 			continue
 		var party := state.party_of(world_party)
 		var soldiers := state.active_member_count(party)
-		var color := COLOR_ENEMY if world_party.kind == Party.KIND_BANDIT else COLOR_HOVERED
+		var color := COLOR_HOVERED
+		if world_party.kind == Party.KIND_BANDIT:
+			color = COLOR_ENEMY
+		elif world_party.kind == Party.KIND_CARAVAN:
+			color = COLOR_CARAVAN
 		var position := world_party.position
 
 		draw_circle(position, 11.0, COLOR_PARTY_OUTLINE)
@@ -393,6 +399,7 @@ func _draw_world_parties() -> void:
 		])
 		draw_colored_polygon(points, color)
 
+		# Guards are real soldiers now (D-139), so every party on the map counts its spears.
 		var label := "%s (%d)" % [world_party.display_name, soldiers]
 		_draw_label(label, position + Vector2(0.0, 26.0), color.lightened(0.15), font_size)
 

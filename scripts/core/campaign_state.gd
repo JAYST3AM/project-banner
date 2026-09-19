@@ -57,6 +57,9 @@ var roads: Array[Dictionary] = []
 var parties: Dictionary = {}
 ## party_id -> Party (enemy/other parties' soldier rosters, keyed like [member parties])
 var enemy_parties: Dictionary = {}
+## Caravan guards (D-139): soldiers, not a number in a tooltip. Kept apart from enemy_parties
+## because a trader is not an enemy - yet.
+var caravan_parties: Dictionary = {}
 ## Arbitrary future-proof extension bag.
 var flags: Dictionary = {}
 
@@ -214,7 +217,10 @@ func world_party(party_id: String) -> WorldParty:
 func party_of(world_party: WorldParty) -> Party:
 	if world_party == null:
 		return null
-	return enemy_parties.get(world_party.party_id, null) as Party
+	var enemy := enemy_parties.get(world_party.party_id, null) as Party
+	if enemy != null:
+		return enemy
+	return caravan_parties.get(world_party.party_id, null) as Party
 
 
 func destination_name() -> String:
@@ -261,6 +267,11 @@ func to_dict() -> Dictionary:
 		var ep := enemy_parties[key] as Party
 		if ep != null:
 			enemy_party_data[key] = ep.to_dict()
+	var caravan_party_data := {}
+	for key in caravan_parties.keys():
+		var cp := caravan_parties[key] as Party
+		if cp != null:
+			caravan_party_data[key] = cp.to_dict()
 	return {
 		"campaign_id": campaign_id,
 		"campaign_name": campaign_name,
@@ -280,6 +291,7 @@ func to_dict() -> Dictionary:
 		"roads": roads.duplicate(true),
 		"parties": world_party_data,
 		"enemy_parties": enemy_party_data,
+		"caravan_parties": caravan_party_data,
 		"flags": flags.duplicate(true),
 		"next_soldier_index": _next_soldier_index,
 	}
@@ -338,6 +350,11 @@ static func from_dict(data: Dictionary, config: GameConfig) -> CampaignState:
 		var raw_enemy: Variant = (data["enemy_parties"] as Dictionary)[key]
 		if typeof(raw_enemy) == TYPE_DICTIONARY:
 			state.enemy_parties[str(key)] = Party.from_dict(raw_enemy as Dictionary)
+	state.caravan_parties.clear()
+	for key in (data.get("caravan_parties", {}) as Dictionary).keys():
+		var raw_caravan: Variant = (data["caravan_parties"] as Dictionary)[key]
+		if typeof(raw_caravan) == TYPE_DICTIONARY:
+			state.caravan_parties[str(key)] = Party.from_dict(raw_caravan as Dictionary)
 
 	return state
 

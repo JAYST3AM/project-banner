@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "note": "What goods are (D-139). The trade layer's foundations: every good the settlement system can produce or want, with a base value and a category. Values are what a caravan's cargo is worth before distance; the market layer will refine them later. A good missing here is a good nobody can price.",
+
+  "goods": [
+    {"id": "grain", "name": "Grain", "value": 4, "category": "food"},
+    {"id": "turnips", "name": "Turnips", "value": 3, "category": "food"},
+    {"id": "cheese", "name": "Cheese", "value": 7, "category": "food"},
+    {"id": "salted meat", "name": "Salted meat", "value": 11, "category": "food"},
+    {"id": "fish", "name": "Fish", "value": 6, "category": "food"},
+    {"id": "salted fish", "name": "Salted fish", "value": 12, "category": "food"},
+    {"id": "ale", "name": "Ale", "value": 6, "category": "food"},
+    {"id": "wine", "name": "Wine", "value": 20, "category": "luxury"},
+    {"id": "spices", "name": "Spices", "value": 40, "category": "luxury"},
+    {"id": "silk", "name": "Silk", "value": 55, "category": "luxury"},
+    {"id": "salt", "name": "Salt", "value": 12, "category": "material"},
+    {"id": "wool", "name": "Wool", "value": 6, "category": "material"},
+    {"id": "wool cloth", "name": "Wool cloth", "value": 22, "category": "material"},
+    {"id": "cloth", "name": "Cloth", "value": 18, "category": "material"},
+    {"id": "leather", "name": "Leather", "value": 14, "category": "material"},
+    {"id": "hides", "name": "Hides", "value": 8, "category": "material"},
+    {"id": "firewood", "name": "Firewood", "value": 3, "category": "material"},
+    {"id": "charcoal", "name": "Charcoal", "value": 7, "category": "material"},
+    {"id": "stone", "name": "Stone", "value": 5, "category": "material"},
+    {"id": "iron", "name": "Iron", "value": 24, "category": "material"},
+    {"id": "coal", "name": "Coal", "value": 8, "category": "material"},
+    {"id": "tools", "name": "Tools", "value": 18, "category": "craft"},
+    {"id": "pottery", "name": "Pottery", "value": 9, "category": "craft"},
+    {"id": "horse tack", "name": "Horse tack", "value": 26, "category": "craft"},
+    {"id": "horses", "name": "Horses", "value": 90, "category": "livestock"}
+  ]
+}

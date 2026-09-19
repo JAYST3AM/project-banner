@@ -55,6 +55,10 @@ func detect() -> WorldParty:
 		var world_party := state.parties[key] as WorldParty
 		if world_party == null or not world_party.is_available():
 			continue
+		if world_party.kind == Party.KIND_CARAVAN:
+			# Traders are not an encounter yet (D-139). When robbing a caravan is a feature, this
+			# gate becomes a choice at the prompt rather than a filter.
+			continue
 		if is_on_cooldown(world_party):
 			continue
 		var party := state.party_of(world_party)
