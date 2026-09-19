@@ -47,6 +47,9 @@ var wants: Array[String] = []
 var families: Array = []
 var wealth: String = ""
 var garrison: int = 0
+## Which generation rules produced the detail above. A save below the current version is regenerated
+## on the next map entry (D-136 follow-up: trade must come from the buildings that provide it).
+var details_version: int = 0
 
 
 func is_enterable() -> bool:
@@ -100,6 +103,7 @@ func to_dict() -> Dictionary:
 		"families": families.duplicate(true),
 		"wealth": wealth,
 		"garrison": garrison,
+		"details_version": details_version,
 	}
 
 
@@ -128,4 +132,5 @@ static func from_dict(data: Dictionary) -> Settlement:
 	s.families = (data.get("families", []) as Array).duplicate(true)
 	s.wealth = str(data.get("wealth", ""))
 	s.garrison = int(data.get("garrison", 0))
+	s.details_version = int(data.get("details_version", 0))
 	return s

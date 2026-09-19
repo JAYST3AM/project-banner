@@ -20,6 +20,7 @@ func run() -> void:
 	_test_owner_leads_and_powers_sum()
 	_test_buildings_are_a_list_of_places()
 	_test_trade_never_overlaps()
+	_test_trade_comes_from_the_buildings()
 	_test_wealth_and_garrison()
 	_test_old_saves_backfill_and_filling_twice_changes_nothing()
 	_test_details_survive_a_round_trip()
@@ -120,6 +121,27 @@ func _test_trade_never_overlaps() -> void:
 	check(disjoint_ok, "and produces and wants never share a good")
 
 
+func _test_trade_comes_from_the_buildings() -> void:
+	section("what a place sells, it can make: the buildings provide it")
+	var produces_ok := true
+	var wants_ok := true
+	for i in 40:
+		var s := _town("p%d" % i, KINDS[i % KINDS.size()])
+		var enabled := {}
+		for entry in s.buildings:
+			var info: Dictionary = entry as Dictionary
+			for good_any in (info.get("enables", []) as Array):
+				enabled[str(good_any)] = true
+		for good in s.produces:
+			if not enabled.has(good):
+				produces_ok = false
+		for good in s.wants:
+			if enabled.has(good):
+				wants_ok = false
+	check(produces_ok, "every produced good has a building that provides it")
+	check(wants_ok, "and nothing a town can make sits on its own wants list")
+
+
 func _test_wealth_and_garrison() -> void:
 	section("wealth and garrison follow the people and the walls")
 	equal(_town("small", Settlement.TYPE_VILLAGE, 400).wealth, "poor", "a hamlet is poor")
@@ -142,6 +164,7 @@ func _test_old_saves_backfill_and_filling_twice_changes_nothing() -> void:
 	check(s.buildings.is_empty(), "the old save carries no detail")
 	SettlementDetails.fill(s, SEED)
 	check(not s.buildings.is_empty(), "and the backfill gives it some")
+	equal(s.details_version, SettlementDetails.DETAILS_VERSION, "at the current rules version")
 	var before := str(s.to_dict())
 	SettlementDetails.fill(s, SEED)
 	equal(str(s.to_dict()), before, "filling twice changes nothing")
@@ -157,3 +180,4 @@ func _test_details_survive_a_round_trip() -> void:
 	equal(str(copy.buildings), str(s.buildings), "and the buildings")
 	equal(copy.garrison, s.garrison, "and the garrison")
 	equal(copy.wealth, s.wealth, "and the wealth")
+	equal(copy.details_version, s.details_version, "and the rules version it was built with")
