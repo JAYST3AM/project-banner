@@ -556,9 +556,8 @@ var draw_sprites: bool = OS.get_environment("PB_UNIT_SPRITES") != "off"
 ## How far below the picture point his frame's anchor - the body's centre column on the cell's
 ## bottom edge - is drawn, in picture units.
 const SPRITE_FOOT_LIFT := 0.85
-## The bar lift used while the sprites are drawn: clear of a raised sword, or the bar is drawn
-## across the soldier's head. (The discs only needed [constant BAR_LIFT].)
-const SPRITE_BAR_LIFT := 2.4
+## The clearance a health bar keeps above the tallest a soldier can draw, in picture units.
+const SPRITE_BAR_MARGIN := 0.15
 ## How much a fallen soldier's frame is darkened: the same amount the canvas battle darkens a
 ## corpse by, so a body reads the same in both renderers.
 const SPRITE_FALLEN_DARKEN := 0.55
@@ -2349,10 +2348,16 @@ func _reset_animation_state() -> void:
 	_anim_flip.fill(0)
 
 
-## The bar lift this picture is drawn with: the sprite frames are taller than the discs, and a
-## bar drawn at the disc's lift would be drawn across the soldier's head.
+## The bar lift this picture is drawn with, derived rather than hand-tuned: the men stand
+## [constant SPRITE_FOOT_LIFT] below the picture point the bar is placed from, they stand
+## [method UnitSpriteWriter.sprite_head] tall, and the bar hangs [constant BAR_HEIGHT] tall off a
+## [constant DISC_RADIUS] lift - so this puts the bar just above a head. (The discs only needed
+## [constant BAR_LIFT].)
 func _bar_lift() -> float:
-	return SPRITE_BAR_LIFT if _sprite_ok else BAR_LIFT
+	if not _sprite_ok:
+		return BAR_LIFT
+	return _sprite_writer.sprite_head() + BAR_HEIGHT - DISC_RADIUS - SPRITE_FOOT_LIFT \
+		+ SPRITE_BAR_MARGIN
 
 
 ## One man's frame, written into the sprite buffer at [param i]. Everything it is given is what

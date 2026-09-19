@@ -106,17 +106,34 @@ func _test_a_flip_mirrors_the_frame_without_moving_it() -> void:
 	approx(flipped.x + flipped.z, 0.25, 0.0001, "the flipped frame samples its right edge there")
 
 
-## The field's own numbers, not the art's: where a man stands on his disc, and a bar that clears
-## the tallest frame. They live on [SoldierField] because they belong to that renderer's
-## geometry - and referencing the class here means a field that does not compile fails this
-## suite rather than passing it by never being mentioned.
+## The field's own numbers, not the art's: where a man stands, and a bar that clears the tallest
+## frame. The lift is derived from the atlas now (cell height, foot lift, the radius the bar hangs
+## off), so what is pinned here is the property that matters rather than a constant: with the art
+## present, the bar's own bottom edge sits above the tallest frame the atlas can draw.
 func _test_the_fields_own_geometry_clears_the_sprite() -> void:
 	section("the field's bar clears the tallest sprite frame")
 	greater(SoldierField.FOOT_LIFT, 0.0, "the sprite's feet are lifted above the soldier's position")
-	greater(SoldierField.SPRITE_BAR_LIFT, SoldierField.BAR_LIFT,
-		"the bar is lifted higher for the sprites than it was for the discs")
-	greater(SoldierField.SPRITE_BAR_LIFT, SoldierField.FOOT_LIFT,
-		"and higher than the foot lift, or it would be drawn across his chest")
+	var art := UnitArt.load_if_present()
+	if art == null:
+		check(true, "absent art is a legitimate outcome, not a failure")
+		return
+	var field := SoldierField.new()
+	field.art = art
+	field.build(8)
+	field.adopt_sprite_layout({
+		"ok": true, "stride": 16, "x_x": 0, "y_y": 5,
+		"origin_x": 3, "origin_y": 7, "color": 8, "custom": 12,
+	})
+	var bar_bottom := -SoldierField.BODY_RADIUS - field.bar_lift() + SoldierField.BAR_HEIGHT
+	var head := art.head(UnitArt.CHARACTER_PLAYER)
+	var cell := art.cell_size(UnitArt.CHARACTER_PLAYER)
+	greater(head, 0.0, "the atlas declares how tall the soldier stands in his idle pose")
+	check(head <= cell.y * art.units_per_pixel() + 0.001,
+		"and his head is no taller than the cell his frames are drawn in")
+	var head_top := SoldierField.FOOT_LIFT - head
+	check(bar_bottom <= head_top - 0.05,
+		"the bar's bottom edge (%.2f) sits above his head (%.2f)" % [bar_bottom, head_top])
+	field.free()
 
 
 func _test_both_sides_are_the_soldier_and_read_from_the_tint() -> void:

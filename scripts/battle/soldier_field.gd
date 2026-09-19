@@ -74,10 +74,8 @@ const COLOR_OUTLINE := Color("0b1017")
 ## occupies, and his feet belong a little below it so the man stands on his patch rather than
 ## floating over it.
 const FOOT_LIFT := 1.35
-## The health bar's lift when the sprites are drawn. The tallest frame in the atlas (a raised
-## sword) reaches about 3.3 units above the anchor, and the bar has to clear it or it is drawn
-## across the soldier's head.
-const SPRITE_BAR_LIFT := 2.2
+## The clearance a health bar keeps above the tallest a soldier can draw, in world units.
+const SPRITE_BAR_MARGIN := 0.15
 ## A cooldown jump larger than this between ticks means a blow landed: the soldier's cooldown
 ## was reset, which is the only visible trace a strike leaves on the unit.
 const STRIKE_COOLDOWN_JUMP := 0.05
@@ -330,7 +328,7 @@ func pack(simulator: BattleSimulator) -> Dictionary:
 			# The bar's background and its fill, in that order: instance order is draw order
 			# inside one multimesh, so the fill lands on top of its own background.
 			var ratio := unit.hp_ratio()
-			var origin := position + Vector2(-BAR_WIDTH * 0.5, -BODY_RADIUS - _bar_lift())
+			var origin := position + Vector2(-BAR_WIDTH * 0.5, -BODY_RADIUS - bar_lift())
 			_write(_packed_bars, bars, stride, x_x, y_y, origin_x, origin_y, color_at,
 				BAR_WIDTH, BAR_HEIGHT, origin + Vector2(BAR_WIDTH * 0.5, BAR_HEIGHT * 0.5),
 				Color(0.0, 0.0, 0.0, 0.65))
@@ -654,10 +652,15 @@ func has_sprites() -> bool:
 	return _sprite_ok
 
 
-## The bar lift this field is drawing with: the sprite frames are taller than the discs, and
-## the bar has to clear a raised sword or it is drawn across the soldier's head.
-func _bar_lift() -> float:
-	return SPRITE_BAR_LIFT if _sprite_ok else BAR_LIFT
+## The lift the health bars are drawn with, derived rather than hand-tuned: the men stand
+## [constant FOOT_LIFT] below the point the bar is placed from, they stand
+## [method UnitSpriteWriter.sprite_head] tall, and the bar hangs [constant BAR_HEIGHT] tall off a
+## [constant BODY_RADIUS] lift - so this puts the bar just above a head. (The discs only needed
+## [constant BAR_LIFT].) Public because the suite pins the geometry against the art.
+func bar_lift() -> float:
+	if not _sprite_ok:
+		return BAR_LIFT
+	return _sprite_writer.sprite_head() + BAR_HEIGHT - BODY_RADIUS - FOOT_LIFT + SPRITE_BAR_MARGIN
 
 
 ## One soldier's sprite: his animation and frame chosen from his own state, written into the

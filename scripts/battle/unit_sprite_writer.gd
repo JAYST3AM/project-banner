@@ -116,6 +116,21 @@ func capacity() -> int:
 	return _written_frame.size()
 
 
+## How tall a soldier stands, in world units - the idle pose's height, which is what a health bar
+## hangs off. (The tallest frame is taller: a raised sword. A bar placed off that floats a gap
+## above the head between swings.)
+func sprite_head() -> float:
+	if _side_common.is_empty():
+		return 0.0
+	var common: PackedFloat32Array = _side_common[0]
+	return common[7] if common.size() >= 8 else cell_height(common)
+
+
+## The cell height out of one side's common block. Split out so the arithmetic is nameable.
+static func cell_height(common: PackedFloat32Array) -> float:
+	return common[1] * common[4] if common.size() >= 5 else 0.0
+
+
 func ready() -> bool:
 	return _stride > 0 and _offsets.size() == 6 and _side_common.size() > 0
 

@@ -37,7 +37,9 @@ a soldier and an orc - idle, walk, attack, hurt, death - and both battle rendere
 `SoldierField` in the canvas battle and `gpu_crowd` in the compute field, which is the one the
 game actually plays (the world map opens `battle_field`). Both sides are drawn as the soldier
 (the owner: "dont use the orks"), the sprite replaces the disc rather than sitting on it, and the
-side reads from the sprite's tint (D-144).
+side reads from the sprite's tint (D-144). The sprites were drawn **upside down** until D-146
+fixed the shared shader's v axis (QuadMesh's v runs bottom-to-top on the canvas), and the health
+bar's lift is derived from the `head` the atlas builder measures rather than hand-tuned.
 
 - **Art**: `assets/art_source/units/tiny_rpg/` (git-ignored on purpose - the licence allows
   commercial use but forbids re-upload, and this repo is public). Rebuild with
@@ -46,7 +48,7 @@ side reads from the sprite's tint (D-144).
 - **Shared maths**: `scripts/battle/unit_art.gd` (frame plan, placement, the precomputed
   per-side tables) + `shaders/battle/unit_sprite.gdshader` (frame rect from instance custom
   data). Verified in a windowed run of both renderers; `test_unit_sprites` (new) pins the
-  arithmetic and the tables, 143/0.
+  arithmetic, the tables and the fused writer against the pure functions, 228/0.
 - **The live game had no battles to show it in** (D-143): a generated world's bandit spawns all
   failed because the spawn file anchors them to authored town names, so `--autoengage` was
   walking the party onto a wagon. Both fixed; seed 2026 now spawns 3 bands and a scripted run

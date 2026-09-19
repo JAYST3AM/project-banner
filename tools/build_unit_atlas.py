@@ -123,11 +123,17 @@ def build():
         # and the cell's bottom as the feet plane.
         idle_box = union_bbox(loaded["idle"][0])
         anchor_x = (idle_box[0] + idle_box[2]) * 0.5 - x0
+        # The head: how tall the soldier stands in his idle pose, from the cell's bottom. The
+        # cell's top is the tallest thing any frame draws - a raised sword in the attack row -
+        # so a health bar placed off the cell floats a gap above his head between swings. The
+        # bar hangs off this instead, and a sword crossing the bar is the lesser price.
+        head_px = max(1, y1 - idle_box[1])
 
         cells[name] = (cell_w, cell_h)
         table["characters"][name] = {
             "cell": [cell_w, cell_h],
             "anchor": [round(anchor_x, 2), 0.0],
+            "head": head_px,
             "source_box": [x0, y0, x1, y1],
             "animations": {},
         }

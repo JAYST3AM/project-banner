@@ -4060,3 +4060,33 @@ simulation's readback, which would replace the inference with a fact (and make t
 rather than inferred), and then a sprite pass drawn on the GPU beside the simulation, which would
 take the per-soldier work out of GDScript entirely. Neither is worth doing for the battles the
 game actually fights.
+
+
+**D-146: the soldiers were drawn upside down, and the bar hangs off the head now.**
+
+Owner: "just so you know, the iso image the warriors are upside down."
+
+Confirmed with pixels, not by eye: one frame drawn through the real pipeline
+(scenes/dev/sprite_orientation.tscn) beside the raw art came out vertically mirrored. The cause sat
+in the seam both renderers share - Godot's QuadMesh lays its v axis bottom-to-top on the canvas,
+and the shader placed the frame's top row (custom.y) at v = 0 - so every soldier has been upside
+down since the sprites landed, in the canvas battle and the compute field alike. Nothing else in
+the picture could reveal it: the discs are radial, the bars are symmetric, the terrain is noise,
+and the showcase's 12 v 12 frames read as "little soldiers" either way.
+
+The fix is one line in shaders/battle/unit_sprite.gdshader:
+[code]UV = INSTANCE_CUSTOM.xy + vec2(UV.x, 1.0 - UV.y) * INSTANCE_CUSTOM.zw;[/code] - the mirror (a
+negative custom.z) is untouched, and both renderers are covered at once.
+
+It invalidated the bar lifts, which had been tuned against the flipped picture: a bar that looked
+attached to a soldier's head was attached to his boots. The lift is derived now rather than
+hand-tuned. The atlas builder measures [b]head[/b] - the idle pose's height above the feet, 24 px
+for this soldier where the cell is 31 - and a renderer's lift is head + margin + BAR_HEIGHT -
+radius - foot lift. The cell's top is a raised sword (the attack row reaches five pixels higher
+than the head), so a bar hung off the cell floats a gap above him between swings; hung off the
+head it sits just over his helmet and a swinging sword crosses the bar instead - the lesser price,
+and what the genre does.
+
+Pinned by the suite (the bar's bottom must sit above the head the atlas declares) and by the probe
+scene, which draws the pipeline's output beside the raw art. Both renderers verified windowed
+after the fix: upright, no discs, sides apart by tint.

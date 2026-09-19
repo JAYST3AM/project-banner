@@ -114,6 +114,9 @@ func _read() -> bool:
 		characters[str(key)] = {
 			"cell": Vector2(float(cell[0]), float(cell[1])),
 			"anchor": Vector2(float(anchor[0]), float(anchor[1])),
+			# The idle pose's height in atlas pixels, as the builder measured it. Optional: a
+			# table built before the field existed falls back to the cell in [method head_units].
+			"head": float(entry.get("head", 0.0)),
 			"animations": animations,
 		}
 
@@ -167,6 +170,12 @@ func cell_size(key: String) -> Vector2:
 func anchor(key: String) -> Vector2:
 	var entry: Dictionary = _characters.get(key, {})
 	return entry.get("anchor", Vector2.ZERO)
+
+
+## How tall a soldier of [param key] stands in his idle pose, in world units. What a health bar
+## hangs off, so it is public: the renderers place their bars from it and the suite pins them.
+func head(key: String) -> float:
+	return head_units(_characters.get(key, {}), cell_size(key), _units_per_pixel)
 
 
 func frames_of(key: String, animation: int) -> int:
@@ -248,6 +257,7 @@ func renderer_data(key: String, rate: float) -> Dictionary:
 				rect.position.x, rect.position.y, rect.size.x, rect.size.y)
 	var cell := cell_size(key)
 	var anchor_point := anchor(key)
+	var entry: Dictionary = _characters.get(key, {})
 	var hurt_at := int(ANIMATIONS.find("hurt"))
 	var attack_at := int(ANIMATIONS.find("attack"))
 	return {
@@ -255,14 +265,29 @@ func renderer_data(key: String, rate: float) -> Dictionary:
 		"frames": frames,
 		"uv": uv,
 		"uv_stride": stride,
-		# cell.xy, anchor.xy, units a pixel, hurt ticks, attack ticks - one typed block so the
-		# per-soldier path never has to touch a dictionary.
+		# cell.xy, anchor.xy, units a pixel, hurt ticks, attack ticks, how tall he stands - one
+		# typed block so the per-soldier path never has to touch a dictionary. The last one is
+		# what a health bar hangs off: the idle pose's height, not the cell's, or the bar floats
+		# above his head whatever pose he is in (a sword reaches higher than a head - see the
+		# atlas builder's `head`).
 		"common": PackedFloat32Array([
 			cell.x, cell.y, anchor_point.x, anchor_point.y, _units_per_pixel,
 			float(int(frames[hurt_at]) * int(ticks[hurt_at])),
 			float(int(frames[attack_at]) * int(ticks[attack_at])),
+			head_units(entry, cell, _units_per_pixel),
 		]),
 	}
+
+
+## How tall a soldier of this character stands in the idle pose, in world units: the atlas's own
+## `head` (pixels from the cell's bottom edge) at the units a pixel the art declares. Falls back
+## to the whole cell for a table built before the field existed - the bar then clears a raised
+## sword but floats a gap above the head, which is what this replaced.
+static func head_units(entry: Dictionary, cell: Vector2, units: float) -> float:
+	var head := float(entry.get("head", 0.0))
+	if head <= 0.0 or units <= 0.0:
+		return cell.y
+	return head * units
 
 
 ## Which animation a soldier is in, from the things a renderer knows about him. Pure and static
