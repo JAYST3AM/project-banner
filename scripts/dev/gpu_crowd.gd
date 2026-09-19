@@ -2430,6 +2430,9 @@ func _open_journal() -> void:
 	_journal = BattleJournal.open(DevFlags.battle_log_path())
 	if _journal == null:
 		return
+	# The field's own clock, not the journal's default step: this battle runs at the configured
+	# tick rate, so stamps made on the canvas battle's step would read 1.5x long at 30 ticks/s.
+	_journal.set_tick_rate(tick_hz)
 	_journal.note(-1, "battle start: %d soldiers, %d a side, seed %d, field %.0fx%.0f, %.0f ticks a second" % [
 		agents, agents / 2, seed_value, field.x, field.y, tick_hz])
 

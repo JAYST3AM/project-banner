@@ -80,6 +80,13 @@ func lines_written() -> int:
 	return _lines
 
 
+## Tell the journal what one tick is worth in seconds. The compute battlefield drives the journal
+## directly and runs at the configured battle rate; without this its stamps are written on the
+## canvas battle's default step and read one and a half times long at thirty ticks a second.
+func set_tick_rate(hz: float) -> void:
+	_step = 1.0 / maxf(1.0, hz)
+
+
 ## What battle this is. Called once, before the first tick.
 func note_start(simulator: BattleSimulator, seed_value: int) -> void:
 	_seed = seed_value
