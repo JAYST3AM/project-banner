@@ -3703,3 +3703,36 @@ a runtime error in GDScript, and the error aborts the whole function - `fill()` 
 showed up as unrelated-looking failures three fields later (empty wealth, zero garrison). Type the
 generator's returns to match the model's fields.
 
+**Follow-up - trade comes from the buildings.** The owner's rule: "when generating what the
+settlement provides, it must have the same buildings that produce that item." Trade is no longer
+rolled separately: every building names the goods it can provide, produces are drawn from that
+union, wants are the kind's list minus everything the town can make, and a repair pass swaps
+non-producing picks for producers until the town can make at least three goods. `DETAILS_VERSION` 2
+regenerates saves written under the old rolls on the next map entry. The same review caught a tavern
+selling ale it did not brew: Brewhouse now brews, Tavern keeps its identity as where rumours wait.
+
+
+## D-137 - Settings, in the main menu and the Esc menu
+
+**Context.** The owner: "also add a settings in the main menu, and esc menu."
+
+**Decision.** Display only, deliberately - window mode (Windowed / Fullscreen, where Fullscreen is
+Godot's borderless mode), VSync, and a frame cap (Uncapped / 60 / 120 / 144 / 240 / 360). Those are
+the knobs the game actually has; there is no sound system yet, and a volume slider attached to
+nothing is a lie.
+
+- `GameSettings` (autoload) owns the option tables, `user://settings.cfg` and `apply()`. Applied at
+  startup only when the file exists, so a fresh install keeps the project's defaults and a dev run's
+  command-line flags stay strongest. Each row is a cycle button: the change applies and saves the
+  moment it is clicked, so there is no OK button to forget.
+- `SettingsPanel` is shared by both menus. It handles Esc in `_input` - which runs before any
+  `_unhandled_input` - so closing the panel from the pause menu can never close the pause menu with
+  it. The panel sits slightly right of centre so it never covers the menu column's own words.
+- Tests write to their own `user://settings_test.cfg` and never call `apply()`: a suite must not
+  resize the window of the machine it runs on. `test_settings` covers table alignment, wrapping, and
+  the save/load round trip. `--settings-panel` opens the panel at boot for screenshots.
+
+**Verified.** Main menu: SETTINGS sits between NEW CAMPAIGN and QUIT, and the panel opened showing
+`FULLSCREEN >`, `ON >`, `360 >` with the footer reading "Applied: fullscreen, vsync On, cap 360."
+The same panel hangs off the Esc menu above Resume's column.
+

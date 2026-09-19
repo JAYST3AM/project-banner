@@ -33,6 +33,8 @@ const DEBUG_PANEL_FLAG := "--debug-panel"
 ## falling back to the nearest of any kind.
 const HOVER_CARD_FLAG := "--hover-card"
 const HOVER_CARD_PREFIX := "--hover-card="
+## Open the settings panel straight away, because a screenshot cannot click the button that opens it.
+const SETTINGS_PANEL_FLAG := "--settings-panel"
 ## Run a scripted formation drill through the battle scene's real order methods.
 const AUTOFORMATIONS_FLAG := "--autoformations"
 const BATTLESPEED_PREFIX := "--battlespeed="
@@ -123,6 +125,11 @@ static func hover_card() -> String:
 		if arg.begins_with(HOVER_CARD_PREFIX):
 			return arg.substr(HOVER_CARD_PREFIX.length())
 	return ""
+
+
+## Whether a run asked to start with the settings panel open.
+static func settings_panel() -> bool:
+	return _has_flag(SETTINGS_PANEL_FLAG)
 
 
 ## Accept the first encounter prompt automatically instead of waiting for a click.

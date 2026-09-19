@@ -33,6 +33,7 @@ const OUTLINE := Color(0.02, 0.02, 0.03)
 const SCRIM := Color(0.03, 0.04, 0.06, 0.86)
 
 var _font: Font = null
+var _settings: SettingsPanel = null
 var _button_styles: Dictionary = {}
 var _continue_button: Button = null
 var _status: Label = null
@@ -114,6 +115,9 @@ func _build_column() -> void:
 	var new_button := _button("New Campaign")
 	new_button.pressed.connect(_on_new_pressed)
 	column.add_child(new_button)
+	var settings_button := _button("Settings")
+	settings_button.pressed.connect(_on_settings)
+	column.add_child(settings_button)
 	var quit_button := _button("Quit")
 	quit_button.pressed.connect(_on_quit)
 	column.add_child(quit_button)
@@ -126,6 +130,18 @@ func _build_column() -> void:
 
 	_build_new_panel(column)
 	_continue_button.grab_focus()
+	# Dev-only: "--settings-panel" opens it, because a screenshot cannot click a button.
+	if DevFlags.settings_panel():
+		_on_settings()
+
+
+## Settings, lazily built: the panel is shared with the Esc menu and carries its own furniture
+## (D-137). Built on first use so the front screen opens without it when nobody asks.
+func _on_settings() -> void:
+	if _settings == null:
+		_settings = SettingsPanel.new()
+		add_child(_settings)
+	_settings.open()
 
 
 ## Naming a campaign and choosing its world is a second decision, so it lives behind the button

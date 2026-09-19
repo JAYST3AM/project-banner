@@ -33,6 +33,7 @@ signal menu_requested
 signal quit_requested
 
 var _font: Font = null
+var _settings: SettingsPanel = null
 var _resume_button: Button = null
 var _status: Label = null
 
@@ -112,6 +113,9 @@ func _build(styles: Dictionary) -> void:
 	var save_button := _button("Save Game", styles)
 	save_button.pressed.connect(_on_save)
 	column.add_child(save_button)
+	var settings_button := _button("Settings", styles)
+	settings_button.pressed.connect(_on_settings)
+	column.add_child(settings_button)
 	var menu_button := _button("Save & Quit to Menu", styles)
 	menu_button.pressed.connect(_on_menu)
 	column.add_child(menu_button)
@@ -122,6 +126,11 @@ func _build(styles: Dictionary) -> void:
 
 	_status = _label("Esc resumes.", SMALL_SIZE, Color(0.66, 0.68, 0.72))
 	column.add_child(_status)
+
+	# The shared settings panel (D-137), centred over the column. It takes its own Esc, so opening
+	# it from here never closes the pause menu with it.
+	_settings = SettingsPanel.new()
+	add_child(_settings)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -163,6 +172,11 @@ func set_status(text: String) -> void:
 
 func _on_save() -> void:
 	save_requested.emit()
+
+
+func _on_settings() -> void:
+	if _settings != null:
+		_settings.open()
 
 
 ## Leaving the campaign unpauses first: a paused tree would follow the new scene into the menu and
