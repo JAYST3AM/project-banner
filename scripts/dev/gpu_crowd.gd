@@ -1356,7 +1356,11 @@ func _note_switch(text: String) -> void:
 func _wipe_body(band: int, fraction: float = 1.0, stripe: bool = false) -> void:
 	_wiped = true
 	var target_body := bodies_per_side + band
-	var data := _meta_bytes.to_float32_array()
+	# The authoritative condition at this tick, not the renderer's last pack: at a tick rate below
+	# the frame rate the snapshot can be several ticks old, and writing it back whole would resurrect
+	# men who fell in those ticks and undo the damage they took. The event must read the field as it
+	# actually stands when it fires.
+	var data := rd.buffer_get_data(buf_meta).to_float32_array()
 	var living := PackedInt32Array()
 	for i in agents:
 		if _man_body[i] == target_body and data[i * 4 + 2] < 0.5:
@@ -1382,6 +1386,14 @@ func _wipe_body(band: int, fraction: float = 1.0, stripe: bool = false) -> void:
 			killed += 1
 	_meta_bytes = data.to_byte_array()
 	rd.buffer_update(buf_meta, 0, _meta_bytes.size(), _meta_bytes)
+	# Tell the body layer now, on this tick. It reads `_body_alive`, which [method _pack] otherwise
+	# refreshes but once a frame, so a body destroyed here would stay alive to the hunt for however
+	# many ticks the frame happened to run - and that count is the frame rate. Left to the pack, the
+	# bereaved body re-targeted on tick 301 at the fast rates and tick 302 at the reference, and the
+	# two battles parted on the anchors the very next tick. It is a body destroyed at a tick, so the
+	# body layer is told at that tick.
+	if target_body >= 0 and target_body < _body_alive.size():
+		_body_alive[target_body] = living.size() - killed
 	print("gpu crowd: scripted | %s destroyed at tick %d, %d of %d men - whoever was fighting it must find someone else" % [
 		_body_name(target_body), _tick, killed, living.size()])
 
@@ -1648,6 +1660,38 @@ func _run_tick() -> void:
 	_tick += 1
 
 
+## The scripted events and orders for a run, fired on the simulation's own tick rather than once a
+## frame. The tick-keyed tests (`--wipe-band`/`--wipe-at`, `--hold-at`, `--advance-at`, `--at=`) all
+## say *when* they happen in ticks, and `_process` used to apply them after a whole frame's batch of
+## ticks had already run. At a tick rate below the frame rate that made the event's tick depend on
+## how many ticks the frame happened to group: the reference (twenty frames a second, a tick and a
+## half a frame at this clock) wiped the enemy body on tick 301 where the faster rates wiped it on
+## 300, so the two battles parted company on the very next tick and the gate failed on positions and
+## formations. Fired here, after each tick, an event due on tick N takes effect for tick N+1 whatever
+## the frame rate grouped it with - the same rule D-119 applied to the tick counter itself.
+func _fire_scripted_events() -> void:
+	if wipe_band >= 0 and not _wiped and _tick >= wipe_at:
+		_wipe_body(wipe_band, wipe_fraction)
+	if hold_band >= 0 and not _held and _tick >= hold_at:
+		_hold_body(hold_band)
+	if advance_band >= 0 and not _advanced and _tick >= advance_at:
+		_advance_body(advance_band, advance_by)
+	# Orders from the scripted list, fired at their tick. They go through the same functions the
+	# mouse calls, so a scripted order is not a second implementation of an order.
+	_apply_scripted_input()
+
+
+## Print the state checksum for this tick, once per window, when the run asked for one. Called from
+## inside the tick loop rather than after it: the tick in the label and the tick that was hashed are
+## then the same at every frame rate, where a once-a-frame print could fall on a different tick
+## depending on how many ticks the frame ran.
+func _maybe_checksum() -> void:
+	if checksum_every <= 0 or _tick / checksum_every == _last_checksum_tick:
+		return
+	_last_checksum_tick = _tick / checksum_every
+	print("gpu crowd: checksum | %s" % _checksums())
+
+
 func _process(delta: float) -> void:
 	if not pipeline.is_valid():
 		return
@@ -1658,6 +1702,8 @@ func _process(delta: float) -> void:
 			for i in ticks_per_frame:
 				_advance_bodies()
 				_run_tick()
+				_fire_scripted_events()
+				_maybe_checksum()
 			ticks_now = ticks_per_frame
 		else:
 			# The game's own clock: a fixed step, however fast the frame is drawn. The
@@ -1669,6 +1715,8 @@ func _process(delta: float) -> void:
 			while _tick_accumulator >= step and budget > 0:
 				_advance_bodies()
 				_run_tick()
+				_fire_scripted_events()
+				_maybe_checksum()
 				_tick_accumulator -= step
 				budget -= 1
 				ticks_now += 1
@@ -1677,27 +1725,11 @@ func _process(delta: float) -> void:
 	# `_tick` itself is advanced by the tick, inside `_run_tick`, so it is the simulation's clock
 	# and not the frame's.
 	_ticks_window += ticks_now
-	# Scripted events for the order tests, fired at fixed ticks so a run is repeatable: a body
-	# destroyed outright (does its enemy find a new one?), or a body ordered to hold (does it stop
-	# while its neighbours lean in?).
-	if not _frozen:
-		if wipe_band >= 0 and not _wiped and _tick >= wipe_at:
-			_wipe_body(wipe_band, wipe_fraction)
-		if hold_band >= 0 and not _held and _tick >= hold_at:
-			_hold_body(hold_band)
-		if advance_band >= 0 and not _advanced and _tick >= advance_at:
-			_advance_body(advance_band, advance_by)
-		# Orders from the scripted list, fired at their tick. They go through the same functions
-		# the mouse calls, so a scripted order is not a second implementation of an order.
-		_apply_scripted_input()
 	# The picture is rebuilt on the simulation's clock, not the frame's: the frame rate is the
 	# renderer's business and repacking an unchanged army on every frame is work with no result.
 	if ticks_now > 0:
 		_readback_counter += ticks_now
 		_track_proof()
-		if checksum_every > 0 and _tick / checksum_every != _last_checksum_tick:
-			_last_checksum_tick = _tick / checksum_every
-			print("gpu crowd: checksum | %s" % _checksums())
 	if _readback_counter >= maxi(1, readback_every):
 		_readback_counter = 0
 		_readback_and_pack()
@@ -2230,9 +2262,18 @@ func _hash_ints(values: PackedInt32Array) -> int:
 
 ## Everything that decides what happens next: where every man stands, what condition he is in, and
 ## where every formation is and which way it faces.
+##
+## Read straight from the device, deliberately: [member _state_bytes] and [member _meta_bytes] are
+## the *renderer's* snapshot, refilled once a frame by [method _readback_and_pack]. At a tick rate
+## below the frame rate a frame runs several ticks, so that snapshot lags the tick it is labelled
+## with by however many ticks the frame happened to run - and that lag is a function of the frame
+## rate, which is the one thing this gate exists to rule out. It read the snapshot once and the
+## reference rate (twenty) runs a tick and a half a frame at this clock, so the trace reported a
+## divergence at tick 25 that was the trace's own staleness and not the battle's. Hashing the buffers
+## themselves makes it a reading of the simulation at its own tick, not of the renderer's last pack.
 func _checksums() -> String:
-	var positions := _hash_floats(_state_bytes.to_float32_array(), 1000.0)
-	var condition := _hash_floats(_meta_bytes.to_float32_array(), 100.0)
+	var positions := _hash_floats(rd.buffer_get_data(buf_state).to_float32_array(), 1000.0)
+	var condition := _hash_floats(rd.buffer_get_data(buf_meta).to_float32_array(), 100.0)
 	# Every other word of the body state: anchors and headings, not the latched engaged flag.
 	var shape := PackedFloat32Array()
 	for b in _bodies:
