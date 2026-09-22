@@ -10,7 +10,7 @@ failures**, with the native query suite and the separation-pass equivalence suit
 own and the two-process restart check green. The 2026-09-19 revert's fallout is cleared: the
 battle-terrain cluster was reconciled to the live seven-type world, a real terrain bug was found
 and fixed on the way through, and the suites that no longer described the game were corrected
-rather than muted - see D-159 to D-163.
+rather than muted - see D-159 to D-166.
 **Independent gate:** GitHub Actions runs the full suite, the native query suite, the separation
 equivalence suite and the restart check on every push to `main`.
 
@@ -100,7 +100,7 @@ The 2026-09-19 revert deleted `biome_catalog.gd`, `terrain_ground.gd`, `battlefi
 `terrain_bench.gd` while seven files still referenced them, headed by
 `scripts/battle/battlefield_terrain.gd`. The owner hit the consequence live - "the battle sim
 didn't load" - so the four files were restored, the battle scene loaded, and the remaining suites
-were reconciled to the live, seven-type world (D-159 to D-163). The full headless suite is green
+were reconciled to the live, seven-type world (D-159 to D-166). The full headless suite is green
 again at **37 suites / 9,535 assertions / 0 failures**, and CI's two extra suites (native query
 and separation equivalence) and the two-process restart check pass with it.
 
@@ -113,10 +113,12 @@ What the reconciliation found, besides stale expectations:
 - **Stale terrain expectations** (D-161): the suite asserted the milestone-07 four-type catalogue
   and a type-only movement multiplier; the game has seven types and a multiplier composed from
   type, soil, vegetation, wetness and slope.
-- **A test that drove the wrong commander** (D-162): the split-approach test ran a player-side AI
-  the game does not attach, which overwrote the very order the test issued.
-- **A result-screen check that ignored a deliberate reward** (D-163): the campaign's post-level
-  hit points are the field's plus `progression.hp_per_level`, not equal to the screen's figure.
+- **A test that drove the wrong commander** (D-162, revised by D-166): the split-approach test ran a
+  player-side AI the game does not attach, which overwrote the very order the test issued. It now drives
+  the enemy's commander only, as the live battle does, so the measured scenario is one the game can make.
+- **A result screen that showed the field's hit points** (D-163, superseded by D-165): the campaign
+  holds its post-level hit points by the time the screen exists, so the screen now takes each survivor's
+  hit points from the campaign and the end-to-end equality is exact again, with no reconstruction.
 - **A HUD that was wired too late** (D-160): `world_map` built its HUD after the ground, so the
   map's own frames read `-` until the ground finished; it is wired before the ground now.
 

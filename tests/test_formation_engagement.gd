@@ -104,11 +104,16 @@ func _drive(bundle: Dictionary, ticks: int) -> void:
 		simulator.step(STEP)
 
 
-## Step the simulation with no commander at all, so a body's explicit order survives the ticks. The
-## live game gives the enemy an AI and leaves the player's own orders alone, so a test that exercises
-## one of those orders has to drive the same way; a player-side commander would overwrite it.
-func _step_only(simulator: BattleSimulator, ticks: int) -> void:
+## Step the simulation with the enemy's commander only, exactly as the live game drives a battle:
+## [battle.gd] attaches a [BattleAI] to the enemy side and leaves the player's own orders alone. A test
+## that exercises one of the player's orders has to drive the same way - a player-side commander would
+## overwrite the order, and dropping the enemy's would hide how its normal approach and contact
+## behaviour affects the separation being measured. The enemy AI thinks before each step, as the
+## battle loop does.
+func _step_enemy_only(bundle: Dictionary, ticks: int) -> void:
+	var simulator: BattleSimulator = bundle["simulator"]
 	for i in ticks:
+		bundle["enemy_ai"].update(simulator, STEP)
 		simulator.step(STEP)
 
 
@@ -805,16 +810,15 @@ func _test_split_while_approaching() -> void:
 	split.order = BattleFormation.ORDER_MOVE
 	split.steer_toward(split.anchor + Vector2(0.0, 40.0))
 	var anchor_before := body.anchor
-	# No commander for this part, deliberately. The live game attaches a [BattleAI] to the enemy
-	# side only (battle.gd), so a player's body keeps the order it was given; running the player-side
-	# commander the harness builds would order the detached half straight back into the fight and
-	# overwrite the move order this test exists to exercise - the half would march to the enemy
-	# beside the body it left rather than away from it. The sibling withdrawal test drives without a
-	# commander for the same reason, and both assert the order actually held.
-	_step_only(simulator, 60)
+	# Drive the enemy's commander only, as the live game does. The player side keeps the explicit move
+	# order this test exists to exercise; a player-side commander would order the detached half straight
+	# back into the fight and overwrite it, and driving no commander at all would stop being a battle
+	# the game could produce. The enemy's approach and contact behaviour is left in, so any effect it
+	# has on the separation is measured rather than hidden.
+	_step_enemy_only(bundle, 60)
 	greater(split.anchor.distance_to(anchor_before), 0.0, "the detached half moved somewhere")
 	var apart_early := split.anchor.distance_to(body.anchor)
-	_step_only(simulator, 120)
+	_step_enemy_only(bundle, 120)
 	var apart := split.anchor.distance_to(body.anchor)
 	# The substance is that the halves part and keep parting. The first measurement matters because
 	# D-108 changed how fast they do it: a soldier standing in his place now moves by his body's

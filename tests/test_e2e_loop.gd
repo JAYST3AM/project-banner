@@ -291,14 +291,10 @@ func _verify_results_screen(state: CampaignState, battle: Dictionary) -> void:
 			continue
 		equal(soldier.kills, int(entry.get("kills", -1)),
 			"%s's kills on screen match the campaign" % soldier.full_name())
-		# The screen shows the hit points the soldier finished the fight with; the campaign's number
-		# can be higher by exactly the hit points a level-up granted after it. That grant is a
-		# deliberate post-battle reward (`progression.hp_per_level`), not a change to what happened on
-		# the field, so compare the campaign's figure with the field's plus the reward rather than
-		# pretending the reward never happened. See D-163.
-		var levels := int(entry.get("levels_gained", 0))
-		var per_level := GameManager.config().get_int("progression.hp_per_level", 3)
-		equal(soldier.hp, mini(soldier.max_hp, int(entry.get("hp", -1)) + levels * per_level),
+		# The screen shows the campaign's own figure: it is a post-resolution view and reconciles the
+		# field result with the campaign, the level-up grant included, so the equality is exact. See
+		# D-165.
+		equal(soldier.hp, int(entry.get("hp", -1)),
 			"%s's hit points on screen match the campaign" % soldier.full_name())
 
 	DebugLogger.info("--- results screen verified against the campaign record ---", "E2E")

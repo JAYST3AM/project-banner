@@ -4482,3 +4482,34 @@ on `settlement("greywatch")` being null before it could save anything. The suite
 check now does the same in `_ready`, so both phases agree on the map. The alternative - rewriting the check
 to read generated ids back - would turn a restart check that can say which town it restored into one that
 cannot. Verified as two separate processes: write 6/6 and verify 95/95, the restart check green again.
+
+**D-165: the results screen shows the campaign's hit points, not the field's.**
+
+`BattleResolver.apply()` writes a survivor's field hit points to the campaign and then, if the fight earned
+a level, adds `progression.hp_per_level` to both maximum and current hit points (`_grow_for_levels`). The
+results screen was handed the `BattleResult` the resolver built *before* that grant - it carries the figure
+the fight itself ended on - and drew that figure, so a levelled survivor read **1 HP on screen against 4 in
+the campaign**. D-163 treated this as a test problem and reconstructed the campaign figure in the assertion,
+which papered over a real mismatch between a post-resolution screen and the state it describes. It is a
+screen defect, and this supersedes D-163. The screen is a post-resolution view: the consequences are already
+written by the time it exists, so `_reconcile_survivors_with_campaign()` reads each survivor's hit points
+from the campaign before drawing anything, and both the rendered `x/y HP` line and
+`displayed_result()` now report the campaign's own numbers. The end-to-end assertion is the original exact
+equality again - `soldier.hp` against the screen's figure - with no reconstruction, so a drift between the
+two is a failure rather than something the test can explain away. The alternative the audit allowed -
+labelling the field figure as "HP at battle end" and carrying a separate final figure - was rejected because
+the screen had no such label, and adding one to preserve a number the campaign had already superseded would
+show the player a stale value for no gain.
+
+**D-166: the split-approach test drives the enemy's commander, and only the enemy's.**
+
+`_test_split_while_approaching` detaches a wing, gives the half an explicit move order, and measures that
+it parts from the parent. D-162 stopped driving *any* commander for that measurement, because the
+player-side `BattleAI` the harness built overwrote the order - but `battle.gd` attaches a `BattleAI` to the
+enemy side only, so driving no commander for the enemy half stopped describing a battle the game can
+produce and hid any effect the enemy's normal approach and contact behaviour has on the separation. The
+test now steps the enemy AI each tick before the simulator, exactly as the battle loop does
+(`_step_enemy_only`), and leaves the player's order untouched; the player side has no commander because
+production gives it none. The substance is unchanged - the first measurement that the half moved is still
+asserted, and the halves still keep parting past five units - and the measured scenario is one the game can
+actually create. This supersedes D-162.

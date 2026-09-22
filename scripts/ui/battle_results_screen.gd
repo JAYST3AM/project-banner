@@ -54,6 +54,7 @@ func _ready() -> void:
 
 
 func _build_result() -> void:
+	_reconcile_survivors_with_campaign()
 	var outcome_color := UiTheme.GOOD if _result.player_won() else UiTheme.BAD
 	if _result.winner == BattleResult.WINNER_DRAW:
 		outcome_color = UiTheme.GOLD
@@ -89,6 +90,27 @@ func _build_result() -> void:
 	columns.add_child(_build_spoils_panel())
 
 	_add_continue_button()
+
+
+## A survivor's hit points on this screen are the campaign's, not the field's.
+##
+## The fight's consequences are already written to the campaign by the time this screen exists
+## ([method BattleResolver.apply]), including the hit points a level-up granted
+## (`progression.hp_per_level`). The [BattleResult] carries the figure the fight itself ended on, so a
+## survivor who earned a level would otherwise read one number here and another in the campaign. This
+## screen is a post-resolution view, so it takes the campaign's own figure for every survivor before it
+## draws anything: what is shown, what [method displayed_result] reports, and what the campaign holds
+## are then exactly the same numbers. See D-165.
+func _reconcile_survivors_with_campaign() -> void:
+	var campaign := GameManager.campaign
+	if campaign == null:
+		return
+	for entry in _result.player_survivors:
+		var soldier := campaign.soldier(str(entry.get("soldier_id", "")))
+		if soldier == null:
+			continue
+		entry["hp"] = soldier.hp
+		entry["max_hp"] = soldier.max_hp
 
 
 func _build_losses_panel() -> Control:
@@ -210,9 +232,11 @@ func continue_to_world_map() -> void:
 	SceneManager.change_scene(WORLD_MAP_KEY)
 
 
-## Read-only view of what this screen was handed. Nothing here changes behaviour;
+## Read-only view of the [BattleResult] this screen was handed. Nothing here changes behaviour;
 ## it exists so the end-to-end test can assert that the real [BattleResult] reached
-## this screen, rather than confirming only that the screen exists.
+## this screen, rather than confirming only that the screen exists. Survivor hit points have
+## been reconciled to the campaign by [method _reconcile_survivors_with_campaign], so the figures
+## read here are the same ones rendered above.
 func displayed_result() -> BattleResult:
 	return _result
 
