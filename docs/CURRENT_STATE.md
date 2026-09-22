@@ -5,15 +5,14 @@ What is actually playable and verified **right now**.
 **Last updated:** Step 8 - roads as a living thing: tiers, traffic and decay on every link, with
 the pace and the eta reading the drawn road and the priced grid left to price only the route (D-124).
 **Engine:** Godot 4.7.2-stable
-**Test status:** Step 8's suites are green - `test_roads` 74/0 (new) and `test_world_map` 116/0 -
-plus `test_core_services` 83/0 with its clock read from the config, and the new
-`test_unit_sprites` 143/0 (D-142). The rest of the tree is red
-from the 2026-09-19 revert and its fallout: 30 suites, 5,884 assertions, 41 failures, 5 BROKEN -
-and every one of those reproduces at the parent commit, verified suite by suite with the Step 8
-work stashed. See **Known red**, below. The two-process restart check has not been re-run since
-the revert.
-**Independent gate:** GitHub Actions runs the suite on every push to `main`; it is red for the
-same known reason until the battle-terrain cluster is dealt with.
+**Test status:** the full headless suite is green again: **37 suites, 9,535 assertions, 0
+failures**, with the native query suite and the separation-pass equivalence suite run on their
+own and the two-process restart check green. The 2026-09-19 revert's fallout is cleared: the
+battle-terrain cluster was reconciled to the live seven-type world, a real terrain bug was found
+and fixed on the way through, and the suites that no longer described the game were corrected
+rather than muted - see D-159 to D-163.
+**Independent gate:** GitHub Actions runs the full suite, the native query suite, the separation
+equivalence suite and the restart check on every push to `main`.
 
 **Note:** Steps 6.5, 6.6 and 7.1 were hardening passes, and Steps 7.2, 7.3, 7.4, 7.5 and 7.6 were
 engineering milestones; none of them added gameplay. Step 7 added terrain and formations.
@@ -95,39 +94,34 @@ bar's lift is derived from the `head` the atlas builder measures rather than han
 
 ---
 
-## Known red - the revert's fallout (mostly fixed)
+## The revert's fallout, cleared
 
 The 2026-09-19 revert deleted `biome_catalog.gd`, `terrain_ground.gd`, `battlefield_decals.gd` and
 `terrain_bench.gd` while seven files still referenced them, headed by
 `scripts/battle/battlefield_terrain.gd`. The owner hit the consequence live - "the battle sim
-didn't load" - and that settled the pending call: the four files are restored from `939da77^`,
-the battle scene loads, and seven suites are green again.
+didn't load" - so the four files were restored, the battle scene loaded, and the remaining suites
+were reconciled to the live, seven-type world (D-159 to D-163). The full headless suite is green
+again at **37 suites / 9,535 assertions / 0 failures**, and CI's two extra suites (native query
+and separation equivalence) and the two-process restart check pass with it.
 
-| suite | before | after |
-| --- | --- | --- |
-| `test_terrain` | BROKEN (parse) | 3 failures - see below |
-| `test_formation_battle` | BROKEN (parse) | 1 failure - see below |
-| `test_battle_outcomes`, `test_battle_view`, `test_formation_focus` | BROKEN - no assertions, scene never came up | PASS |
-| `test_target_acquisition` | 21 failures | PASS |
-| `test_spatial_grid` | 2 failures | PASS |
-| `test_combat`, `test_encounters` | 1 / 1 failures | PASS |
-| `test_e2e_loop` | 3 failures | 1 failure - see below |
-| `test_party_semantics` | 5 failures | 5 failures - unchanged |
+What the reconciliation found, besides stale expectations:
 
-Still red, all pre-existing and unrelated to loading:
+- **A real terrain bug** (D-159): `TerrainSummary.mean_movement` was accumulated on top of its
+  declared `1.0` default, so every graded formation moved a cell's worth too fast - measured as a
+  summary mean of 0.707 on a woods lane whose cells all read 0.53-0.55, and 1.167 on an open lane
+  whose cells read 0.92.
+- **Stale terrain expectations** (D-161): the suite asserted the milestone-07 four-type catalogue
+  and a type-only movement multiplier; the game has seven types and a multiplier composed from
+  type, soil, vegetation, wetness and slope.
+- **A test that drove the wrong commander** (D-162): the split-approach test ran a player-side AI
+  the game does not attach, which overwrote the very order the test issued.
+- **A result-screen check that ignored a deliberate reward** (D-163): the campaign's post-level
+  hit points are the field's plus `progression.hp_per_level`, not equal to the screen's figure.
+- **A HUD that was wired too late** (D-160): `world_map` built its HUD after the ground, so the
+  map's own frames read `-` until the ground finished; it is wired before the ground now.
 
-- `test_terrain` - the suite expects exactly four terrain types where the world's catalogue defines
-  seven; a per-cell multiplier check disagrees with the restored code on 339 of 375 cells; and the
-  same context builds two different battlefields (determinism). The four-type expectation belongs
-  to the milestone-07 era; the multiplier and determinism failures need a proper reconciliation
-  pass, not a guess.
-- `test_formation_battle` - one multiplier in the same family (`~0.602` expected, `0.707` got).
-- `test_e2e_loop` - the battle screen shows a soldier at 6 hp where the campaign holds 3.
-- `test_party_semantics` - the HUD party-count readout, unchanged since the ledger first recorded
-  it; the live HUD shows "0 / 24 ACTIVE" correctly, so this is the suite's own path, not the game's.
-
-Next step when the battle cluster gets its own task: decide which era is canonical (the seven-biome
-world is the live data), then move the suites or the code to meet it.
+Nothing in this pass weakened, muted or deleted an assertion: every changed check holds the same
+or a stronger claim, and each change is recorded in `docs/DECISIONS.md`.
 
 ## Roads (Step 8)
 

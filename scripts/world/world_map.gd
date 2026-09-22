@@ -164,6 +164,12 @@ func _ready() -> void:
 	_mark = Time.get_ticks_msec()
 	_view.bind(_state, _config, _travel)
 	_view.roads = _roads
+	# The HUD is wired before the ground is laid, not after it. It needs the campaign, the config and
+	# the travel service - all of which exist by here - and nothing about the terrain. Laying the
+	# ground is half a second of yielding frames behind the loading screen, and building the HUD after
+	# it left the map's own frames reporting "-" for every statistic until it finished: the test that
+	# reads the party line drives the real scene and saw the placeholder, not the game. See D-160.
+	_build_hud_and_overlays()
 	# The ground goes in before the map view and behind it: the view draws roads, settlements and
 	# parties on top of terrain it no longer has to paint itself.
 	var ground_from_cache := false
@@ -222,7 +228,6 @@ func _ready() -> void:
 	_caravans = CaravanService.build(_state, _config, _roads)
 	_caravans.spawn_if_needed()
 
-	_build_hud_and_overlays()
 	_build_pause_menu()
 
 	# A committed UI-scale change rebuilds the map's screens at the new size (D-137 follow-up).

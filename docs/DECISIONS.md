@@ -4405,3 +4405,80 @@ edge to edge and doubles the ground an army can manoeuvre over. Deployment, terr
 encounter placement all read the size from `battle_config` and needed no other change. First battle on it,
 same seed and roster: 36 fallen in 145 seconds with 317 arrows loosed, on a field the lines now march
 across rather than stand at the edge of.
+
+**D-159: the ground summary counted one phantom cell, so every formed body moved too fast.**
+
+`TerrainSummary.grade()` accumulates every mean over the cells it visits and divides at the end, but
+`mean_movement` was declared at `1.0` - the value an empty summary reports, "unknown ground crosses like
+open ground" - and the walk then added each cell's multiplier *on top of* it before dividing. Every graded
+body's pace was therefore inflated by one cell's worth: a six-cell line read `(1 + sum) / 6` rather than
+`sum / 6`. It was invisible while nothing consumed the summary for movement; D-115's `_formation_speed`
+does, so the fault reached the battlefield. Measured on the test's banded lanes: a three-man woods line
+whose cells all read 0.53-0.55 reported a summary mean of **0.7066**, and an open lane whose cells read
+~0.92 reported **1.1668** - a mean above 1.0, which no ground can produce. Because the multiplier is a
+factor on the whole body's pace, every formed body crossed the field faster than the ground allowed, and
+buried bodies worst of all. The field is now reset to 0.0 before the walk and put back to 1.0 when the walk
+finds nothing, so the empty-summary contract still holds. Paired: the ground-proportion assertion went from
+**0.707 (expected ~0.602)** to within 0.1 of the ground's own numbers, and `test_formation_battle` 1
+failure to 0.
+
+**D-160: the map's HUD is wired before the ground is laid, not after.**
+
+`world_map._ready()` built the HUD after the ground - half a second of frames yielded behind the loading
+screen - and after the overworld, encounter and caravan services were assembled. The HUD needs the
+campaign, the config and the travel service and none of those, so the map's own frames reported `-` for
+every statistic until the ground finished, and the party-capacity suite, which drives the real scene and
+reads the party line through `WorldHud.stat_text`, saw the placeholder rather than the game. The HUD is now
+set up beside the view bind, before the terrain `await`. The suite is untouched and passes, and the live
+map gains correct statistics during the load instead of after it. The work was moved to where its inputs
+exist rather than made to wait on the slowest unrelated step.
+
+**D-161: the terrain suite reads the ground the game actually generates.**
+
+The live catalogue is seven types (`open`, `rough`, `woods`, `high_ground`, `mud`, `water`, `cliff`) and a
+cell's movement multiplier is composed from its type, soil, vegetation, wetness and slope
+(`BattlefieldTerrain.resolve_move_of_cell`), cached once at generation. The suite still asserted the
+milestone-07 four-type catalogue and compared the query with the type's bare number, so it disagreed with
+339 of 375 cells. Both assertions are corrected to the deliberate behaviour rather than muted: the
+catalogue check names the exact seven the game uses - the "no filler types" intent is preserved by failing
+on any unexpected id - and the multiplier check holds the invariants that survive composition: within
+`(0, 1]`, equal to the composition of the cell's own channels, and never above the cell's type's own number
+(every other term is at most one). The determinism assertion was comparing a bare `generate` with the
+battlefield a battle fights on, which is that generation *plus* the cleared deployment zones and grown
+props; it now compares two builds of the same context, which is the stronger claim - two runs of one
+context must be identical - and it holds.
+
+**D-162: a split-approach test drives without a player-side commander.**
+
+`_test_split_while_approaching` detached a wing, gave the half an explicit move order, then drove both
+commanders - including a player-side `BattleAI` the game never attaches (`battle.gd` gives the enemy one
+only). The AI's standing engage order overwrote the move order on its next 0.5 s tick, so the half marched
+at the enemy beside the body it had left and ended 2.2 units away against the test's own `> 5`. The harness
+now steps without a commander for this part, exactly as the sibling withdrawal test already does and
+documents, so the order the test issues is the order that is executed; the half parts from its parent and
+the assertion passes without being weakened. The alternative - teaching the AI to skip bodies holding a
+move order - would change production code to satisfy a scenario production cannot produce, since only the
+enemy side is ever commanded by an AI.
+
+**D-163: the result-screen HP check accounts for the level-up grant.**
+
+`BattleResolver.apply()` writes a survivor's field hit points to the campaign and then, if the fight earned
+a level, adds `progression.hp_per_level` to both maximum and current hit points (`_grow_for_levels`). The
+end-to-end test compared the screen's field figure with the campaign's post-progression figure and demanded
+equality, so a survivor who levelled read as a mismatch - 1 on screen against 4 in the campaign, one level
+at three hit points. The test was corrected, not the game: the screen is right to show the number the fight
+actually left, and the reward is a deliberate post-battle rule. The assertion reconstructs the campaign
+figure from the field hit points plus `levels_gained * hp_per_level`, so it stays exact for a levelled
+soldier and is unchanged for one who did not level.
+
+**D-164: the restart check pins the authored map it names.**
+
+The two-process restart check is written against the authored starting region: it names Greywatch,
+Brackenford, Redmoor and Thornwood Hollow and asserts four settlements and four roads. When the generated
+world became the game's default (`world.procedural` true, `world.settlement_count` 20), the check began
+building *that* world directly - `GameManager.new_campaign` no longer produces named towns - and crashed
+on `settlement("greywatch")` being null before it could save anything. The suite runner already pins
+`world.procedural` false for exactly this reason ("every suite ... runs against the authored one"); the
+check now does the same in `_ready`, so both phases agree on the map. The alternative - rewriting the check
+to read generated ids back - would turn a restart check that can say which town it restored into one that
+cannot. Verified as two separate processes: write 6/6 and verify 95/95, the restart check green again.

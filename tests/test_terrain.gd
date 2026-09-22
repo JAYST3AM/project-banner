@@ -65,9 +65,20 @@ func _test_catalog() -> void:
 	var catalog := TerrainCatalog.load_from()
 	check(catalog.is_valid(), "the terrain types load")
 	equal(catalog.load_errors.size(), 0, "with no load errors")
-	for required in ["open", "rough", "woods", "high_ground"]:
+	# The live world's catalogue is seven types, not the milestone-07 four: water, cliff and mud
+	# joined it when terrain became a rule (move / traverse / cover / sight) rather than a movement
+	# number. The assertion is still "the exact set the game uses and nothing else", just the set
+	# that exists. See D-161.
+	var expected_types := ["open", "rough", "woods", "high_ground", "mud", "water", "cliff"]
+	for required in expected_types:
 		check(catalog.has(required), "'%s' is defined" % required)
-	equal(catalog.order.size(), 4, "and there are exactly four of them - no filler types")
+	equal(catalog.order.size(), expected_types.size(),
+		"and there are exactly seven of them - no filler types")
+	var unexpected: Array[String] = []
+	for id in catalog.order:
+		if not expected_types.has(id):
+			unexpected.append(id)
+	equal(unexpected.size(), 0, "and none the game does not use: %s" % str(unexpected))
 
 	for id in catalog.order:
 		var multiplier := catalog.move_multiplier(id)
@@ -161,14 +172,23 @@ func _test_move_multipliers_are_sane() -> void:
 	var terrain := BattlefieldTerrain.generate(SEED + 11, _field(), GameManager.config())
 	var bad := 0
 	var checked := 0
+	var faster_than_type := 0
 	for index in terrain.cell_count():
-		var id := terrain.type_id_of_cell(index)
-		var expected := catalog.move_multiplier(id)
-		var actual := terrain.move_multiplier_at(terrain.cell_centre(index))
+		var centre := terrain.cell_centre(index)
+		var actual := terrain.move_multiplier_at(centre)
 		checked += 1
-		if absf(actual - expected) > 0.0001 or actual <= 0.0 or actual > 1.0:
+		# The multiplier is the composed value now, not the type's bare number: the type says what
+		# the ground does, the soil seasons it, and vegetation, standing water and slope each take
+		# something off. What must still hold is that the cached query is within (0, 1], that it is
+		# the very composition the cell's own channels resolve to, and that no cell moves faster than
+		# its own type's number allows - every other term in the composition is at most one. See D-161.
+		var expected := terrain.resolve_move_of_cell(index)
+		if actual <= 0.0 or actual > 1.0 or absf(actual - expected) > 0.0001:
 			bad += 1
-	equal(bad, 0, "every cell's multiplier matches its type and is within (0, 1] (%d cells)" % checked)
+		if actual > catalog.move_multiplier(terrain.type_id_of_cell(index)) + 0.0001:
+			faster_than_type += 1
+	equal(bad, 0, "every cell's multiplier is its own composition and within (0, 1] (%d cells)" % checked)
+	equal(faster_than_type, 0, "and no cell moves faster than its own type allows")
 
 	var counts := terrain.counts_by_type()
 	var total := 0
@@ -360,8 +380,13 @@ func _test_the_seed_actually_comes_from_the_context() -> void:
 	equal(terrain.terrain_seed, context.terrain_seed,
 		"and used the context's terrain seed, not one of its own")
 
-	# Two contexts from the same spot give the same ground.
-	var again := BattlefieldTerrain.generate(context.terrain_seed, simulator.field_size, config)
+	# Two contexts from the same spot give the same ground. The battlefield the battle actually fights
+	# on is the generated ground *plus* the battle's own post-processing - the deployment zones are
+	# cleared and the props are grown - so determinism is asserted on the whole thing a second battle
+	# from the same context would deploy on, not on a bare generation that never gets props. See D-161.
+	var second := BattleSimulator.new(config, context.battle_seed)
+	var again := second.set_terrain_from_context(context, config)
+	not_null(again, "a second build of the same context produced ground")
 	equal(again.signature(), terrain.signature(), "the same context reproduces the same battlefield")
 
 	GameManager.end_campaign()

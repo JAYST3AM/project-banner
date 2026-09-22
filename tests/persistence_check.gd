@@ -27,6 +27,12 @@ var _checks := 0
 
 
 func _ready() -> void:
+	# This check is written against the authored starting region - it names Greywatch, Brackenford,
+	# Redmoor and Thornwood Hollow - because a restart check that names the places it restored is
+	# worth more than one that reads generated ids back. The game's own default is a generated world
+	# now, so pin the authored map here exactly as the test runner does (test_runner.gd), rather than
+	# chasing generated names or weakening what the check asserts. See D-164.
+	GameManager.config().set_value("world.procedural", false)
 	var phase := _phase()
 	print("")
 	print("######## PROJECT BANNER PERSISTENCE CHECK - phase: %s ########" % phase)

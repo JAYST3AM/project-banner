@@ -58,6 +58,12 @@ static func grade(terrain: BattlefieldTerrain, rect: Rect2) -> TerrainSummary:
 	var highest_point := Vector2.ZERO
 	summary.lowest_height = INF
 	summary.highest_height = -INF
+	# Mean movement accumulates from zero like every other mean here. It was declared at 1.0 - the
+	# value an empty summary reports, "unknown ground crosses like open ground" - and then accumulated
+	# on top of it, so every graded body's pace was inflated by one cell's worth: a six-cell line moved
+	# at (1 + sum)/6 rather than sum/6. The field is reset to 0.0 before the walk and put back to 1.0
+	# if the walk finds nothing, so the empty-summary contract still holds.
+	summary.mean_movement = 0.0
 	for row in range(min_row, max_row + 1):
 		for col in range(min_col, max_col + 1):
 			var index := row * terrain.cols + col
@@ -82,6 +88,7 @@ static func grade(terrain: BattlefieldTerrain, rect: Rect2) -> TerrainSummary:
 			var type_id := terrain.type_id_of_cell(index)
 			type_counts[type_id] = int(type_counts.get(type_id, 0)) + 1
 	if summary.cells <= 0:
+		summary.mean_movement = 1.0
 		return summary
 	var divisor := float(summary.cells)
 	summary.mean_slope /= divisor

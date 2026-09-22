@@ -104,6 +104,14 @@ func _drive(bundle: Dictionary, ticks: int) -> void:
 		simulator.step(STEP)
 
 
+## Step the simulation with no commander at all, so a body's explicit order survives the ticks. The
+## live game gives the enemy an AI and leaves the player's own orders alone, so a test that exercises
+## one of those orders has to drive the same way; a player-side commander would overwrite it.
+func _step_only(simulator: BattleSimulator, ticks: int) -> void:
+	for i in ticks:
+		simulator.step(STEP)
+
+
 ## The press-forward gate is now decided once per body per step instead of once per soldier. The
 ## answers must be identical to the reference it replaced - which stays switchable in the same build -
 ## and the two battles must stay in lockstep, tick for tick. A change in behaviour would show up as
@@ -797,10 +805,16 @@ func _test_split_while_approaching() -> void:
 	split.order = BattleFormation.ORDER_MOVE
 	split.steer_toward(split.anchor + Vector2(0.0, 40.0))
 	var anchor_before := body.anchor
-	_drive(bundle, 60)
+	# No commander for this part, deliberately. The live game attaches a [BattleAI] to the enemy
+	# side only (battle.gd), so a player's body keeps the order it was given; running the player-side
+	# commander the harness builds would order the detached half straight back into the fight and
+	# overwrite the move order this test exists to exercise - the half would march to the enemy
+	# beside the body it left rather than away from it. The sibling withdrawal test drives without a
+	# commander for the same reason, and both assert the order actually held.
+	_step_only(simulator, 60)
 	greater(split.anchor.distance_to(anchor_before), 0.0, "the detached half moved somewhere")
 	var apart_early := split.anchor.distance_to(body.anchor)
-	_drive(bundle, 120)
+	_step_only(simulator, 120)
 	var apart := split.anchor.distance_to(body.anchor)
 	# The substance is that the halves part and keep parting. The first measurement matters because
 	# D-108 changed how fast they do it: a soldier standing in his place now moves by his body's
