@@ -143,7 +143,6 @@ func _build_controls_column() -> void:
 		detail_button.add_theme_color_override("font_hover_color", UiTheme.TEXT)
 		detail_button.add_theme_color_override("font_pressed_color", UiTheme.TEXT)
 		detail_button.add_theme_color_override("font_focus_color", UiTheme.TEXT)
-		detail_button.add_theme_color_override("font_disabled_color", Color(0.45, 0.47, 0.51))
 		detail_button.theme_type_variation = "UtilityButton"
 		detail_button.tooltip_text = "A finer grid on the same cloth - the banner's size in the game never changes."
 		detail_button.pressed.connect(set_detail.bind(size.x, size.y))
