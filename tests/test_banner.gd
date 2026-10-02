@@ -340,6 +340,26 @@ func _test_the_new_game_screen_path() -> void:
 	not_null(menu_third, "Back returns to the menu")
 	check(GameManager.campaign == before, "and Back created nothing")
 
+	# Escape returns to the menu too, even mid-typing: a focused line edit consumes
+	# ui_cancel on its own, so the screen listens before the GUI (D-168 audit round).
+	var screen_escape := await SceneManager.change_scene_and_wait("new_campaign")
+	not_null(screen_escape, "the screen opens for the Escape test")
+	screen_escape.call("focus_company_name")
+	check(bool(screen_escape.call("name_field_has_focus")), "the name field holds the caret")
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.physical_keycode = KEY_ESCAPE
+	escape.pressed = true
+	Input.parse_input_event(escape)
+	var menu_escape := await SceneManager.await_scene("main_menu")
+	not_null(menu_escape, "Escape returns to the menu even while typing")
+	check(GameManager.campaign == before, "and Escape created nothing")
+	var release := InputEventKey.new()
+	release.keycode = KEY_ESCAPE
+	release.physical_keycode = KEY_ESCAPE
+	release.pressed = false
+	Input.parse_input_event(release)
+
 	# Validation: a blank name resolves to the configured default and a text seed keeps
 	# its stable hash - the same request, the same world, whatever was typed.
 	var screen_last := await SceneManager.change_scene_and_wait("new_campaign")

@@ -277,7 +277,11 @@ func back() -> void:
 	SceneManager.change_scene("main_menu")
 
 
-func _unhandled_input(event: InputEvent) -> void:
+## Escape returns to the menu from anywhere on the screen - in _input, not
+## _unhandled_input, because a focused line edit consumes ui_cancel by itself (Escape is
+## how it leaves edit mode), so a player mid-typing would otherwise get no way back
+## (D-168 audit).
+func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		back()
 		get_viewport().set_input_as_handled()
@@ -332,3 +336,13 @@ func workspace() -> BannerWorkspace:
 
 func summary_text() -> String:
 	return _summary.text
+
+
+## Put the caret in the company-name field. For suites: focus is exactly what makes a
+## line edit swallow ui_cancel, so the Escape path cannot be tested without it.
+func focus_company_name() -> void:
+	_name_input.grab_focus()
+
+
+func name_field_has_focus() -> bool:
+	return _name_input.has_focus()
