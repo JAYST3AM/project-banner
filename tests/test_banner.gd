@@ -20,6 +20,7 @@ func run() -> void:
 	await _test_the_campaign_carries_the_banner()
 	await _test_saving_and_loading_keeps_the_banner()
 	await _test_the_new_game_screen_path()
+	await _test_every_pixel_icon_is_well_formed()
 	greater(float(checks), 80.0, "the suite ran its assertions")
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
@@ -377,3 +378,21 @@ func _test_the_new_game_screen_path() -> void:
 	equal(last_campaign.campaign_seed, RngService.stable_hash("old oak"), "and the hashed seed does too")
 	GameManager.end_campaign()
 	await SceneManager.change_scene_and_wait("main_menu")
+
+
+## ---------- the icon set ------------------------------------------------------------
+
+## The visual pass's icons are string grids read by [method PixelIcons.texture], which sizes
+## the image from the first row. The audit caught one icon at 11 wide among 10s - it rendered
+## squashed inside its square control - so the format is pinned here: every icon, every row,
+## ten and ten.
+func _test_every_pixel_icon_is_well_formed() -> void:
+	section("every pixel icon is a well-formed 10x10 grid")
+	check(PixelIcons.ICONS.size() >= 20, "the set covers the screen's furniture")
+	for icon_name in PixelIcons.ICONS.keys():
+		var grid: Array = PixelIcons.ICONS[icon_name]
+		equal(grid.size(), 10, "icon '%s' is ten rows" % icon_name)
+		for y in grid.size():
+			equal(str(grid[y]).length(), 10, "icon '%s' row %d is ten wide" % [icon_name, y])
+		check(not PixelIcons.texture(str(icon_name)).get_image().is_empty(),
+			"icon '%s' renders to a texture" % icon_name)
