@@ -21,21 +21,15 @@ extends HBoxContainer
 
 signal banner_changed
 
-const BODY := Color(0.13, 0.15, 0.19)
-const LIGHT := Color(0.38, 0.42, 0.48)
-const DARK := Color(0.06, 0.07, 0.09)
-const OUTLINE := Color(0.02, 0.02, 0.03)
 const DIM := Color(0.66, 0.68, 0.72)
 const GOLD := Color(0.91, 0.81, 0.55)
-const BRONZE := Color(0.48, 0.36, 0.24)
+const OUTLINE := Color(0.02, 0.02, 0.03)
 const CANVAS_W := 160.0
 const CANVAS_H := 200.0
 const UNDO_LIMIT := 120
 
 var _banner: BannerData = null
 var _font: Font = null
-var _button_styles: Dictionary = {}
-var _icon_styles: Dictionary = {}
 var _selected_colour: int = 10
 var _tool: String = "pencil"
 var _mirror: bool = false
@@ -54,25 +48,10 @@ func _ready() -> void:
 	if _banner == null:
 		_banner = BannerData.create_default()
 	_font = PixelStyle.pixel_font()
-	_button_styles = PixelStyle.button_styles(BODY, LIGHT, DARK, UiTheme.ACCENT, OUTLINE)
-	_icon_styles = _build_icon_styles()
 	add_theme_constant_override("separation", 12)
 	_build_controls_column()
 	_build_canvas_column()
 	_build_preview_column()
-
-
-## Icon buttons need less padding than word buttons - the base button style keeps 14-pixel
-## content margins, which would squeeze a 28-pixel square to nothing.
-func _build_icon_styles() -> Dictionary:
-	var styles := PixelStyle.button_styles(BODY, LIGHT, DARK, UiTheme.GOLD, BRONZE)
-	for key in styles.keys():
-		var style: StyleBoxTexture = styles[key]
-		style.content_margin_left = 3.0
-		style.content_margin_right = 3.0
-		style.content_margin_top = 3.0
-		style.content_margin_bottom = 3.0
-	return styles
 
 
 ## Give the workspace a banner to paint (the New Campaign screen's payload or a fresh
@@ -95,12 +74,12 @@ func install_banner(banner: BannerData) -> void:
 func _build_controls_column() -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 5)
-	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(column)
 
 	column.add_child(PixelStyle.pixel_label("Tools", 11, GOLD))
 	var tool_row := HBoxContainer.new()
-	tool_row.add_theme_constant_override("separation", 3)
+	tool_row.add_theme_constant_override("separation", 2)
 	column.add_child(tool_row)
 	var group := ButtonGroup.new()
 	var pencil := _icon_button("pencil", "Pencil - click or drag to paint, right-click to erase", group)
@@ -116,11 +95,11 @@ func _build_controls_column() -> void:
 	var mirror := _icon_button("mirror", "Mirror - strokes land on both halves at once", null)
 	mirror.toggled.connect(_on_mirror_toggled)
 	tool_row.add_child(mirror)
-	var wind := _icon_button("wind", "Wind - the cloth waves on the map", null, true, UiTheme.ACCENT)
+	var wind := _icon_button("wind", "Wind - the cloth waves on the map", null, true)
 	wind.button_pressed = true
 	wind.toggled.connect(_on_wind_toggled)
 	tool_row.add_child(wind)
-	var grid_toggle := _icon_button("grid", "Grid - the cell lines on the cloth", null, true, UiTheme.ACCENT)
+	var grid_toggle := _icon_button("grid", "Grid - the cell lines on the cloth", null, true)
 	grid_toggle.button_pressed = true
 	grid_toggle.toggled.connect(_on_grid_toggled)
 	tool_row.add_child(grid_toggle)
@@ -141,7 +120,7 @@ func _build_controls_column() -> void:
 	var palette := BannerData.palette()
 	for i in palette.size():
 		var swatch := Button.new()
-		swatch.custom_minimum_size = Vector2(20.0, 20.0)
+		swatch.custom_minimum_size = Vector2(18.0, 18.0)
 		swatch.tooltip_text = "#" + palette[i].to_html(false)
 		swatch.focus_mode = Control.FOCUS_NONE
 		swatch.pressed.connect(_select_colour.bind(i))
@@ -155,8 +134,16 @@ func _build_controls_column() -> void:
 	column.add_child(detail_row)
 	_detail_buttons.clear()
 	for size in BannerData.detail_sizes():
-		var detail_button := PixelStyle.text_button("%dx%d" % [size.x, size.y], _button_styles, 11,
-			Vector2(62.0, 26.0), UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+		var detail_button := Button.new()
+		detail_button.text = "%dx%d" % [size.x, size.y]
+		detail_button.custom_minimum_size = PixelStyle.scaled_vec(Vector2(62.0, 26.0))
+		detail_button.add_theme_font_override("font", _font)
+		detail_button.add_theme_font_size_override("font_size", PixelStyle.scaled(11))
+		detail_button.add_theme_color_override("font_color", UiTheme.TEXT)
+		detail_button.add_theme_color_override("font_hover_color", UiTheme.TEXT)
+		detail_button.add_theme_color_override("font_pressed_color", UiTheme.TEXT)
+		detail_button.add_theme_color_override("font_focus_color", UiTheme.TEXT)
+		detail_button.add_theme_color_override("font_disabled_color", Color(0.45, 0.47, 0.51))
 		detail_button.tooltip_text = "A finer grid on the same cloth - the banner's size in the game never changes."
 		detail_button.pressed.connect(set_detail.bind(size.x, size.y))
 		detail_row.add_child(detail_button)
@@ -183,15 +170,15 @@ func _build_controls_column() -> void:
 func _build_canvas_column() -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 4)
-	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(column)
 
 	var frame := PanelContainer.new()
-	frame.add_theme_stylebox_override("panel", _canvas_frame_style())
+	frame.theme_type_variation = "TileDark"
 	column.add_child(frame)
 
 	var inner := VBoxContainer.new()
-	inner.add_theme_constant_override("separation", 4)
+	inner.add_theme_constant_override("separation", 8)
 	frame.add_child(inner)
 
 	_grid = PaintGrid.new()
@@ -215,34 +202,34 @@ func _build_preview_column() -> void:
 
 	# Card one: the banner on its pole - the focal preview of the screen.
 	var pole_frame := PanelContainer.new()
-	pole_frame.add_theme_stylebox_override("panel", _card_style())
+	pole_frame.theme_type_variation = "TileDark"
 	column.add_child(pole_frame)
 	var pole_view := BannerView.new()
 	pole_view.banner = _banner
 	pole_view.view_scale = 3.2
-	pole_view.custom_minimum_size = Vector2(190.0, 245.0)
+	pole_view.custom_minimum_size = Vector2(176.0, 235.0)
 	_views.append(pole_view)
 	pole_frame.add_child(pole_view)
 
 	# Card two: the founder slot, plainly reserved - no control pretends to exist here.
 	var founder_frame := PanelContainer.new()
-	founder_frame.add_theme_stylebox_override("panel", _card_style())
+	founder_frame.theme_type_variation = "TileDark"
 	founder_frame.set_meta("reserved", true)
 	column.add_child(founder_frame)
 	var founder_row := HBoxContainer.new()
 	founder_row.add_theme_constant_override("separation", 8)
 	founder_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	founder_frame.add_child(founder_row)
-	founder_row.add_child(PixelIcons.icon("founder", 26, Color(0.34, 0.36, 0.40)))
+	founder_row.add_child(PixelIcons.icon("founder", 26, Color(0.44, 0.46, 0.50)))
 	var founder_text := VBoxContainer.new()
 	founder_text.add_theme_constant_override("separation", 0)
 	founder_row.add_child(founder_text)
-	founder_text.add_child(PixelStyle.pixel_label("FOUNDER", 10, Color(0.42, 0.44, 0.48)))
-	founder_text.add_child(PixelStyle.body_label("arrives with the founder creator", 11, Color(0.36, 0.38, 0.42)))
+	founder_text.add_child(PixelStyle.pixel_label("FOUNDER", 10, Color(0.58, 0.60, 0.64)))
+	founder_text.add_child(PixelStyle.body_label("arrives with the founder creator", 11, Color(0.55, 0.57, 0.61)))
 
 	# Card three: the cloth at the size the campaign map actually shows.
 	var map_frame := PanelContainer.new()
-	map_frame.add_theme_stylebox_override("panel", _card_style())
+	map_frame.theme_type_variation = "TileDark"
 	column.add_child(map_frame)
 	var map_view := BannerView.new()
 	map_view.banner = _banner
@@ -253,45 +240,19 @@ func _build_preview_column() -> void:
 	map_frame.add_child(map_view)
 
 
-func _canvas_frame_style() -> StyleBoxTexture:
-	var style := PixelStyle.panel_style(Color(0.055, 0.065, 0.09), BRONZE, OUTLINE)
-	style.content_margin_left = 6.0
-	style.content_margin_right = 6.0
-	style.content_margin_top = 6.0
-	style.content_margin_bottom = 6.0
-	return style
-
-
-func _card_style() -> StyleBoxTexture:
-	var style := PixelStyle.panel_style(Color(0.09, 0.105, 0.135), LIGHT.darkened(0.45), OUTLINE)
-	style.content_margin_left = 4.0
-	style.content_margin_right = 4.0
-	style.content_margin_top = 4.0
-	style.content_margin_bottom = 4.0
-	return style
-
-
-func _icon_button(icon_name: String, tooltip: String, group: ButtonGroup, toggle: bool = true,
-		on_colour: Color = GOLD) -> Button:
+## The tools wear the theme's square icon button: an ON toggle - the selected tool, wind,
+## grid, mirror - is the gold ring the theme draws, so "on" is read from the button itself
+## rather than from a colour this file used to hand-paint over it.
+func _icon_button(icon_name: String, tooltip: String, group: ButtonGroup,
+		toggle: bool = true) -> Button:
 	var button := Button.new()
-	PixelStyle.dress_button(button, _icon_styles, _font, 11, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	button.theme_type_variation = "IconButton"
 	button.icon = PixelIcons.texture(icon_name, UiTheme.TEXT)
 	button.expand_icon = true
 	button.tooltip_text = tooltip
-	button.custom_minimum_size = Vector2(28.0, 28.0)
+	button.custom_minimum_size = Vector2(24.0, 24.0)
 	button.toggle_mode = toggle
 	button.focus_mode = Control.FOCUS_NONE
-	if toggle:
-		# A toggle that is ON must look ON. The selected tool wears gold (the mockup's
-		# reading); the plain switches (wind, grid) wear the accent, so three glowing
-		# buttons never argue about which one is the pencil.
-		var pressed_style := PixelStyle.button_style(Color(0.23, 0.20, 0.13), on_colour, DARK, on_colour)
-		pressed_style.content_margin_left = 3.0
-		pressed_style.content_margin_right = 3.0
-		pressed_style.content_margin_top = 3.0
-		pressed_style.content_margin_bottom = 3.0
-		button.add_theme_stylebox_override("pressed", pressed_style)
-		button.add_theme_stylebox_override("hover_pressed", pressed_style)
 	if group != null:
 		button.button_group = group
 	return button
@@ -465,12 +426,7 @@ func _refresh_status() -> void:
 	# Mark the active detail button, the way the mockup's selected level reads.
 	for button in _detail_buttons:
 		var is_active := button.text == "%dx%d" % [_banner.width, _banner.height]
-		button.add_theme_stylebox_override("normal",
-			_active_detail_style() if is_active else _button_styles["normal"])
-
-
-func _active_detail_style() -> StyleBoxTexture:
-	return PixelStyle.button_style(Color(0.23, 0.20, 0.13), GOLD, DARK, GOLD)
+		button.theme_type_variation = "ActiveButton" if is_active else ""
 
 
 # ---------------------------------------------------------------------------------------------

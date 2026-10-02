@@ -27,18 +27,11 @@ extends Control
 
 const BACKGROUND_PATH := "res://assets/ui/main_menu_bg.png"
 
-const DARK := Color(0.06, 0.07, 0.09)
-const OUTLINE := Color(0.02, 0.02, 0.03)
 const DIM := Color(0.66, 0.68, 0.72)
 const SMALL_SIZE := 12
 const GOLD := Color(0.91, 0.81, 0.55)
 const BRONZE := Color(0.48, 0.36, 0.24)
-const PANEL_FILL := Color(0.085, 0.10, 0.13)
-const CARD_FILL := Color(0.09, 0.105, 0.135)
-const PARCHMENT := Color(0.76, 0.63, 0.38)
-const PARCHMENT_EDGE := Color(0.54, 0.42, 0.22)
 const PARCHMENT_TEXT := Color(0.14, 0.10, 0.05)
-const LOCKED_FILL := Color(0.075, 0.085, 0.11)
 
 ## The rail's steps. `ready` is the honest switch: true means the step is on this screen
 ## today; false renders as a plainly locked tile. The founder creator will flip them on as
@@ -56,9 +49,6 @@ const SECTIONS: Array = [
 ]
 
 var _font: Font = null
-var _button_styles: Dictionary = {}
-var _icon_styles: Dictionary = {}
-var _start_styles: Dictionary = {}
 var _workspace: BannerWorkspace = null
 var _name_input: LineEdit = null
 var _seed_input: LineEdit = null
@@ -72,12 +62,7 @@ var _preview_thumb: BannerWorkspace.BannerView = null
 func _ready() -> void:
 	var payload: Dictionary = SceneManager.consume_payload()
 	_font = PixelStyle.pixel_font()
-	_button_styles = PixelStyle.button_styles(Color(0.13, 0.15, 0.19), Color(0.38, 0.42, 0.48),
-		DARK, UiTheme.ACCENT, OUTLINE)
-	_icon_styles = _build_icon_styles(_button_styles)
-	_start_styles = PixelStyle.button_styles(Color(0.22, 0.34, 0.20), Color(0.46, 0.60, 0.35),
-		DARK, GOLD, PARCHMENT_EDGE)
-	theme = PixelStyle.tooltip_theme(Color(0.13, 0.15, 0.19), UiTheme.ACCENT, UiTheme.TEXT)
+	theme = load("res://assets/ui/project_banner/themes/pb_theme.tres")
 	_build()
 	var incoming: Variant = payload.get("banner", null)
 	if incoming is BannerData:
@@ -88,20 +73,6 @@ func _ready() -> void:
 		_seed_input.text = str(payload.get("seed_value"))
 	_refresh_summary()
 	DebugLogger.info("new campaign screen opened", "NewCampaign")
-
-
-## Icon buttons need less padding than word buttons - the base style keeps 14-pixel content
-## margins, which would squeeze a 28-pixel square to nothing.
-func _build_icon_styles(base: Dictionary) -> Dictionary:
-	var styles := {}
-	for key in base.keys():
-		var style: StyleBoxTexture = (base[key] as StyleBoxTexture).duplicate()
-		style.content_margin_left = 3.0
-		style.content_margin_right = 3.0
-		style.content_margin_top = 3.0
-		style.content_margin_bottom = 3.0
-		styles[key] = style
-	return styles
 
 
 # ---------------------------------------------------------------------------------------------
@@ -126,7 +97,7 @@ func _build() -> void:
 	_build_header(column)
 
 	var main := HBoxContainer.new()
-	main.add_theme_constant_override("separation", 10)
+	main.add_theme_constant_override("separation", 8)
 	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(main)
 	_build_rail(main)
@@ -154,10 +125,17 @@ func _build_background() -> void:
 
 
 func _build_header(column: VBoxContainer) -> void:
+	var panel := PanelContainer.new()
+	panel.theme_type_variation = "HeaderFrame"
+	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	column.add_child(panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	panel.add_child(box)
 	var title_row := HBoxContainer.new()
 	title_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	title_row.add_theme_constant_override("separation", 14)
-	column.add_child(title_row)
+	box.add_child(title_row)
 	title_row.add_child(PixelIcons.icon("diamond", 14, GOLD.darkened(0.2)))
 	title_row.add_child(PixelStyle.pixel_label("FOUND YOUR COMPANY", 26, GOLD))
 	title_row.add_child(PixelIcons.icon("diamond", 14, GOLD.darkened(0.2)))
@@ -166,18 +144,12 @@ func _build_header(column: VBoxContainer) -> void:
 		"Create your company, design its banner, and choose the world it marches into.", 14,
 		Color(0.80, 0.82, 0.86))
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	column.add_child(subtitle)
-	column.add_child(PixelStyle.rule(BRONZE.darkened(0.25)))
+	box.add_child(subtitle)
 
 
-## A framed panel with a titled head: the one shape every block on this screen shares.
+## A framed panel with a titled head: the one shape every block on this screen shares. The
+## frame itself is the theme's window panel - the head, the rule and the body are ours.
 func _frame(panel: PanelContainer, title: String) -> VBoxContainer:
-	var style := PixelStyle.panel_style(PANEL_FILL, BRONZE, OUTLINE)
-	style.content_margin_left = 12.0
-	style.content_margin_right = 12.0
-	style.content_margin_top = 8.0
-	style.content_margin_bottom = 10.0
-	panel.add_theme_stylebox_override("panel", style)
 	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 6)
@@ -193,16 +165,11 @@ func _frame(panel: PanelContainer, title: String) -> VBoxContainer:
 
 ## The creation rail: a step list where the current step is a parchment tile and the future
 ## steps are plainly locked. Labels, not buttons - a control that cannot do anything is a
-## lie about what the game can do.
+## lie about what the game can do. Only the live step is dressed: a locked tile is the
+## theme's plain panel, so it reads as "not yet" without a colour of its own.
 func _build_rail(parent: HBoxContainer) -> void:
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(216.0, 0.0)
-	var style := PixelStyle.panel_style(Color(0.055, 0.065, 0.09), BRONZE, OUTLINE)
-	style.content_margin_left = 7.0
-	style.content_margin_right = 7.0
-	style.content_margin_top = 7.0
-	style.content_margin_bottom = 7.0
-	panel.add_theme_stylebox_override("panel", style)
+	panel.custom_minimum_size = Vector2(218.0, 0.0)
 	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	parent.add_child(panel)
 
@@ -212,35 +179,38 @@ func _build_rail(parent: HBoxContainer) -> void:
 	for entry in SECTIONS:
 		var row: Array = entry
 		column.add_child(_section_tile(str(row[0]), str(row[1]), str(row[2]), bool(row[3])))
+	# The well below the steps is real estate on purpose, but an unexplained void reads as
+	# missing content - one quiet line says what it is.
+	var filler := Control.new()
+	filler.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(filler)
+	column.add_child(PixelStyle.rule(Color(0.30, 0.26, 0.20)))
+	var later := PixelStyle.body_label("The founder's steps open as their systems are built.", 11,
+		Color(0.58, 0.60, 0.63))
+	later.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(later)
 
 
 func _section_tile(id: String, label: String, sub: String, ready: bool) -> PanelContainer:
 	var tile := PanelContainer.new()
 	tile.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	var style := StyleBoxFlat.new()
-	style.bg_color = PARCHMENT if ready else LOCKED_FILL
-	style.border_color = PARCHMENT_EDGE if ready else OUTLINE
-	style.set_border_width_all(2 if ready else 1)
-	style.set_corner_radius_all(0)
-	style.content_margin_left = 9.0
-	style.content_margin_right = 9.0
-	style.content_margin_top = 7.0
-	style.content_margin_bottom = 7.0
-	tile.add_theme_stylebox_override("panel", style)
+	# The custom kit's own tile materials: warm parchment for the live step, the dark
+	# recessed tile for the locked ones - no hand-painted fill in this file any more.
+	tile.theme_type_variation = "TileParchment" if ready else "TileDark"
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 9)
 	tile.add_child(row)
 	row.add_child(PixelIcons.icon(id, 24,
-		Color(0.18, 0.13, 0.07) if ready else Color(0.58, 0.60, 0.63)))
+		Color(0.18, 0.13, 0.07) if ready else Color(0.64, 0.66, 0.69)))
 
 	var text := VBoxContainer.new()
 	text.add_theme_constant_override("separation", 0)
 	row.add_child(text)
 	text.add_child(PixelStyle.pixel_label(label, 13 if ready else 12,
-		PARCHMENT_TEXT if ready else Color(0.68, 0.70, 0.73)))
+		PARCHMENT_TEXT if ready else Color(0.72, 0.74, 0.77)))
 	text.add_child(PixelStyle.body_label(sub, 11,
-		Color(0.30, 0.23, 0.11) if ready else Color(0.47, 0.49, 0.52)))
+		Color(0.30, 0.23, 0.11) if ready else Color(0.52, 0.54, 0.57)))
 	return tile
 
 
@@ -258,7 +228,7 @@ func _build_centre(parent: HBoxContainer) -> void:
 	details.add_child(row)
 	row.add_child(PixelStyle.body_label("Company Name", 14, DIM))
 	_name_input = LineEdit.new()
-	_name_input.custom_minimum_size = Vector2(330.0, 30.0)
+	_name_input.custom_minimum_size = Vector2(330.0, 34.0)
 	_name_input.max_length = 48
 	_name_input.placeholder_text = _default_company_name()
 	_dress_field(_name_input)
@@ -270,13 +240,20 @@ func _build_centre(parent: HBoxContainer) -> void:
 	var editor := _frame(editor_panel, "BANNER EDITOR")
 	_workspace = BannerWorkspace.new()
 	_workspace.banner_changed.connect(_refresh_summary)
-	editor.add_child(_workspace)
+	# The frame is taller than the bench's rows: centre them in the well so the space
+	# reads as craft-room breathing rather than a void.
+	var wrap := VBoxContainer.new()
+	wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	wrap.alignment = BoxContainer.ALIGNMENT_CENTER
+	_workspace.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	wrap.add_child(_workspace)
+	editor.add_child(wrap)
 
 
 func _build_right_column(parent: HBoxContainer) -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
-	column.custom_minimum_size = Vector2(316.0, 0.0)
+	column.add_theme_constant_override("separation", 10)
+	column.custom_minimum_size = Vector2(304.0, 0.0)
 	parent.add_child(column)
 
 	# --- world settings -------------------------------------------------------------------
@@ -288,7 +265,7 @@ func _build_right_column(parent: HBoxContainer) -> void:
 	row.add_theme_constant_override("separation", 6)
 	world.add_child(row)
 	_seed_input = LineEdit.new()
-	_seed_input.custom_minimum_size = Vector2(0.0, 30.0)
+	_seed_input.custom_minimum_size = Vector2(0.0, 34.0)
 	_seed_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_seed_input.max_length = 18
 	_seed_input.placeholder_text = "random"
@@ -304,13 +281,20 @@ func _build_right_column(parent: HBoxContainer) -> void:
 	randomise.text = "Randomise Seed"
 	randomise.icon = PixelIcons.texture("dice", UiTheme.TEXT)
 	randomise.expand_icon = true
-	PixelStyle.dress_button(randomise, _button_styles, _font, 13, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	randomise.add_theme_font_override("font", _font)
+	randomise.add_theme_font_size_override("font_size", PixelStyle.scaled(13))
+	randomise.add_theme_color_override("font_color", UiTheme.TEXT)
+	randomise.add_theme_color_override("font_hover_color", UiTheme.TEXT)
+	randomise.add_theme_color_override("font_pressed_color", UiTheme.TEXT)
+	randomise.add_theme_color_override("font_focus_color", UiTheme.TEXT)
+	randomise.add_theme_color_override("font_disabled_color", Color(0.45, 0.47, 0.51))
 	randomise.custom_minimum_size = Vector2(0.0, 32.0)
 	randomise.pressed.connect(randomise_seed)
 	world.add_child(randomise)
 
 	# --- campaign preview -----------------------------------------------------------------
 	var preview_panel := PanelContainer.new()
+	preview_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	column.add_child(preview_panel)
 	var preview := _frame(preview_panel, "CAMPAIGN PREVIEW")
 	_sum_company = PixelStyle.pixel_label("", 12, UiTheme.TEXT)
@@ -344,31 +328,28 @@ func _build_right_column(parent: HBoxContainer) -> void:
 	options_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	options_row.add_child(options_label)
 	options_row.add_child(PixelIcons.icon("rules", 14, Color(0.52, 0.54, 0.57)))
-	_sum_options = PixelStyle.pixel_label("Default Settings", 12, Color(0.52, 0.54, 0.57))
+	_sum_options = PixelStyle.pixel_label("Default Settings", 11, Color(0.58, 0.60, 0.63))
 	options_row.add_child(_sum_options)
 
 
-func _thumb_style() -> StyleBoxTexture:
-	var style := PixelStyle.panel_style(Color(0.06, 0.07, 0.095), LIGHT_EDGE(), OUTLINE)
+func _thumb_style() -> StyleBoxFlat:
+	# The thumbnail frame stays hand-drawn: at 28x34 units the kit's panel borders would
+	# swallow the whole thumb. Compact, flat, same palette as the kit's panels.
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.07, 0.095)
+	style.border_color = Color(0.24, 0.27, 0.32)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(0)
 	style.content_margin_left = 2.0
-	style.content_margin_right = 2.0
 	style.content_margin_top = 2.0
+	style.content_margin_right = 2.0
 	style.content_margin_bottom = 2.0
 	return style
 
 
-func LIGHT_EDGE() -> Color:
-	return Color(0.24, 0.27, 0.32)
-
-
 func _build_actions(column: VBoxContainer) -> void:
 	var panel := PanelContainer.new()
-	var style := PixelStyle.panel_style(Color(0.055, 0.065, 0.09), BRONZE, OUTLINE)
-	style.content_margin_left = 10.0
-	style.content_margin_right = 10.0
-	style.content_margin_top = 6.0
-	style.content_margin_bottom = 6.0
-	panel.add_theme_stylebox_override("panel", style)
+	panel.theme_type_variation = "FooterFrame"
 	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	column.add_child(panel)
 
@@ -380,7 +361,13 @@ func _build_actions(column: VBoxContainer) -> void:
 	back_button.text = "Back to Main Menu"
 	back_button.icon = PixelIcons.texture("arrow_left", UiTheme.TEXT)
 	back_button.expand_icon = true
-	PixelStyle.dress_button(back_button, _button_styles, _font, 13, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	back_button.add_theme_font_override("font", _font)
+	back_button.add_theme_font_size_override("font_size", PixelStyle.scaled(13))
+	back_button.add_theme_color_override("font_color", Color(0.74, 0.76, 0.80))
+	back_button.add_theme_color_override("font_hover_color", Color(0.92, 0.93, 0.95))
+	back_button.add_theme_color_override("font_pressed_color", Color(0.74, 0.76, 0.80))
+	back_button.add_theme_color_override("font_focus_color", Color(0.74, 0.76, 0.80))
+	back_button.add_theme_color_override("font_disabled_color", Color(0.45, 0.47, 0.51))
 	back_button.custom_minimum_size = Vector2(230.0, 38.0)
 	back_button.pressed.connect(back)
 	row.add_child(back_button)
@@ -390,11 +377,17 @@ func _build_actions(column: VBoxContainer) -> void:
 	row.add_child(spacer)
 
 	var start_button := Button.new()
+	start_button.theme_type_variation = "StartButton"
 	start_button.text = "START CAMPAIGN"
 	start_button.icon = PixelIcons.texture("class", GOLD)
 	start_button.expand_icon = true
-	PixelStyle.dress_button(start_button, _start_styles, _font, 16, Color(0.97, 0.93, 0.78),
-		Color(0.55, 0.58, 0.52))
+	start_button.add_theme_font_override("font", _font)
+	start_button.add_theme_font_size_override("font_size", PixelStyle.scaled(16))
+	start_button.add_theme_color_override("font_color", Color(0.97, 0.93, 0.78))
+	start_button.add_theme_color_override("font_hover_color", Color(0.97, 0.93, 0.78))
+	start_button.add_theme_color_override("font_pressed_color", Color(0.97, 0.93, 0.78))
+	start_button.add_theme_color_override("font_focus_color", Color(0.97, 0.93, 0.78))
+	start_button.add_theme_color_override("font_disabled_color", Color(0.55, 0.58, 0.52))
 	start_button.custom_minimum_size = Vector2(300.0, 44.0)
 	start_button.pressed.connect(start)
 	row.add_child(start_button)
@@ -402,9 +395,10 @@ func _build_actions(column: VBoxContainer) -> void:
 
 func _icon_button(icon_name: String, tooltip: String, handler: Callable) -> Button:
 	var button := Button.new()
-	PixelStyle.dress_button(button, _icon_styles, _font, 11, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	button.theme_type_variation = "IconButton"
 	button.icon = PixelIcons.texture(icon_name, UiTheme.TEXT)
 	button.expand_icon = true
+	button.add_theme_constant_override("icon_max_width", 16)
 	button.tooltip_text = tooltip
 	button.custom_minimum_size = Vector2(30.0, 30.0)
 	button.focus_mode = Control.FOCUS_NONE
@@ -412,12 +406,10 @@ func _icon_button(icon_name: String, tooltip: String, handler: Callable) -> Butt
 	return button
 
 
+## The fields wear the theme's input style; what is left here is the type: the pixel face,
+## the size and the colours that read on the parchment.
 func _dress_field(field: LineEdit) -> void:
 	field.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	field.add_theme_stylebox_override("normal",
-		PixelStyle.panel_style(Color(0.10, 0.12, 0.15), Color(0.28, 0.31, 0.37), OUTLINE))
-	field.add_theme_stylebox_override("focus",
-		PixelStyle.panel_style(Color(0.13, 0.15, 0.19), GOLD.darkened(0.15), GOLD.darkened(0.3)))
 	if _font != null:
 		field.add_theme_font_override("font", _font)
 	field.add_theme_font_size_override("font_size", PixelStyle.scaled(13))

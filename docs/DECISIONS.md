@@ -4615,3 +4615,22 @@ and D-168's flow, contract and tests are untouched (banner suite 279/0 through e
 revision). Remaining distance from the mockup is painted art the project does not have
 (wood/parchment textures, serif display faces); the composition, hierarchy and pixel
 language now follow it.
+
+**D-168 skin pass, second attempt (owner's brief, same night): the project cuts its own UI kit
+from the custom sheet.** The owner supplied a generated sprite sheet made specifically for
+Project Banner and made it the primary source; Framewright Lite was shelved on the local
+branch `framewright-skin-try` and nothing from it is mixed in. `tools/slice_ui_sheet.gd`
+turns the sheet into 26 production pieces (alpha harden, connected-component slicing, ring
+fills, ornament keep-boxes, crest cover patches - all recorded in
+`assets/ui/project_banner/README.md`, which also carries the margins table and the known
+limitations). A Project Banner theme (`pb_theme.tres`) wraps them: base
+Button/PanelContainer/LineEdit styles plus `IconButton`, `StartButton`, `ActiveButton`,
+`EditorFrame`, `HeaderFrame`, `FooterFrame`, `TileParchment`, `TileDark` variations. The New
+Campaign screen wears them: header bar, rail tiles (parchment selected / dark locked), the
+editor's large frame, footer bar, green START, and the inset input/panels. Retained custom
+styling where the kit cannot go: palette swatches, tool toggles (flat IconButton), the
+campaign-preview thumbnail frame, the paint grid itself, and the valley background. The
+layout contract held throughout - the fat editor frame forced a measured rebalance (editor
+content margins, rail/right column trims, compact tool buttons) so nothing clips at 1280x720
+units; verified across six screenshot iterations. Banner suite 580/0 through every revision;
+full suite and restart check re-run before the audit.

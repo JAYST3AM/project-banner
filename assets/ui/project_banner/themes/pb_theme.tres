@@ -1,0 +1,233 @@
+[gd_resource type="Theme" load_steps=25 format=3]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/frame_large.png" id="tex_editor"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/header_bar.png" id="tex_header"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/footer_bar.png" id="tex_footer"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/inset_panel.png" id="tex_panel"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/tile_parchment.png" id="tex_tile_p"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/tile_dark.png" id="tex_tile_d"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/buttons/secondary_dark.png" id="tex_btn"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/buttons/primary_green.png" id="tex_btn_start"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/inputs/input_frame.png" id="tex_input"]
+[ext_resource type="FontFile" path="res://assets/fonts/EBGaramond-Regular.ttf" id="pb_font_body"]
+[ext_resource type="FontFile" path="res://assets/fonts/Silkscreen-Regular.ttf" id="pb_font_pixel"]
+[sub_resource type="StyleBoxTexture" id="sb_editor"]
+texture = ExtResource("tex_editor")
+texture_margin_left = 61
+texture_margin_top = 61
+texture_margin_right = 61
+texture_margin_bottom = 61
+content_margin_left = 28
+content_margin_top = 30
+content_margin_right = 28
+content_margin_bottom = 30
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxTexture" id="sb_header"]
+texture = ExtResource("tex_header")
+texture_margin_left = 60
+texture_margin_top = 20
+texture_margin_right = 60
+texture_margin_bottom = 24
+content_margin_left = 60
+content_margin_top = 16
+content_margin_right = 60
+content_margin_bottom = 14
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxTexture" id="sb_footer"]
+texture = ExtResource("tex_footer")
+texture_margin_left = 30
+texture_margin_top = 26
+texture_margin_right = 30
+texture_margin_bottom = 26
+content_margin_left = 26
+content_margin_top = 14
+content_margin_right = 26
+content_margin_bottom = 14
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxTexture" id="sb_panel"]
+texture = ExtResource("tex_panel")
+texture_margin_left = 22
+texture_margin_top = 22
+texture_margin_right = 22
+texture_margin_bottom = 22
+content_margin_left = 20
+content_margin_top = 14
+content_margin_right = 20
+content_margin_bottom = 14
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxTexture" id="sb_tile_parch"]
+texture = ExtResource("tex_tile_p")
+texture_margin_left = 16
+texture_margin_top = 16
+texture_margin_right = 16
+texture_margin_bottom = 16
+content_margin_left = 18
+content_margin_top = 8
+content_margin_right = 26
+content_margin_bottom = 8
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxTexture" id="sb_tile_dark"]
+texture = ExtResource("tex_tile_d")
+texture_margin_left = 16
+texture_margin_top = 16
+texture_margin_right = 16
+texture_margin_bottom = 16
+content_margin_left = 18
+content_margin_top = 8
+content_margin_right = 26
+content_margin_bottom = 8
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxTexture" id="sb_btn"]
+texture = ExtResource("tex_btn")
+texture_margin_left = 14
+texture_margin_top = 14
+texture_margin_right = 14
+texture_margin_bottom = 14
+content_margin_left = 14
+content_margin_top = 8
+content_margin_right = 14
+content_margin_bottom = 10
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxTexture" id="sb_btn_start"]
+texture = ExtResource("tex_btn_start")
+texture_margin_left = 14
+texture_margin_top = 14
+texture_margin_right = 14
+texture_margin_bottom = 14
+content_margin_left = 18
+content_margin_top = 8
+content_margin_right = 18
+content_margin_bottom = 10
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxTexture" id="sb_input"]
+texture = ExtResource("tex_input")
+texture_margin_left = 12
+texture_margin_top = 12
+texture_margin_right = 12
+texture_margin_bottom = 12
+content_margin_left = 16
+content_margin_top = 8
+content_margin_right = 16
+content_margin_bottom = 8
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+
+[sub_resource type="StyleBoxFlat" id="sb_icon_on"]
+bg_color = Color(0.30, 0.25, 0.15, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.72, 0.45, 1)
+draw_center = true
+corner_radius_top_left = 0
+corner_radius_top_right = 0
+corner_radius_bottom_right = 0
+corner_radius_bottom_left = 0
+content_margin_left = 5
+content_margin_top = 4
+content_margin_right = 5
+content_margin_bottom = 4
+
+[sub_resource type="StyleBoxFlat" id="sb_icon_off"]
+bg_color = Color(0.1, 0.12, 0.15, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.23, 0.26, 0.31, 1)
+draw_center = true
+corner_radius_top_left = 0
+corner_radius_top_right = 0
+corner_radius_bottom_right = 0
+corner_radius_bottom_left = 0
+content_margin_left = 5
+content_margin_top = 4
+content_margin_right = 5
+content_margin_bottom = 4
+
+[sub_resource type="StyleBoxFlat" id="sb_focus_ring"]
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.72, 0.45, 1)
+draw_center = false
+corner_radius_top_left = 0
+corner_radius_top_right = 0
+corner_radius_bottom_right = 0
+corner_radius_bottom_left = 0
+content_margin_left = 4
+content_margin_top = 4
+content_margin_right = 4
+content_margin_bottom = 4
+
+[sub_resource type="StyleBoxFlat" id="sb_empty"]
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 0
+border_width_top = 0
+border_width_right = 0
+border_width_bottom = 0
+border_color = Color(0, 0, 0, 0)
+draw_center = false
+corner_radius_top_left = 0
+corner_radius_top_right = 0
+corner_radius_bottom_right = 0
+corner_radius_bottom_left = 0
+content_margin_left = 0
+content_margin_top = 0
+content_margin_right = 0
+content_margin_bottom = 0
+
+[resource]
+
+PanelContainer/styles/panel = SubResource("sb_panel")
+Panel/styles/panel = SubResource("sb_panel")
+Button/styles/normal = SubResource("sb_btn")
+Button/styles/focus = SubResource("sb_focus_ring")
+LineEdit/styles/normal = SubResource("sb_input")
+LineEdit/styles/focus = SubResource("sb_focus_ring")
+Label/colors/font_color = Color(0.91, 0.92, 0.94, 1)
+TooltipPanel/styles/panel = SubResource("sb_panel")
+TooltipLabel/colors/font_color = Color(0.91, 0.92, 0.94, 1)
+IconButton/base_type = &"Button"
+IconButton/styles/normal = SubResource("sb_icon_off")
+IconButton/styles/hover = SubResource("sb_icon_off")
+IconButton/styles/pressed = SubResource("sb_icon_on")
+IconButton/styles/hover_pressed = SubResource("sb_icon_on")
+IconButton/styles/disabled = SubResource("sb_icon_off")
+IconButton/styles/focus = SubResource("sb_empty")
+StartButton/base_type = &"Button"
+StartButton/styles/normal = SubResource("sb_btn_start")
+StartButton/styles/focus = SubResource("sb_focus_ring")
+ActiveButton/base_type = &"Button"
+ActiveButton/styles/normal = SubResource("sb_icon_on")
+EditorFrame/base_type = &"PanelContainer"
+EditorFrame/styles/panel = SubResource("sb_editor")
+HeaderFrame/base_type = &"PanelContainer"
+HeaderFrame/styles/panel = SubResource("sb_header")
+FooterFrame/base_type = &"PanelContainer"
+FooterFrame/styles/panel = SubResource("sb_footer")
+TileParchment/base_type = &"PanelContainer"
+TileParchment/styles/panel = SubResource("sb_tile_parch")
+TileDark/base_type = &"PanelContainer"
+TileDark/styles/panel = SubResource("sb_tile_dark")
+
+default_font = ExtResource("pb_font_body")
+default_font_size = 15
