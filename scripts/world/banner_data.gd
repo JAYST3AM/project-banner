@@ -240,7 +240,14 @@ var height: int = DEFAULT_HEIGHT
 var cells: PackedInt32Array = PackedInt32Array()
 
 
+## Constructs the storage for one grid. A size that is not a configured detail level
+## cannot be painted on or drawn correctly, so construction normalises it to the default
+## pair - every [BannerData] that exists is sized for a grid the paint screen offers.
 func _init(w: int = DEFAULT_WIDTH, h: int = DEFAULT_HEIGHT) -> void:
+	if not is_detail_size(w, h):
+		DebugLogger.warn("banner grid %dx%d is not a configured detail level; using %dx%d" % [w, h, DEFAULT_WIDTH, DEFAULT_HEIGHT], "BannerData")
+		w = DEFAULT_WIDTH
+		h = DEFAULT_HEIGHT
 	width = w
 	height = h
 	cells = PackedInt32Array()

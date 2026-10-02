@@ -173,6 +173,10 @@ func _test_serialisation_degrades_to_default() -> void:
 	var fine := BannerData.create_default(8, 10)
 	equal(BannerData.from_dict(fine.to_dict()).to_rle(), fine.to_rle(),
 		"a configured 8x10 grid still loads exactly")
+	var built_askew := BannerData.new(4, 4)
+	equal(built_askew.width, 16, "construction itself normalises a non-configured grid")
+	equal(built_askew.height, 20, "to the default pair")
+	equal(BannerData.create_default(4, 4).width, 16, "and so does the default factory")
 
 
 ## ---------- the wind ----------------------------------------------------------------
