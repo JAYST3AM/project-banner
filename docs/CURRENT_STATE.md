@@ -2,10 +2,11 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** Step 9 - the company banner, founded on the unified New Campaign screen (D-168):
+**Last updated:** Step 9 - the company banner, founded on the unified New Campaign screen (D-168,
+restyled to the owner's approved mockup):
 painted pixel-by-pixel, hanging from its pole on the campaign map as one cached texture (D-167).
 **Engine:** Godot 4.7.2-stable
-**Test status:** the full headless suite is green: **38 suites, 9,814 assertions, 0 failures**,
+**Test status:** the full headless suite is green: **38 suites, 10,115 assertions, 0 failures**,
 with the native query suite and the separation-pass equivalence suite run on their own and the
 two-process restart check green. The 2026-09-19 revert's fallout stays cleared: the battle-terrain
 cluster reconciled to the live seven-type world - see D-159 to D-166.
