@@ -4534,7 +4534,11 @@ calls `GameManager.new_campaign(name, seed, banner)` at confirm. `CampaignState.
 the persistent cloth; serialisation is `{width, height, rle}` (A = empty, B..U = palette 0..19)
 via `BannerData.to_dict`/`from_dict`, and anything malformed - a save written before banners
 existed included - degrades to the default design rather than failing to open. `set_cell` refuses
-the notch and off-palette indices at the data layer, so no renderer defends itself.
+the notch and off-palette indices at the data layer, so no renderer defends itself; the load path
+holds the same line - `from_dict` accepts only a configured detail level, bounds every run against
+the cells remaining in the grid before it expands (a corrupt `999999999B` run is refused in
+microseconds instead of spending ~4 GB first), and a banner whose painted cells leave the cloth
+degrades to the default whole.
 
 The renderer (`BannerArt`) paints the banner once into a 56 x 70 image and caches the texture,
 keyed by a signature of the paint and the wind's whole-unit row shifts, because MEASURED: drawing

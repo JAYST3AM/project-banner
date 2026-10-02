@@ -21,9 +21,6 @@ const EMPTY := -1
 const DATA_PATH := "res://data/config/banner.json"
 const DEFAULT_WIDTH := 16
 const DEFAULT_HEIGHT := 20
-const MIN_SIZE := 4
-const MAX_SIZE := 64
-const MAX_CELLS := 4096
 ## The starter the default banner wears: the split field the paint prototype opened on.
 const DEFAULT_KIND := "pale"
 
@@ -105,10 +102,6 @@ static func cloth_units() -> Vector2:
 	return Vector2(32.0, 40.0)
 
 
-static func max_cells() -> int:
-	return int(_document().get("max_cells", MAX_CELLS))
-
-
 static func wind_amplitude() -> float:
 	var wind: Variant = _document().get("wind", {})
 	if typeof(wind) == TYPE_DICTIONARY:
@@ -171,29 +164,46 @@ static func from_rle(text: String, w: int, h: int) -> BannerData:
 	return banner
 
 
-## Rebuilds from [method to_dict]'s shape. Anything malformed - bad sizes, undecodable
-## or wrong-length runs, an oversized grid - quietly becomes the default banner: an old
-## or corrupt save must open with a legal banner, not fail to open at all.
+## Rebuilds from [method to_dict]'s shape. Anything malformed - a grid that is not one
+## of the configured detail levels, undecodable or oversized runs, painted notch cells -
+## quietly becomes the default banner: an old or corrupt save must open with a legal
+## banner, not fail to open at all. The load path enforces the same invariants the
+## paint path does, so a hand-edited save cannot smuggle in a banner the player could
+## never have painted.
 static func from_dict(data: Dictionary) -> BannerData:
 	var w := int(data.get("width", 0))
 	var h := int(data.get("height", 0))
 	var rle := str(data.get("rle", ""))
-	if w < MIN_SIZE or w > MAX_SIZE or h < MIN_SIZE or h > MAX_SIZE or w * h > max_cells():
+	if not is_detail_size(w, h):
 		if not data.is_empty():
-			DebugLogger.warn("banner shape %dx%d is not paintable; using the default" % [w, h], "BannerData")
+			DebugLogger.warn("banner shape %dx%d is not a paintable detail level; using the default" % [w, h], "BannerData")
 		return create_default()
 	var banner := from_rle(rle, w, h)
 	if banner == null:
 		if not data.is_empty():
 			DebugLogger.warn("banner runs did not decode (%dx%d); using the default" % [w, h], "BannerData")
 		return create_default()
+	if not banner.shape_is_respected():
+		if not data.is_empty():
+			DebugLogger.warn("banner data paints outside the cloth (%dx%d); using the default" % [w, h], "BannerData")
+		return create_default()
 	return banner
+
+
+## Whether (w, h) is exactly one of the configured detail levels. A grid the paint
+## screen cannot offer cannot be loaded either.
+static func is_detail_size(w: int, h: int) -> bool:
+	for size in detail_sizes():
+		if size.x == w and size.y == h:
+			return true
+	return false
 
 
 static func decode_rle(text: String, w: int, h: int) -> PackedInt32Array:
 	var out := PackedInt32Array()
 	if text.is_empty() or w <= 0 or h <= 0:
 		return out
+	var total := w * h
 	var size := palette_size()
 	for token in text.split("."):
 		if token.length() < 2:
@@ -203,7 +213,9 @@ static func decode_rle(text: String, w: int, h: int) -> PackedInt32Array:
 		if not digits.is_valid_int():
 			return PackedInt32Array()
 		var count := int(digits)
-		if count <= 0:
+		# Bounded BEFORE the expansion: a corrupt run may not spend memory on cells
+		# that cannot fit in the grid.
+		if count <= 0 or count > total - out.size():
 			return PackedInt32Array()
 		var value := EMPTY
 		if letter != "A":
@@ -213,7 +225,7 @@ static func decode_rle(text: String, w: int, h: int) -> PackedInt32Array:
 			value = code - 66
 		for i in count:
 			out.append(value)
-	if out.size() != w * h:
+	if out.size() != total:
 		return PackedInt32Array()
 	return out
 
@@ -277,6 +289,17 @@ func is_legal() -> bool:
 			return false
 		if value != EMPTY and value >= size:
 			return false
+	return true
+
+
+## Whether every painted cell sits inside the cloth: the notch is never painted, at the
+## brush or on load. [method from_dict] calls this, so a corrupt save cannot smuggle in
+## a banner the player could never have painted.
+func shape_is_respected() -> bool:
+	for y in height:
+		for x in width:
+			if cells[y * width + x] != EMPTY and not allowed(x, y):
+				return false
 	return true
 
 

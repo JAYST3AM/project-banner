@@ -149,6 +149,28 @@ func _test_serialisation_degrades_to_default() -> void:
 		check(recovered.is_legal(), "garbage recovers to a legal banner")
 		equal(recovered.width, 16, "at the default size")
 		equal(recovered.height, 20, "and the default shape")
+	# The audit round: a save that paints the notch, a run that would expand past the
+	# grid's end, and a grid that is not a configured detail level are all malformed
+	# and must come back as the default banner - the load path enforces the same
+	# invariants the paint path does, not just the palette.
+	var painted_notch := BannerData.from_dict({"width": 16, "height": 20, "rle": "320B"})
+	equal(painted_notch.to_rle(), BannerData.create_default().to_rle(),
+		"a save that paints the swallowtail notch degrades to the default")
+	var clock := Time.get_ticks_msec()
+	var bomb := BannerData.from_dict({"width": 16, "height": 20, "rle": "999999999B"})
+	equal(bomb.to_rle(), BannerData.create_default().to_rle(),
+		"a run past the grid's end is refused before it expands")
+	check(Time.get_ticks_msec() - clock < 500,
+		"and the refusal is immediate, not after expanding the run")
+	var odd_grid := BannerData.from_dict({"width": 4, "height": 4, "rle": "16A"})
+	equal(odd_grid.width, 16, "a grid that is not a paintable detail level degrades")
+	equal(odd_grid.height, 20, "to the default shape")
+	var over_grid := BannerData.from_dict({"width": 64, "height": 64, "rle": "4096A"})
+	equal(over_grid.width, 16, "and an oversized grid degrades too")
+	equal(over_grid.height, 20, "to the default")
+	var fine := BannerData.create_default(8, 10)
+	equal(BannerData.from_dict(fine.to_dict()).to_rle(), fine.to_rle(),
+		"a configured 8x10 grid still loads exactly")
 
 
 ## ---------- the wind ----------------------------------------------------------------
