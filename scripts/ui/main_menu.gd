@@ -38,9 +38,6 @@ var _margin: MarginContainer = null
 var _button_styles: Dictionary = {}
 var _continue_button: Button = null
 var _status: Label = null
-var _name_input: LineEdit = null
-var _seed_input: LineEdit = null
-var _new_panel: Control = null
 
 
 func _ready() -> void:
@@ -60,16 +57,8 @@ func _rebuild_column() -> void:
 	if _margin != null:
 		_margin.free()
 		_margin = null
-	_build_new_panel_cleared()
 	_build_column()
 	_refresh_continue_state()
-
-
-## The new-campaign panel lives inside the column, so a rebuild must forget the old reference before
-## the column is built again - otherwise the menu would think a panel is open when its node is gone.
-func _build_new_panel_cleared() -> void:
-	if _new_panel != null:
-		_new_panel = null
 
 
 func _build_background() -> void:
@@ -151,7 +140,6 @@ func _build_column() -> void:
 	_status.custom_minimum_size = Vector2(COLUMN_WIDTH, 46)
 	column.add_child(_status)
 
-	_build_new_panel(column)
 	_continue_button.grab_focus()
 	# Dev-only: "--settings-panel" opens it, because a screenshot cannot click a button.
 	if DevFlags.settings_panel():
@@ -167,84 +155,16 @@ func _on_settings() -> void:
 	_settings.open()
 
 
-## Naming a campaign and choosing its world is a second decision, so it lives behind the button
-## that means it rather than in front of the one that means continue.
-func _build_new_panel(column: VBoxContainer) -> void:
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", PixelStyle.panel_style(BODY, LIGHT.darkened(0.3), OUTLINE))
-	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	panel.visible = false
-	column.add_child(panel)
-	_new_panel = panel
-
-	var inner := VBoxContainer.new()
-	inner.add_theme_constant_override("separation", 6)
-	panel.add_child(inner)
-	inner.add_child(_label("NEW CAMPAIGN", SMALL_SIZE, UiTheme.GOLD))
-	inner.add_child(_label("Campaign name", SMALL_SIZE, Color(0.66, 0.68, 0.72)))
-	_name_input = LineEdit.new()
-	_name_input.custom_minimum_size = Vector2(0, 32)
-	_name_input.max_length = 48
-	_name_input.text = GameManager.config().get_string("campaign.default_campaign_name", "A New Banner")
-	_dress_field(_name_input)
-	inner.add_child(_name_input)
-	inner.add_child(_label("World seed (blank = random)", SMALL_SIZE, Color(0.66, 0.68, 0.72)))
-	_seed_input = LineEdit.new()
-	_seed_input.custom_minimum_size = Vector2(0, 32)
-	_seed_input.max_length = 18
-	_seed_input.placeholder_text = "random"
-	_dress_field(_seed_input)
-	inner.add_child(_seed_input)
-
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	inner.add_child(row)
-	var begin := _button("Begin")
-	begin.pressed.connect(_on_new_campaign)
-	row.add_child(begin)
-	var cancel := _button("Cancel")
-	cancel.pressed.connect(_close_new_panel)
-	row.add_child(cancel)
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel") and _new_panel != null and _new_panel.visible:
-		_close_new_panel()
-		get_viewport().set_input_as_handled()
-
-
 # ---------------------------------------------------------------------------------------------
-# Behaviour. Unchanged in substance from the menu this replaces: a campaign name and an optional
-# seed, Continue offered only when a save exists and this build can read it, and a quit.
+# Behaviour. Continue offered only when a save exists and this build can read it, New Campaign
+# hands off to the creation screen (D-168), and a quit. Naming the company and seeding the world
+# are that screen's decisions now, made on the same surface where the banner is painted.
 # ---------------------------------------------------------------------------------------------
 
+## New Campaign opens the creation screen: one surface that owns the company name, the banner
+## and the world, and founds nothing until its Start Campaign (D-168).
 func _on_new_pressed() -> void:
-	if _new_panel == null:
-		return
-	_new_panel.visible = true
-	_name_input.grab_focus()
-	_name_input.select_all()
-
-
-func _close_new_panel() -> void:
-	if _new_panel != null:
-		_new_panel.visible = false
-	if _continue_button != null:
-		_continue_button.grab_focus()
-
-
-func _on_new_campaign() -> void:
-	var seed_value := 0
-	var raw_seed := _seed_input.text.strip_edges()
-	if not raw_seed.is_empty():
-		seed_value = int(raw_seed) if raw_seed.is_valid_int() else RngService.stable_hash(raw_seed)
-	# The campaign is not created here any more (D-167): founding the company begins by
-	# painting its banner, so the name and seed ride to the banner screen and the campaign
-	# is created when the player confirms there. Back on that screen means nothing happened.
-	SceneManager.change_scene("banner_editor", {
-		"campaign_name": _name_input.text,
-		"seed_value": seed_value,
-	})
+	SceneManager.change_scene("new_campaign")
 
 
 func _on_continue() -> void:
@@ -318,20 +238,6 @@ func _button(text: String) -> Button:
 	return button
 
 
-func _dress_field(field: LineEdit) -> void:
-	field.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	field.add_theme_stylebox_override("normal",
-		PixelStyle.panel_style(Color(0.10, 0.12, 0.15), LIGHT.darkened(0.5), OUTLINE))
-	field.add_theme_stylebox_override("focus",
-		PixelStyle.panel_style(Color(0.13, 0.15, 0.19), UiTheme.ACCENT, UiTheme.ACCENT))
-	if _font != null:
-		field.add_theme_font_override("font", _font)
-	field.add_theme_font_size_override("font_size", PixelStyle.scaled(SMALL_SIZE))
-	field.add_theme_color_override("font_color", UiTheme.TEXT)
-	field.add_theme_color_override("font_placeholder_color", Color(0.45, 0.47, 0.51))
-	field.add_theme_color_override("caret_color", UiTheme.ACCENT)
-
-
 # ---------------------------------------------------------------------------------------------
 # Read-only access for the tests. They read state rather than node paths, so the layout above can
 # change without breaking the thing that proves this screen can open an old save. See the header.
@@ -353,3 +259,9 @@ func offered_campaign_name() -> String:
 ## real path rather than a copy of it - not a test-only mutation hook.
 func press_continue() -> void:
 	_on_continue()
+
+
+## Press New Campaign. The button's own handler, callable by name so a suite drives the real
+## hand-off to the creation screen (D-168).
+func press_new_campaign() -> void:
+	_on_new_pressed()

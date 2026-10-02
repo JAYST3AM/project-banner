@@ -1,31 +1,33 @@
-extends Control
-## The company banner screen (D-167).
+class_name BannerWorkspace
+extends HBoxContainer
+## The company banner's paint surface, as an embeddable component (D-167, reworked into the
+## New Campaign screen by D-168).
 ##
-## Opens after New Game, before the campaign starts: the player founds the company by
-## painting the banner it marches under, and from then on that cloth rides the player's
-## marker on the campaign map. The payload carries the campaign name and seed chosen in
-## the menu; [method confirm] creates the campaign with the painted banner and moves on,
-## [method back] returns to the menu without creating anything.
+## Everything a player does to paint a banner lives here - the grid, the locked-20 palette,
+## pencil/fill/erase, mirror, the wind and grid toggles, undo, clear, starters, the three
+## detail levels and the two live previews. The New Campaign screen owns the company name,
+## the world seed and the final Start Campaign; this component owns the cloth. One source of
+## truth: the campaign map, the suites and the screen all talk to [method BannerData], and
+## this is the only place that paints one.
 ##
-## The paint surface is [constant BannerData]'s grid; every tool the owner approved in
-## the paint prototype is here - pencil, fill, eraser, mirror, wind, grid, undo, clear,
-## starters and the three detail levels. Detail is detail only: the cloth's size in the
-## world never changes, so the previews prove what the map will wear at every level.
+## Detail is detail only: the cloth's size in the world never changes, so the previews prove
+## what the map will wear at every level. Changing detail starts a fresh design rather than
+## inventing a resample nobody asked for.
 ##
-## The read-only accessors under "for the tests" exist so a suite can drive this screen
+## The read-only accessors under "for the tests" exist so a suite can drive the paint surface
 ## through the same methods its buttons drive - not a parallel test path.
+
+signal banner_changed
 
 const BODY := Color(0.13, 0.15, 0.19)
 const LIGHT := Color(0.38, 0.42, 0.48)
 const DARK := Color(0.06, 0.07, 0.09)
 const OUTLINE := Color(0.02, 0.02, 0.03)
 const DIM := Color(0.66, 0.68, 0.72)
-const GRID_W := 288.0
-const GRID_H := 360.0
+const GRID_W := 224.0
+const GRID_H := 280.0
 const UNDO_LIMIT := 120
 
-var _campaign_name: String = "A New Banner"
-var _seed_value: int = 0
 var _banner: BannerData = null
 var _font: Font = null
 var _button_styles: Dictionary = {}
@@ -43,74 +45,37 @@ var _swatches: Array[Button] = []
 
 
 func _ready() -> void:
-	var payload: Dictionary = SceneManager.consume_payload()
-	_campaign_name = str(payload.get("campaign_name", _campaign_name))
-	_seed_value = int(payload.get("seed_value", 0))
-	var incoming: Variant = payload.get("banner", null)
-	if incoming is BannerData:
-		_banner = incoming as BannerData
-	else:
+	if _banner == null:
 		_banner = BannerData.create_default()
 	_font = PixelStyle.pixel_font()
 	_button_styles = PixelStyle.button_styles(BODY, LIGHT, DARK, UiTheme.ACCENT, OUTLINE)
-	theme = PixelStyle.tooltip_theme(BODY, UiTheme.ACCENT, UiTheme.TEXT)
-	_build()
-	DebugLogger.info("banner editor opened: '%s', %dx%d grid, %d cells painted" % [
-		_campaign_name, _banner.width, _banner.height, _banner.painted_count(),
-	], "BannerEditor")
+	add_theme_constant_override("separation", 24)
+	_build_paint_column()
+	_build_preview_column()
+
+
+## Give the workspace a banner to paint (the New Campaign screen's payload or a fresh
+## default). Safe to call after the component is built: the grid and the previews follow.
+func install_banner(banner: BannerData) -> void:
+	if banner == null:
+		return
+	_banner = banner
+	_undo.clear()
+	if is_node_ready():
+		for view in _views:
+			view.banner = _banner
+		_after_change()
 
 
 # ---------------------------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------------------------
 
-func _build() -> void:
-	var background := ColorRect.new()
-	background.color = Color(0.05, 0.06, 0.08)
-	background.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(background)
-
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 48)
-	margin.add_theme_constant_override("margin_right", 48)
-	margin.add_theme_constant_override("margin_top", 30)
-	margin.add_theme_constant_override("margin_bottom", 30)
-	add_child(margin)
-
+func _build_paint_column() -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	margin.add_child(column)
-
-	column.add_child(PixelStyle.pixel_label("FOUND YOUR COMPANY", 22, UiTheme.GOLD))
-	column.add_child(PixelStyle.body_label(
-		"%s - paint the banner the company marches under. Every colour is from the game's locked palette." % _campaign_name,
-		15, DIM))
-	column.add_child(PixelStyle.rule(LIGHT.darkened(0.3)))
-
-	var main := HBoxContainer.new()
-	main.add_theme_constant_override("separation", 30)
-	column.add_child(main)
-	_build_paint_column(main)
-	_build_preview_column(main)
-
-	column.add_child(PixelStyle.rule(LIGHT.darkened(0.3)))
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 10)
-	column.add_child(actions)
-	var begin := _text_button("Begin Campaign", Vector2(220.0, 46.0))
-	begin.pressed.connect(confirm)
-	actions.add_child(begin)
-	var back_button := _text_button("Back", Vector2(140.0, 46.0))
-	back_button.pressed.connect(back)
-	actions.add_child(back_button)
-
-
-func _build_paint_column(parent: HBoxContainer) -> void:
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
+	column.add_theme_constant_override("separation", 6)
 	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	parent.add_child(column)
+	add_child(column)
 
 	column.add_child(PixelStyle.pixel_label("PIXEL PAINT", 11, UiTheme.GOLD))
 	_grid = PaintGrid.new()
@@ -197,46 +162,44 @@ func _build_paint_column(parent: HBoxContainer) -> void:
 	_refresh_status()
 
 
-func _build_preview_column(parent: HBoxContainer) -> void:
+func _build_preview_column() -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
+	column.add_theme_constant_override("separation", 6)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(column)
+	add_child(column)
 
 	column.add_child(PixelStyle.pixel_label("PREVIEWS", 11, UiTheme.GOLD))
-	column.add_child(PixelStyle.body_label("In the company panel - 5x", 13, DIM))
+	column.add_child(PixelStyle.body_label("In the company panel - 4x", 12, DIM))
 	var panel_view := BannerView.new()
 	panel_view.banner = _banner
-	panel_view.view_scale = 5.0
-	panel_view.custom_minimum_size = Vector2(320.0, 372.0)
+	panel_view.view_scale = 4.0
+	panel_view.custom_minimum_size = Vector2(224.0, 280.0)
 	_views.append(panel_view)
 	column.add_child(panel_view)
 
-	column.add_child(PixelStyle.body_label("On the campaign map - true scale (0.75 px per unit)", 13, DIM))
+	column.add_child(PixelStyle.body_label("On the campaign map - true scale", 12, DIM))
 	var map_view := BannerView.new()
 	map_view.banner = _banner
 	map_view.view_scale = 0.75
 	map_view.map_mode = true
-	map_view.custom_minimum_size = Vector2(320.0, 150.0)
+	map_view.custom_minimum_size = Vector2(224.0, 110.0)
 	_views.append(map_view)
 	column.add_child(map_view)
-
-	column.add_child(PixelStyle.body_label(
-		"At map scale the cloth is about 24 x 30 pixels - fine detail reads as colour blocks; that is the honest size.",
-		12, DIM))
-
-
-func _text_button(text: String, min_size: Vector2) -> Button:
-	return PixelStyle.text_button(text, _button_styles, 13, min_size, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
 
 
 func _tool_button(text: String, group: ButtonGroup, toggle: bool = true) -> Button:
 	var button := Button.new()
 	button.text = text
 	PixelStyle.dress_button(button, _button_styles, _font, 11, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
-	button.custom_minimum_size = Vector2(0.0, 30.0)
+	button.custom_minimum_size = Vector2(0.0, 28.0)
 	button.toggle_mode = toggle
 	button.focus_mode = Control.FOCUS_NONE
+	if toggle:
+		# A toggle that is ON must look ON: the pressed state gets the accent border, so
+		# the chosen tool, the wind and the grid read at a glance.
+		var pressed_style := PixelStyle.panel_style(Color(0.20, 0.23, 0.28), UiTheme.ACCENT, OUTLINE)
+		button.add_theme_stylebox_override("pressed", pressed_style)
+		button.add_theme_stylebox_override("hover_pressed", pressed_style)
 	if group != null:
 		button.button_group = group
 	return button
@@ -384,7 +347,7 @@ func set_detail(w: int, h: int) -> void:
 	_undo.clear()
 	for view in _views:
 		view.banner = _banner
-	DebugLogger.info("banner detail %dx%d (design reset)" % [w, h], "BannerEditor")
+	DebugLogger.info("banner detail %dx%d (design reset)" % [w, h], "BannerWorkspace")
 	_after_change()
 
 
@@ -394,6 +357,7 @@ func _after_change() -> void:
 		_grid.queue_redraw()
 	for view in _views:
 		view.queue_redraw()
+	banner_changed.emit()
 
 
 func _refresh_status() -> void:
@@ -409,33 +373,8 @@ func _refresh_status() -> void:
 
 
 # ---------------------------------------------------------------------------------------------
-# The flow: confirm starts the campaign, back returns to the menu.
-# ---------------------------------------------------------------------------------------------
-
-## Begin Campaign. This is the button's own handler, callable by name so the suites drive
-## the real path rather than a copy of it.
-func confirm() -> void:
-	DebugLogger.info("banner confirmed: %dx%d, %d cells painted - starting '%s'" % [
-		_banner.width, _banner.height, _banner.painted_count(), _campaign_name,
-	], "BannerEditor")
-	GameManager.new_campaign(_campaign_name, _seed_value, _banner)
-	SceneManager.change_scene("world_map")
-
-
-func back() -> void:
-	DebugLogger.info("banner editor: back to the menu", "BannerEditor")
-	SceneManager.change_scene("main_menu")
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel"):
-		back()
-		get_viewport().set_input_as_handled()
-
-
-# ---------------------------------------------------------------------------------------------
-# Read-only access for the tests. They read and drive state through the screen's own
-# methods, not node paths, so the layout can change around them.
+# Read-only access for the tests and the hosting screen. They read and drive state through
+# the component's own methods, not node paths, so the layout can change around them.
 # ---------------------------------------------------------------------------------------------
 
 func current_banner() -> BannerData:

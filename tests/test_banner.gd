@@ -274,50 +274,86 @@ func _test_saving_and_loading_keeps_the_banner() -> void:
 	equal(loaded.player_banner.to_rle(), rle, "cell for cell")
 
 
-## ---------- the New Game path --------------------------------------------------------
+## ---------- the New Campaign path ----------------------------------------------------
 
 func _test_the_new_game_screen_path() -> void:
-	section("the New Game path: menu -> banner screen -> campaign")
-	var editor := await SceneManager.change_scene_and_wait("banner_editor", {
-		"campaign_name": "Painted Company",
-		"seed_value": 5150,
-	})
-	not_null(editor, "the banner screen loads")
-	if editor == null:
+	section("the New Campaign path: menu -> creation screen -> campaign")
+	# Through the real menu: New Campaign hands off to the creation screen (D-168), and
+	# opening that screen founds nothing - the campaign exists only after Start Campaign.
+	var menu := await SceneManager.change_scene_and_wait("main_menu")
+	not_null(menu, "the main menu loads")
+	if menu == null:
 		return
-	equal(SceneManager.current_key, "banner_editor", "and is the current scene")
-	var banner: BannerData = editor.call("current_banner")
-	not_null(banner, "the screen holds a banner")
+	var campaign_before := GameManager.campaign
+	menu.call("press_new_campaign")
+	var screen := await SceneManager.await_scene("new_campaign")
+	not_null(screen, "New Campaign opens the creation screen")
+	equal(SceneManager.current_key, "new_campaign", "and it is the current scene")
+	check(GameManager.campaign == campaign_before, "opening the screen created no campaign")
+
+	# The company is named and the world seeded on this screen.
+	screen.call("set_company_name", "Painted Company")
+	equal(screen.call("company_name"), "Painted Company", "the name field carries the typing")
+	screen.call("set_seed_text", "5150")
+	equal(screen.call("seed_text"), "5150", "the seed field carries the typing")
+
+	# Painting through the real workspace: a cell, then a finer detail on the same cloth.
+	var space: BannerWorkspace = screen.call("workspace")
+	not_null(space, "the screen embeds the banner workspace")
+	var banner: BannerData = space.current_banner()
+	not_null(banner, "which holds a banner")
 	equal(banner.width, 16, "in the default detail")
-	editor.call("paint_cell", 0, 0, 15)
+	space.paint_cell(0, 0, 15)
 	equal(banner.cell(0, 0), 15, "a painted corner lands")
-	editor.call("set_detail", 8, 10)
-	banner = editor.call("current_banner")
+	space.set_detail(8, 10)
+	banner = space.current_banner()
 	equal(banner.width, 8, "a finer detail takes")
 	equal(banner.height, 10, "in both axes")
 	equal(BannerData.cloth_units(), Vector2(32.0, 40.0), "the cloth itself never changes size")
-	editor.call("paint_cell", 0, 0, 17)
-	editor.call("confirm")
+	# The owner's rule: moving around the screen must not lose the setup.
+	equal(screen.call("company_name"), "Painted Company", "the name survives the detail change")
+	equal(screen.call("seed_text"), "5150", "and the seed survives it")
+	space.paint_cell(0, 0, 17)
+
+	# START CAMPAIGN: exactly one campaign, with the typed name, seed and cloth, then the map.
+	screen.call("start")
 	var world := await SceneManager.await_scene("world_map")
-	not_null(world, "Begin Campaign reaches the world map")
+	not_null(world, "START CAMPAIGN reaches the world map")
 	equal(SceneManager.current_key, "world_map", "which is current")
 	var campaign := GameManager.campaign
 	not_null(campaign, "a campaign exists")
-	equal(campaign.campaign_name, "Painted Company", "with the name carried from the menu")
+	equal(campaign.campaign_name, "Painted Company", "with the name from the creation screen")
 	equal(campaign.campaign_seed, 5150, "and the seed")
 	not_null(campaign.player_banner, "carrying the painted banner")
 	equal(campaign.player_banner.cell(0, 0), 17, "with the paint on it")
 	equal(campaign.player_banner.width, 8, "at the chosen detail")
-	# Back on the screen means nothing happened: no campaign is created by looking.
-	var menu := await SceneManager.change_scene_and_wait("main_menu")
-	not_null(menu, "back at the menu")
-	var editor_again := await SceneManager.change_scene_and_wait("banner_editor", {
-		"campaign_name": "Never Made",
-		"seed_value": 1,
-	})
-	not_null(editor_again, "the screen opens again")
+
+	# Back means nothing happened, however far the player got: no campaign, no trace.
+	var menu_again := await SceneManager.change_scene_and_wait("main_menu")
+	not_null(menu_again, "back at the menu")
 	var before := GameManager.campaign
-	editor_again.call("back")
-	var menu_again := await SceneManager.await_scene("main_menu")
-	not_null(menu_again, "Back returns to the menu")
+	var screen_again := await SceneManager.change_scene_and_wait("new_campaign")
+	not_null(screen_again, "the creation screen opens again")
+	screen_again.call("set_company_name", "Never Made")
+	screen_again.call("back")
+	var menu_third := await SceneManager.await_scene("main_menu")
+	not_null(menu_third, "Back returns to the menu")
 	check(GameManager.campaign == before, "and Back created nothing")
+
+	# Validation: a blank name resolves to the configured default and a text seed keeps
+	# its stable hash - the same request, the same world, whatever was typed.
+	var screen_last := await SceneManager.change_scene_and_wait("new_campaign")
+	not_null(screen_last, "the screen opens once more")
+	screen_last.call("set_company_name", "   ")
+	screen_last.call("set_seed_text", "old oak")
+	var default_name := GameManager.config().get_string("campaign.default_campaign_name", "A New Banner")
+	equal(screen_last.call("resolved_name"), default_name, "a blank name resolves to the default")
+	equal(screen_last.call("resolved_seed"), RngService.stable_hash("old oak"),
+		"and a text seed keeps its stable hash")
+	screen_last.call("start")
+	await SceneManager.await_scene("world_map")
+	var last_campaign := GameManager.campaign
+	equal(last_campaign.campaign_name, default_name, "the default name reaches the campaign")
+	equal(last_campaign.campaign_seed, RngService.stable_hash("old oak"), "and the hashed seed does too")
+	GameManager.end_campaign()
+	await SceneManager.change_scene_and_wait("main_menu")
