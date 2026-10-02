@@ -124,6 +124,8 @@ func _test_runs_round_trip() -> void:
 	check(BannerData.decode_rle("9999A", 32, 40).is_empty(), "an over-long run is refused")
 	check(BannerData.decode_rle("", 32, 40).is_empty(), "an empty string is not a banner")
 	is_null(BannerData.from_rle("", 32, 40), "and makes no banner object")
+	is_null(BannerData.from_rle("320B", 16, 20), "the constructor refuses a painted notch too")
+	is_null(BannerData.from_rle("16A", 4, 4), "and a grid that is not a detail level")
 
 
 ## ---------- serialisation degrades to the default -----------------------------------

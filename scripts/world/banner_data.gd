@@ -155,12 +155,20 @@ static func create_default(w: int = DEFAULT_WIDTH, h: int = DEFAULT_HEIGHT) -> B
 	return banner
 
 
+## Builds one banner from runs. Refuses a grid that is not a configured detail level and
+## any data whose painted cells leave the cloth, so every [BannerData] that exists is
+## legal by construction - the save path only ever chooses between one of these and the
+## default.
 static func from_rle(text: String, w: int, h: int) -> BannerData:
+	if not is_detail_size(w, h):
+		return null
 	var decoded := decode_rle(text, w, h)
 	if decoded.is_empty():
 		return null
 	var banner := BannerData.new(w, h)
 	banner.cells = decoded
+	if not banner.shape_is_respected():
+		return null
 	return banner
 
 
@@ -181,11 +189,7 @@ static func from_dict(data: Dictionary) -> BannerData:
 	var banner := from_rle(rle, w, h)
 	if banner == null:
 		if not data.is_empty():
-			DebugLogger.warn("banner runs did not decode (%dx%d); using the default" % [w, h], "BannerData")
-		return create_default()
-	if not banner.shape_is_respected():
-		if not data.is_empty():
-			DebugLogger.warn("banner data paints outside the cloth (%dx%d); using the default" % [w, h], "BannerData")
+			DebugLogger.warn("banner runs did not decode into a legal cloth (%dx%d); using the default" % [w, h], "BannerData")
 		return create_default()
 	return banner
 
