@@ -84,8 +84,8 @@ func _build() -> void:
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
 	margin.add_theme_constant_override("margin_top", 10)
 	margin.add_theme_constant_override("margin_bottom", 10)
 	add_child(margin)
@@ -97,7 +97,7 @@ func _build() -> void:
 	_build_header(column)
 
 	var main := HBoxContainer.new()
-	main.add_theme_constant_override("separation", 8)
+	main.add_theme_constant_override("separation", 6)
 	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(main)
 	_build_rail(main)
@@ -169,7 +169,7 @@ func _frame(panel: PanelContainer, title: String) -> VBoxContainer:
 ## theme's plain panel, so it reads as "not yet" without a colour of its own.
 func _build_rail(parent: HBoxContainer) -> void:
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(218.0, 0.0)
+	panel.custom_minimum_size = Vector2(206.0, 0.0)
 	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	parent.add_child(panel)
 
@@ -236,6 +236,8 @@ func _build_centre(parent: HBoxContainer) -> void:
 	row.add_child(_name_input)
 
 	var editor_panel := PanelContainer.new()
+	editor_panel.theme_type_variation = "EditorFrame"
+	editor_panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	column.add_child(editor_panel)
 	var editor := _frame(editor_panel, "BANNER EDITOR")
 	_workspace = BannerWorkspace.new()
@@ -253,7 +255,7 @@ func _build_centre(parent: HBoxContainer) -> void:
 func _build_right_column(parent: HBoxContainer) -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 10)
-	column.custom_minimum_size = Vector2(304.0, 0.0)
+	column.custom_minimum_size = Vector2(292.0, 0.0)
 	parent.add_child(column)
 
 	# --- world settings -------------------------------------------------------------------
@@ -414,7 +416,7 @@ func _dress_field(field: LineEdit) -> void:
 		field.add_theme_font_override("font", _font)
 	field.add_theme_font_size_override("font_size", PixelStyle.scaled(13))
 	field.add_theme_color_override("font_color", UiTheme.TEXT)
-	field.add_theme_color_override("font_placeholder_color", Color(0.45, 0.47, 0.51))
+	field.add_theme_color_override("font_placeholder_color", Color(0.53, 0.55, 0.59))
 	field.add_theme_color_override("caret_color", UiTheme.ACCENT)
 
 

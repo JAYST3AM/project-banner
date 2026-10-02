@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=25 format=3]
+[gd_resource type="Theme" load_steps=35 format=3]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/frame_large.png" id="tex_editor"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/header_bar.png" id="tex_header"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/footer_bar.png" id="tex_footer"]
@@ -195,14 +195,153 @@ content_margin_top = 0
 content_margin_right = 0
 content_margin_bottom = 0
 
+[sub_resource type="StyleBoxTexture" id="sb_btn_hover"]
+texture = ExtResource("tex_btn")
+texture_margin_left = 14
+texture_margin_top = 14
+texture_margin_right = 14
+texture_margin_bottom = 14
+content_margin_left = 14
+content_margin_top = 8
+content_margin_right = 14
+content_margin_bottom = 10
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+modulate_color = Color(1.0, 1.0, 1.0, 1)
+
+[sub_resource type="StyleBoxTexture" id="sb_btn_pressed"]
+texture = ExtResource("tex_btn")
+texture_margin_left = 14
+texture_margin_top = 14
+texture_margin_right = 14
+texture_margin_bottom = 14
+content_margin_left = 14
+content_margin_top = 8
+content_margin_right = 14
+content_margin_bottom = 10
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+modulate_color = Color(0.78, 0.78, 0.85, 1)
+
+[sub_resource type="StyleBoxTexture" id="sb_btn_disabled"]
+texture = ExtResource("tex_btn")
+texture_margin_left = 14
+texture_margin_top = 14
+texture_margin_right = 14
+texture_margin_bottom = 14
+content_margin_left = 14
+content_margin_top = 8
+content_margin_right = 14
+content_margin_bottom = 10
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+modulate_color = Color(0.52, 0.54, 0.58, 1)
+
+[sub_resource type="StyleBoxTexture" id="sb_btn_start_hover"]
+texture = ExtResource("tex_btn_start")
+texture_margin_left = 14
+texture_margin_top = 14
+texture_margin_right = 14
+texture_margin_bottom = 14
+content_margin_left = 18
+content_margin_top = 8
+content_margin_right = 18
+content_margin_bottom = 10
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+modulate_color = Color(1.0, 1.0, 1.0, 1)
+
+[sub_resource type="StyleBoxTexture" id="sb_btn_start_pressed"]
+texture = ExtResource("tex_btn_start")
+texture_margin_left = 14
+texture_margin_top = 14
+texture_margin_right = 14
+texture_margin_bottom = 14
+content_margin_left = 18
+content_margin_top = 8
+content_margin_right = 18
+content_margin_bottom = 10
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+modulate_color = Color(0.8, 0.8, 0.85, 1)
+
+[sub_resource type="StyleBoxTexture" id="sb_btn_start_disabled"]
+texture = ExtResource("tex_btn_start")
+texture_margin_left = 14
+texture_margin_top = 14
+texture_margin_right = 14
+texture_margin_bottom = 14
+content_margin_left = 18
+content_margin_top = 8
+content_margin_right = 18
+content_margin_bottom = 10
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+modulate_color = Color(0.55, 0.57, 0.6, 1)
+
+[sub_resource type="StyleBoxFlat" id="sb_active_hover"]
+bg_color = Color(0.3, 0.25, 0.15, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.72, 0.45, 1)
+content_margin_left = 5.0
+content_margin_top = 4.0
+content_margin_right = 5.0
+content_margin_bottom = 4.0
+
+[sub_resource type="StyleBoxFlat" id="sb_active_pressed"]
+bg_color = Color(0.26, 0.22, 0.13, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.72, 0.45, 1)
+content_margin_left = 5.0
+content_margin_top = 4.0
+content_margin_right = 5.0
+content_margin_bottom = 4.0
+
+[sub_resource type="StyleBoxFlat" id="sb_active_disabled"]
+bg_color = Color(0.14, 0.14, 0.16, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.36, 0.4, 1)
+content_margin_left = 5.0
+content_margin_top = 4.0
+content_margin_right = 5.0
+content_margin_bottom = 4.0
+
+[sub_resource type="StyleBoxTexture" id="sb_input_read_only"]
+texture = ExtResource("tex_input")
+texture_margin_left = 12
+texture_margin_top = 12
+texture_margin_right = 12
+texture_margin_bottom = 12
+content_margin_left = 16
+content_margin_top = 8
+content_margin_right = 16
+content_margin_bottom = 8
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
+modulate_color = Color(0.85, 0.85, 0.88, 1)
+
 [resource]
 
 PanelContainer/styles/panel = SubResource("sb_panel")
 Panel/styles/panel = SubResource("sb_panel")
 Button/styles/normal = SubResource("sb_btn")
+Button/styles/hover = SubResource("sb_btn_hover")
+Button/styles/pressed = SubResource("sb_btn_pressed")
+Button/styles/hover_pressed = SubResource("sb_btn_pressed")
+Button/styles/disabled = SubResource("sb_btn_disabled")
 Button/styles/focus = SubResource("sb_focus_ring")
 LineEdit/styles/normal = SubResource("sb_input")
 LineEdit/styles/focus = SubResource("sb_focus_ring")
+LineEdit/styles/read_only = SubResource("sb_input_read_only")
 Label/colors/font_color = Color(0.91, 0.92, 0.94, 1)
 TooltipPanel/styles/panel = SubResource("sb_panel")
 TooltipLabel/colors/font_color = Color(0.91, 0.92, 0.94, 1)
@@ -215,9 +354,17 @@ IconButton/styles/disabled = SubResource("sb_icon_off")
 IconButton/styles/focus = SubResource("sb_empty")
 StartButton/base_type = &"Button"
 StartButton/styles/normal = SubResource("sb_btn_start")
+StartButton/styles/hover = SubResource("sb_btn_start_hover")
+StartButton/styles/pressed = SubResource("sb_btn_start_pressed")
+StartButton/styles/hover_pressed = SubResource("sb_btn_start_pressed")
+StartButton/styles/disabled = SubResource("sb_btn_start_disabled")
 StartButton/styles/focus = SubResource("sb_focus_ring")
 ActiveButton/base_type = &"Button"
 ActiveButton/styles/normal = SubResource("sb_icon_on")
+ActiveButton/styles/hover = SubResource("sb_active_hover")
+ActiveButton/styles/pressed = SubResource("sb_active_pressed")
+ActiveButton/styles/hover_pressed = SubResource("sb_active_pressed")
+ActiveButton/styles/disabled = SubResource("sb_active_disabled")
 EditorFrame/base_type = &"PanelContainer"
 EditorFrame/styles/panel = SubResource("sb_editor")
 HeaderFrame/base_type = &"PanelContainer"

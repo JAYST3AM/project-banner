@@ -120,7 +120,7 @@ func _build_controls_column() -> void:
 	var palette := BannerData.palette()
 	for i in palette.size():
 		var swatch := Button.new()
-		swatch.custom_minimum_size = Vector2(18.0, 18.0)
+		swatch.custom_minimum_size = Vector2(17.0, 17.0)
 		swatch.tooltip_text = "#" + palette[i].to_html(false)
 		swatch.focus_mode = Control.FOCUS_NONE
 		swatch.pressed.connect(_select_colour.bind(i))
@@ -136,7 +136,7 @@ func _build_controls_column() -> void:
 	for size in BannerData.detail_sizes():
 		var detail_button := Button.new()
 		detail_button.text = "%dx%d" % [size.x, size.y]
-		detail_button.custom_minimum_size = PixelStyle.scaled_vec(Vector2(62.0, 26.0))
+		detail_button.custom_minimum_size = PixelStyle.scaled_vec(Vector2(56.0, 24.0))
 		detail_button.add_theme_font_override("font", _font)
 		detail_button.add_theme_font_size_override("font_size", PixelStyle.scaled(11))
 		detail_button.add_theme_color_override("font_color", UiTheme.TEXT)
@@ -206,8 +206,8 @@ func _build_preview_column() -> void:
 	column.add_child(pole_frame)
 	var pole_view := BannerView.new()
 	pole_view.banner = _banner
-	pole_view.view_scale = 3.2
-	pole_view.custom_minimum_size = Vector2(176.0, 235.0)
+	pole_view.view_scale = 2.9
+	pole_view.custom_minimum_size = Vector2(168.0, 232.0)
 	_views.append(pole_view)
 	pole_frame.add_child(pole_view)
 
@@ -250,7 +250,7 @@ func _icon_button(icon_name: String, tooltip: String, group: ButtonGroup,
 	button.icon = PixelIcons.texture(icon_name, UiTheme.TEXT)
 	button.expand_icon = true
 	button.tooltip_text = tooltip
-	button.custom_minimum_size = Vector2(24.0, 24.0)
+	button.custom_minimum_size = Vector2(22.0, 22.0)
 	button.toggle_mode = toggle
 	button.focus_mode = Control.FOCUS_NONE
 	if group != null:
