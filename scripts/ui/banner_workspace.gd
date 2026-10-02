@@ -4,8 +4,11 @@ extends HBoxContainer
 ## New Campaign screen's Banner Editor panel by D-168).
 ##
 ## Everything a player does to paint a banner lives here - the grid, the locked-20 palette,
-## pencil/fill/erase, mirror, the wind and grid toggles, undo, clear, starters, the three
-## detail levels and the preview stack. The New Campaign screen owns the company name, the
+## pencil/fill/erase, mirror, the wind and grid toggles, undo, clear, starters and the three
+## detail levels. The workspace runs three lanes: the tools toolbox, the finished banner as
+## the hero object (its own BannerView at 4x, the editor's focal point) and the editing lane -
+## the paint grid with its status line, above one grouped support card holding the reserved
+## founder slot and the true-scale map. The New Campaign screen owns the company name, the
 ## world seed and the final Start Campaign; this component owns the cloth. One source of
 ## truth: the campaign map, the suites and the screen all talk to [method BannerData], and
 ## this is the only place that paints one.
@@ -206,11 +209,11 @@ func _build_canvas_column() -> void:
 
 	var founder_slot := HBoxContainer.new()
 	founder_slot.name = "founder_slot"
-	founder_slot.add_theme_constant_override("separation", 8)
+	founder_slot.add_theme_constant_override("separation", 6)
 	founder_slot.alignment = BoxContainer.ALIGNMENT_CENTER
 	founder_slot.set_meta("reserved", true)
 	support_rows.add_child(founder_slot)
-	founder_slot.add_child(PixelIcons.icon("founder", 26, Color(0.44, 0.46, 0.50)))
+	founder_slot.add_child(PixelIcons.icon("founder", 22, Color(0.44, 0.46, 0.50)))
 	var founder_text := VBoxContainer.new()
 	founder_text.add_theme_constant_override("separation", 0)
 	founder_slot.add_child(founder_text)
@@ -433,7 +436,7 @@ func _refresh_status() -> void:
 	var colour := "none"
 	if _selected_colour >= 0 and _selected_colour < palette.size():
 		colour = "#" + palette[_selected_colour].to_html(false)
-	_status.text = "%dx%d - painted %d of %d - colour %s" % [
+	_status.text = "%dx%d - %d of %d - %s" % [
 		_banner.width, _banner.height, _banner.painted_count(), _banner.allowed_count(), colour,
 	]
 	# Mark the active detail button, the way the mockup's selected level reads.
