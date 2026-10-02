@@ -582,7 +582,11 @@ class BannerView extends Control:
 			draw_rect(Rect2(0.0, road_y, size.x, 4.0), Color(0.56, 0.48, 0.33))
 		if banner == null:
 			return
-		var anchor_y := (size.y * 0.72 + 2.0) if map_mode else (size.y - 9.0)
+		# Large views (the hero pole at 3.1) tuck the art 9px up so its top sits
+		# exactly on the card's inner edge; small views (thumbnail at 0.34) keep
+		# the original 10px anchor.
+		var pole_inset := 9.0 if view_scale > 1.0 else 10.0
+		var anchor_y := (size.y * 0.72 + 2.0) if map_mode else (size.y - pole_inset)
 		var t := Time.get_ticks_msec() / 1000.0
 		BannerArt.draw_marker(self, _cache, banner, Vector2(size.x * 0.5, anchor_y), t,
 			wind and BannerArt.wind_enabled(), view_scale)
