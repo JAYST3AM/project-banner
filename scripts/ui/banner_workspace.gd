@@ -73,7 +73,7 @@ func install_banner(banner: BannerData) -> void:
 
 func _build_controls_column() -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 5)
+	column.add_theme_constant_override("separation", 7)
 	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(column)
 
