@@ -1,60 +1,83 @@
 extends Control
-## The New Campaign screen (D-168): one place where a campaign is founded.
+## The New Campaign screen (D-168): one place where a campaign is founded, wearing the
+## approved mockup's composition (visual pass, 2026-10-02).
 ##
 ## This is the whole of pre-campaign setup - the company's name, the banner it marches
-## under and the world it marches into - on one full-screen surface. The owner's brief
-## was explicit: no popup form followed by a second window; the player stays here until
-## they either go Back or press Start Campaign.
+## under and the world it marches into - on one full-screen surface. The owner's brief was
+## explicit: no popup form followed by a second window; the player stays here until they
+## either go Back or press Start Campaign.
 ##
-## The campaign does not exist until Start Campaign (the D-167 contract, kept): this
-## screen collects the name, the seed and the painted banner locally, and only
-## [method start] calls [method GameManager.new_campaign] and moves to the world map.
-## Back or Escape returns to the menu and creates nothing.
+## The campaign does not exist until Start Campaign (the D-167 contract, kept): this screen
+## collects the name, the seed and the painted banner locally, and only [method start] calls
+## [method GameManager.new_campaign] and moves to the world map. Back or Escape returns to
+## the menu and creates nothing.
 ##
-## The banner workspace is [BannerWorkspace], the same component the paint prototype's
-## tools were approved in - one source of truth for banner editing. The left rail lists
-## the sections a creation screen will eventually hold; only the ones that genuinely
-## exist are interactive, the rest are plainly marked as later so nothing pretends to
-## exist before it does (the owner's rule). The right column carries the world's seed and
-## a live summary of what Start Campaign will found.
+## Composition, following the mockup: a titled header over the scene; a left rail of
+## creation steps (Company live; the founder steps plainly locked with "(Coming Soon)" -
+## tiles, not controls, so nothing pretends to exist before it does); framed COMPANY
+## DETAILS and BANNER EDITOR panels in the centre, the editor hosting [BannerWorkspace];
+## framed WORLD SETTINGS and CAMPAIGN PREVIEW panels on the right; and a framed action bar
+## carrying Back to Main Menu and the gold-trimmed START CAMPAIGN.
+##
+## The layout is deliberate about the project's fixed 1280x720 UI units (canvas_items
+## stretch): nothing may clip, at any window size, so the centre works to a measured budget.
 ##
 ## The read-only accessors under "for the tests" exist so a suite can drive this screen
 ## through the same methods its buttons drive - not a parallel test path.
 
-const BODY := Color(0.13, 0.15, 0.19)
-const LIGHT := Color(0.38, 0.42, 0.48)
+const BACKGROUND_PATH := "res://assets/ui/main_menu_bg.png"
+
 const DARK := Color(0.06, 0.07, 0.09)
 const OUTLINE := Color(0.02, 0.02, 0.03)
 const DIM := Color(0.66, 0.68, 0.72)
 const SMALL_SIZE := 12
+const GOLD := Color(0.91, 0.81, 0.55)
+const BRONZE := Color(0.48, 0.36, 0.24)
+const PANEL_FILL := Color(0.085, 0.10, 0.13)
+const CARD_FILL := Color(0.09, 0.105, 0.135)
+const PARCHMENT := Color(0.76, 0.63, 0.38)
+const PARCHMENT_EDGE := Color(0.54, 0.42, 0.22)
+const PARCHMENT_TEXT := Color(0.14, 0.10, 0.05)
+const LOCKED_FILL := Color(0.075, 0.085, 0.11)
 
-## The rail's sections. `ready` is the honest switch: true means the section is on this
-## screen today; false renders as a plainly marked "later" line, and the founder creator
-## will flip them on as those systems are built. Nothing here is a control until it has
-## something to control.
+## The rail's steps. `ready` is the honest switch: true means the step is on this screen
+## today; false renders as a plainly locked tile. The founder creator will flip them on as
+## those systems are built - nothing here is a control until it has something to control.
 const SECTIONS: Array = [
-	["company", "COMPANY", true],
-	["founder", "FOUNDER", false],
-	["appearance", "APPEARANCE", false],
-	["backstory", "BACKSTORY", false],
-	["culture", "CULTURE", false],
-	["starting", "STARTING CONDITIONS", false],
-	["rules", "CAMPAIGN RULES", false],
+	["company", "COMPANY", "Name & Banner", true],
+	["founder", "FOUNDER", "(Coming Soon)", false],
+	["appearance", "APPEARANCE", "(Coming Soon)", false],
+	["backstory", "BACKSTORY", "(Coming Soon)", false],
+	["culture", "CULTURE / RACE", "(Coming Soon)", false],
+	["class", "CLASS", "(Coming Soon)", false],
+	["subclass", "SUBCLASS", "(Coming Soon)", false],
+	["starting", "STARTING CONDITIONS", "(Coming Soon)", false],
+	["rules", "CAMPAIGN RULES", "(Coming Soon)", false],
 ]
 
 var _font: Font = null
 var _button_styles: Dictionary = {}
+var _icon_styles: Dictionary = {}
+var _start_styles: Dictionary = {}
 var _workspace: BannerWorkspace = null
 var _name_input: LineEdit = null
 var _seed_input: LineEdit = null
-var _summary: Label = null
+var _sum_company: Label = null
+var _sum_banner: Label = null
+var _sum_seed: Label = null
+var _sum_options: Label = null
+var _preview_thumb: BannerWorkspace.BannerView = null
 
 
 func _ready() -> void:
 	var payload: Dictionary = SceneManager.consume_payload()
 	_font = PixelStyle.pixel_font()
-	_button_styles = PixelStyle.button_styles(BODY, LIGHT, DARK, UiTheme.ACCENT, OUTLINE)
-	theme = PixelStyle.tooltip_theme(BODY, UiTheme.ACCENT, UiTheme.TEXT)
+	_button_styles = PixelStyle.button_styles(Color(0.13, 0.15, 0.19), Color(0.38, 0.42, 0.48),
+		DARK, UiTheme.ACCENT, OUTLINE)
+	_icon_styles = _build_icon_styles(_button_styles)
+	_start_styles = PixelStyle.button_styles(Color(0.22, 0.34, 0.20), Color(0.46, 0.60, 0.35),
+		DARK, GOLD, PARCHMENT_EDGE)
+	theme = PixelStyle.tooltip_theme(Color(0.13, 0.15, 0.19), UiTheme.ACCENT, UiTheme.TEXT)
 	_build()
 	var incoming: Variant = payload.get("banner", null)
 	if incoming is BannerData:
@@ -67,162 +90,334 @@ func _ready() -> void:
 	DebugLogger.info("new campaign screen opened", "NewCampaign")
 
 
+## Icon buttons need less padding than word buttons - the base style keeps 14-pixel content
+## margins, which would squeeze a 28-pixel square to nothing.
+func _build_icon_styles(base: Dictionary) -> Dictionary:
+	var styles := {}
+	for key in base.keys():
+		var style: StyleBoxTexture = (base[key] as StyleBoxTexture).duplicate()
+		style.content_margin_left = 3.0
+		style.content_margin_right = 3.0
+		style.content_margin_top = 3.0
+		style.content_margin_bottom = 3.0
+		styles[key] = style
+	return styles
+
+
 # ---------------------------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------------------------
 
 func _build() -> void:
-	var background := ColorRect.new()
-	background.color = Color(0.05, 0.06, 0.08)
-	background.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(background)
+	_build_background()
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 40)
-	margin.add_theme_constant_override("margin_right", 40)
-	margin.add_theme_constant_override("margin_top", 18)
-	margin.add_theme_constant_override("margin_bottom", 18)
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_bottom", 10)
 	add_child(margin)
 
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 8)
 	margin.add_child(column)
 
-	column.add_child(PixelStyle.pixel_label("FOUND YOUR COMPANY", 22, UiTheme.GOLD))
-	column.add_child(PixelStyle.body_label(
-		"Raise a company, paint the banner it marches under, and choose the world it marches into.",
-		15, DIM))
-	column.add_child(PixelStyle.rule(LIGHT.darkened(0.3)))
+	_build_header(column)
 
 	var main := HBoxContainer.new()
-	main.add_theme_constant_override("separation", 22)
+	main.add_theme_constant_override("separation", 10)
 	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(main)
 	_build_rail(main)
-	_build_company_section(main)
-	_build_world_column(main)
+	_build_centre(main)
+	_build_right_column(main)
 
-	column.add_child(PixelStyle.rule(LIGHT.darkened(0.3)))
 	_build_actions(column)
 
 
-## The section rail: where the founder creator will grow. Current sections read bright,
-## later ones are dim and plainly marked - labels, not buttons, because a control that
-## cannot do anything is a lie about what the game can do.
+## The valley from the main menu, held far back: atmosphere, not a second subject.
+func _build_background() -> void:
+	if ResourceLoader.exists(BACKGROUND_PATH):
+		var picture := TextureRect.new()
+		picture.set_anchors_preset(Control.PRESET_FULL_RECT)
+		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		picture.texture = load(BACKGROUND_PATH)
+		picture.modulate = Color(0.42, 0.40, 0.45)
+		picture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		add_child(picture)
+	var scrim := ColorRect.new()
+	scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scrim.color = Color(0.035, 0.04, 0.055, 0.78)
+	add_child(scrim)
+
+
+func _build_header(column: VBoxContainer) -> void:
+	var title_row := HBoxContainer.new()
+	title_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	title_row.add_theme_constant_override("separation", 14)
+	column.add_child(title_row)
+	title_row.add_child(PixelIcons.icon("diamond", 14, GOLD.darkened(0.2)))
+	title_row.add_child(PixelStyle.pixel_label("FOUND YOUR COMPANY", 26, GOLD))
+	title_row.add_child(PixelIcons.icon("diamond", 14, GOLD.darkened(0.2)))
+
+	var subtitle := PixelStyle.body_label(
+		"Create your company, design its banner, and choose the world it marches into.", 14,
+		Color(0.80, 0.82, 0.86))
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(subtitle)
+	column.add_child(PixelStyle.rule(BRONZE.darkened(0.25)))
+
+
+## A framed panel with a titled head: the one shape every block on this screen shares.
+func _frame(panel: PanelContainer, title: String) -> VBoxContainer:
+	var style := PixelStyle.panel_style(PANEL_FILL, BRONZE, OUTLINE)
+	style.content_margin_left = 12.0
+	style.content_margin_right = 12.0
+	style.content_margin_top = 8.0
+	style.content_margin_bottom = 10.0
+	panel.add_theme_stylebox_override("panel", style)
+	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 6)
+	panel.add_child(column)
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 7)
+	title_row.add_child(PixelIcons.icon("diamond", 10, GOLD.darkened(0.15)))
+	title_row.add_child(PixelStyle.pixel_label(title, 12, GOLD))
+	column.add_child(title_row)
+	column.add_child(PixelStyle.rule(BRONZE.darkened(0.35)))
+	return column
+
+
+## The creation rail: a step list where the current step is a parchment tile and the future
+## steps are plainly locked. Labels, not buttons - a control that cannot do anything is a
+## lie about what the game can do.
 func _build_rail(parent: HBoxContainer) -> void:
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 6)
-	column.custom_minimum_size = Vector2(170.0, 0.0)
-	parent.add_child(column)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(216.0, 0.0)
+	var style := PixelStyle.panel_style(Color(0.055, 0.065, 0.09), BRONZE, OUTLINE)
+	style.content_margin_left = 7.0
+	style.content_margin_right = 7.0
+	style.content_margin_top = 7.0
+	style.content_margin_bottom = 7.0
+	panel.add_theme_stylebox_override("panel", style)
+	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	parent.add_child(panel)
 
-	column.add_child(PixelStyle.pixel_label("SECTIONS", 11, UiTheme.GOLD))
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 4)
+	panel.add_child(column)
 	for entry in SECTIONS:
-		var pair: Array = entry
-		var ready := bool(pair[2])
-		# Only the colour marks the current section: the founder sections are plainly dim
-		# and called out below, and nothing here is a control until it has something to control.
-		var label := PixelStyle.body_label(str(pair[1]), 14, UiTheme.GOLD if ready else Color(0.36, 0.38, 0.42))
-		column.add_child(label)
-	var note := PixelStyle.body_label(
-		"The founder sections arrive as their systems do - this screen is their home.", SMALL_SIZE, DIM)
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.custom_minimum_size = Vector2(170.0, 0.0)
-	column.add_child(note)
+		var row: Array = entry
+		column.add_child(_section_tile(str(row[0]), str(row[1]), str(row[2]), bool(row[3])))
 
 
-## The company: its name, and the banner it marches under. The workspace carries every
-## tool the paint prototype proved; the name is the one thing the menu used to own.
-func _build_company_section(parent: HBoxContainer) -> void:
+func _section_tile(id: String, label: String, sub: String, ready: bool) -> PanelContainer:
+	var tile := PanelContainer.new()
+	tile.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var style := StyleBoxFlat.new()
+	style.bg_color = PARCHMENT if ready else LOCKED_FILL
+	style.border_color = PARCHMENT_EDGE if ready else OUTLINE
+	style.set_border_width_all(2 if ready else 1)
+	style.set_corner_radius_all(0)
+	style.content_margin_left = 9.0
+	style.content_margin_right = 9.0
+	style.content_margin_top = 7.0
+	style.content_margin_bottom = 7.0
+	tile.add_theme_stylebox_override("panel", style)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 9)
+	tile.add_child(row)
+	row.add_child(PixelIcons.icon(id, 24,
+		Color(0.18, 0.13, 0.07) if ready else Color(0.58, 0.60, 0.63)))
+
+	var text := VBoxContainer.new()
+	text.add_theme_constant_override("separation", 0)
+	row.add_child(text)
+	text.add_child(PixelStyle.pixel_label(label, 13 if ready else 12,
+		PARCHMENT_TEXT if ready else Color(0.68, 0.70, 0.73)))
+	text.add_child(PixelStyle.body_label(sub, 11,
+		Color(0.30, 0.23, 0.11) if ready else Color(0.47, 0.49, 0.52)))
+	return tile
+
+
+func _build_centre(parent: HBoxContainer) -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 6)
+	column.add_theme_constant_override("separation", 8)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(column)
 
-	column.add_child(PixelStyle.pixel_label("COMPANY", 11, UiTheme.GOLD))
-	column.add_child(PixelStyle.body_label("Company name", 13, DIM))
+	var details_panel := PanelContainer.new()
+	column.add_child(details_panel)
+	var details := _frame(details_panel, "COMPANY DETAILS")
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	details.add_child(row)
+	row.add_child(PixelStyle.body_label("Company Name", 14, DIM))
 	_name_input = LineEdit.new()
-	_name_input.custom_minimum_size = Vector2(330.0, 28.0)
+	_name_input.custom_minimum_size = Vector2(330.0, 30.0)
 	_name_input.max_length = 48
 	_name_input.placeholder_text = _default_company_name()
 	_dress_field(_name_input)
 	_name_input.text_changed.connect(func(_text: String) -> void: _refresh_summary())
-	column.add_child(_name_input)
+	row.add_child(_name_input)
 
+	var editor_panel := PanelContainer.new()
+	column.add_child(editor_panel)
+	var editor := _frame(editor_panel, "BANNER EDITOR")
 	_workspace = BannerWorkspace.new()
 	_workspace.banner_changed.connect(_refresh_summary)
-	column.add_child(_workspace)
+	editor.add_child(_workspace)
 
 
-## The world: its seed today, its settings as they arrive. Below it, the live summary of
-## what Start Campaign will found.
-func _build_world_column(parent: HBoxContainer) -> void:
+func _build_right_column(parent: HBoxContainer) -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 6)
-	column.custom_minimum_size = Vector2(310.0, 0.0)
+	column.add_theme_constant_override("separation", 8)
+	column.custom_minimum_size = Vector2(316.0, 0.0)
 	parent.add_child(column)
 
-	column.add_child(PixelStyle.pixel_label("WORLD", 11, UiTheme.GOLD))
-	column.add_child(PixelStyle.body_label("World seed", 13, DIM))
+	# --- world settings -------------------------------------------------------------------
+	var world_panel := PanelContainer.new()
+	column.add_child(world_panel)
+	var world := _frame(world_panel, "WORLD SETTINGS")
+	world.add_child(PixelStyle.body_label("World Seed", 14, DIM))
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	column.add_child(row)
+	row.add_theme_constant_override("separation", 6)
+	world.add_child(row)
 	_seed_input = LineEdit.new()
-	_seed_input.custom_minimum_size = Vector2(200.0, 28.0)
+	_seed_input.custom_minimum_size = Vector2(0.0, 30.0)
+	_seed_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_seed_input.max_length = 18
 	_seed_input.placeholder_text = "random"
 	_dress_field(_seed_input)
 	_seed_input.text_changed.connect(func(_text: String) -> void: _refresh_summary())
 	row.add_child(_seed_input)
-	var random_button := PixelStyle.text_button("Randomise", _button_styles, 12, Vector2(0.0, 28.0),
-		UiTheme.TEXT, Color(0.45, 0.47, 0.51))
-	random_button.pressed.connect(randomise_seed)
-	row.add_child(random_button)
-	var hint := PixelStyle.body_label("Blank = a random world; numbers and words both mark one.", SMALL_SIZE, DIM)
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.custom_minimum_size = Vector2(310.0, 0.0)
-	column.add_child(hint)
-
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0.0, 8.0)
-	column.add_child(spacer)
-	column.add_child(PixelStyle.rule(LIGHT.darkened(0.3)))
-	column.add_child(PixelStyle.pixel_label("CAMPAIGN PREVIEW", 11, UiTheme.GOLD))
-	_summary = PixelStyle.body_label("", 13, DIM)
-	_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_summary.custom_minimum_size = Vector2(310.0, 0.0)
-	column.add_child(_summary)
-	var note := PixelStyle.body_label(
-		"The campaign is founded when you press Start Campaign. Back leaves the world unfounded.",
+	row.add_child(_icon_button("dice", "A fresh random seed", randomise_seed))
+	var hint := PixelStyle.body_label("Leave blank for a random world, or enter a number or word seed.",
 		SMALL_SIZE, DIM)
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.custom_minimum_size = Vector2(310.0, 0.0)
-	column.add_child(note)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	world.add_child(hint)
+	var randomise := Button.new()
+	randomise.text = "Randomise Seed"
+	randomise.icon = PixelIcons.texture("dice", UiTheme.TEXT)
+	randomise.expand_icon = true
+	PixelStyle.dress_button(randomise, _button_styles, _font, 13, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	randomise.custom_minimum_size = Vector2(0.0, 32.0)
+	randomise.pressed.connect(randomise_seed)
+	world.add_child(randomise)
+
+	# --- campaign preview -----------------------------------------------------------------
+	var preview_panel := PanelContainer.new()
+	column.add_child(preview_panel)
+	var preview := _frame(preview_panel, "CAMPAIGN PREVIEW")
+	_sum_company = PixelStyle.pixel_label("", 12, UiTheme.TEXT)
+	preview.add_child(PixelStyle.stat_row("Company Name", _sum_company, 13, DIM))
+
+	var banner_row := HBoxContainer.new()
+	banner_row.add_theme_constant_override("separation", 8)
+	preview.add_child(banner_row)
+	banner_row.add_child(PixelStyle.body_label("Banner", 13, DIM))
+	var sponge := Control.new()
+	sponge.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	banner_row.add_child(sponge)
+	var thumb_frame := PanelContainer.new()
+	thumb_frame.add_theme_stylebox_override("panel", _thumb_style())
+	banner_row.add_child(thumb_frame)
+	_preview_thumb = BannerWorkspace.BannerView.new()
+	_preview_thumb.view_scale = 0.34
+	_preview_thumb.custom_minimum_size = Vector2(28.0, 34.0)
+	_preview_thumb.banner = null
+	thumb_frame.add_child(_preview_thumb)
+	_sum_banner = PixelStyle.pixel_label("", 12, UiTheme.TEXT)
+	_sum_banner.tooltip_text = "The company's own banner, painted in the editor"
+	banner_row.add_child(_sum_banner)
+
+	_sum_seed = PixelStyle.pixel_label("", 12, UiTheme.TEXT)
+	preview.add_child(PixelStyle.stat_row("World Seed", _sum_seed, 13, DIM))
+	var options_row := HBoxContainer.new()
+	options_row.add_theme_constant_override("separation", 6)
+	preview.add_child(options_row)
+	var options_label := PixelStyle.body_label("Additional Options", 13, DIM)
+	options_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	options_row.add_child(options_label)
+	options_row.add_child(PixelIcons.icon("rules", 14, Color(0.52, 0.54, 0.57)))
+	_sum_options = PixelStyle.pixel_label("Default Settings", 12, Color(0.52, 0.54, 0.57))
+	options_row.add_child(_sum_options)
+
+
+func _thumb_style() -> StyleBoxTexture:
+	var style := PixelStyle.panel_style(Color(0.06, 0.07, 0.095), LIGHT_EDGE(), OUTLINE)
+	style.content_margin_left = 2.0
+	style.content_margin_right = 2.0
+	style.content_margin_top = 2.0
+	style.content_margin_bottom = 2.0
+	return style
+
+
+func LIGHT_EDGE() -> Color:
+	return Color(0.24, 0.27, 0.32)
 
 
 func _build_actions(column: VBoxContainer) -> void:
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 10)
-	column.add_child(actions)
-	var back_button := PixelStyle.text_button("Back", _button_styles, 13, Vector2(140.0, 38.0),
-		UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	var panel := PanelContainer.new()
+	var style := PixelStyle.panel_style(Color(0.055, 0.065, 0.09), BRONZE, OUTLINE)
+	style.content_margin_left = 10.0
+	style.content_margin_right = 10.0
+	style.content_margin_top = 6.0
+	style.content_margin_bottom = 6.0
+	panel.add_theme_stylebox_override("panel", style)
+	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	column.add_child(panel)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	panel.add_child(row)
+
+	var back_button := Button.new()
+	back_button.text = "Back to Main Menu"
+	back_button.icon = PixelIcons.texture("arrow_left", UiTheme.TEXT)
+	back_button.expand_icon = true
+	PixelStyle.dress_button(back_button, _button_styles, _font, 13, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	back_button.custom_minimum_size = Vector2(230.0, 38.0)
 	back_button.pressed.connect(back)
-	actions.add_child(back_button)
+	row.add_child(back_button)
+
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	actions.add_child(spacer)
-	var start_button := PixelStyle.text_button("START CAMPAIGN", _button_styles, 15, Vector2(240.0, 38.0),
-		UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	row.add_child(spacer)
+
+	var start_button := Button.new()
+	start_button.text = "START CAMPAIGN"
+	start_button.icon = PixelIcons.texture("class", GOLD)
+	start_button.expand_icon = true
+	PixelStyle.dress_button(start_button, _start_styles, _font, 16, Color(0.97, 0.93, 0.78),
+		Color(0.55, 0.58, 0.52))
+	start_button.custom_minimum_size = Vector2(300.0, 44.0)
 	start_button.pressed.connect(start)
-	actions.add_child(start_button)
+	row.add_child(start_button)
+
+
+func _icon_button(icon_name: String, tooltip: String, handler: Callable) -> Button:
+	var button := Button.new()
+	PixelStyle.dress_button(button, _icon_styles, _font, 11, UiTheme.TEXT, Color(0.45, 0.47, 0.51))
+	button.icon = PixelIcons.texture(icon_name, UiTheme.TEXT)
+	button.expand_icon = true
+	button.tooltip_text = tooltip
+	button.custom_minimum_size = Vector2(30.0, 30.0)
+	button.focus_mode = Control.FOCUS_NONE
+	button.pressed.connect(handler)
+	return button
 
 
 func _dress_field(field: LineEdit) -> void:
 	field.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	field.add_theme_stylebox_override("normal",
-		PixelStyle.panel_style(Color(0.10, 0.12, 0.15), LIGHT.darkened(0.5), OUTLINE))
+		PixelStyle.panel_style(Color(0.10, 0.12, 0.15), Color(0.28, 0.31, 0.37), OUTLINE))
 	field.add_theme_stylebox_override("focus",
-		PixelStyle.panel_style(Color(0.13, 0.15, 0.19), UiTheme.ACCENT, UiTheme.ACCENT))
+		PixelStyle.panel_style(Color(0.13, 0.15, 0.19), GOLD.darkened(0.15), GOLD.darkened(0.3)))
 	if _font != null:
 		field.add_theme_font_override("font", _font)
 	field.add_theme_font_size_override("font_size", PixelStyle.scaled(13))
@@ -292,17 +487,14 @@ func _default_company_name() -> String:
 
 
 func _refresh_summary() -> void:
-	if _summary == null or _workspace == null:
+	if _workspace == null or _sum_company == null:
 		return
 	var banner: BannerData = _workspace.current_banner()
-	var raw_seed := _seed_input.text.strip_edges()
-	var world := "random - picked when the campaign is founded"
-	if not raw_seed.is_empty():
-		world = "seed %s" % raw_seed if raw_seed.is_valid_int() else "words '%s' - hash %d" % [
-			raw_seed, RngService.stable_hash(raw_seed)]
-	_summary.text = "company   %s\nworld     %s\nbanner    %dx%d - %d of %d cells painted" % [
-		resolved_name(), world, banner.width, banner.height, banner.painted_count(), banner.allowed_count(),
-	]
+	_sum_company.text = resolved_name()
+	_sum_seed.text = _seed_input.text.strip_edges() if not _seed_input.text.strip_edges().is_empty() else "random"
+	_sum_banner.text = "Custom Banner" if banner.painted_count() > 0 else "Blank"
+	_preview_thumb.banner = banner
+	_preview_thumb.queue_redraw()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -335,7 +527,7 @@ func workspace() -> BannerWorkspace:
 
 
 func summary_text() -> String:
-	return _summary.text
+	return "%s / %s / %s" % [_sum_company.text, _sum_seed.text, _sum_banner.text]
 
 
 ## Put the caret in the company-name field. For suites: focus is exactly what makes a

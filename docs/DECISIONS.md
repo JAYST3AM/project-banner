@@ -4593,3 +4593,25 @@ opening the screen creates no campaign, the name and seed survive the paint work
 founds exactly one campaign with them, Back founds nothing, a blank name resolves to the
 configured default and a text seed keeps its stable hash; the same suite's D-167 invariants (cloth
 size, guards, RLE, wind, cache, save/load) are unchanged and green.
+
+**D-168 visual pass (owner's brief, same day):** the screen was then rebuilt to the approved
+mockup's composition - the owner's "Ravenwood Company Campaign Builder" image. What changed:
+a titled header over the scene (diamond ornaments, brighter subtitle); the rail became nine
+framed step tiles (COMPANY live as a parchment tile with its "Name & Banner" sublabel;
+FOUNDER..CAMPAIGN RULES locked tiles marked "(Coming Soon)"), each with a small procedural
+icon; framed COMPANY DETAILS and BANNER EDITOR panels; the editor re-arranged as controls
+(icon tool row, "Palette (20 colours)" in two rows of ten, Detail Level with the active
+level marked, Starters) | the paint grid recessed in a bronze frame (160x200, reduced from
+its old oversized presentation) | a preview stack of three cards - the banner-on-pole hero,
+a plainly reserved founder slot ("arrives with the founder creator"), and the campaign map
+at true scale; framed WORLD SETTINGS (seed, dice button, Randomise Seed) and CAMPAIGN
+PREVIEW (company, Custom Banner + thumbnail, seed, Additional Options) panels on the right;
+a framed action bar with Back to Main Menu and a green-and-gold START CAMPAIGN carrying the
+crossed swords, the single strongest control. The menu's valley painting sits far behind as
+atmosphere. Icons are procedural (`scripts/ui/pixel_icons.gd`: 10x10 string-grid
+silhouettes, one ink colour, cached) because the project ships no icon set. Nothing added is
+a control that does not work - the locked steps are labels and the founder card says so -
+and D-168's flow, contract and tests are untouched (banner suite 279/0 through every
+revision). Remaining distance from the mockup is painted art the project does not have
+(wood/parchment textures, serif display faces); the composition, hierarchy and pixel
+language now follow it.
