@@ -13,11 +13,12 @@ extends HBoxContainer
 ## truth: the campaign map, the suites and the screen all talk to [method BannerData], and
 ## this is the only place that paints one.
 ##
-## The layout follows the approved mockup: tools as an icon row, the palette as two rows of
-## ten, detail and starters as compact rows, the paint grid recessed in a bronze frame, and a
-## preview stack of three cards - the banner on its pole (the focal card), a plainly reserved
-## founder slot, and the campaign map at true scale. Detail is detail only: the cloth's size
-## in the world never changes, so the previews prove what the map will wear at every level.
+## The layout follows the approved mockup in three lanes: the tools lane (icon row, palette in
+## two rows of ten, detail and starters as compact rows), the hero lane - the finished banner
+## on its pole at 4x, the editor's focal object, and the editing lane - the paint grid with its
+## status line above one support card holding the reserved founder slot and the campaign map at
+## true scale. Detail is detail only: the cloth's size in the world never changes, so the
+## previews prove what the map will wear at every level.
 ##
 ## The read-only accessors under "for the tests" exist so a suite can drive the paint surface
 ## through the same methods its buttons drive - not a parallel test path.
@@ -592,7 +593,7 @@ class BannerView extends Control:
 			draw_rect(Rect2(0.0, road_y, size.x, 4.0), Color(0.56, 0.48, 0.33))
 		if banner == null:
 			return
-		# Large views (the hero pole at 3.1) tuck the art 9px up so its top sits
+		# Large views (the hero pole at 4.0) tuck the art 9px up so its top sits
 		# exactly on the card's inner edge; small views (thumbnail at 0.34) keep
 		# the original 10px anchor.
 		var pole_inset := 9.0 if view_scale > 1.0 else 10.0
