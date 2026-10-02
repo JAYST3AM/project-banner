@@ -78,6 +78,18 @@ func _ready() -> void:
 # ---------------------------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------------------------
+#
+# SCREEN GRID (logical units, 1280x720):
+#   outer margin 16 | major gutter 6 (root + all columns) | margins top/bottom 10
+#   rail 206 | centre 738 | right column 292        (16+206+6+738+6+292+16 = 1280)
+#   header 62 (10..72) | main 78..636 | footer 68 (642..710)
+#   every guide lands on an integer; all panels snap to these edges - art conforms
+#   to the rects, never the other way around. Measured with --layout-debug.
+	if OS.get_cmdline_user_args().has("--layout-debug"):
+		var probe := Control.new()
+		probe.set_script(load("res://scripts/dev/layout_debug.gd"))
+		add_child(probe)
+
 
 func _build() -> void:
 	_build_background()
@@ -91,13 +103,13 @@ func _build() -> void:
 	add_child(margin)
 
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
+	column.add_theme_constant_override("separation", 6)  # same major gutter as the columns
 	margin.add_child(column)
 
 	_build_header(column)
 
 	var main := HBoxContainer.new()
-	main.add_theme_constant_override("separation", 6)
+	main.add_theme_constant_override("separation", 6)  # the one major gutter: outer margin 16, gutters 6
 	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(main)
 	_build_rail(main)
@@ -126,6 +138,7 @@ func _build_background() -> void:
 
 func _build_header(column: VBoxContainer) -> void:
 	var panel := PanelContainer.new()
+	panel.name = "header_panel"
 	panel.theme_type_variation = "HeaderFrame"
 	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	column.add_child(panel)
@@ -169,6 +182,7 @@ func _frame(panel: PanelContainer, title: String) -> VBoxContainer:
 ## theme's plain panel, so it reads as "not yet" without a colour of its own.
 func _build_rail(parent: HBoxContainer) -> void:
 	var panel := PanelContainer.new()
+	panel.name = "rail_panel"
 	panel.custom_minimum_size = Vector2(206.0, 0.0)
 	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	parent.add_child(panel)
@@ -216,11 +230,12 @@ func _section_tile(id: String, label: String, sub: String, ready: bool) -> Panel
 
 func _build_centre(parent: HBoxContainer) -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
+	column.add_theme_constant_override("separation", 6)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(column)
 
 	var details_panel := PanelContainer.new()
+	details_panel.name = "company_panel"
 	column.add_child(details_panel)
 	var details := _frame(details_panel, "COMPANY DETAILS")
 	var row := HBoxContainer.new()
@@ -236,7 +251,9 @@ func _build_centre(parent: HBoxContainer) -> void:
 	row.add_child(_name_input)
 
 	var editor_panel := PanelContainer.new()
+	editor_panel.name = "editor_panel"
 	editor_panel.theme_type_variation = "EditorFrame"
+	editor_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	editor_panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	column.add_child(editor_panel)
 	var editor := _frame(editor_panel, "BANNER EDITOR")
@@ -254,12 +271,13 @@ func _build_centre(parent: HBoxContainer) -> void:
 
 func _build_right_column(parent: HBoxContainer) -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
+	column.add_theme_constant_override("separation", 6)
 	column.custom_minimum_size = Vector2(292.0, 0.0)
 	parent.add_child(column)
 
 	# --- world settings -------------------------------------------------------------------
 	var world_panel := PanelContainer.new()
+	world_panel.name = "world_panel"
 	world_panel.theme_type_variation = "PrimaryPanel"
 	column.add_child(world_panel)
 	var world := _frame(world_panel, "WORLD SETTINGS")
@@ -297,6 +315,7 @@ func _build_right_column(parent: HBoxContainer) -> void:
 
 	# --- campaign preview -----------------------------------------------------------------
 	var preview_panel := PanelContainer.new()
+	preview_panel.name = "preview_panel"
 	preview_panel.theme_type_variation = "PrimaryPanel"
 	preview_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	column.add_child(preview_panel)
@@ -353,6 +372,7 @@ func _thumb_style() -> StyleBoxFlat:
 
 func _build_actions(column: VBoxContainer) -> void:
 	var panel := PanelContainer.new()
+	panel.name = "footer_panel"
 	panel.theme_type_variation = "FooterFrame"
 	panel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	column.add_child(panel)
@@ -362,6 +382,7 @@ func _build_actions(column: VBoxContainer) -> void:
 	panel.add_child(row)
 
 	var back_button := Button.new()
+	back_button.name = "back_button"
 	back_button.theme_type_variation = "SecondaryButton"
 	back_button.text = "Back to Main Menu"
 	back_button.icon = PixelIcons.texture("arrow_left", UiTheme.TEXT)
@@ -381,6 +402,7 @@ func _build_actions(column: VBoxContainer) -> void:
 	row.add_child(spacer)
 
 	var start_button := Button.new()
+	start_button.name = "start_button"
 	start_button.theme_type_variation = "StartButton"
 	start_button.text = "START CAMPAIGN"
 	start_button.icon = PixelIcons.texture("class", GOLD)

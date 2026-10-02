@@ -73,6 +73,7 @@ func install_banner(banner: BannerData) -> void:
 
 func _build_controls_column() -> void:
 	var column := VBoxContainer.new()
+	column.name = "editor_controls"
 	column.add_theme_constant_override("separation", 7)
 	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(column)
@@ -174,6 +175,7 @@ func _build_canvas_column() -> void:
 	add_child(column)
 
 	var frame := PanelContainer.new()
+	frame.name = "canvas_frame"
 	frame.theme_type_variation = "UtilityInset"
 	column.add_child(frame)
 
@@ -194,6 +196,7 @@ func _build_canvas_column() -> void:
 
 func _build_preview_column() -> void:
 	var column := VBoxContainer.new()
+	column.name = "editor_previews"
 	column.add_theme_constant_override("separation", 4)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(column)
@@ -202,17 +205,19 @@ func _build_preview_column() -> void:
 
 	# Card one: the banner on its pole - the focal preview of the screen.
 	var pole_frame := PanelContainer.new()
+	pole_frame.name = "pole_frame"
 	pole_frame.theme_type_variation = "UtilityInset"
 	column.add_child(pole_frame)
 	var pole_view := BannerView.new()
 	pole_view.banner = _banner
-	pole_view.view_scale = 3.3
-	pole_view.custom_minimum_size = Vector2(196.0, 234.0)
+	pole_view.view_scale = 3.1
+	pole_view.custom_minimum_size = Vector2(196.0, 218.0)
 	_views.append(pole_view)
 	pole_frame.add_child(pole_view)
 
 	# Card two: the founder slot, plainly reserved - no control pretends to exist here.
 	var founder_frame := PanelContainer.new()
+	founder_frame.name = "founder_frame"
 	founder_frame.theme_type_variation = "UtilityInset"
 	founder_frame.set_meta("reserved", true)
 	column.add_child(founder_frame)
@@ -229,6 +234,7 @@ func _build_preview_column() -> void:
 
 	# Card three: the cloth at the size the campaign map actually shows.
 	var map_frame := PanelContainer.new()
+	map_frame.name = "map_frame"
 	map_frame.theme_type_variation = "UtilityInset"
 	column.add_child(map_frame)
 	var map_view := BannerView.new()
