@@ -4513,3 +4513,42 @@ test now steps the enemy AI each tick before the simulator, exactly as the battl
 production gives it none. The substance is unchanged - the first measurement that the half moved is still
 asserted, and the halves still keep parting past five units - and the measured scenario is one the game can
 actually create. This supersedes D-162.
+
+**D-167: the company banner - painted after New Game, and it rides the map.**
+
+The owner's brief: a system "in the game, where the player can customize their banner after
+clicking new game", edited "by pixel art painting ... the user clicks a color and paints the
+banner". The construction was agreed in the paint prototype (`F:\VSC Projects\pb-bench\art\
+avatars\`): the cloth HANGS from a crossbar with a swallowtail notch cut into the bottom hem - the
+owner rejected the earlier flag-floating-beside-the-pole look outright - and the pole carries
+detail (five-tone timber, wrap rings, steel butt ferrule). Two rulings are load-bearing: the grid
+is DETAIL ONLY - "the amount of grid shouldn't change the size in game. it should just be more
+detailed" - so the cloth is one fixed 32 x 40 banner units (grids of 8x10 / 16x20 / 32x40 art
+pixels across it), and the campaign is created at the screen's confirm, not at the menu's Begin, so
+Back on the banner screen creates nothing.
+
+Where it lives: `main_menu._on_new_campaign` routes to the new `banner_editor` scene with the name
+and seed in the payload; the screen (paint grid, locked-20 palette, pencil/fill/erase, mirror,
+wind toggle, grid, undo, clear, starters, detail levels, company-panel and true-scale previews)
+calls `GameManager.new_campaign(name, seed, banner)` at confirm. `CampaignState.player_banner` is
+the persistent cloth; serialisation is `{width, height, rle}` (A = empty, B..U = palette 0..19)
+via `BannerData.to_dict`/`from_dict`, and anything malformed - a save written before banners
+existed included - degrades to the default design rather than failing to open. `set_cell` refuses
+the notch and off-palette indices at the data layer, so no renderer defends itself.
+
+The renderer (`BannerArt`) paints the banner once into a 56 x 70 image and caches the texture,
+keyed by a signature of the paint and the wind's whole-unit row shifts, because MEASURED: drawing
+the ~1,500 rectangles live every frame cost the world map ~2 ms/frame (166 fps against 248 for the
+old disc marker); the cached texture draws one quad and puts the map back at 211-236 fps, worst
+frame 6.4 ms. The wind is per-row integer shifts pinned at the crossbar, growing towards the hem,
+with gusts and fold shading (`PB_BANNER_WIND=off` stills every cloth in the same build);
+`PB_BANNER_MARKER=dot` restores the pre-banner disc for A/B. The disc under the player is gone -
+the banner IS the marker, its pole base planted on the party's own position - and `--banner-editor`
+opens the screen at boot for a scripted run or a screenshot.
+
+Verified: suite `test_banner` 250/0 - the shape pinned per detail level, palette legality, guarded
+cells, RLE round trip and refusals, garbage-in degradation, the wind's pinned top row and bounded
+hem, the rendered image's own pixels (finial, first cell, pole through the notch, transparency
+outside), cache behaviour, campaign round trip through save/load, and the real menu -> banner
+screen -> campaign path including Back creating nothing. Windowed runs of the banner screen and the
+campaign map: no script errors; the map's frame pacing is quoted above.

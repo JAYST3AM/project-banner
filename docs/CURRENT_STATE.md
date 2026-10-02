@@ -2,15 +2,13 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** Step 8 - roads as a living thing: tiers, traffic and decay on every link, with
-the pace and the eta reading the drawn road and the priced grid left to price only the route (D-124).
+**Last updated:** Step 9 - the company banner: painted pixel-by-pixel after New Game, hanging
+from its pole on the campaign map as one cached texture (D-167).
 **Engine:** Godot 4.7.2-stable
-**Test status:** the full headless suite is green again: **37 suites, 9,535 assertions, 0
-failures**, with the native query suite and the separation-pass equivalence suite run on their
-own and the two-process restart check green. The 2026-09-19 revert's fallout is cleared: the
-battle-terrain cluster was reconciled to the live seven-type world, a real terrain bug was found
-and fixed on the way through, and the suites that no longer described the game were corrected
-rather than muted - see D-159 to D-166.
+**Test status:** the full headless suite is green: **38 suites, 9,785 assertions, 0 failures**,
+with the native query suite and the separation-pass equivalence suite run on their own and the
+two-process restart check green. The 2026-09-19 revert's fallout stays cleared: the battle-terrain
+cluster reconciled to the live seven-type world - see D-159 to D-166.
 **Independent gate:** GitHub Actions runs the full suite, the native query suite, the separation
 equivalence suite and the restart check on every push to `main`.
 
@@ -26,6 +24,22 @@ scaling](#step-75---formation-battlefield-focus-scaling), [Step 7.6 - automatic 
 cost scaling](#step-76---automatic-target-search-cost-scaling) and [Step 7.7 - native spatial
 query feasibility spike](#step-77---native-spatial-query-feasibility-spike) and [Step 7.8 -
 separation-pass optimisation](#step-78---separation-pass-optimisation) below.
+
+---
+
+## The company banner (2026-10-02, D-167)
+
+After **New Game** the player founds the company by painting its banner: a pixel grid (8x10 / 16x20 /
+32x40 - detail only, the cloth is always 32 x 40 world units) in the locked 20-colour palette, with
+pencil/fill/erase, mirror, a wind toggle, undo, clear and starters, plus live previews (company
+panel at 5x, true map scale). Confirm creates the campaign and the same cloth rides the party
+marker on the world map, where the disc used to be; Back creates nothing. The cloth waves -
+per-row whole-unit shifts pinned at the crossbar, with gusts and fold shading - and is cached as
+one texture (drawing it live cost ~2 ms/frame; the cached quad puts the map back at 211-236 fps).
+`PB_BANNER_MARKER=dot` restores the old disc and `PB_BANNER_WIND=off` stills every cloth in the
+same build; `--banner-editor` opens the screen at boot for a scripted run or a screenshot. Old
+saves gain the default banner on load. Suite: `test_banner` (new). Prototype and design notes:
+`F:\VSC Projects\pb-bench\art\avatars\`.
 
 ---
 

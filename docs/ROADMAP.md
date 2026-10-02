@@ -924,3 +924,31 @@ curve now reads the terrain (D-127): a road never simply runs over water - a cro
 `roads.bridge_max_span` is crossed by a **bridge** (timber, posted, priced and walked as road) and a
 wider lake bends the road around it - while the roads themselves draw as trodden earth, not UI
 strokes.
+
+
+## Step 9 - the company banner (`milestone-09`)
+
+**What it is.** After **New Game** the player founds the company by painting its banner: a pixel
+grid (8x10 / 16x20 / 32x40) in the locked 20-colour palette, with the tools the owner specified in
+the paint prototype (pencil, fill, eraser, mirror, wind, grid, undo, clear, starters, right-click
+erase). The campaign is created at **confirm**; the same cloth then rides the party marker on the
+campaign map, where the disc used to be. The owner's two calls shaped it: "I want the player to be
+able to edit their banners ... by pixel art painting", and "the amount of grid shouldn't change the
+size in game. it should just be more detailed" - so the cloth is one fixed 32x40 units and the grid
+is detail only.
+
+| piece | where |
+| --- | --- |
+| the grid, serialisation, the cloth shape, the wind maths | `scripts/world/banner_data.gd` (new) |
+| the renderer: pole, finial, crossbar, waving cloth -> a cached 56x70 texture | `scripts/world/banner_art.gd` (new) |
+| the screen: paint surface, palette, tools, previews, Begin/Back | `scripts/ui/banner_editor.gd` + `scenes/ui/banner_editor.tscn` (new) |
+| the flow: menu -> banner screen -> campaign; `new_campaign(name, seed, banner)` | `scripts/ui/main_menu.gd`, `scripts/core/game_manager.gd` |
+| the marker; `PB_BANNER_MARKER=dot` restores the old disc, `PB_BANNER_WIND=off` stills the wind | `scripts/world/world_map_view.gd` |
+| palette, detail levels, wind constants | `data/config/banner.json` (new) |
+| the checks | `tests/test_banner.gd` (new) |
+
+**Measured:** drawing the cloth live costs ~2 ms/frame on the map (166 fps against the disc's 248);
+the cached texture puts the map back at 211-236 fps, worst frame 6.4 ms. **Verified** by the suite
+and by banner-screen and campaign-map windowed runs. **Next:** faction banners (the data model
+stores one per company and `Party.faction_id` already exists), and a "re-edit from the company
+panel" entry point. See D-167.

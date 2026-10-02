@@ -171,6 +171,22 @@ drive real scene transitions without freeing itself mid-test.
 `world_map.tscn` is deliberately tiny (root + `View` + `Camera2D` + `HUD`); the HUD
 builds its own controls. See D-013 in `DECISIONS.md` for why.
 
+### The company banner (D-167)
+
+| Class | File | Notes |
+| --- | --- | --- |
+| `BannerData` | `scripts/world/banner_data.gd` | the painted grid: palette indices, the cloth shape, the wind maths, RLE serialisation |
+| `BannerArt` | `scripts/world/banner_art.gd` | renders a banner into a cached 56x70 texture; every consumer draws one quad |
+
+The banner screen (`scenes/ui/banner_editor.tscn`, `scripts/ui/banner_editor.gd`) opens after New
+Campaign with the name and seed in its payload and creates the campaign at **confirm**
+(`GameManager.new_campaign(name, seed, banner)`), so Back means nothing happened. The player's cloth
+lives on `CampaignState.player_banner` and is drawn where the party marker used to be; a save
+without one gains the default design on load. The grid is detail only - the cloth is always 32 x 40
+world units - and `PB_BANNER_MARKER=dot` / `PB_BANNER_WIND=off` restore the old disc and still the
+wind in the same build. Palette, detail levels and wind constants live in
+`data/config/banner.json`.
+
 ### Units and soldiers (Step 3)
 
 | Class | File | Notes |
