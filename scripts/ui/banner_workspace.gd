@@ -50,8 +50,8 @@ func _ready() -> void:
 	_font = PixelStyle.pixel_font()
 	add_theme_constant_override("separation", 12)
 	_build_controls_column()
+	_build_hero_column()
 	_build_canvas_column()
-	_build_preview_column()
 
 
 ## Give the workspace a banner to paint (the New Campaign screen's payload or a fresh
@@ -74,8 +74,8 @@ func install_banner(banner: BannerData) -> void:
 func _build_controls_column() -> void:
 	var column := VBoxContainer.new()
 	column.name = "editor_controls"
-	column.add_theme_constant_override("separation", 7)
-	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	column.add_theme_constant_override("separation", 10)
+	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	add_child(column)
 
 	column.add_child(PixelStyle.pixel_label("Tools", 11, GOLD))
@@ -170,8 +170,9 @@ func _build_controls_column() -> void:
 
 func _build_canvas_column() -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 4)
-	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	column.name = "editor_canvas"
+	column.add_theme_constant_override("separation", 12)
+	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	add_child(column)
 
 	var frame := PanelContainer.new()
@@ -193,57 +194,63 @@ func _build_canvas_column() -> void:
 	inner.add_child(_status)
 	_refresh_status()
 
+	# One quiet card grouping the reserved founder slot and the true-scale map,
+	# rather than two cards floating apart from the editing surface.
+	var support := PanelContainer.new()
+	support.name = "editor_support"
+	support.theme_type_variation = "UtilityInset"
+	column.add_child(support)
+	var support_rows := VBoxContainer.new()
+	support_rows.add_theme_constant_override("separation", 8)
+	support.add_child(support_rows)
 
-func _build_preview_column() -> void:
+	var founder_slot := HBoxContainer.new()
+	founder_slot.name = "founder_slot"
+	founder_slot.add_theme_constant_override("separation", 8)
+	founder_slot.alignment = BoxContainer.ALIGNMENT_CENTER
+	founder_slot.set_meta("reserved", true)
+	support_rows.add_child(founder_slot)
+	founder_slot.add_child(PixelIcons.icon("founder", 26, Color(0.44, 0.46, 0.50)))
+	var founder_text := VBoxContainer.new()
+	founder_text.add_theme_constant_override("separation", 0)
+	founder_slot.add_child(founder_text)
+	founder_text.add_child(PixelStyle.pixel_label("FOUNDER", 10, Color(0.58, 0.60, 0.64)))
+	founder_text.add_child(PixelStyle.body_label("arrives with the founder creator", 11, Color(0.55, 0.57, 0.61)))
+
+	support_rows.add_child(PixelStyle.rule(Color(0.30, 0.26, 0.20, 0.55)))
+
+	var map_view := BannerView.new()
+	map_view.name = "map_preview"
+	map_view.banner = _banner
+	map_view.view_scale = 0.75
+	map_view.map_mode = true
+	map_view.custom_minimum_size = Vector2(160.0, 56.0)
+	_views.append(map_view)
+	support_rows.add_child(map_view)
+
+
+func _build_hero_column() -> void:
+	# Zone B: the finished banner is the editor's primary object - a large, simply
+	# framed render with negative space around it, centred in the middle lane.
 	var column := VBoxContainer.new()
-	column.name = "editor_previews"
+	column.name = "editor_hero"
 	column.add_theme_constant_override("separation", 4)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(column)
 
-	column.add_child(PixelStyle.pixel_label("Preview", 11, GOLD))
+	column.add_child(PixelStyle.body_label("COMPANY BANNER", 11, GOLD))
 
-	# Card one: the banner on its pole - the focal preview of the screen.
 	var pole_frame := PanelContainer.new()
 	pole_frame.name = "pole_frame"
 	pole_frame.theme_type_variation = "UtilityInset"
 	column.add_child(pole_frame)
 	var pole_view := BannerView.new()
 	pole_view.banner = _banner
-	pole_view.view_scale = 3.1
-	pole_view.custom_minimum_size = Vector2(196.0, 218.0)
+	pole_view.view_scale = 4.0
+	pole_view.custom_minimum_size = Vector2(240.0, 300.0)
 	_views.append(pole_view)
 	pole_frame.add_child(pole_view)
-
-	# Card two: the founder slot, plainly reserved - no control pretends to exist here.
-	var founder_frame := PanelContainer.new()
-	founder_frame.name = "founder_frame"
-	founder_frame.theme_type_variation = "UtilityInset"
-	founder_frame.set_meta("reserved", true)
-	column.add_child(founder_frame)
-	var founder_row := HBoxContainer.new()
-	founder_row.add_theme_constant_override("separation", 8)
-	founder_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	founder_frame.add_child(founder_row)
-	founder_row.add_child(PixelIcons.icon("founder", 26, Color(0.44, 0.46, 0.50)))
-	var founder_text := VBoxContainer.new()
-	founder_text.add_theme_constant_override("separation", 0)
-	founder_row.add_child(founder_text)
-	founder_text.add_child(PixelStyle.pixel_label("FOUNDER", 10, Color(0.58, 0.60, 0.64)))
-	founder_text.add_child(PixelStyle.body_label("arrives with the founder creator", 11, Color(0.55, 0.57, 0.61)))
-
-	# Card three: the cloth at the size the campaign map actually shows.
-	var map_frame := PanelContainer.new()
-	map_frame.name = "map_frame"
-	map_frame.theme_type_variation = "UtilityInset"
-	column.add_child(map_frame)
-	var map_view := BannerView.new()
-	map_view.banner = _banner
-	map_view.view_scale = 0.75
-	map_view.map_mode = true
-	map_view.custom_minimum_size = Vector2(190.0, 64.0)
-	_views.append(map_view)
-	map_frame.add_child(map_view)
 
 
 ## The tools wear the theme's square icon button: an ON toggle - the selected tool, wind,

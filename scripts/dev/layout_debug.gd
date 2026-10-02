@@ -10,8 +10,8 @@ extends Control
 
 const TAGS := [
 	"header_panel", "rail_panel", "rail_tile_company", "rail_tile_founder",
-	"company_panel", "editor_panel", "editor_controls", "canvas_frame",
-	"editor_previews", "pole_frame", "founder_frame", "map_frame",
+	"company_panel", "editor_panel", "editor_controls", "editor_hero",
+	"editor_canvas", "canvas_frame", "pole_frame", "founder_slot", "map_preview",
 	"world_panel", "preview_panel", "footer_panel", "back_button",
 	"start_button",
 ]
