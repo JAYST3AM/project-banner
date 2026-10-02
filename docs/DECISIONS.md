@@ -4556,3 +4556,40 @@ hem, the rendered image's own pixels (finial, first cell, pole through the notch
 outside), cache behaviour, campaign round trip through save/load, and the real menu -> banner
 screen -> campaign path including Back creating nothing. Windowed runs of the banner screen and the
 campaign map: no script errors; the map's frame pacing is quoted above.
+
+**D-168: one New Campaign screen - the creation surface the founder creator will grow into.**
+
+The flow the owner specified: "Main Menu -> New Campaign -> World Map" - one full-screen creation
+interface, no popup form followed by another window, no second scene for any individual option.
+D-167's contract is kept exactly: the campaign is created at START CAMPAIGN and nowhere else, and
+Back or Escape returns to the menu having founded nothing.
+
+The screen (`scenes/ui/new_campaign.tscn`, `scripts/ui/new_campaign.gd`) is built around what the
+game genuinely has today and reserves room for what it will have: a left rail lists the sections
+(COMPANY now; FOUNDER, APPEARANCE, BACKSTORY, CULTURE, STARTING CONDITIONS, CAMPAIGN RULES plainly
+marked as later - labels, not controls, so nothing pretends to exist before it does), the centre
+pairs the company name with the banner, the right column carries the world seed and a live summary
+of what Start Campaign will found, and the bottom bar holds Back and START CAMPAIGN.
+
+The banner editor became `BannerWorkspace` (`scripts/ui/banner_workspace.gd`), an embeddable
+component that owns every paint tool, the palette, the detail levels and both previews - ONE source
+of truth for banner editing, embedded by the screen instead of a parallel paint system. The old
+standalone banner screen is deleted; `--banner-editor` became `--new-campaign`; the main menu's
+embedded name/seed mini-form is gone and New Campaign opens the creation screen directly, with
+Continue/Settings/Quit untouched (the legacy-menu suite still proves Continue opens an old save).
+The world seed behaves as the menu always did: blank = random at founding, a number is that
+number, words keep their stable hash.
+
+Measured the hard way: the project's UI space is a fixed 1280x720 units at every window size
+(canvas_items stretch, project.godot), and the D-167 banner screen had been clipping its own action
+row by ~66 units - unnoticed because its buttons had only ever been pressed by tests, never by
+eye. D-168's layout budget is the 720-unit box with slack (paint grid 224x280, previews 224x280 and
+224x110, 18-unit vertical margins); the action bar is verified visible in a real 2560x1440
+screenshot, and a toggle that is ON (tool, wind, grid) now carries an accent border so its state
+reads at a glance.
+
+Verified: `test_banner` drives the New Campaign path end-to-end through the real menu button -
+opening the screen creates no campaign, the name and seed survive the paint work, START CAMPAIGN
+founds exactly one campaign with them, Back founds nothing, a blank name resolves to the
+configured default and a text seed keeps its stable hash; the same suite's D-167 invariants (cloth
+size, guards, RLE, wind, cache, save/load) are unchanged and green.

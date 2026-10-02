@@ -941,14 +941,18 @@ is detail only.
 | --- | --- |
 | the grid, serialisation, the cloth shape, the wind maths | `scripts/world/banner_data.gd` (new) |
 | the renderer: pole, finial, crossbar, waving cloth -> a cached 56x70 texture | `scripts/world/banner_art.gd` (new) |
-| the screen: paint surface, palette, tools, previews, Begin/Back | `scripts/ui/banner_editor.gd` + `scenes/ui/banner_editor.tscn` (new) |
+| the screen: paint surface, palette, tools, previews (D-168: embedded as `BannerWorkspace` in the `new_campaign` screen, with company name + world seed + START CAMPAIGN around it) | `scripts/ui/banner_workspace.gd`, `scripts/ui/new_campaign.gd`, `scenes/ui/new_campaign.tscn` |
 | the flow: menu -> banner screen -> campaign; `new_campaign(name, seed, banner)` | `scripts/ui/main_menu.gd`, `scripts/core/game_manager.gd` |
 | the marker; `PB_BANNER_MARKER=dot` restores the old disc, `PB_BANNER_WIND=off` stills the wind | `scripts/world/world_map_view.gd` |
 | palette, detail levels, wind constants | `data/config/banner.json` (new) |
 | the checks | `tests/test_banner.gd` (new) |
 
 **Measured:** drawing the cloth live costs ~2 ms/frame on the map (166 fps against the disc's 248);
-the cached texture puts the map back at 211-236 fps, worst frame 6.4 ms. **Verified** by the suite
-and by banner-screen and campaign-map windowed runs. **Next:** faction banners (the data model
-stores one per company and `Party.faction_id` already exists), and a "re-edit from the company
-panel" entry point. See D-167.
+the cached texture puts the map back at 211-236 fps, worst frame 6.4 ms. **Reworked (D-168):** the
+standalone banner screen became `BannerWorkspace`, embedded in one full-screen New Campaign
+creation surface (section rail / company name + paint workspace / world seed + live summary /
+Back + START CAMPAIGN); the campaign is still founded only at START CAMPAIGN and the menu's
+name/seed mini-form is gone. **Verified** by the suite and by creation-screen and campaign-map
+windowed runs. **Next:** faction banners (the data model
+stores one per company and `Party.faction_id` already exists), and the founder sections slot into
+the D-168 rail as their systems arrive. See D-167 and D-168.

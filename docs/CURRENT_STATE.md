@@ -2,10 +2,10 @@
 
 What is actually playable and verified **right now**.
 
-**Last updated:** Step 9 - the company banner: painted pixel-by-pixel after New Game, hanging
-from its pole on the campaign map as one cached texture (D-167).
+**Last updated:** Step 9 - the company banner, founded on the unified New Campaign screen (D-168):
+painted pixel-by-pixel, hanging from its pole on the campaign map as one cached texture (D-167).
 **Engine:** Godot 4.7.2-stable
-**Test status:** the full headless suite is green: **38 suites, 9,798 assertions, 0 failures**,
+**Test status:** the full headless suite is green: **38 suites, 9,810 assertions, 0 failures**,
 with the native query suite and the separation-pass equivalence suite run on their own and the
 two-process restart check green. The 2026-09-19 revert's fallout stays cleared: the battle-terrain
 cluster reconciled to the live seven-type world - see D-159 to D-166.
@@ -27,19 +27,20 @@ separation-pass optimisation](#step-78---separation-pass-optimisation) below.
 
 ---
 
-## The company banner (2026-10-02, D-167)
+## The company banner and the New Campaign screen (2026-10-02, D-167/D-168)
 
-After **New Game** the player founds the company by painting its banner: a pixel grid (8x10 / 16x20 /
-32x40 - detail only, the cloth is always 32 x 40 world units) in the locked 20-colour palette, with
-pencil/fill/erase, mirror, a wind toggle, undo, clear and starters, plus live previews (company
-panel at 5x, true map scale). Confirm creates the campaign and the same cloth rides the party
-marker on the world map, where the disc used to be; Back creates nothing. The cloth waves -
-per-row whole-unit shifts pinned at the crossbar, with gusts and fold shading - and is cached as
-one texture (drawing it live cost ~2 ms/frame; the cached quad puts the map back at 211-236 fps).
+**New Campaign** opens one full-screen creation surface (D-168): a section rail on the left
+(COMPANY today; the founder sections marked as later - labels, not dead controls), the company
+name and the embedded `BannerWorkspace` paint surface in the centre, the world seed and a live
+summary in the right column, and Back / START CAMPAIGN on the bottom bar. Painting: a pixel grid
+(8x10 / 16x20 / 32x40 - detail only, the cloth is always 32 x 40 world units) in the locked
+20-colour palette, with pencil/fill/erase, mirror, a wind toggle, undo, clear and starters, plus
+live previews (company panel at 4x, true map scale). The campaign is created at START CAMPAIGN and
+nothing is founded before it; the cloth then rides the party marker on the world map, where the
+disc used to be. `--new-campaign` opens the screen at boot for a scripted run or a screenshot;
 `PB_BANNER_MARKER=dot` restores the old disc and `PB_BANNER_WIND=off` stills every cloth in the
-same build; `--banner-editor` opens the screen at boot for a scripted run or a screenshot. Old
-saves gain the default banner on load. Suite: `test_banner` (new). Prototype and design notes:
-`F:\VSC Projects\pb-bench\art\avatars\`.
+same build. Old saves gain the default banner on load. Suite: `test_banner` (new). Prototype and
+design notes: `F:\VSC Projects\pb-bench\art\avatars\`.
 
 ---
 

@@ -171,21 +171,24 @@ drive real scene transitions without freeing itself mid-test.
 `world_map.tscn` is deliberately tiny (root + `View` + `Camera2D` + `HUD`); the HUD
 builds its own controls. See D-013 in `DECISIONS.md` for why.
 
-### The company banner (D-167)
+### The company banner and the New Campaign screen (D-167/D-168)
 
 | Class | File | Notes |
 | --- | --- | --- |
 | `BannerData` | `scripts/world/banner_data.gd` | the painted grid: palette indices, the cloth shape, the wind maths, RLE serialisation |
 | `BannerArt` | `scripts/world/banner_art.gd` | renders a banner into a cached 56x70 texture; every consumer draws one quad |
+| `BannerWorkspace` | `scripts/ui/banner_workspace.gd` | the embeddable paint surface (grid, palette, tools, detail, previews); one source of truth for banner editing |
 
-The banner screen (`scenes/ui/banner_editor.tscn`, `scripts/ui/banner_editor.gd`) opens after New
-Campaign with the name and seed in its payload and creates the campaign at **confirm**
-(`GameManager.new_campaign(name, seed, banner)`), so Back means nothing happened. The player's cloth
-lives on `CampaignState.player_banner` and is drawn where the party marker used to be; a save
-without one gains the default design on load. The grid is detail only - the cloth is always 32 x 40
-world units - and `PB_BANNER_MARKER=dot` / `PB_BANNER_WIND=off` restore the old disc and still the
-wind in the same build. Palette, detail levels and wind constants live in
-`data/config/banner.json`.
+`scenes/ui/new_campaign.tscn` + `scripts/ui/new_campaign.gd` are the one creation surface (D-168):
+New Campaign opens it from the menu, it collects the company name, the banner (via
+`BannerWorkspace`) and the world seed, and only its **START CAMPAIGN** calls
+`GameManager.new_campaign(name, seed, banner)` before the transition to the world map - Back or
+Escape founds nothing. The player's cloth lives on `CampaignState.player_banner` and is drawn where
+the party marker used to be; a save without one gains the default design on load. The grid is
+detail only - the cloth is always 32 x 40 world units - and `PB_BANNER_MARKER=dot` /
+`PB_BANNER_WIND=off` restore the old disc and still the wind in the same build. Palette, detail
+levels and wind constants live in `data/config/banner.json`. The screen's layout fits the project's
+fixed 1280x720 UI units (canvas_items stretch) with slack; see D-168.
 
 ### Units and soldiers (Step 3)
 
