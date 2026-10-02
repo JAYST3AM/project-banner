@@ -37,6 +37,10 @@ var ground_field: Image = null
 
 var player_gold: int = 0
 var player_party: Party = null
+## The company banner: the cloth the player painted after New Game (D-167). A saved
+## campaign without one gains the default design on load, so old saves open with a
+## legal banner rather than a missing marker.
+var player_banner: BannerData = null
 
 var world_position: Vector2 = Vector2.ZERO
 var current_settlement_id: String = ""
@@ -88,6 +92,7 @@ static func create(p_config: GameConfig, campaign_name: String, seed_value: int)
 	state.player_party.kind = Party.KIND_PLAYER
 	state.player_party.display_name = p_config.get_string("campaign.player_party_name", "The Banner")
 	state.player_party.faction_id = p_config.get_string("campaign.starting_faction_id", "free_companies")
+	state.player_banner = BannerData.create_default()
 	return state
 
 
@@ -281,6 +286,7 @@ func to_dict() -> Dictionary:
 		"clock": clock.to_dict() if clock != null else {},
 		"player_gold": player_gold,
 		"player_party": player_party.to_dict() if player_party != null else {},
+		"player_banner": player_banner.to_dict() if player_banner != null else {},
 		"world_position": DataUtils.vec2_to(world_position),
 		"current_settlement_id": current_settlement_id,
 		"destination_id": destination_id,
@@ -317,6 +323,13 @@ static func from_dict(data: Dictionary, config: GameConfig) -> CampaignState:
 	state.clock = CampaignClock.new(config)
 	state.clock.from_dict(data.get("clock", {}) as Dictionary)
 	state.player_party = Party.from_dict(data.get("player_party", {}) as Dictionary)
+	# A save written before banners existed carries no player_banner, and a corrupt one
+	# carries nonsense; both gain the default design rather than failing to open (D-167).
+	var raw_banner: Variant = data.get("player_banner", {})
+	if typeof(raw_banner) == TYPE_DICTIONARY:
+		state.player_banner = BannerData.from_dict(raw_banner as Dictionary)
+	else:
+		state.player_banner = BannerData.create_default()
 
 	for key in (data.get("soldiers", {}) as Dictionary).keys():
 		var raw: Variant = (data["soldiers"] as Dictionary)[key]

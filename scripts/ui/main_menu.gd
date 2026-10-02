@@ -238,8 +238,13 @@ func _on_new_campaign() -> void:
 	var raw_seed := _seed_input.text.strip_edges()
 	if not raw_seed.is_empty():
 		seed_value = int(raw_seed) if raw_seed.is_valid_int() else RngService.stable_hash(raw_seed)
-	GameManager.new_campaign(_name_input.text, seed_value)
-	SceneManager.change_scene("world_map")
+	# The campaign is not created here any more (D-167): founding the company begins by
+	# painting its banner, so the name and seed ride to the banner screen and the campaign
+	# is created when the player confirms there. Back on that screen means nothing happened.
+	SceneManager.change_scene("banner_editor", {
+		"campaign_name": _name_input.text,
+		"seed_value": seed_value,
+	})
 
 
 func _on_continue() -> void:

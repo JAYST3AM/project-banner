@@ -22,8 +22,10 @@ func config() -> GameConfig:
 	return GameData.config
 
 
-## Creates a brand-new campaign. [param seed_value] of 0 means "pick one".
-func new_campaign(campaign_name: String = "", seed_value: int = 0) -> CampaignState:
+## Creates a brand-new campaign. [param seed_value] of 0 means "pick one"; [param banner]
+## is the cloth the player painted on the banner screen (D-167), and null means the default
+## banner - which is also what an old save gains when it carries none.
+func new_campaign(campaign_name: String = "", seed_value: int = 0, banner: BannerData = null) -> CampaignState:
 	var cfg := config()
 	var final_name := campaign_name.strip_edges()
 	if final_name.is_empty():
@@ -32,6 +34,8 @@ func new_campaign(campaign_name: String = "", seed_value: int = 0) -> CampaignSt
 		seed_value = randi()
 
 	campaign = CampaignState.create(cfg, final_name, seed_value)
+	if banner != null:
+		campaign.player_banner = banner
 	campaign.campaign_id = generate_campaign_id()
 	campaign.created_at = Time.get_datetime_string_from_system(false, true)
 

@@ -38,6 +38,9 @@ const HOVER_CARD_PREFIX := "--hover-card="
 const NO_MEETINGS_FLAG := "--no-meetings"
 ## Open the settings panel straight away, because a screenshot cannot click the button that opens it.
 const SETTINGS_PANEL_FLAG := "--settings-panel"
+## Open the company banner screen straight away (D-167). It normally opens after New
+## Campaign; a scripted run or a screenshot cannot click through the menu to reach it.
+const BANNER_EDITOR_FLAG := "--banner-editor"
 ## Force a UI scale for one run: "--ui-scale=1.2". Wins over the saved file, because it is the more
 ## deliberate request, and it is how screenshots at other scales are taken.
 const UI_SCALE_PREFIX := "--ui-scale="
@@ -154,6 +157,11 @@ static func no_meetings() -> bool:
 ## Whether a run asked to start with the settings panel open.
 static func settings_panel() -> bool:
 	return _has_flag(SETTINGS_PANEL_FLAG)
+
+
+## Whether a run asked to open the company banner screen at boot.
+static func banner_editor() -> bool:
+	return _has_flag(BANNER_EDITOR_FLAG)
 
 
 ## The UI scale a run asked for, or 0.0 when it did not.

@@ -61,6 +61,14 @@ var selected_id: String = ""
 var hovered_id: String = ""
 
 var _font: Font = null
+## The banner marker's wind time, stamped from the wall clock each draw: the cloth keeps
+## moving even while the simulation clock is paused, and no clock plumbing is needed here.
+var _banner_time: float = 0.0
+## The banner's rendered-texture cache: the cloth is painted into an image only when the
+## wind steps or the paint changes, and drawn as one quad every frame (D-167).
+var _banner_cache: Dictionary = {}
+## True when this process was asked for the pre-banner disc (PB_BANNER_MARKER=dot).
+var _banner_marker_disabled: bool = false
 ## Set while the terrain layer is drawing the ground. The flat fill and the grid were written for a
 ## map with no artwork - the grid says so itself - and painting them over real ground would be
 ## drawing the placeholder on top of the thing it stood in for.
@@ -70,6 +78,9 @@ var ground_art := false
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
 	z_index = -10
+	# PB_BANNER_MARKER=dot restores the pre-banner disc in the same build (D-167), which is
+	# how the two markers are compared; the banner is the default.
+	_banner_marker_disabled = OS.get_environment("PB_BANNER_MARKER").to_lower() == "dot"
 
 
 func bind(p_state: CampaignState, p_config: GameConfig, p_travel: TravelService) -> void:
@@ -435,17 +446,30 @@ func _draw_settlements() -> void:
 		_draw_label(settlement.name, Vector2(settlement.position.x, settlement.position.y - label_lift - 20.0), color, font_size)
 
 
+## The player's marker: the company banner, planted where the party stands (D-167).
+## The pole base sits on the party's own position, so the point the simulation walks is
+## the point the pole is planted on. [code]PB_BANNER_MARKER=dot[/code] restores the old
+## disc in the same build.
 func _draw_player_party() -> void:
 	# Between the last simulation step and the next one, not on a step boundary: the world moves thirty
 	# times a second and the screen draws three hundred and sixty, so drawing the step position alone
 	# makes the party hop the same distance at the same interval. Interpolating costs one lerp and is
 	# the difference between a marker that glides and a marker that stutters.
 	var position := state.previous_world_position.lerp(state.world_position, clampf(state.render_alpha, 0.0, 1.0))
-	draw_circle(position, 12.0, COLOR_PARTY_OUTLINE)
-	draw_circle(position, 9.0, COLOR_PLAYER)
-	draw_arc(position, 14.0, 0.0, TAU, 32, COLOR_PLAYER.lightened(0.25), 2.0)
+	if state.player_banner != null and not _banner_marker_disabled:
+		# A contact shadow, so the pole reads as planted in the ground rather than floating over it.
+		draw_set_transform(position, 0.0, Vector2(1.0, 0.45))
+		draw_circle(Vector2.ZERO, 11.0, Color(0.03, 0.04, 0.05, 0.38))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		_banner_time = Time.get_ticks_msec() / 1000.0
+		BannerArt.draw_marker(self, _banner_cache, state.player_banner, position, _banner_time,
+			BannerArt.wind_enabled())
+	else:
+		draw_circle(position, 12.0, COLOR_PARTY_OUTLINE)
+		draw_circle(position, 9.0, COLOR_PLAYER)
+		draw_arc(position, 14.0, 0.0, TAU, 32, COLOR_PLAYER.lightened(0.25), 2.0)
 	if state.player_party != null and not state.player_party.display_name.is_empty():
-		_draw_label(state.player_party.display_name, position + Vector2(0.0, 30.0), COLOR_PLAYER, label_font_size() - 2)
+		_draw_label(state.player_party.display_name, position + Vector2(0.0, 12.0), COLOR_PLAYER, label_font_size() - 2)
 
 
 ## Hostile and neutral parties sharing the map with the player. Hostile ones get

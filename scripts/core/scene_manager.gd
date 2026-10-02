@@ -17,6 +17,7 @@ signal scene_change_started(key: String)
 const SCENES := {
 	"main": "res://scenes/core/main.tscn",
 	"main_menu": "res://scenes/ui/main_menu.tscn",
+	"banner_editor": "res://scenes/ui/banner_editor.tscn",
 	"world_map": "res://scenes/world/world_map.tscn",
 	"settlement": "res://scenes/settlements/settlement.tscn",
 	# "battle" is the CPU battle - the oracle. The migration plan's condition is that the suites keep

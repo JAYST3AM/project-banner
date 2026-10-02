@@ -41,6 +41,14 @@ func _ready() -> void:
 		SceneManager.change_scene("world_map")
 		return
 
+	# Dev-only: "--banner-editor" opens the company banner screen directly (D-167). The
+	# screen normally opens after New Campaign, and a script or a screenshot cannot click
+	# through the menu to reach it.
+	if DevFlags.banner_editor():
+		DebugLogger.info("dev flag: opening the banner editor", "Main")
+		SceneManager.change_scene("banner_editor", {"campaign_name": "Dev Company", "seed_value": 5150})
+		return
+
 	SceneManager.change_scene("main_menu")
 
 

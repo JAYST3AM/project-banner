@@ -31,6 +31,7 @@ const SUITE_DEADLINE_S := 90
 const SUITES: Array[String] = [
 	"res://tests/test_core_services.gd",
 	"res://tests/test_campaign_flow.gd",
+	"res://tests/test_banner.gd",
 	"res://tests/test_world_map.gd",
 	"res://tests/test_world_chunks.gd",
 	"res://tests/test_world_sites.gd",
