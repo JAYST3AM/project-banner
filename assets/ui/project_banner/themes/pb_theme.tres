@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=35 format=3]
+[gd_resource type="Theme" load_steps=46 format=3]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/frame_large.png" id="tex_editor"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/header_bar.png" id="tex_header"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/footer_bar.png" id="tex_footer"]
@@ -30,9 +30,9 @@ texture_margin_top = 20
 texture_margin_right = 60
 texture_margin_bottom = 24
 content_margin_left = 60
-content_margin_top = 16
+content_margin_top = 12
 content_margin_right = 60
-content_margin_bottom = 14
+content_margin_bottom = 10
 axis_stretch_horizontal = 0
 axis_stretch_vertical = 0
 
@@ -329,21 +329,154 @@ axis_stretch_horizontal = 0
 axis_stretch_vertical = 0
 modulate_color = Color(0.85, 0.85, 0.88, 1)
 
+[sub_resource type="StyleBoxFlat" id="sb_secondary"]
+bg_color = Color(0.072, 0.082, 0.099, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.26, 0.2, 1)
+draw_center = true
+content_margin_left = 16
+content_margin_top = 12
+content_margin_right = 16
+content_margin_bottom = 12
+[sub_resource type="StyleBoxFlat" id="sb_locked"]
+bg_color = Color(0.055, 0.063, 0.076, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.17, 0.2, 0.24, 1)
+draw_center = true
+content_margin_left = 14
+content_margin_top = 8
+content_margin_right = 20
+content_margin_bottom = 8
+[sub_resource type="StyleBoxFlat" id="sb_utility_inset"]
+bg_color = Color(0.048, 0.055, 0.068, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.25, 0.3, 1)
+draw_center = true
+content_margin_left = 10
+content_margin_top = 8
+content_margin_right = 10
+content_margin_bottom = 8
+[sub_resource type="StyleBoxFlat" id="sb_input_flat"]
+bg_color = Color(0.062, 0.072, 0.088, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.26, 0.29, 0.34, 1)
+draw_center = true
+content_margin_left = 10
+content_margin_top = 6
+content_margin_right = 10
+content_margin_bottom = 6
+[sub_resource type="StyleBoxFlat" id="sb_utility"]
+bg_color = Color(0.086, 0.096, 0.114, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.24, 0.27, 0.32, 1)
+draw_center = true
+content_margin_left = 10
+content_margin_top = 5
+content_margin_right = 10
+content_margin_bottom = 5
+[sub_resource type="StyleBoxFlat" id="sb_utility_hover"]
+bg_color = Color(0.104, 0.116, 0.136, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.36, 0.4, 0.47, 1)
+draw_center = true
+content_margin_left = 10
+content_margin_top = 5
+content_margin_right = 10
+content_margin_bottom = 5
+[sub_resource type="StyleBoxFlat" id="sb_utility_pressed"]
+bg_color = Color(0.3, 0.25, 0.15, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.72, 0.45, 1)
+draw_center = true
+content_margin_left = 9
+content_margin_top = 4
+content_margin_right = 9
+content_margin_bottom = 4
+[sub_resource type="StyleBoxFlat" id="sb_utility_disabled"]
+bg_color = Color(0.07, 0.076, 0.088, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.16, 0.18, 0.21, 1)
+draw_center = true
+content_margin_left = 10
+content_margin_top = 5
+content_margin_right = 10
+content_margin_bottom = 5
+
+[sub_resource type="StyleBoxFlat" id="sb_secondary_btn"]
+bg_color = Color(0.098, 0.108, 0.128, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.34, 0.29, 0.21, 1)
+content_margin_left = 12
+content_margin_top = 6
+content_margin_right = 12
+content_margin_bottom = 6
+
+[sub_resource type="StyleBoxFlat" id="sb_secondary_btn_hover"]
+bg_color = Color(0.118, 0.130, 0.152, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.48, 0.41, 0.29, 1)
+content_margin_left = 12
+content_margin_top = 6
+content_margin_right = 12
+content_margin_bottom = 6
+
+[sub_resource type="StyleBoxFlat" id="sb_secondary_btn_pressed"]
+bg_color = Color(0.30, 0.25, 0.15, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.72, 0.45, 1)
+content_margin_left = 11
+content_margin_top = 5
+content_margin_right = 11
+content_margin_bottom = 5
+
 [resource]
 
-PanelContainer/styles/panel = SubResource("sb_panel")
-Panel/styles/panel = SubResource("sb_panel")
+PanelContainer/styles/panel = SubResource("sb_secondary")
+Panel/styles/panel = SubResource("sb_secondary")
 Button/styles/normal = SubResource("sb_btn")
 Button/styles/hover = SubResource("sb_btn_hover")
 Button/styles/pressed = SubResource("sb_btn_pressed")
 Button/styles/hover_pressed = SubResource("sb_btn_pressed")
 Button/styles/disabled = SubResource("sb_btn_disabled")
 Button/styles/focus = SubResource("sb_focus_ring")
-LineEdit/styles/normal = SubResource("sb_input")
+LineEdit/styles/normal = SubResource("sb_input_flat")
 LineEdit/styles/focus = SubResource("sb_focus_ring")
 LineEdit/styles/read_only = SubResource("sb_input_read_only")
 Label/colors/font_color = Color(0.91, 0.92, 0.94, 1)
-TooltipPanel/styles/panel = SubResource("sb_panel")
+TooltipPanel/styles/panel = SubResource("sb_secondary")
 TooltipLabel/colors/font_color = Color(0.91, 0.92, 0.94, 1)
 IconButton/base_type = &"Button"
 IconButton/styles/normal = SubResource("sb_icon_off")
@@ -378,3 +511,23 @@ TileDark/styles/panel = SubResource("sb_tile_dark")
 
 default_font = ExtResource("pb_font_body")
 default_font_size = 15
+PrimaryPanel/base_type = &"PanelContainer"
+PrimaryPanel/styles/panel = SubResource("sb_panel")
+LockedNavTile/base_type = &"PanelContainer"
+LockedNavTile/styles/panel = SubResource("sb_locked")
+UtilityInset/base_type = &"PanelContainer"
+UtilityInset/styles/panel = SubResource("sb_utility_inset")
+UtilityButton/base_type = &"Button"
+UtilityButton/styles/normal = SubResource("sb_utility")
+UtilityButton/styles/hover = SubResource("sb_utility_hover")
+UtilityButton/styles/pressed = SubResource("sb_utility_pressed")
+UtilityButton/styles/hover_pressed = SubResource("sb_utility_pressed")
+UtilityButton/styles/disabled = SubResource("sb_utility_disabled")
+UtilityButton/styles/focus = SubResource("sb_focus_ring")
+SecondaryButton/base_type = &"Button"
+SecondaryButton/styles/normal = SubResource("sb_secondary_btn")
+SecondaryButton/styles/hover = SubResource("sb_secondary_btn_hover")
+SecondaryButton/styles/pressed = SubResource("sb_secondary_btn_pressed")
+SecondaryButton/styles/hover_pressed = SubResource("sb_secondary_btn_pressed")
+SecondaryButton/styles/disabled = SubResource("sb_utility_disabled")
+SecondaryButton/styles/focus = SubResource("sb_focus_ring")

@@ -185,7 +185,7 @@ func _build_rail(parent: HBoxContainer) -> void:
 	filler.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(filler)
 	column.add_child(PixelStyle.rule(Color(0.30, 0.26, 0.20)))
-	var later := PixelStyle.body_label("The founder's steps open as their systems are built.", 11,
+	var later := PixelStyle.body_label("The founder's steps open as their systems are built.", 12,
 		Color(0.58, 0.60, 0.63))
 	later.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(later)
@@ -196,7 +196,7 @@ func _section_tile(id: String, label: String, sub: String, ready: bool) -> Panel
 	tile.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	# The custom kit's own tile materials: warm parchment for the live step, the dark
 	# recessed tile for the locked ones - no hand-painted fill in this file any more.
-	tile.theme_type_variation = "TileParchment" if ready else "TileDark"
+	tile.theme_type_variation = "TileParchment" if ready else "LockedNavTile"
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 9)
@@ -260,6 +260,7 @@ func _build_right_column(parent: HBoxContainer) -> void:
 
 	# --- world settings -------------------------------------------------------------------
 	var world_panel := PanelContainer.new()
+	world_panel.theme_type_variation = "PrimaryPanel"
 	column.add_child(world_panel)
 	var world := _frame(world_panel, "WORLD SETTINGS")
 	world.add_child(PixelStyle.body_label("World Seed", 14, DIM))
@@ -280,6 +281,7 @@ func _build_right_column(parent: HBoxContainer) -> void:
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	world.add_child(hint)
 	var randomise := Button.new()
+	randomise.theme_type_variation = "SecondaryButton"
 	randomise.text = "Randomise Seed"
 	randomise.icon = PixelIcons.texture("dice", UiTheme.TEXT)
 	randomise.expand_icon = true
@@ -296,6 +298,7 @@ func _build_right_column(parent: HBoxContainer) -> void:
 
 	# --- campaign preview -----------------------------------------------------------------
 	var preview_panel := PanelContainer.new()
+	preview_panel.theme_type_variation = "PrimaryPanel"
 	preview_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	column.add_child(preview_panel)
 	var preview := _frame(preview_panel, "CAMPAIGN PREVIEW")
@@ -360,6 +363,7 @@ func _build_actions(column: VBoxContainer) -> void:
 	panel.add_child(row)
 
 	var back_button := Button.new()
+	back_button.theme_type_variation = "SecondaryButton"
 	back_button.text = "Back to Main Menu"
 	back_button.icon = PixelIcons.texture("arrow_left", UiTheme.TEXT)
 	back_button.expand_icon = true

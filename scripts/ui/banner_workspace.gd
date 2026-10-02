@@ -144,6 +144,7 @@ func _build_controls_column() -> void:
 		detail_button.add_theme_color_override("font_pressed_color", UiTheme.TEXT)
 		detail_button.add_theme_color_override("font_focus_color", UiTheme.TEXT)
 		detail_button.add_theme_color_override("font_disabled_color", Color(0.45, 0.47, 0.51))
+		detail_button.theme_type_variation = "UtilityButton"
 		detail_button.tooltip_text = "A finer grid on the same cloth - the banner's size in the game never changes."
 		detail_button.pressed.connect(set_detail.bind(size.x, size.y))
 		detail_row.add_child(detail_button)
@@ -174,7 +175,7 @@ func _build_canvas_column() -> void:
 	add_child(column)
 
 	var frame := PanelContainer.new()
-	frame.theme_type_variation = "TileDark"
+	frame.theme_type_variation = "UtilityInset"
 	column.add_child(frame)
 
 	var inner := VBoxContainer.new()
@@ -194,7 +195,7 @@ func _build_canvas_column() -> void:
 
 func _build_preview_column() -> void:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 6)
+	column.add_theme_constant_override("separation", 4)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(column)
 
@@ -202,18 +203,18 @@ func _build_preview_column() -> void:
 
 	# Card one: the banner on its pole - the focal preview of the screen.
 	var pole_frame := PanelContainer.new()
-	pole_frame.theme_type_variation = "TileDark"
+	pole_frame.theme_type_variation = "UtilityInset"
 	column.add_child(pole_frame)
 	var pole_view := BannerView.new()
 	pole_view.banner = _banner
-	pole_view.view_scale = 2.9
-	pole_view.custom_minimum_size = Vector2(168.0, 232.0)
+	pole_view.view_scale = 3.3
+	pole_view.custom_minimum_size = Vector2(196.0, 234.0)
 	_views.append(pole_view)
 	pole_frame.add_child(pole_view)
 
 	# Card two: the founder slot, plainly reserved - no control pretends to exist here.
 	var founder_frame := PanelContainer.new()
-	founder_frame.theme_type_variation = "TileDark"
+	founder_frame.theme_type_variation = "UtilityInset"
 	founder_frame.set_meta("reserved", true)
 	column.add_child(founder_frame)
 	var founder_row := HBoxContainer.new()
@@ -229,13 +230,13 @@ func _build_preview_column() -> void:
 
 	# Card three: the cloth at the size the campaign map actually shows.
 	var map_frame := PanelContainer.new()
-	map_frame.theme_type_variation = "TileDark"
+	map_frame.theme_type_variation = "UtilityInset"
 	column.add_child(map_frame)
 	var map_view := BannerView.new()
 	map_view.banner = _banner
 	map_view.view_scale = 0.75
 	map_view.map_mode = true
-	map_view.custom_minimum_size = Vector2(190.0, 70.0)
+	map_view.custom_minimum_size = Vector2(190.0, 64.0)
 	_views.append(map_view)
 	map_frame.add_child(map_view)
 
