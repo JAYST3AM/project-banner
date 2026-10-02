@@ -43,9 +43,9 @@ The sheet is a generated atlas, not a grid, with anti-aliased edges. The tool:
 
 ```
 frames/    frame_large (editor), frame_medium, frame_small, header_bar, footer_bar
-panels/    inset_panel (base panels), tile_parchment (selected step), tile_dark (locked steps, canvas frame, cards)
+panels/    inset_panel (PrimaryPanel - World Settings, Campaign Preview; EditorFrame), tile_parchment (selected step)
 buttons/   primary_green (START), secondary_dark (base buttons)
-inputs/    input_frame (LineEdits)
+inputs/    (retired after the hierarchy pass - LineEdits are flat dark insets now; the piece stays in the repo for future use)
 dividers/  divider_wide
 ornaments/ crest_shield, crest_header, diamond_top, diamond_top_small, button_diamond,
            bracket_tl/tr/bl/br, diamond_ornate, square_crest, ring_plain, ring_crest, cross_gold
@@ -60,14 +60,14 @@ borders are not periodic, so tiling would seam)
 | header_bar | 60,20,60,24 | 60,16,60,14 |
 | footer_bar | 30,26,30,26 | 26,14,26,14 |
 | inset_panel (base PanelContainer) | 22,22,22,22 | 20,14,20,14 |
-| tile_parchment / tile_dark | 16,16,16,16 | 18,8,26,8 |
+| tile_parchment | 16,16,16,16 | 18,8,26,8 |
 | primary_green / secondary_dark | 14,14,14,14 | 14,8,14,10 / 18,8,18,10 |
-| input_frame | 12,12,12,12 | 16,8,16,8 |
+| (retired) input_frame | 12,12,12,12 | 16,8,16,8 |
 
 The full theme is `themes/pb_theme.tres`: base `Button`/`PanelContainer`/`LineEdit` styles
 from these pieces plus the type variations `IconButton` (flat, gold-ring pressed state),
 `StartButton` (primary_green), `ActiveButton` (gold-ringed normal), `EditorFrame`,
-`HeaderFrame`, `FooterFrame`, `TileParchment`, `TileDark`.
+`HeaderFrame`, `FooterFrame`, `TileParchment`, `LockedNavTile`, `PrimaryPanel`, `SecondaryButton`, `UtilityInset`, `UtilityButton` - since the hierarchy pass the theme runs three visual tiers: Tier 1 keeps the strong carved pieces (header, editor, right panels, footer, selected step, START), Tier 2 is flat secondary (rail container, Company Details, Back/Randomise), Tier 3 is quiet utility (cards, canvas frame, inputs, detail buttons; gold only when selected/active/focused).
 
 ## Known limitations (recorded, not hidden)
 

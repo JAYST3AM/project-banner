@@ -1,13 +1,11 @@
-[gd_resource type="Theme" load_steps=46 format=3]
+[gd_resource type="Theme" load_steps=41 format=3]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/frame_large.png" id="tex_editor"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/header_bar.png" id="tex_header"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/footer_bar.png" id="tex_footer"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/inset_panel.png" id="tex_panel"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/tile_parchment.png" id="tex_tile_p"]
-[ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/tile_dark.png" id="tex_tile_d"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/buttons/secondary_dark.png" id="tex_btn"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/buttons/primary_green.png" id="tex_btn_start"]
-[ext_resource type="Texture2D" path="res://assets/ui/project_banner/inputs/input_frame.png" id="tex_input"]
 [ext_resource type="FontFile" path="res://assets/fonts/EBGaramond-Regular.ttf" id="pb_font_body"]
 [ext_resource type="FontFile" path="res://assets/fonts/Silkscreen-Regular.ttf" id="pb_font_pixel"]
 [sub_resource type="StyleBoxTexture" id="sb_editor"]
@@ -75,18 +73,6 @@ content_margin_bottom = 8
 axis_stretch_horizontal = 0
 axis_stretch_vertical = 0
 
-[sub_resource type="StyleBoxTexture" id="sb_tile_dark"]
-texture = ExtResource("tex_tile_d")
-texture_margin_left = 16
-texture_margin_top = 16
-texture_margin_right = 16
-texture_margin_bottom = 16
-content_margin_left = 18
-content_margin_top = 8
-content_margin_right = 26
-content_margin_bottom = 8
-axis_stretch_horizontal = 0
-axis_stretch_vertical = 0
 
 [sub_resource type="StyleBoxTexture" id="sb_btn"]
 texture = ExtResource("tex_btn")
@@ -114,18 +100,6 @@ content_margin_bottom = 10
 axis_stretch_horizontal = 0
 axis_stretch_vertical = 0
 
-[sub_resource type="StyleBoxTexture" id="sb_input"]
-texture = ExtResource("tex_input")
-texture_margin_left = 12
-texture_margin_top = 12
-texture_margin_right = 12
-texture_margin_bottom = 12
-content_margin_left = 16
-content_margin_top = 8
-content_margin_right = 16
-content_margin_bottom = 8
-axis_stretch_horizontal = 0
-axis_stretch_vertical = 0
 
 [sub_resource type="StyleBoxFlat" id="sb_icon_on"]
 bg_color = Color(0.30, 0.25, 0.15, 1)
@@ -315,19 +289,6 @@ content_margin_top = 4.0
 content_margin_right = 5.0
 content_margin_bottom = 4.0
 
-[sub_resource type="StyleBoxTexture" id="sb_input_read_only"]
-texture = ExtResource("tex_input")
-texture_margin_left = 12
-texture_margin_top = 12
-texture_margin_right = 12
-texture_margin_bottom = 12
-content_margin_left = 16
-content_margin_top = 8
-content_margin_right = 16
-content_margin_bottom = 8
-axis_stretch_horizontal = 0
-axis_stretch_vertical = 0
-modulate_color = Color(0.85, 0.85, 0.88, 1)
 
 [sub_resource type="StyleBoxFlat" id="sb_secondary"]
 bg_color = Color(0.072, 0.082, 0.099, 1)
@@ -474,7 +435,7 @@ Button/styles/disabled = SubResource("sb_btn_disabled")
 Button/styles/focus = SubResource("sb_focus_ring")
 LineEdit/styles/normal = SubResource("sb_input_flat")
 LineEdit/styles/focus = SubResource("sb_focus_ring")
-LineEdit/styles/read_only = SubResource("sb_input_read_only")
+LineEdit/styles/read_only = SubResource("sb_input_flat")
 Label/colors/font_color = Color(0.91, 0.92, 0.94, 1)
 TooltipPanel/styles/panel = SubResource("sb_secondary")
 TooltipLabel/colors/font_color = Color(0.91, 0.92, 0.94, 1)
@@ -506,8 +467,6 @@ FooterFrame/base_type = &"PanelContainer"
 FooterFrame/styles/panel = SubResource("sb_footer")
 TileParchment/base_type = &"PanelContainer"
 TileParchment/styles/panel = SubResource("sb_tile_parch")
-TileDark/base_type = &"PanelContainer"
-TileDark/styles/panel = SubResource("sb_tile_dark")
 
 default_font = ExtResource("pb_font_body")
 default_font_size = 15
@@ -518,6 +477,7 @@ LockedNavTile/styles/panel = SubResource("sb_locked")
 UtilityInset/base_type = &"PanelContainer"
 UtilityInset/styles/panel = SubResource("sb_utility_inset")
 UtilityButton/base_type = &"Button"
+UtilityButton/colors/font_disabled_color = Color(0.48, 0.50, 0.54, 1)
 UtilityButton/styles/normal = SubResource("sb_utility")
 UtilityButton/styles/hover = SubResource("sb_utility_hover")
 UtilityButton/styles/pressed = SubResource("sb_utility_pressed")
@@ -525,6 +485,7 @@ UtilityButton/styles/hover_pressed = SubResource("sb_utility_pressed")
 UtilityButton/styles/disabled = SubResource("sb_utility_disabled")
 UtilityButton/styles/focus = SubResource("sb_focus_ring")
 SecondaryButton/base_type = &"Button"
+SecondaryButton/colors/font_disabled_color = Color(0.48, 0.50, 0.54, 1)
 SecondaryButton/styles/normal = SubResource("sb_secondary_btn")
 SecondaryButton/styles/hover = SubResource("sb_secondary_btn_hover")
 SecondaryButton/styles/pressed = SubResource("sb_secondary_btn_pressed")

@@ -427,7 +427,7 @@ func _refresh_status() -> void:
 	# Mark the active detail button, the way the mockup's selected level reads.
 	for button in _detail_buttons:
 		var is_active := button.text == "%dx%d" % [_banner.width, _banner.height]
-		button.theme_type_variation = "ActiveButton" if is_active else ""
+		button.theme_type_variation = "ActiveButton" if is_active else "UtilityButton"
 
 
 # ---------------------------------------------------------------------------------------------
