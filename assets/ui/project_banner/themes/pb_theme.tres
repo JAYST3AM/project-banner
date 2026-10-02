@@ -447,6 +447,7 @@ IconButton/styles/hover_pressed = SubResource("sb_icon_on")
 IconButton/styles/disabled = SubResource("sb_icon_off")
 IconButton/styles/focus = SubResource("sb_empty")
 StartButton/base_type = &"Button"
+StartButton/colors/font_disabled_color = Color(0.58, 0.60, 0.55, 1)
 StartButton/styles/normal = SubResource("sb_btn_start")
 StartButton/styles/hover = SubResource("sb_btn_start_hover")
 StartButton/styles/pressed = SubResource("sb_btn_start_pressed")
