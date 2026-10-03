@@ -157,13 +157,16 @@ func write(buffer: PackedFloat32Array, slot: int, state: int, picture: Vector2, 
 		return
 	var common: PackedFloat32Array = _char_common[table]
 	# --- the plan, inlined from UnitArt.plan (the priority order is the whole of it) ------------
+	# A blow struck outranks a blow taken (the owner: "the melee isn't using the sword swing"):
+	# in a press every man is hit while he swings, so a flinch checked first hid every attack in
+	# a melee while the archers - seldom hit - showed theirs.
 	var anim := UnitArt.IDLE
 	if not alive:
 		anim = UnitArt.DEATH
-	elif hurt_age >= 0 and hurt_age < int(common[5]):
-		anim = UnitArt.HURT
 	elif strike_age >= 0 and strike_age < int(common[6]):
 		anim = UnitArt.ATTACK
+	elif hurt_age >= 0 and hurt_age < int(common[5]):
+		anim = UnitArt.HURT
 	elif moved:
 		anim = UnitArt.WALK
 	# The phase that desynchronises a rank belongs to the loops; a blow, a wound and a death start

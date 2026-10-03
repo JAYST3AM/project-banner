@@ -47,7 +47,7 @@ func _test_the_priority_order_of_the_animations() -> void:
 	# and the flinch used to be checked first - so the attack pose was never reached in a melee.
 	# A strike made outranks a strike taken; a wound taken alone still plays.
 	equal(UnitArt.plan(true, true, 3, 3, hurt, attack), UnitArt.ATTACK,
-		"struck three ticks ago: he is showing the wound, not mid-swing")
+		"struck and wounded three ticks ago: he is mid-swing, not showing the wound")
 	equal(UnitArt.plan(true, true, 3, 40, hurt, attack), UnitArt.HURT,
 		"a blow taken, and no blow struck, is a flinch")
 	equal(UnitArt.plan(true, true, 40, 3, hurt, attack), UnitArt.ATTACK,
@@ -308,9 +308,18 @@ func _test_the_writer_matches_the_pure_functions() -> void:
 	field.pack(simulator)
 	_check_instance(art, field, simulator, unit, ticks, counts, UnitArt.HURT, 0, "a wound")
 
-	# A blow of his own: the attack pose. The canvas battle reads a strike off the cooldown
-	# jumping, which is the only trace a blow leaves on the unit itself - once the wound has
-	# played out, because a wound outranks a blow in the plan.
+	# A blow struck through that wound: the swing outranks the flinch. Both stamps active in one
+	# pack is exactly a melee - every man in a press is hit while he swings - and the fused
+	# writer must agree with [method UnitArt.plan] here, or the attack pose vanishes from the
+	# canvas battle the same way it once did before the owner noticed.
+	unit.cooldown_left += SoldierField.STRIKE_COOLDOWN_JUMP + 1.0
+	field.pack(simulator)
+	_check_instance(art, field, simulator, unit, ticks, counts, UnitArt.ATTACK, 0,
+		"a blow through a wound")
+
+	# And a blow of his own on its own: the attack pose, once the wound has played out. The
+	# canvas battle reads a strike off the cooldown jumping, which is the only trace a blow
+	# leaves on the unit itself.
 	unit.cooldown_left += SoldierField.STRIKE_COOLDOWN_JUMP + 1.0
 	simulator.tick_index += int(data["common"][5]) + 1
 	field.pack(simulator)
