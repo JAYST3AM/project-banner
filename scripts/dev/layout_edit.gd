@@ -36,7 +36,7 @@ const SNAP_PX := 6.0
 ## Campaign screen does); other screens simply contribute buttons and inputs.
 const REGION_NAMES: Array[String] = [
 	"editor_controls", "editor_canvas", "pole_frame", "founder_frame", "map_frame",
-	"company_panel", "world_panel", "preview_panel",
+	"company_panel", "world_panel", "preview_panel", "rail_panel",
 ]
 const REGION_LABELS := {
 	"editor_controls": "ToolsCluster",
@@ -47,7 +47,12 @@ const REGION_LABELS := {
 	"company_panel": "CompanyDetails",
 	"world_panel": "WorldSettings",
 	"preview_panel": "CampaignPreview",
+	"rail_panel": "LeftRail",
 }
+
+## Node-name prefixes that mark additional editable elements on any screen
+## (the New Campaign rail names its step tiles this way).
+const NAMED_PREFIXES: Array[String] = ["rail_tile"]
 
 var _regions: Array = []          # [{name, label, node, prod, min, links, parent}]
 var _selected := -1
@@ -139,7 +144,15 @@ func _discover(screen: Control, origin: Vector2) -> void:
 			continue
 		queue.append(node)
 		seen[node] = REGION_LABELS.get(region_name, region_name)
-	# 2. Every button and text input, individually.
+	# 2. Anything whose name carries a known editable prefix.
+	for prefix in NAMED_PREFIXES:
+		for node in screen.find_children(prefix + "*", "", true, false):
+			var control := node as Control
+			if control == null or _inside_layer(control) or seen.has(control):
+				continue
+			queue.append(control)
+			seen[control] = _panel_label(control)
+	# 3. Every button and text input, individually.
 	_collect_interactives(screen, queue, seen)
 	# Build the region table (parents first, so links refer to the original tree).
 	var by_node := {}
@@ -226,6 +239,23 @@ func _name_base(control: Control) -> String:
 			kind = "input"
 		return "%s_%d" % [kind, control.get_index()]
 	return raw
+
+
+## A readable label for panel-like elements (the rail tiles): the first text
+## label inside them, else the name.
+func _panel_label(control: Control) -> String:
+	var walker: Array[Node] = [control]
+	var depth := 0
+	while walker.size() > 0 and depth < 24:
+		var node: Node = walker.pop_front()
+		for child in node.get_children():
+			if child is Label:
+				var text := String((child as Label).text).strip_edges()
+				if not text.is_empty():
+					return text.substr(0, 22)
+			walker.append(child)
+			depth += 1
+	return _name_base(control).capitalize()
 
 
 func _nearest_included(node: Node, by_node: Dictionary) -> Control:
@@ -389,19 +419,25 @@ func _gui_input(event: InputEvent) -> void:
 	queue_redraw()
 
 
+## Handles belong to elements with room for them: anything smaller than 40 on
+## either axis is move-only, and the margin shrinks with tiny controls, so a
+## press inside a small button can never be mistaken for a resize grab.
 func _handle_at(point: Vector2) -> int:
 	for i in _regions.size():
 		var rect: Rect2 = (_regions[i]["node"] as Control).get_rect()
-		if not rect.grow(HANDLE).has_point(point):
+		if rect.size.x < 40.0 or rect.size.y < 40.0:
+			continue
+		var margin := minf(HANDLE, minf(rect.size.x, rect.size.y) / 3.0)
+		if not rect.grow(margin).has_point(point):
 			continue
 		var handle := 0
-		if point.x <= rect.position.x + HANDLE:
+		if point.x <= rect.position.x + margin:
 			handle |= 1
-		elif point.x >= rect.end.x - HANDLE:
+		elif point.x >= rect.end.x - margin:
 			handle |= 2
-		if point.y <= rect.position.y + HANDLE:
+		if point.y <= rect.position.y + margin:
 			handle |= 4
-		elif point.y >= rect.end.y - HANDLE:
+		elif point.y >= rect.end.y - margin:
 			handle |= 8
 		_handle_region = i
 		return handle if handle != 0 else -1

@@ -190,9 +190,11 @@ func _build_rail(parent: HBoxContainer) -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 4)
 	panel.add_child(column)
-	for entry in SECTIONS:
-		var row: Array = entry
-		column.add_child(_section_tile(str(row[0]), str(row[1]), str(row[2]), bool(row[3])))
+	for i in SECTIONS.size():
+		var row: Array = SECTIONS[i]
+		var tile := _section_tile(str(row[0]), str(row[1]), str(row[2]), bool(row[3]))
+		tile.name = "rail_tile_%d" % i
+		column.add_child(tile)
 	# The well below the steps is real estate on purpose, but an unexplained void reads as
 	# missing content - one quiet line says what it is.
 	var filler := Control.new()
