@@ -84,10 +84,12 @@ func _shape_a(buffer: PackedFloat32Array, i: int, offsets: PackedInt32Array, str
 func _plan(alive: bool, moved: bool, hurt_age: int, strike_age: int, hurt_window: int, attack_window: int) -> int:
 	if not alive:
 		return 4
-	if hurt_age >= 0 and hurt_age < hurt_window:
-		return 3
+	# A blow struck outranks a blow taken, as UnitArt.plan() ranks it: this shape mirrors the
+	# shipped call graph, so its order has to be the shipped order.
 	if strike_age >= 0 and strike_age < attack_window:
 		return 2
+	if hurt_age >= 0 and hurt_age < hurt_window:
+		return 3
 	if moved:
 		return 1
 	return 0
@@ -136,10 +138,10 @@ func _shape_b(buffer: PackedFloat32Array, i: int, offsets: PackedInt32Array, tic
 	var anim := 0
 	if not alive:
 		anim = 4
-	elif into < 12:
-		anim = 3
-	elif into < 12:
+	elif into < 6:
 		anim = 2
+	elif into < 18:
+		anim = 3
 	elif moved:
 		anim = 1
 	var frame := posmod(int((into + phase * 7) / maxi(1, ticks[anim])), maxi(1, frames[anim]))
