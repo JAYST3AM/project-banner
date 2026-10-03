@@ -51,3 +51,10 @@ extension_api.json
 
 # Art source assets (licence forbids redistribution; large binaries)
 assets/art_source/
+
+# secrets - never commit
+.env
+.env.*
+!.env.example
+*.key
+secrets*.json
