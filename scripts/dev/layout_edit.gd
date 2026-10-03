@@ -62,6 +62,7 @@ var _drag_handle := -1
 var _handle_region := -1
 var _drag_origin := Vector2.ZERO
 var _drag_rect := Rect2()
+var _drag_members: Array = []     # [{node, start: Vector2}] captured at press
 var _guides: Array = []           # [[vertical: bool, coord: float]]
 var _panel: PanelContainer = null
 var _info: Label = null
@@ -425,6 +426,13 @@ func _gui_input(event: InputEvent) -> void:
 	_drag_mode = "resize" if _drag_handle >= 0 else "move"
 	_drag_origin = button.position
 	_drag_rect = (_regions[_selected]["node"] as Control).get_rect()
+	_drag_members.clear()
+	if _drag_mode == "move":
+		var node := _regions[_selected]["node"] as Control
+		_drag_members.append({"node": node, "start": node.position})
+		for link in linked_indices(_selected):
+			var linked := _regions[link]["node"] as Control
+			_drag_members.append({"node": linked, "start": linked.position})
 	_refresh_panel()
 	queue_redraw()
 
@@ -480,7 +488,7 @@ func _drag_to(point: Vector2) -> void:
 		if snap:
 			target = _snap_position(region, target, rect.size)
 		target = _normalize_rect(region, Rect2(target, rect.size)).position
-		_move_with_links(_selected, target - rect.position)
+		_move_members(target - rect.position)
 	else:
 		var result := _resize_rect(region, rect, delta, _drag_handle, snap)
 		var node := region["node"] as Control
@@ -491,27 +499,46 @@ func _drag_to(point: Vector2) -> void:
 	queue_redraw()
 
 
-## Move a region and carry every linked descendant with it; the shared delta
-## is clamped per axis so the whole group stays inside the content area.
-func _move_with_links(index: int, wanted: Vector2) -> void:
-	var members: Array[int] = [index]
-	for link in linked_indices(index):
-		members.append(link)
+## Move the press-time member set (the region and its linked descendants) by
+## an absolute delta from their captured press positions; the shared delta is
+## clamped per axis against every member's start rect, so the whole group
+## stays inside the content area and repeated motion events cannot compound.
+func _move_members(wanted: Vector2) -> void:
 	var delta := wanted
 	for axis in 2:
 		var allowed := delta[axis]
-		for member in members:
-			var rect: Rect2 = (_regions[member]["node"] as Control).get_rect()
+		for member in _drag_members:
+			var start: Vector2 = member["start"]
+			var node := member["node"] as Control
 			if delta[axis] > 0.0:
-				allowed = minf(allowed, size[axis] - rect.end[axis])
+				allowed = minf(allowed, size[axis] - (start[axis] + node.size[axis]))
 			elif delta[axis] < 0.0:
-				allowed = maxf(allowed, -rect.position[axis])
+				allowed = maxf(allowed, -start[axis])
 		delta[axis] = allowed
-	for member in members:
-		var node := _regions[member]["node"] as Control
-		node.position = (node.position + delta).round()
-	for member in members:
-		_apply_region_rules(_regions[member])
+	for member in _drag_members:
+		var node := member["node"] as Control
+		node.position = ((member["start"] as Vector2) + delta).round()
+	for member in _drag_members:
+		_apply_node_rules(member["node"] as Control)
+
+
+## Nudge path: same bookkeeping for a one-shot move of the selection.
+func _move_with_links(index: int, wanted: Vector2) -> void:
+	_drag_members.clear()
+	var node := _regions[index]["node"] as Control
+	_drag_members.append({"node": node, "start": node.position})
+	for link in linked_indices(index):
+		var linked := _regions[link]["node"] as Control
+		_drag_members.append({"node": linked, "start": linked.position})
+	_move_members(wanted)
+
+
+## Per-node rules (hero rescale, canvas cells) by reverse lookup.
+func _apply_node_rules(node: Control) -> void:
+	for region in _regions:
+		if region["node"] == node:
+			_apply_region_rules(region)
+			return
 
 
 ## Every extracted descendant of a region, including grandchildren.
@@ -534,12 +561,16 @@ func linked_indices(index: int) -> Array[int]:
 ## draft loads, group moves and nudges all pass through here.
 func _normalize_rect(region: Dictionary, rect: Rect2) -> Rect2:
 	var min_size: Vector2 = region["min"]
-	# Round to integers first, then clamp, so the final edge can never land
-	# outside the layer through independent rounding of position and size.
-	var width := minf(roundf(maxf(rect.size.x, min_size.x)), roundf(maxf(size.x, min_size.x)))
-	var height := minf(roundf(maxf(rect.size.y, min_size.y)), roundf(maxf(size.y, min_size.y)))
-	var x := clampf(roundf(rect.position.x), 0.0, maxf(0.0, size.x - width))
-	var y := clampf(roundf(rect.position.y), 0.0, maxf(0.0, size.y - height))
+	# Integer-exact: use rounded layer dimensions, round the requested size up
+	# to its minimum, cap at the layer (even when a minimum exceeds it - a
+	# region that cannot fit still has to stay on screen), then clamp the
+	# position against the rounded values so the final edge is always inside.
+	var lw := maxf(1.0, roundf(size.x))
+	var lh := maxf(1.0, roundf(size.y))
+	var width := minf(roundf(maxf(rect.size.x, min_size.x)), lw)
+	var height := minf(roundf(maxf(rect.size.y, min_size.y)), lh)
+	var x := clampf(roundf(rect.position.x), 0.0, lw - width)
+	var y := clampf(roundf(rect.position.y), 0.0, lh - height)
 	return Rect2(Vector2(x, y), Vector2(width, height))
 
 
