@@ -27,6 +27,7 @@ const MIN_SCALE_STEP := 0.1
 
 const REGION_NAMES: Array[String] = [
 	"editor_controls", "editor_canvas", "pole_frame", "founder_frame", "map_frame",
+	"company_panel", "world_panel", "preview_panel",
 ]
 const REGION_LABELS := {
 	"editor_controls": "ToolsCluster",
@@ -34,6 +35,9 @@ const REGION_LABELS := {
 	"pole_frame": "HeroBanner",
 	"founder_frame": "Founder",
 	"map_frame": "MapPreview",
+	"company_panel": "CompanyDetails",
+	"world_panel": "WorldSettings",
+	"preview_panel": "CampaignPreview",
 }
 
 var _regions: Array = []          # [{name, label, node, prod: Rect2, min: Vector2}]
@@ -46,34 +50,52 @@ var _guides: Array = []           # [[vertical: bool, coord: float]]
 var _panel: PanelContainer = null
 var _info: Label = null
 var _hint: Label = null
+var _editor_rect := Rect2()
 
 
 # -------------------------------------------------------------------------------------------
 # Activation
 # -------------------------------------------------------------------------------------------
 
-## Dismantle the workspace's containers and take over the five regions.
-func start(workspace: Control) -> void:
+## Dismantle the production containers and take over every editable region.
+## The layer is hosted by the screen's layout container (so it always has a
+## real rect), covers the content area, and holds all eight regions: the five
+## Banner Editor internals plus Company Details, World Settings and Campaign
+## Preview. The editor frame stays as a pinned backdrop and its content rect
+## is the main alignment reference. Rect numbers are relative to the content
+## area; older drafts (workspace-relative) migrate on load.
+func start(screen: Control, workspace: Control) -> void:
 	name = "layout_edit_layer"
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = true
+	var host: Control = screen
+	for child in screen.get_children():
+		if child is MarginContainer:
+			host = child
+			break
+	host.add_child(self)
+	set_anchors_preset(Control.PRESET_FULL_RECT)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
-	workspace.add_child(self)
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	await get_tree().process_frame
+	await get_tree().process_frame
 
-	var origin := workspace.global_position
-	# The production workspace shrinks to its content; emptied of containers it would
-	# collapse to nothing. Pin it to the size it had, then let it fill the frame.
+	var origin := global_position
+	_editor_rect = Rect2(workspace.global_position - origin, workspace.size)
+	# Pin the production shells so nothing collapses behind the floating regions.
 	var ws_size := workspace.size
 	workspace.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	workspace.custom_minimum_size = ws_size
+	var pin := screen.find_child("editor_panel", true, false) as Control
+	if pin != null:
+		pin.custom_minimum_size = pin.size
 	var shells: Array[Node] = []
 	for region_name in REGION_NAMES:
-		var node := workspace.find_child(region_name, true, false) as Control
+		var node := screen.find_child(region_name, true, false) as Control
 		if node == null:
 			DebugLogger.info("layout edit: region '%s' not found" % region_name, "LayoutEdit")
 			continue
+		var pin_parent := node.get_parent() as Control
 		var local := Rect2(node.global_position - origin, node.size)
 		node.reparent(self)
 		node.position = local.position
@@ -86,12 +108,15 @@ func start(workspace: Control) -> void:
 			"prod": local,
 			"min": node.get_combined_minimum_size(),
 		})
-	# Leftover container shells (the hero column and its support row) are empty now.
+		# A column left holding nothing keeps its space so the screen does not
+		# reflow mid-edit.
+		if pin_parent != null and pin_parent.get_child_count() == 0 and pin_parent is VBoxContainer:
+			pin_parent.custom_minimum_size = pin_parent.size
+	# Emptied shells inside the workspace (the hero column and its support row).
 	for shell_name in ["editor_hero", "editor_support"]:
 		var shell := workspace.find_child(shell_name, true, false)
 		if shell != null and shell.get_child_count() == 0:
 			shell.queue_free()
-	# And the workspace's own straight-line columns are gone with the extraction.
 	for child in workspace.get_children():
 		if child != self and child is Control and not _is_region_node(child):
 			shells.append(child)
@@ -101,10 +126,11 @@ func start(workspace: Control) -> void:
 	_build_panel()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_panel.position = Vector2(180.0, maxf(10.0, size.y - _panel.size.y - 10.0))
+	_panel.position = Vector2(24.0, maxf(8.0, size.y - _panel.size.y - 8.0))
 	_load_draft()
 	_refresh_panel()
-	DebugLogger.info("layout edit active: %d regions" % _regions.size(), "LayoutEdit")
+	DebugLogger.info("layout edit active: %d regions, content area %dx%d" % [
+		_regions.size(), int(size.x), int(size.y)], "LayoutEdit")
 	if DevFlags.layout_export():
 		_copy_layout()
 
@@ -124,7 +150,7 @@ func _build_panel() -> void:
 	_panel = PanelContainer.new()
 	# Bottom-left of the editor: the empty well under the tools cluster, so the
 	# panel never sits on the canvas or the hero. Placed once the layout settles.
-	_panel.position = Vector2(10.0, maxf(10.0, size.y - 150.0))
+	_panel.position = Vector2(24.0, 24.0)
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.05, 0.04, 0.08, 0.94)
@@ -340,6 +366,13 @@ func _snap_position(region: Dictionary, target: Vector2, region_size: Vector2) -
 	# Candidate lines: workspace bounds and centre, every other region's edges and centres.
 	var xs: Array[float] = [0.0, canvas.x * 0.5, canvas.x]
 	var ys: Array[float] = [0.0, canvas.y * 0.5, canvas.y]
+	# The Banner Editor content rect is the primary alignment reference.
+	xs.append(_editor_rect.position.x)
+	xs.append(_editor_rect.position.x + _editor_rect.size.x * 0.5)
+	xs.append(_editor_rect.end.x)
+	ys.append(_editor_rect.position.y)
+	ys.append(_editor_rect.position.y + _editor_rect.size.y * 0.5)
+	ys.append(_editor_rect.end.y)
 	var nodes := [target.x, target.x + region_size.x * 0.5, target.x + region_size.x]
 	var nodeys := [target.y, target.y + region_size.y * 0.5, target.y + region_size.y]
 	var best_x := INF
@@ -452,8 +485,13 @@ func _layout_json() -> String:
 			"x": int(rect.position.x), "y": int(rect.position.y),
 			"w": int(rect.size.x), "h": int(rect.size.y),
 		}
-	# Bounds of the Banner Editor content rect, so the numbers are portable.
-	data["_canvas"] = {"w": int(size.x), "h": int(size.y)}
+	# Content-area numbers plus the reference rects, so the arrangement is portable.
+	data["_screen"] = {"w": int(size.x), "h": int(size.y),
+		"x": int(global_position.x), "y": int(global_position.y)}
+	data["_editor"] = {
+		"x": int(_editor_rect.position.x), "y": int(_editor_rect.position.y),
+		"w": int(_editor_rect.size.x), "h": int(_editor_rect.size.y),
+	}
 	return JSON.stringify(data, "  ")
 
 
@@ -485,6 +523,11 @@ func _load_draft() -> void:
 	file.close()
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return
+	# Drafts written before the screen-space rework stored the five editor
+	# regions relative to the Banner Editor content rect; shift them onto the
+	# screen so an arrangement made with the first version still loads.
+	var legacy: bool = not (parsed as Dictionary).has("_screen")
+	var offset: Vector2 = _editor_rect.position if legacy else Vector2.ZERO
 	for region in _regions:
 		var entry = (parsed as Dictionary).get(String(region["name"]), null)
 		if typeof(entry) != TYPE_DICTIONARY:
@@ -499,9 +542,9 @@ func _load_draft() -> void:
 		var raw_w = values["w"]
 		var raw_h = values["h"]
 		if _is_finite_number(raw_x):
-			rect.position.x = float(raw_x)
+			rect.position.x = float(raw_x) + offset.x
 		if _is_finite_number(raw_y):
-			rect.position.y = float(raw_y)
+			rect.position.y = float(raw_y) + offset.y
 		if _is_finite_number(raw_w):
 			rect.size.x = float(raw_w)
 		if _is_finite_number(raw_h):
@@ -545,10 +588,17 @@ func _screenshot() -> void:
 # -------------------------------------------------------------------------------------------
 
 func _draw() -> void:
-	# Banner Editor content bounds and centre lines - obviously dev chrome.
-	draw_rect(Rect2(Vector2.ZERO, size), Color(1.0, 0.25, 0.9, 0.55), false, 2.0)
-	draw_line(Vector2(size.x * 0.5, 0.0), Vector2(size.x * 0.5, size.y), Color(1.0, 0.25, 0.9, 0.18), 1.0)
-	draw_line(Vector2(0.0, size.y * 0.5), Vector2(size.x, size.y * 0.5), Color(1.0, 0.25, 0.9, 0.18), 1.0)
+	# Screen bounds, and the Banner Editor content rect as the alignment reference.
+	draw_rect(Rect2(Vector2.ZERO, size), Color(1.0, 0.25, 0.9, 0.35), false, 2.0)
+	draw_rect(_editor_rect, Color(1.0, 0.25, 0.9, 0.6), false, 2.0)
+	draw_string(ThemeDB.fallback_font, _editor_rect.position + Vector2(3.0, -6.0), "BANNER EDITOR",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.45, 0.95))
+	draw_line(Vector2(_editor_rect.position.x + _editor_rect.size.x * 0.5, _editor_rect.position.y),
+		Vector2(_editor_rect.position.x + _editor_rect.size.x * 0.5, _editor_rect.end.y),
+		Color(1.0, 0.25, 0.9, 0.18), 1.0)
+	draw_line(Vector2(_editor_rect.position.x, _editor_rect.position.y + _editor_rect.size.y * 0.5),
+		Vector2(_editor_rect.end.x, _editor_rect.position.y + _editor_rect.size.y * 0.5),
+		Color(1.0, 0.25, 0.9, 0.18), 1.0)
 	# Every region outlined; the selected one carries handles.
 	for i in _regions.size():
 		var rect: Rect2 = (_regions[i]["node"] as Control).get_rect()

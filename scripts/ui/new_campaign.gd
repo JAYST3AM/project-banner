@@ -89,7 +89,7 @@ func _start_layout_edit() -> void:
 	if _workspace == null:
 		return
 	var layer = load("res://scripts/dev/layout_edit.gd").new()
-	layer.start(_workspace)
+	layer.start(self, _workspace)
 
 
 # ---------------------------------------------------------------------------------------------
