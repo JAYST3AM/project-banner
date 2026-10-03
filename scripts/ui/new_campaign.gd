@@ -77,19 +77,6 @@ func _ready() -> void:
 		var probe := Control.new()
 		probe.set_script(load("res://scripts/dev/layout_debug.gd"))
 		add_child(probe)
-	if DevFlags.layout_edit():
-		_start_layout_edit.call_deferred()
-
-
-## Dev-only: hand the Banner Editor over to the layout editor (--layout-edit). Never
-## reachable without the flag; normal runs behave exactly as before.
-func _start_layout_edit() -> void:
-	await get_tree().process_frame
-	await get_tree().process_frame
-	if _workspace == null:
-		return
-	var layer = load("res://scripts/dev/layout_edit.gd").new()
-	layer.start(self, _workspace)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -271,6 +258,7 @@ func _build_centre(parent: HBoxContainer) -> void:
 	column.add_child(editor_panel)
 	var editor := _frame(editor_panel, "BANNER EDITOR")
 	_workspace = BannerWorkspace.new()
+	_workspace.name = "banner_workspace"
 	_workspace.banner_changed.connect(_refresh_summary)
 	# The frame is taller than the bench's rows: centre them in the well so the space
 	# reads as craft-room breathing rather than a void.

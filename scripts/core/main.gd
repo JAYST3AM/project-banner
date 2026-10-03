@@ -9,6 +9,7 @@ const TITLE := "PROJECT BANNER"
 const SUBTITLE := "Development Environment Operational"
 const SPLASH_SECONDS := 1.1
 const SCREENSHOT_PROBE := preload("res://scripts/dev/screenshot_probe.gd")
+const LAYOUT_WATCHER := preload("res://scripts/dev/layout_edit_watcher.gd")
 
 @onready var _title: Label = $UI/Title
 @onready var _subtitle: Label = $UI/Subtitle
@@ -33,6 +34,7 @@ func _ready() -> void:
 	# Before the branch, so a screenshot run gets its shot whether it starts a campaign or just
 	# sits on the menu. The probe lives on the tree root: this scene is about to be replaced.
 	_spawn_screenshot_probe()
+	_spawn_layout_watcher()
 
 	var autostart := DevFlags.autostart_campaign()
 	if bool(autostart.get("enabled", false)):
@@ -62,6 +64,17 @@ func _spawn_screenshot_probe() -> void:
 	probe.name = "ScreenshotProbe"
 	probe.set_script(SCREENSHOT_PROBE)
 	get_tree().root.add_child.call_deferred(probe)
+
+
+## Dev-only: "--layout-edit" attaches the layout editor to every screen as it opens. The
+## watcher lives on the tree root, because screens come and go beneath it.
+func _spawn_layout_watcher() -> void:
+	if not DevFlags.layout_edit():
+		return
+	var watcher := Node.new()
+	watcher.name = "LayoutEditWatcher"
+	watcher.set_script(LAYOUT_WATCHER)
+	get_tree().root.add_child.call_deferred(watcher)
 
 
 func _is_headless() -> bool:
