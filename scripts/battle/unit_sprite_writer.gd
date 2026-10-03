@@ -48,12 +48,15 @@ var _offsets := PackedInt32Array()
 var _foot_lift := 0.0
 var _fallen_darken := DEFAULT_FALLEN_DARKEN
 
-## Per side, index 0 the player's: shared with what [method UnitArt.renderer_data] returns.
-var _side_common: Array = []
-var _side_ticks: Array = []
-var _side_frames: Array = []
-var _side_uv: Array = []
-var _side_uv_stride := PackedInt32Array()
+## Per character, in the atlas key order handed to [method setup]: shared with what
+## [method UnitArt.renderer_data] returns.
+var _char_common: Array = []
+var _char_ticks: Array = []
+var _char_frames: Array = []
+var _char_uv: Array = []
+var _char_uv_stride := PackedInt32Array()
+## Per side, index 0 the player's: the tint every soldier of that side wears, whatever
+## character he is.
 var _tint := PackedColorArray()
 
 ## Per soldier state: where his picture was when his origin was last written, and which frame
@@ -67,32 +70,30 @@ var _written_frame := PackedInt32Array()
 var _slot_state := PackedInt32Array()
 
 
-## Ready the writer for a battle: the per-side tables an atlas and a battle rate produce, the
-## buffer layout the renderer measured, and the two placements that belong to the look rather than
-## the maths. False means the art or the layout is not one this writer can draw, and the renderer
-## should keep drawing whatever it drew instead.
+## Ready the writer for a battle: the per-character tables an atlas and a battle rate produce,
+## the buffer layout the renderer measured, and the two placements that belong to the look rather
+## than the maths. False means the art or the layout is not one this writer can draw, and the
+## renderer should keep drawing whatever it drew instead.
 func setup(art: UnitArt, keys: Array, rate: float, offsets: PackedInt32Array, stride: int,
 		foot_lift: float, fallen_darken: float = DEFAULT_FALLEN_DARKEN) -> bool:
 	if art == null or offsets.size() != 6 or stride <= 0:
 		return false
-	_side_common = []
-	_side_ticks = []
-	_side_frames = []
-	_side_uv = []
-	_side_uv_stride = PackedInt32Array()
-	for side in keys.size():
-		var key := str(keys[side])
+	_char_common = []
+	_char_ticks = []
+	_char_frames = []
+	_char_uv = []
+	_char_uv_stride = PackedInt32Array()
+	for at in keys.size():
+		var key := str(keys[at])
 		if not art.has_character(key):
 			return false
 		var data: Dictionary = art.renderer_data(key, rate)
-		_side_ticks.append(data["ticks"])
-		_side_frames.append(data["frames"])
-		_side_uv.append(data["uv"])
-		_side_common.append(data["common"])
-		_side_uv_stride.append(int(data["uv_stride"]))
-	_tint.resize(keys.size())
-	for side in keys.size():
-		_tint[side] = UnitArt.side_tint(side == 0)
+		_char_ticks.append(data["ticks"])
+		_char_frames.append(data["frames"])
+		_char_uv.append(data["uv"])
+		_char_common.append(data["common"])
+		_char_uv_stride.append(int(data["uv_stride"]))
+	_tint = PackedColorArray([UnitArt.TINT_PLAYER, UnitArt.TINT_ENEMY])
 	_offsets = offsets
 	_stride = stride
 	_foot_lift = foot_lift
@@ -120,10 +121,14 @@ func capacity() -> int:
 ## hangs off. (The tallest frame is taller: a raised sword. A bar placed off that floats a gap
 ## above the head between swings.)
 func sprite_head() -> float:
-	if _side_common.is_empty():
-		return 0.0
-	var common: PackedFloat32Array = _side_common[0]
-	return common[7] if common.size() >= 8 else cell_height(common)
+	## The tallest head of any character the writer carries: a bar hangs above the tallest
+	## soldier, whatever units the armies field.
+	var head := 0.0
+	for common in _char_common:
+		var block: PackedFloat32Array = common
+		var units := block[7] if block.size() >= 8 else cell_height(block)
+		head = maxf(head, units)
+	return head
 
 
 ## The cell height out of one side's common block. Split out so the arithmetic is nameable.
@@ -132,21 +137,25 @@ static func cell_height(common: PackedFloat32Array) -> float:
 
 
 func ready() -> bool:
-	return _stride > 0 and _offsets.size() == 6 and _side_common.size() > 0
+	return _stride > 0 and _offsets.size() == 6 and _char_common.size() > 0
 
 
 ## One soldier's instance, written into [param buffer] at [param slot] (his instance index there).
 ## [param state] is who he is - the key the animation memory is held under. [param picture] is
 ## where he is being drawn this pack (the interpolated position), which is what the quad is placed
-## from; the ages are in whole ticks, [constant UnitArt.NEVER] meaning it never happened.
-func write(buffer: PackedFloat32Array, slot: int, state: int, picture: Vector2, side: int,
-		alive: bool, moved: bool, hurt_age: int, strike_age: int, death_age: int, flip: bool,
-		tick: int) -> void:
-	if side < 0 or side >= _side_common.size():
+## from; [param table] is his character's index in the tables [method setup] built; [param side] is
+## 0 for the player's tint and 1 for the enemy's; the ages are in whole ticks,
+## [constant UnitArt.NEVER] meaning it never happened.
+func write(buffer: PackedFloat32Array, slot: int, state: int, picture: Vector2, table: int,
+		side: int, alive: bool, moved: bool, hurt_age: int, strike_age: int, death_age: int,
+		flip: bool, tick: int) -> void:
+	if table < 0 or table >= _char_common.size():
+		return
+	if side < 0 or side >= _tint.size():
 		return
 	if state < 0 or state >= _written_frame.size() or slot < 0:
 		return
-	var common: PackedFloat32Array = _side_common[side]
+	var common: PackedFloat32Array = _char_common[table]
 	# --- the plan, inlined from UnitArt.plan (the priority order is the whole of it) ------------
 	var anim := UnitArt.IDLE
 	if not alive:
@@ -167,8 +176,8 @@ func write(buffer: PackedFloat32Array, slot: int, state: int, picture: Vector2, 
 	elif anim == UnitArt.ATTACK:
 		into = maxi(0, strike_age)
 	# --- the frame, inlined from UnitArt.frame: the loops wrap, a corpse holds its last pose ----
-	var ticks: PackedInt32Array = _side_ticks[side]
-	var counts: PackedInt32Array = _side_frames[side]
+	var ticks: PackedInt32Array = _char_ticks[table]
+	var counts: PackedInt32Array = _char_frames[table]
 	var per := ticks[anim]
 	if per < 1:
 		per = 1
@@ -191,7 +200,7 @@ func write(buffer: PackedFloat32Array, slot: int, state: int, picture: Vector2, 
 	var off_origin_y := _offsets[3]
 	var off_colour := _offsets[4]
 	var off_custom := _offsets[5]
-	var key := anim * _side_uv_stride[side] + frame
+	var key := anim * _char_uv_stride[table] + frame
 	var fresh := _written_frame[state] < 0 or _slot_state[slot] != state
 	_slot_state[slot] = state
 	if fresh:
@@ -202,7 +211,7 @@ func write(buffer: PackedFloat32Array, slot: int, state: int, picture: Vector2, 
 		buffer[base + off_size_y] = common[1] * units
 	if fresh or _written_frame[state] != key:
 		_written_frame[state] = key
-		var rect: Vector4 = _side_uv[side][key]
+		var rect: Vector4 = _char_uv[table][key]
 		if flip:
 			buffer[base + off_custom] = rect.x + rect.z
 			buffer[base + off_custom + 2] = -rect.z

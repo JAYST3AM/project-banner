@@ -587,8 +587,7 @@ func _build_sprite_batch(capacity: int) -> void:
 		return
 	if art == null:
 		art = UnitArt.load_if_present()
-	if art == null or not art.has_character(UnitArt.CHARACTER_PLAYER) \
-			or not art.has_character(UnitArt.CHARACTER_ENEMY):
+	if art == null or not art.has_all_units():
 		art = null
 		return
 	var shader := load(UnitArt.SHADER_PATH) as Shader
@@ -618,8 +617,9 @@ func _build_sprite_batch(capacity: int) -> void:
 func _rebuild_sprite_tables() -> bool:
 	if art == null or _sprite_offsets.size() != 6 or _sprite_stride <= 0:
 		return false
-	# Player first: index 0 is the player's side in every side-indexed table the writer holds.
-	if not _sprite_writer.setup(art, [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY],
+	# One table a roster unit: the writer is keyed by character, and each soldier selects his
+	# own through [method UnitArt.index_for_unit]. The side tint rides beside it.
+	if not _sprite_writer.setup(art, UnitArt.UNIT_KEYS,
 			anim_rate, _sprite_offsets, _sprite_stride, FOOT_LIFT, FALLEN_DARKEN):
 		return false
 	_sprite_writer.reserve(_capacity)
@@ -679,9 +679,9 @@ func _write_sprite(index: int, unit: BattleUnit, position: Vector2, alive: bool,
 		_anim_last_position[id] = position
 		# A cooldown that jumped between packs is the blow landing: it is the only trace a
 		# strike leaves on the unit itself.
-		# A bowman looses, he does not swing: the pack's attack strips are all sword, so the pose
-		# is left to the idle and the arrow is the tell (the battle view flies it from the
-		# simulator's own events). The clock stamp still runs for everyone else.
+		# A bowman looses, he does not swing: melee attack poses read as a melee act, so a ranged
+		# soldier keeps his stance and the arrow is the tell (the battle view flies it from the
+		# simulator's own events). The clock stamp still runs for every soldier.
 		if not first and not unit.ranged 				and unit.cooldown_left > _anim_last_cooldown[id] + STRIKE_COOLDOWN_JUMP:
 			_anim_strike_tick[id] = tick
 		_anim_last_cooldown[id] = unit.cooldown_left
@@ -699,8 +699,10 @@ func _write_sprite(index: int, unit: BattleUnit, position: Vector2, alive: bool,
 		if _anim_died_tick[id] >= 0:
 			death_age = tick - _anim_died_tick[id]
 	var side := 0 if unit.side == BattleContext.SIDE_PLAYER else 1
+	var table := UnitArt.index_for_unit(unit.unit_type_id)
 	# One call: the animation, the frame, the placement, the tint and the writes. The writer is
 	# shared with the compute battlefield's soldier loop, which knows the same things about a man
-	# a different way - [param index] is this pack's slot, [param id] is who he is.
-	_sprite_writer.write(_packed_sprites, index, id if known else index, position, side, alive,
-		moved, hurt_age, strike_age, death_age, unit.facing.x < 0.0, tick)
+	# a different way - [param index] is this pack's slot, [param id] is who he is, and the table
+	# is his unit's character.
+	_sprite_writer.write(_packed_sprites, index, id if known else index, position, table, side,
+		alive, moved, hurt_age, strike_age, death_age, unit.facing.x < 0.0, tick)

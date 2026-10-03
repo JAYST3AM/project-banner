@@ -2936,8 +2936,7 @@ func _build_sprites() -> void:
 	if not draw_sprites:
 		return
 	_art = UnitArt.load_if_present()
-	if _art == null or not _art.has_character(UnitArt.CHARACTER_PLAYER) \
-			or not _art.has_character(UnitArt.CHARACTER_ENEMY):
+	if _art == null or not _art.has_all_units():
 		_art = null
 		return
 	var shader := load(UnitArt.SHADER_PATH) as Shader
@@ -2969,11 +2968,11 @@ func _build_sprites() -> void:
 		DebugLogger.info("gpu crowd: unit sprites off (the layout could not be read back)",
 			"GpuCrowd")
 		return
-	# The per-soldier step lives in the writer both renderers share: it holds the per-side tables
-	# and the memory of what each soldier was last written as, and writes only what changed. One
-	# call a soldier rather than five - see UnitSpriteWriter for the measured reason.
-	if not _sprite_writer.setup(_art, [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY],
-			1.0 / maxf(DT, 0.001), _sprite_offsets, _sprite_stride, SPRITE_FOOT_LIFT,
+	# The per-soldier step lives in the writer both renderers share: it holds the per-character
+	# tables and the memory of what each soldier was last written as, and writes only what
+	# changed. One call a soldier rather than five - see UnitSpriteWriter for the measured reason.
+	if not _sprite_writer.setup(_art, UnitArt.UNIT_KEYS,
+		1.0 / maxf(DT, 0.001), _sprite_offsets, _sprite_stride, SPRITE_FOOT_LIFT,
 			SPRITE_FALLEN_DARKEN):
 		_sprites_node.queue_free()
 		_sprites_node = null
@@ -3062,9 +3061,11 @@ func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
 	if _anim_died_tick[i] >= 0:
 		death_age = _tick - _anim_died_tick[i]
 	# One call: the animation, the frame, the placement, the tint and the four writes, with the
-	# per-side tables and the "what changed" memory inside the writer both renderers share.
-	_sprite_writer.write(_sprite_buffer, i, i, picture, side, alive, moved, hurt_age, strike_age,
-		death_age, _anim_flip[i] == 1, _tick)
+	# per-character tables and the "what changed" memory inside the writer both renderers share.
+	# The dev crowd fields the first two roster units, one a side, so the two armies still read
+	# apart at a glance.
+	_sprite_writer.write(_sprite_buffer, i, i, picture, side, side, alive, moved, hurt_age,
+		strike_age, death_age, _anim_flip[i] == 1, _tick)
 
 
 ## One box a body, drawn the way the battle view's formation debug draws it: the ground the

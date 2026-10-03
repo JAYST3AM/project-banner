@@ -1,0 +1,233 @@
+{
+ "units_per_pixel": 0.065,
+ "characters": {
+  "peasant_recruit": {
+   "cell": [
+    59,
+    62
+   ],
+   "anchor": [
+    32.0,
+    2
+   ],
+   "head": 59,
+   "animations": {
+    "idle": {
+     "y": 0,
+     "frames": 4,
+     "ms": 140.0
+    },
+    "walk": {
+     "y": 62,
+     "frames": 6,
+     "ms": 95.0
+    },
+    "attack": {
+     "y": 124,
+     "frames": 3,
+     "ms": 65.0
+    },
+    "hurt": {
+     "y": 186,
+     "frames": 6,
+     "ms": 90.0
+    },
+    "death": {
+     "y": 248,
+     "frames": 7,
+     "ms": 110.0
+    }
+   }
+  },
+  "spearman": {
+   "cell": [
+    51,
+    58
+   ],
+   "anchor": [
+    29.375,
+    0
+   ],
+   "head": 57,
+   "animations": {
+    "idle": {
+     "y": 310,
+     "frames": 4,
+     "ms": 140.0
+    },
+    "walk": {
+     "y": 368,
+     "frames": 6,
+     "ms": 95.0
+    },
+    "attack": {
+     "y": 426,
+     "frames": 3,
+     "ms": 65.0
+    },
+    "hurt": {
+     "y": 484,
+     "frames": 6,
+     "ms": 90.0
+    },
+    "death": {
+     "y": 542,
+     "frames": 7,
+     "ms": 110.0
+    }
+   }
+  },
+  "archer": {
+   "cell": [
+    57,
+    62
+   ],
+   "anchor": [
+    28.5,
+    0
+   ],
+   "head": 60,
+   "animations": {
+    "idle": {
+     "y": 600,
+     "frames": 4,
+     "ms": 140.0
+    },
+    "walk": {
+     "y": 662,
+     "frames": 6,
+     "ms": 95.0
+    },
+    "attack": {
+     "y": 724,
+     "frames": 3,
+     "ms": 65.0
+    },
+    "hurt": {
+     "y": 786,
+     "frames": 6,
+     "ms": 90.0
+    },
+    "death": {
+     "y": 848,
+     "frames": 7,
+     "ms": 110.0
+    }
+   }
+  },
+  "bandit_ruffian": {
+   "cell": [
+    59,
+    61
+   ],
+   "anchor": [
+    22.375,
+    0
+   ],
+   "head": 61,
+   "animations": {
+    "idle": {
+     "y": 910,
+     "frames": 4,
+     "ms": 140.0
+    },
+    "walk": {
+     "y": 971,
+     "frames": 6,
+     "ms": 95.0
+    },
+    "attack": {
+     "y": 1032,
+     "frames": 3,
+     "ms": 65.0
+    },
+    "hurt": {
+     "y": 1093,
+     "frames": 6,
+     "ms": 90.0
+    },
+    "death": {
+     "y": 1154,
+     "frames": 7,
+     "ms": 110.0
+    }
+   }
+  },
+  "bandit_brigand": {
+   "cell": [
+    55,
+    58
+   ],
+   "anchor": [
+    29.125,
+    0
+   ],
+   "head": 58,
+   "animations": {
+    "idle": {
+     "y": 1215,
+     "frames": 4,
+     "ms": 140.0
+    },
+    "walk": {
+     "y": 1273,
+     "frames": 6,
+     "ms": 95.0
+    },
+    "attack": {
+     "y": 1331,
+     "frames": 3,
+     "ms": 65.0
+    },
+    "hurt": {
+     "y": 1389,
+     "frames": 6,
+     "ms": 90.0
+    },
+    "death": {
+     "y": 1447,
+     "frames": 7,
+     "ms": 110.0
+    }
+   }
+  },
+  "bandit_archer": {
+   "cell": [
+    59,
+    64
+   ],
+   "anchor": [
+    26.75,
+    0
+   ],
+   "head": 61,
+   "animations": {
+    "idle": {
+     "y": 1505,
+     "frames": 4,
+     "ms": 140.0
+    },
+    "walk": {
+     "y": 1569,
+     "frames": 6,
+     "ms": 95.0
+    },
+    "attack": {
+     "y": 1633,
+     "frames": 3,
+     "ms": 65.0
+    },
+    "hurt": {
+     "y": 1697,
+     "frames": 6,
+     "ms": 90.0
+    },
+    "death": {
+     "y": 1761,
+     "frames": 7,
+     "ms": 110.0
+    }
+   }
+  }
+ }
+}

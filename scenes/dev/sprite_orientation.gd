@@ -33,12 +33,12 @@ func _ready() -> void:
 	var offsets := UnitArt.offsets_from(layout)
 	var stride := int(layout.get("stride", 0))
 	var writer := UnitSpriteWriter.new()
-	writer.setup(art, [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY], 30.0, offsets, stride,
+	writer.setup(art, UnitArt.UNIT_KEYS, 30.0, offsets, stride,
 		SPRITE_FOOT_LIFT)
 	writer.reserve(2)
 	var buffer := PackedFloat32Array()
 	buffer.resize(stride)
-	writer.write(buffer, 0, 0, Vector2.ZERO, 0, true, false, -1, -1, 0, false, 0)
+	writer.write(buffer, 0, 0, Vector2.ZERO, 0, 0, true, false, -1, -1, 0, false, 0)
 	sprite_mm.instance_count = 1
 	sprite_mm.buffer = buffer
 	sprite_mm.visible_instance_count = 1
@@ -77,11 +77,11 @@ func _ready() -> void:
 	bar_mm.buffer = bar_buffer
 	bar_mm.visible_instance_count = 1
 
-	print("head (world units) = ", head, "  cell = ", art.cell_size(UnitArt.CHARACTER_PLAYER),
+	print("head (world units) = ", head, "  cell = ", art.cell_size(UnitArt.UNIT_KEYS[0]),
 		"  units/px = ", art.units_per_pixel())
 	print("bar lift = ", lift, "   bar top-left = ", bar_top_left,
 		"  bar bottom = ", bar_top_left.y + BAR_HEIGHT)
-	print("model: sprite box top = ", SPRITE_FOOT_LIFT - art.cell_size(UnitArt.CHARACTER_PLAYER).y
+	print("model: sprite box top = ", SPRITE_FOOT_LIFT - art.cell_size(UnitArt.UNIT_KEYS[0]).y
 		* art.units_per_pixel(), "  head top = ", SPRITE_FOOT_LIFT - head,
 		"  model gap (bar bottom - head top) = ", bar_top_left.y + BAR_HEIGHT
 		- (SPRITE_FOOT_LIFT - head))

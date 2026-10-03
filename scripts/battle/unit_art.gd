@@ -3,10 +3,9 @@ extends RefCounted
 ## The battle's unit sprites: one atlas, a frame table, and the arithmetic that turns a
 ## soldier's state into the rectangle the renderer hands the GPU.
 ##
-## [b]Loaded only if it is there.[/b] The pack is third-party art under a licence that allows
-## use but forbids re-upload, so it lives in the git-ignored [code]assets/art_source/[/code]
-## tree and a fresh clone does not have it. [method load_if_present] therefore returns
-## [code]null[/code] rather than failing, and [SoldierField] draws its instance discs exactly
+## [b]Loaded only if it is there.[/b] The art is the project's own PixelLab unit set, committed
+## under [code]assets/sprites/units/[/code]; a build tree without the imported atlas still loads
+## to [code]null[/code] rather than failing, and [SoldierField] draws its instance discs exactly
 ## as it did before - the same graceful-absence rule the campaign ground follows when the
 ## painted terrain art is missing.
 ##
@@ -17,8 +16,8 @@ extends RefCounted
 ## Rebuild the atlas with [code]tools/build_unit_atlas.py[/code] after changing the source
 ## strips; the frame counts and durations live in the JSON, never in code.
 
-const ATLAS_PATH := "res://assets/art_source/units/tiny_rpg/unit_atlas.png"
-const TABLE_PATH := "res://assets/art_source/units/tiny_rpg/unit_atlas.json"
+const ATLAS_PATH := "res://assets/sprites/units/unit_atlas.png"
+const TABLE_PATH := "res://assets/sprites/units/unit_atlas.json"
 ## The shader both renderers draw their sprite batch with: custom data carries the frame rect,
 ## the shader maps the quad's UV onto it. Committed code - only the art is git-ignored.
 const SHADER_PATH := "res://shaders/battle/unit_sprite.gdshader"
@@ -31,12 +30,14 @@ const HURT := 3
 const DEATH := 4
 const ANIMATIONS: Array[String] = ["idle", "walk", "attack", "hurt", "death"]
 
-## Which character a side is drawn as. [b]Both sides are the soldier[/b] - the owner: "dont use the
-## orks" - so the orc rows stay in the atlas unused for now (a monster, or an enemy character
-## whose silhouette reads apart from a soldier). Because both sides are the same character, the
-## side has to read from the tint below, not the art.
-const CHARACTER_PLAYER := "soldier"
-const CHARACTER_ENEMY := CHARACTER_PLAYER
+## The six roster units' characters, in atlas order. A soldier is drawn as his own unit type:
+## the key comes from his definition's id, and a type the atlas does not carry falls back to the
+## first entry rather than drawing nothing. Both sides share this table - the side still reads
+## from the tint below, not the art.
+const UNIT_KEYS: Array[String] = [
+	"peasant_recruit", "spearman", "archer",
+	"bandit_ruffian", "bandit_brigand", "bandit_archer",
+]
 
 ## The per-side tint every sprite instance is drawn with. The player's soldier is left natural -
 ## his own blue steel already reads as "ours" - and the enemy is multiplied warm: verified against
@@ -127,9 +128,28 @@ func _read() -> bool:
 	return true
 
 
-## The key of the character the given side is drawn as.
-static func key_for_side(side: String) -> String:
-	return CHARACTER_PLAYER if side == BattleContext.SIDE_PLAYER else CHARACTER_ENEMY
+## The key of the character a soldier of this unit type is drawn as; an id the atlas does not
+## carry falls back to the first entry, so an unknown unit still renders as a soldier.
+static func key_for_unit(unit_type_id: String) -> String:
+	return unit_type_id if UNIT_KEYS.has(unit_type_id) else UNIT_KEYS[0]
+
+
+## The index of a unit's character in the renderer tables; 0 for an unknown unit, matching
+## [method key_for_unit].
+static func index_for_unit(unit_type_id: String) -> int:
+	var at := UNIT_KEYS.find(unit_type_id)
+	return at if at >= 0 else 0
+
+
+## True when the table carries every roster character - the check both renderers make before
+## turning their sprite batches on.
+func has_all_units() -> bool:
+	if _characters.is_empty():
+		return false
+	for key in UNIT_KEYS:
+		if not _characters.has(key):
+			return false
+	return true
 
 
 ## The tint the given side's sprites are drawn with.

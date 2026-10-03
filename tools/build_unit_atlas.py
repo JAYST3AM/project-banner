@@ -1,176 +1,149 @@
-"""Build the battle unit atlas from the Tiny RPG character strips.
+#!/usr/bin/env python3
+"""Build the unit sprite atlas the battle renders from.
 
-Run from anywhere:  python tools/build_unit_atlas.py
+Source: the PixelLab unit bundles under `assets/sprites/units/<unit>/<animation>/frame_XX.png`
+- one character a roster unit, with the idle/walk/attack/hurt/death animations UnitArt carries.
+Every character is cropped to one cell, the union of every frame of every animation, so a frame
+is always the same size and the runtime just reads offsets; the cell, the anchor (where the
+soldier's feet sit) and the head (how tall the idle pose stands, for the health bar) are measured
+here, once, and written to the JSON beside the PNG.
 
-Reads   assets/art_source/units/tiny_rpg/source/<character>/<animation>.png   (100 px cells)
-Writes  assets/art_source/units/tiny_rpg/unit_atlas.png
-        assets/art_source/units/tiny_rpg/unit_atlas.json
+Run:  uv run --with pillow python tools/build_unit_atlas.py
+Then: godot --headless --import  (so the .import lands beside the fresh PNG)
 
-Why an atlas at all: the battle draws every soldier as one MultiMesh instance, and a
-MultiMesh has exactly one texture. All animations of both characters therefore have to live
-in one image, and the per-frame source rectangle travels per instance in custom data.
-
-Two rules the game depends on:
-
-* **One crop box per character, for every animation.** The box is the union of every frame's
-  opaque pixels (idle through death, attack swings included), so cell size never changes
-  between animations and the feet stay on the same pixel - otherwise a soldier's feet would
-  jump when he starts walking.
-* **The anchor is the idle body's centre line, measured from the cell's bottom.** The battle
-  places that point at the soldier's world position, so the drawn man stands on his disc
-  however wide the attack frames are.
-
-The art is Zerie's Tiny RPG Character Asset Pack (see README.md beside it); it is git-ignored
-and must not be redistributed. This script only ever reads the local copy.
+Keep UNITS in lockstep with UnitArt.UNIT_KEYS and ANIMS with UnitArt.ANIMATIONS.
 """
-
 import json
 import os
+import sys
 
 from PIL import Image
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
-ART = os.path.join(ROOT, "assets", "art_source", "units", "tiny_rpg")
-OUT_PNG = os.path.join(ART, "unit_atlas.png")
-OUT_JSON = os.path.join(ART, "unit_atlas.json")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(ROOT, "assets", "sprites", "units")
+OUT_PNG = os.path.join(SRC, "unit_atlas.png")
+OUT_JSON = os.path.join(SRC, "unit_atlas.json")
 
-CELL = 100  # the pack's cell size
-PAD = 2     # transparent border around every cell: with nearest sampling this is belt and braces
-UNITS_PER_PIXEL = 0.16  # world units one atlas pixel draws as; tuned against the battle camera
-
-# Animation name -> (source file stem, milliseconds per frame). The durations are the look of
-# the pack's own animations (a slow breath, a brisk walk, a fast swing), not physics.
-CHARACTERS = {
-    "soldier": {
-        "source": "source/soldier",
-        "animations": {
-            "idle": ("idle", 140),
-            "walk": ("walk", 95),
-            "attack": ("attack01", 65),
-            "hurt": ("hurt", 90),
-            "death": ("death", 110),
-        },
-    },
-    "orc": {
-        "source": "source/orc",
-        "animations": {
-            "idle": ("idle", 140),
-            "walk": ("walk", 95),
-            "attack": ("attack01", 65),
-            "hurt": ("hurt", 90),
-            "death": ("death", 110),
-        },
-    },
-}
+UNITS = [
+    "peasant_recruit", "spearman", "archer",
+    "bandit_ruffian", "bandit_brigand", "bandit_archer",
+]
+# Animation name -> milliseconds a frame is held. The old tuned pace, kept: the walk reads at a
+# march and the one-shots snap.
+ANIMS = [("idle", 140.0), ("walk", 95.0), ("attack", 65.0), ("hurt", 90.0), ("death", 110.0)]
+# Chosen so a head (57-61 px, measured below) stands ~3.84 world units - the height the old
+# atlas drew soldiers at, so formation spacing and the health bar keep their tuned feel.
+UNITS_PER_PIXEL = 0.065
 
 
-def load_frames(path):
-    image = Image.open(path).convert("RGBA")
-    if image.size[1] != CELL:
-        raise SystemExit(f"{path}: expected {CELL}px tall strips, got {image.size}")
-    count = image.size[0] // CELL
-    if count == 0:
-        raise SystemExit(f"{path}: no {CELL}px cells")
-    return [image.crop((i * CELL, 0, (i + 1) * CELL, CELL)) for i in range(count)]
+def frame_paths(unit, anim):
+    """The unit's frames for one animation: <anim>_frame_NN.png, the install's flat naming."""
+    d = os.path.join(SRC, unit)
+    if not os.path.isdir(d):
+        return []
+    return sorted(
+        os.path.join(d, f) for f in os.listdir(d)
+        if f.startswith(anim + "_frame_") and f.endswith(".png")
+    )
 
 
-def union_bbox(frames):
-    box = None
-    for frame in frames:
-        alpha = frame.getchannel("A")
-        part = alpha.getbbox()
-        if part is None:
-            continue
-        box = part if box is None else (
-            min(box[0], part[0]), min(box[1], part[1]),
-            max(box[2], part[2]), max(box[3], part[3]),
-        )
-    if box is None:
-        raise SystemExit("every frame was empty")
-    return box
+def opaque_box(image):
+    """The frame's non-transparent bounds, or None when the frame is empty."""
+    return image.getchannel("A").getbbox()
 
 
-def build():
-    table = {
-        "generated_by": "tools/build_unit_atlas.py",
-        "source_pack": "Tiny RPG Character Asset Pack 01 v2.0 - Free Soldier & Orc",
-        "author": "Zerie (https://zerie.itch.io/tiny-rpg-character-asset-pack)",
-        "usage": "personal & commercial game projects; no redistribution, no AI training",
-        "atlas": "unit_atlas.png",
-        "units_per_pixel": UNITS_PER_PIXEL,
-        "characters": {},
-    }
+def main():
+    warnings = []
+    # Gather every character's frames first: the union box sets the cell for all of them.
+    chars = {}
+    for unit in UNITS:
+        anim_frames = {}
+        idle_pool = frame_paths(unit, "idle")
+        if not idle_pool:
+            print("ERROR: %s has no idle frames - a unit without a stance cannot be built" % unit)
+            return 1
+        union = None
+        for anim, _ms in ANIMS:
+            paths = frame_paths(unit, anim)
+            if not paths:
+                # The one template the pack lacks still ships: one idle frame, held. The JSON's
+                # frame count is what the plan reads, so a 1-frame animation plays as a pose.
+                warnings.append("%s: no %s frames - falls back to a held idle pose" % (unit, anim))
+                paths = [idle_pool[0]]
+            images = [Image.open(p).convert("RGBA") for p in paths]
+            for im in images:
+                box = opaque_box(im)
+                if box is None:
+                    continue
+                if union is None:
+                    union = list(box)
+                else:
+                    union[0] = min(union[0], box[0])
+                    union[1] = min(union[1], box[1])
+                    union[2] = max(union[2], box[2])
+                    union[3] = max(union[3], box[3])
+            anim_frames[anim] = images
+        if union is None:
+            print("ERROR: %s has no opaque pixels at all" % unit)
+            return 1
+        x0, y0, x1, y1 = union
+        cell = (x1 - x0, y1 - y0)
 
-    rows = []  # (character, animation, frames, cell box) - laid out after every box is known
-    cells = {}
-    for name, spec in CHARACTERS.items():
-        loaded = {}
-        for anim, (stem, ms) in spec["animations"].items():
-            path = os.path.join(ART, spec["source"], stem + ".png")
-            if not os.path.exists(path):
-                raise SystemExit(f"missing source strip: {path}")
-            loaded[anim] = (load_frames(path), ms)
+        # Anchor: the feet, from the idle pose - its horizontal centre and the last idle pixel
+        # row, both measured against the cell's own edges so every drawn frame lands under him.
+        idle_boxes = [b for b in (opaque_box(im) for im in anim_frames["idle"]) if b]
+        idle_bottom = max(b[3] for b in idle_boxes)
+        centre_x = sum((b[0] + b[2]) * 0.5 for b in idle_boxes) / len(idle_boxes)
+        anchor = (centre_x - x0, y1 - idle_bottom)
+        # Head: how tall the idle pose stands, the tallest idle frame - a health bar hangs off it.
+        head = max(b[3] - b[1] for b in idle_boxes)
+        chars[unit] = {
+            "cell": cell, "anchor": anchor, "head": head, "anim_frames": anim_frames,
+            "crop": (x0, y0, x1, y1),
+        }
 
-        box = union_bbox([frame for frames, _ in loaded.values() for frame in frames])
-        x0 = max(0, box[0] - PAD)
-        y0 = max(0, box[1] - PAD)
-        x1 = min(CELL, box[2] + PAD)
-        y1 = min(CELL, box[3] + PAD)
-        cell_w, cell_h = x1 - x0, y1 - y0
-
-        # The anchor: the idle body's centre column (the one pose with no weapon thrown out),
-        # and the cell's bottom as the feet plane.
-        idle_box = union_bbox(loaded["idle"][0])
-        anchor_x = (idle_box[0] + idle_box[2]) * 0.5 - x0
-        # The head: how tall the soldier stands in his idle pose, from the cell's bottom. The
-        # cell's top is the tallest thing any frame draws - a raised sword in the attack row -
-        # so a health bar placed off the cell floats a gap above his head between swings. The
-        # bar hangs off this instead, and a sword crossing the bar is the lesser price.
-        head_px = max(1, y1 - idle_box[1])
-
-        cells[name] = (cell_w, cell_h)
-        table["characters"][name] = {
-            "cell": [cell_w, cell_h],
-            "anchor": [round(anchor_x, 2), 0.0],
-            "head": head_px,
-            "source_box": [x0, y0, x1, y1],
+    # Lay the rows out: one animation a row, frames left to right, each character's rows stacked.
+    width = 0
+    height = 0
+    for unit in UNITS:
+        c = chars[unit]
+        for anim, _ms in ANIMS:
+            width = max(width, max(1, len(c["anim_frames"][anim])) * c["cell"][0])
+            height += c["cell"][1]
+    atlas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    table = {"units_per_pixel": UNITS_PER_PIXEL, "characters": {}}
+    y = 0
+    for unit in UNITS:
+        c = chars[unit]
+        cw, ch = c["cell"]
+        entry = {
+            "cell": [cw, ch],
+            "anchor": [c["anchor"][0], c["anchor"][1]],
+            "head": c["head"],
             "animations": {},
         }
-        for anim, (frames, ms) in loaded.items():
-            rows.append((name, anim, frames, (x0, y0, x1, y1), cell_w, cell_h))
-            table["characters"][name]["animations"][anim] = {
-                "row": 0, "y": 0, "frames": len(frames), "ms": ms,
-            }
-
-    widest = max(cell_w * len(frames) for _, _, frames, _, cell_w, _ in rows)
-    height = sum(cell_h for _, _, _, _, _, cell_h in rows)
-    atlas = Image.new("RGBA", (widest, height), (0, 0, 0, 0))
-
-    y = 0
-    for name, anim, frames, (x0, y0, x1, y1), cell_w, cell_h in rows:
-        entry = table["characters"][name]["animations"][anim]
-        entry["row"] = y // cell_h if cell_h else 0
-        entry["y"] = y
-        for index, frame in enumerate(frames):
-            atlas.alpha_composite(frame.crop((x0, y0, x1, y1)), (index * cell_w, y))
-        y += cell_h
+        for anim, ms in ANIMS:
+            images = c["anim_frames"][anim]
+            for i, im in enumerate(images):
+                atlas.alpha_composite(im.crop(c["crop"]), (i * cw, y))
+            entry["animations"][anim] = {"y": y, "frames": len(images), "ms": ms}
+            y += ch
+        table["characters"][unit] = entry
+        print("%-15s cell %dx%d head %dpx anchor (%.1f, %.1f) frames %s" % (
+            unit, cw, ch, c["head"], c["anchor"][0], c["anchor"][1],
+            "/".join("%s:%d" % (a, len(c["anim_frames"][a])) for a, _ in ANIMS)))
 
     atlas.save(OUT_PNG)
-    table["atlas_size"] = [widest, height]
-    with open(OUT_JSON, "w", encoding="utf-8") as handle:
-        json.dump(table, handle, indent=2)
-        handle.write("\n")
-
-    print(f"atlas {widest}x{height} -> {OUT_PNG}")
-    for name, entry in table["characters"].items():
-        anims = ", ".join(
-            f"{anim} {data['frames']}f@{data['ms']}ms y{data['y']}"
-            for anim, data in entry["animations"].items()
-        )
-        print(f"  {name}: cell {entry['cell'][0]}x{entry['cell'][1]} anchor {entry['anchor'][0]} "
-              f"box {entry['source_box']}  {anims}")
+    with open(OUT_JSON, "w", encoding="utf-8") as f:
+        json.dump(table, f, indent=1)
+        f.write("\n")
+    for w in warnings:
+        print("WARN:", w)
+    print("built %s (%dx%d) + %s" % (
+        os.path.relpath(OUT_PNG, ROOT), atlas.width, atlas.height,
+        os.path.relpath(OUT_JSON, ROOT)))
+    return 0
 
 
 if __name__ == "__main__":
-    build()
+    sys.exit(main())

@@ -24,7 +24,7 @@ func run() -> void:
 	_test_the_placement_puts_the_anchor_at_the_soldiers_feet()
 	_test_a_flip_mirrors_the_frame_without_moving_it()
 	_test_the_fields_own_geometry_clears_the_sprite()
-	_test_both_sides_are_the_soldier_and_read_from_the_tint()
+	_test_every_roster_unit_draws_as_itself_and_sides_read_from_the_tint()
 	_test_the_precomputed_tables_hold_together_when_the_art_is_present()
 	_test_the_instance_write_follows_the_layout()
 	_test_the_writer_matches_the_pure_functions()
@@ -130,9 +130,12 @@ func _test_the_fields_own_geometry_clears_the_sprite() -> void:
 		"origin_x": 3, "origin_y": 7, "color": 8, "custom": 12,
 	})
 	var bar_bottom := -SoldierField.BODY_RADIUS - field.bar_lift() + SoldierField.BAR_HEIGHT
-	var head := art.head(UnitArt.CHARACTER_PLAYER)
-	var cell := art.cell_size(UnitArt.CHARACTER_PLAYER)
-	greater(head, 0.0, "the atlas declares how tall the soldier stands in his idle pose")
+	# The bar clears the tallest character the writer carries, so the check is against the tallest.
+	var head := 0.0
+	for key in UnitArt.UNIT_KEYS:
+		head = maxf(head, art.head(key))
+	var cell := art.cell_size(UnitArt.UNIT_KEYS[0])
+	greater(head, 0.0, "the atlas declares how tall each unit stands in his idle pose")
 	check(head <= cell.y * art.units_per_pixel() + 0.001,
 		"and his head is no taller than the cell his frames are drawn in")
 	var head_top := SoldierField.FOOT_LIFT - head
@@ -141,12 +144,15 @@ func _test_the_fields_own_geometry_clears_the_sprite() -> void:
 	field.free()
 
 
-func _test_both_sides_are_the_soldier_and_read_from_the_tint() -> void:
-	section("both sides are the soldier, separated by the tint")
-	equal(UnitArt.key_for_side(BattleContext.SIDE_PLAYER), UnitArt.CHARACTER_PLAYER,
-		"the player's side is the soldier")
-	equal(UnitArt.key_for_side(BattleContext.SIDE_ENEMY), UnitArt.CHARACTER_PLAYER,
-		"and so is the enemy's - the owner's call, the orc is not used")
+func _test_every_roster_unit_draws_as_itself_and_sides_read_from_the_tint() -> void:
+	section("every roster unit draws as its own character, the sides read from the tint")
+	for key in UnitArt.UNIT_KEYS:
+		equal(UnitArt.key_for_unit(key), key, "a roster id is its own character key: %s" % key)
+	equal(UnitArt.key_for_unit("no_such_unit"), UnitArt.UNIT_KEYS[0],
+		"an id the atlas does not carry falls back to the first character")
+	equal(UnitArt.index_for_unit("archer"), UnitArt.UNIT_KEYS.find("archer"),
+		"a roster unit's index agrees with the key order")
+	equal(UnitArt.index_for_unit("no_such_unit"), 0, "and an unknown unit is the fallback index")
 	not_equal(UnitArt.side_tint(true), UnitArt.side_tint(false),
 		"the two sides are tinted apart, or nobody could tell them apart")
 	equal(UnitArt.side_tint(true), UnitArt.TINT_PLAYER, "the player's soldier is left natural")
@@ -156,12 +162,12 @@ func _test_both_sides_are_the_soldier_and_read_from_the_tint() -> void:
 ## this pipeline most worth pinning: a table that disagreed with [method UnitArt.uv_rect] would
 ## draw the wrong frames at speed instead of failing.
 func _test_the_precomputed_tables_hold_together_when_the_art_is_present() -> void:
-	section("the precomputed per-character tables, when the pack is on this machine")
+	section("the precomputed per-character tables, when the atlas is in this tree")
 	var art := UnitArt.load_if_present()
 	if art == null:
 		check(true, "absent art is a legitimate outcome, not a failure")
 		return
-	for key in [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY]:
+	for key in UnitArt.UNIT_KEYS:
 		var data := art.renderer_data(key, 30.0)
 		var ticks: PackedInt32Array = data["ticks"]
 		var frames: PackedInt32Array = data["frames"]
@@ -227,7 +233,7 @@ func _test_the_instance_write_follows_the_layout() -> void:
 	equal(int(packed.get("discs", -1)), 0, "the pack says so too, for the bench's report")
 	for i in simulator.units.size():
 		var unit: BattleUnit = simulator.units[i]
-		var key := UnitArt.key_for_side(unit.side)
+		var key := UnitArt.key_for_unit(unit.unit_type_id)
 		var cell := art.cell_size(key)
 		var scale := art.units_per_pixel()
 		var rect := field.sprite_instance_rect(i)
@@ -268,7 +274,7 @@ func _test_the_writer_matches_the_pure_functions() -> void:
 		GameManager.config(), UnitCatalog.load_from(), FormationCatalog.load_from(), 2, SEED)
 	var simulator: BattleSimulator = built["simulator"]
 	var unit: BattleUnit = simulator.units[0]
-	var key := UnitArt.key_for_side(unit.side)
+	var key := UnitArt.key_for_unit(unit.unit_type_id)
 	var data := art.renderer_data(key, field.anim_rate)
 	var ticks: PackedInt32Array = data["ticks"]
 	var counts: PackedInt32Array = data["frames"]
@@ -328,7 +334,7 @@ func _test_the_writer_matches_the_pure_functions() -> void:
 func _check_instance(art: UnitArt, field: SoldierField, simulator: BattleSimulator, unit: BattleUnit,
 		ticks: PackedInt32Array, counts: PackedInt32Array, animation: int, age: int, label: String,
 		slot: int = 0) -> void:
-	var key := UnitArt.key_for_side(unit.side)
+	var key := UnitArt.key_for_unit(unit.unit_type_id)
 	var cell := art.cell_size(key)
 	var scale := art.units_per_pixel()
 	var into := simulator.tick_index + unit.id * UnitArt.PHASE_STRIDE
@@ -354,13 +360,13 @@ func _test_the_atlas_table_holds_together_when_the_art_is_present() -> void:
 	section("the atlas table, when the pack is on this machine")
 	var art := UnitArt.load_if_present()
 	if art == null:
-		print("    (the pack is not present: the field draws its discs, and that path is unchanged)")
+		print("    (the atlas is not present: the field draws its discs, and that path is unchanged)")
 		check(true, "absent art is a legitimate outcome, not a failure")
 		return
 	greater(art.atlas_size().x, 0.0, "the atlas has a width")
 	greater(art.atlas_size().y, 0.0, "and a height")
 	greater(art.units_per_pixel(), 0.0, "and a scale")
-	var keys: Array[String] = [UnitArt.CHARACTER_PLAYER, UnitArt.CHARACTER_ENEMY]
+	var keys: Array[String] = UnitArt.UNIT_KEYS
 	for key in keys:
 		check(art.has_character(key), "the table has the %s" % key)
 		var cell := art.cell_size(key)
