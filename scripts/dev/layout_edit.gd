@@ -266,10 +266,10 @@ func _drag_to(point: Vector2) -> void:
 		var target := Vector2(rect.position.x + delta.x, rect.position.y + delta.y)
 		if snap:
 			target = _snap_position(region, target, rect.size)
-		node.position = _clamp_position(target, rect.size)
+		node.position = _normalize_rect(region, Rect2(target, rect.size)).position
 	else:
 		var result := _resize_rect(region, rect, delta, _drag_handle, snap)
-		node.position = _clamp_position(result.position, result.size)
+		node.position = result.position
 		node.size = result.size
 		_apply_region_rules(region)
 	_refresh_panel()
@@ -287,12 +287,6 @@ func _normalize_rect(region: Dictionary, rect: Rect2) -> Rect2:
 	var x := clampf(rect.position.x, 0.0, maxf(0.0, size.x - width))
 	var y := clampf(rect.position.y, 0.0, maxf(0.0, size.y - height))
 	return Rect2(Vector2(round(x), round(y)), Vector2(round(width), round(height)))
-
-
-func _clamp_position(target: Vector2, region_size: Vector2) -> Vector2:
-	var x := clampf(target.x, 0.0, maxf(0.0, size.x - region_size.x))
-	var y := clampf(target.y, 0.0, maxf(0.0, size.y - region_size.y))
-	return Vector2(round(x), round(y))
 
 
 ## Everything under a region stops taking clicks while edit mode is on.
@@ -411,8 +405,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_DOWN: move.y = step
 	if move == Vector2.ZERO:
 		return
-	var node := _regions[_selected]["node"] as Control
-	node.position = _clamp_position(node.position + move, node.size)
+	var region: Dictionary = _regions[_selected]
+	var node := region["node"] as Control
+	node.position = _normalize_rect(region, Rect2(node.position + move, node.size)).position
 	_refresh_panel()
 	queue_redraw()
 	get_viewport().set_input_as_handled()
