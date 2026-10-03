@@ -28,8 +28,10 @@ signal banner_changed
 const DIM := Color(0.66, 0.68, 0.72)
 const GOLD := Color(0.91, 0.81, 0.55)
 const OUTLINE := Color(0.02, 0.02, 0.03)
-const CANVAS_W := 160.0
-const CANVAS_H := 200.0
+# The on-screen editing surface: a compact render of the 16x20 grid (8px per
+# cell; the canvas no longer competes with the hero for attention).
+const DISPLAY_W := 128.0
+const DISPLAY_H := 160.0
 const UNDO_LIMIT := 120
 
 var _banner: BannerData = null
@@ -54,8 +56,8 @@ func _ready() -> void:
 	_font = PixelStyle.pixel_font()
 	add_theme_constant_override("separation", 12)
 	_build_controls_column()
-	_build_hero_column()
 	_build_canvas_column()
+	_build_hero_column()
 
 
 ## Give the workspace a banner to paint (the New Campaign screen's payload or a fresh
@@ -83,8 +85,10 @@ func _build_controls_column() -> void:
 	add_child(column)
 
 	column.add_child(PixelStyle.pixel_label("Tools", 11, GOLD))
-	var tool_row := HBoxContainer.new()
-	tool_row.add_theme_constant_override("separation", 2)
+	var tool_row := GridContainer.new()
+	tool_row.columns = 4
+	tool_row.add_theme_constant_override("h_separation", 2)
+	tool_row.add_theme_constant_override("v_separation", 2)
 	column.add_child(tool_row)
 	var group := ButtonGroup.new()
 	var pencil := _icon_button("pencil", "Pencil - click or drag to paint, right-click to erase", group)
@@ -125,7 +129,7 @@ func _build_controls_column() -> void:
 	var palette := BannerData.palette()
 	for i in palette.size():
 		var swatch := Button.new()
-		swatch.custom_minimum_size = Vector2(17.0, 17.0)
+		swatch.custom_minimum_size = Vector2(15.0, 15.0)
 		swatch.tooltip_text = "#" + palette[i].to_html(false)
 		swatch.focus_mode = Control.FOCUS_NONE
 		swatch.pressed.connect(_select_colour.bind(i))
@@ -141,7 +145,7 @@ func _build_controls_column() -> void:
 	for size in BannerData.detail_sizes():
 		var detail_button := Button.new()
 		detail_button.text = "%dx%d" % [size.x, size.y]
-		detail_button.custom_minimum_size = PixelStyle.scaled_vec(Vector2(56.0, 24.0))
+		detail_button.custom_minimum_size = PixelStyle.scaled_vec(Vector2(52.0, 24.0))
 		detail_button.add_theme_font_override("font", _font)
 		detail_button.add_theme_font_size_override("font_size", PixelStyle.scaled(11))
 		detail_button.add_theme_color_override("font_color", UiTheme.TEXT)
@@ -173,15 +177,19 @@ func _build_controls_column() -> void:
 
 
 func _build_canvas_column() -> void:
+	# The editing surface: a compact dark inset, clearly smaller than the hero.
 	var column := VBoxContainer.new()
 	column.name = "editor_canvas"
-	column.add_theme_constant_override("separation", 12)
+	column.add_theme_constant_override("separation", 4)
 	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	add_child(column)
+
+	column.add_child(PixelStyle.pixel_label("Edit Design", 11, GOLD))
 
 	var frame := PanelContainer.new()
 	frame.name = "canvas_frame"
 	frame.theme_type_variation = "UtilityInset"
+	frame.custom_minimum_size = Vector2(DISPLAY_W + 20.0, 0.0)
 	column.add_child(frame)
 
 	var inner := VBoxContainer.new()
@@ -189,48 +197,16 @@ func _build_canvas_column() -> void:
 	frame.add_child(inner)
 
 	_grid = PaintGrid.new()
+	_grid.name = "paint_grid"
 	_grid.editor = self
-	_grid.grid_size = Vector2(CANVAS_W, CANVAS_H)
-	_grid.custom_minimum_size = Vector2(CANVAS_W, CANVAS_H)
+	_grid.grid_size = Vector2(DISPLAY_W, DISPLAY_H)
+	_grid.custom_minimum_size = Vector2(DISPLAY_W, DISPLAY_H)
 	inner.add_child(_grid)
 
 	_status = PixelStyle.body_label("", 13, DIM)
-	inner.add_child(_status)
+	column.add_child(_status)
 	_refresh_status()
 
-	# One quiet card grouping the reserved founder slot and the true-scale map,
-	# rather than two cards floating apart from the editing surface.
-	var support := PanelContainer.new()
-	support.name = "editor_support"
-	support.theme_type_variation = "UtilityInset"
-	column.add_child(support)
-	var support_rows := VBoxContainer.new()
-	support_rows.add_theme_constant_override("separation", 8)
-	support.add_child(support_rows)
-
-	var founder_slot := HBoxContainer.new()
-	founder_slot.name = "founder_slot"
-	founder_slot.add_theme_constant_override("separation", 6)
-	founder_slot.alignment = BoxContainer.ALIGNMENT_CENTER
-	founder_slot.set_meta("reserved", true)
-	support_rows.add_child(founder_slot)
-	founder_slot.add_child(PixelIcons.icon("founder", 22, Color(0.44, 0.46, 0.50)))
-	var founder_text := VBoxContainer.new()
-	founder_text.add_theme_constant_override("separation", 0)
-	founder_slot.add_child(founder_text)
-	founder_text.add_child(PixelStyle.pixel_label("FOUNDER", 10, Color(0.58, 0.60, 0.64)))
-	founder_text.add_child(PixelStyle.body_label("arrives with the founder creator", 11, Color(0.55, 0.57, 0.61)))
-
-	support_rows.add_child(PixelStyle.rule(Color(0.30, 0.26, 0.20, 0.55)))
-
-	var map_view := BannerView.new()
-	map_view.name = "map_preview"
-	map_view.banner = _banner
-	map_view.view_scale = 0.75
-	map_view.map_mode = true
-	map_view.custom_minimum_size = Vector2(160.0, 56.0)
-	_views.append(map_view)
-	support_rows.add_child(map_view)
 
 
 func _build_hero_column() -> void:
@@ -252,9 +228,47 @@ func _build_hero_column() -> void:
 	var pole_view := BannerView.new()
 	pole_view.banner = _banner
 	pole_view.view_scale = 4.0
-	pole_view.custom_minimum_size = Vector2(240.0, 300.0)
+	pole_view.custom_minimum_size = Vector2(240.0, 284.0)
 	_views.append(pole_view)
 	pole_frame.add_child(pole_view)
+
+	# Supporting previews: the reserved founder slot and the true-scale map, side
+	# by side under the hero - proof of how the identity appears elsewhere.
+	var support := HBoxContainer.new()
+	support.name = "editor_support"
+	support.add_theme_constant_override("separation", 8)
+	column.add_child(support)
+
+	var founder_frame := PanelContainer.new()
+	founder_frame.name = "founder_frame"
+	founder_frame.theme_type_variation = "UtilityInset"
+	founder_frame.custom_minimum_size = Vector2(180.0, 0.0)
+	founder_frame.set_meta("reserved", true)
+	support.add_child(founder_frame)
+	var founder_row := HBoxContainer.new()
+	founder_row.name = "founder_slot"
+	founder_row.add_theme_constant_override("separation", 6)
+	founder_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	founder_frame.add_child(founder_row)
+	founder_row.add_child(PixelIcons.icon("founder", 22, Color(0.44, 0.46, 0.50)))
+	var founder_text := VBoxContainer.new()
+	founder_text.add_theme_constant_override("separation", 0)
+	founder_row.add_child(founder_text)
+	founder_text.add_child(PixelStyle.pixel_label("FOUNDER", 10, Color(0.58, 0.60, 0.64)))
+	founder_text.add_child(PixelStyle.body_label("arrives with the founder creator", 11, Color(0.55, 0.57, 0.61)))
+
+	var map_frame := PanelContainer.new()
+	map_frame.name = "map_frame"
+	map_frame.theme_type_variation = "UtilityInset"
+	support.add_child(map_frame)
+	var map_view := BannerView.new()
+	map_view.name = "map_preview"
+	map_view.banner = _banner
+	map_view.view_scale = 0.75
+	map_view.map_mode = true
+	map_view.custom_minimum_size = Vector2(118.0, 48.0)
+	_views.append(map_view)
+	map_frame.add_child(map_view)
 
 
 ## The tools wear the theme's square icon button: an ON toggle - the selected tool, wind,
