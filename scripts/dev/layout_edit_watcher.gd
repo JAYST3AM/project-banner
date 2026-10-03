@@ -62,6 +62,10 @@ func _attach(scene: Node) -> void:
 	# its own; without this the layer measures 0x0 and clamps everything to zero.
 	if host.size.x < 1.0 or host.size.y < 1.0:
 		host.size = scene.get_viewport().get_visible_rect().size
+	var viewport := scene.get_viewport()
+	viewport.size_changed.connect(func() -> void:
+		if is_instance_valid(host):
+			host.size = viewport.get_visible_rect().size)
 	var layer = load("res://scripts/dev/layout_edit.gd").new()
 	_attached = layer
 	layer.start(scene as Node, host)

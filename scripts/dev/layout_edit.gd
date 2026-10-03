@@ -533,6 +533,15 @@ func _move_with_links(index: int, wanted: Vector2) -> void:
 	_move_members(wanted)
 
 
+## True while a node is part of the group being dragged; its live position is
+## not a snap candidate mid-drag, so repeated pointer events snap identically.
+func _is_drag_member(node: Control) -> bool:
+	for member in _drag_members:
+		if member["node"] == node:
+			return true
+	return false
+
+
 ## Per-node rules (hero rescale, canvas cells) by reverse lookup.
 func _apply_node_rules(node: Control) -> void:
 	for region in _regions:
@@ -565,6 +574,8 @@ func _normalize_rect(region: Dictionary, rect: Rect2) -> Rect2:
 	# to its minimum, cap at the layer (even when a minimum exceeds it - a
 	# region that cannot fit still has to stay on screen), then clamp the
 	# position against the rounded values so the final edge is always inside.
+	# A layer thinner than one pixel cannot host regions at all; the 1px floor
+	# keeps the arithmetic sane in a state that start() already prevents.
 	var lw := maxf(1.0, roundf(size.x))
 	var lh := maxf(1.0, roundf(size.y))
 	var width := minf(roundf(maxf(rect.size.x, min_size.x)), lw)
@@ -638,7 +649,7 @@ func _snap_position(region: Dictionary, target: Vector2, region_size: Vector2) -
 	var best_x := INF
 	var best_y := INF
 	for other in _regions:
-		if other == region:
+		if other == region or _is_drag_member(other["node"] as Control):
 			continue
 		var rect: Rect2 = (other["node"] as Control).get_rect()
 		xs.append(rect.position.x)
