@@ -67,9 +67,12 @@ func _spawn_screenshot_probe() -> void:
 
 
 ## Dev-only: "--layout-edit" attaches the layout editor to every screen as it opens. The
-## watcher lives on the tree root, because screens come and go beneath it.
+## watcher lives on the tree root, because screens come and go beneath it. Only one ever
+## exists: re-entering this scene must not stack a second one.
 func _spawn_layout_watcher() -> void:
 	if not DevFlags.layout_edit():
+		return
+	if get_tree().root.get_node_or_null("LayoutEditWatcher") != null:
 		return
 	var watcher := Node.new()
 	watcher.name = "LayoutEditWatcher"

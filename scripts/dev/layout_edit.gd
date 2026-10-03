@@ -68,7 +68,7 @@ var _info: Label = null
 var _hint: Label = null
 var _panel_hidden := false
 var _editor_rect := Rect2()
-var _screen: Control = null
+var _screen: Node = null
 var _draft_key := "screen"
 
 
@@ -78,16 +78,20 @@ var _draft_key := "screen"
 
 ## Take over a screen: discover the editable elements, flatten them into this
 ## layer, and hand the arrangement to the user.
-func start(screen: Control) -> void:
+func start(screen: Node, host_override: Control = null) -> void:
 	_screen = screen
 	name = "layout_edit_layer"
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = true
-	var host: Control = screen
-	for child in screen.get_children():
-		if child is MarginContainer:
-			host = child
-			break
+	var host: Control = host_override
+	if host == null and screen is Control:
+		host = screen as Control
+		for child in (screen as Control).get_children():
+			if child is MarginContainer:
+				host = child
+				break
+	if host == null:
+		return
 	host.add_child(self)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -95,6 +99,12 @@ func start(screen: Control) -> void:
 	_draft_key = _scene_key(screen)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# The anchors do their job under Control hosts; under a canvas host (Node2D
+	# screens) size the layer explicitly so the geometry authority never runs
+	# against a zero rect.
+	if size.x < 1.0 or size.y < 1.0:
+		position = Vector2.ZERO
+		size = host.size
 
 	var origin := global_position
 	var workspace := screen.find_child("banner_workspace", true, false) as Control
@@ -116,7 +126,7 @@ func start(screen: Control) -> void:
 		_copy_layout()
 
 
-func _scene_key(screen: Control) -> String:
+func _scene_key(screen: Node) -> String:
 	var key := String(screen.name).to_snake_case()
 	if key.is_empty():
 		key = "screen"
@@ -125,7 +135,7 @@ func _scene_key(screen: Control) -> String:
 
 ## The production shells stay in place (pinned to their current size) so the
 ## screen does not reflow behind the floating elements.
-func _pin_shells(screen: Control, workspace: Control) -> void:
+func _pin_shells(screen: Node, workspace: Control) -> void:
 	if workspace != null:
 		workspace.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		workspace.custom_minimum_size = workspace.size
@@ -134,7 +144,7 @@ func _pin_shells(screen: Control, workspace: Control) -> void:
 		editor.custom_minimum_size = editor.size
 
 
-func _discover(screen: Control, origin: Vector2) -> void:
+func _discover(screen: Node, origin: Vector2) -> void:
 	var seen := {}
 	var queue: Array[Control] = []
 	# 1. The named panel regions, if this screen has them.
@@ -281,7 +291,7 @@ func _unique_key(node: Control, taken: Dictionary) -> String:
 
 ## Containers the extraction emptied are removed, so the pinned backdrop and
 ## the floating elements are all that remains.
-func _free_emptied_shells(screen: Control) -> void:
+func _free_emptied_shells(screen: Node) -> void:
 	var walker: Array[Node] = [screen]
 	var emptied: Array[Node] = []
 	while walker.size() > 0:
@@ -495,7 +505,7 @@ func _move_with_links(index: int, wanted: Vector2) -> void:
 			if delta[axis] > 0.0:
 				allowed = minf(allowed, size[axis] - rect.end[axis])
 			elif delta[axis] < 0.0:
-				allowed = minf(allowed, rect.position[axis])
+				allowed = maxf(allowed, -rect.position[axis])
 		delta[axis] = allowed
 	for member in members:
 		var node := _regions[member]["node"] as Control
@@ -524,11 +534,13 @@ func linked_indices(index: int) -> Array[int]:
 ## draft loads, group moves and nudges all pass through here.
 func _normalize_rect(region: Dictionary, rect: Rect2) -> Rect2:
 	var min_size: Vector2 = region["min"]
-	var width := clampf(rect.size.x, min_size.x, maxf(size.x, min_size.x))
-	var height := clampf(rect.size.y, min_size.y, maxf(size.y, min_size.y))
-	var x := clampf(rect.position.x, 0.0, maxf(0.0, size.x - width))
-	var y := clampf(rect.position.y, 0.0, maxf(0.0, size.y - height))
-	return Rect2(Vector2(round(x), round(y)), Vector2(round(width), round(height)))
+	# Round to integers first, then clamp, so the final edge can never land
+	# outside the layer through independent rounding of position and size.
+	var width := minf(roundf(maxf(rect.size.x, min_size.x)), roundf(maxf(size.x, min_size.x)))
+	var height := minf(roundf(maxf(rect.size.y, min_size.y)), roundf(maxf(size.y, min_size.y)))
+	var x := clampf(roundf(rect.position.x), 0.0, maxf(0.0, size.x - width))
+	var y := clampf(roundf(rect.position.y), 0.0, maxf(0.0, size.y - height))
+	return Rect2(Vector2(x, y), Vector2(width, height))
 
 
 ## Everything under a region stops taking clicks while edit mode is on.
