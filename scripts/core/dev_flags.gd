@@ -65,6 +65,16 @@ const BATTLESPEED_PREFIX := "--battlespeed="
 ## Dev-only battle journal: "--battlelog" for the default file, "--battlelog=<path>" to name one.
 const BATTLELOG_FLAG := "--battlelog"
 const BATTLELOG_PREFIX := "--battlelog="
+## Dev-only layout editor for the New Campaign screen's Banner Editor: "--layout-edit" swaps the
+## editor's containers for a manual composition layer where every major region can be dragged and
+## resized by hand (scripts/dev/layout_edit.gd). The arrangement is copied/saved as JSON and later
+## baked into the production containers. Never active without the flag, so the player flow cannot
+## reach it.
+const LAYOUT_EDIT_FLAG := "--layout-edit"
+## Companion to the above: with "--layout-export" an edit-mode run copies its current arrangement
+## (clipboard + log) once at boot, so a scripted verification can read the geometry without
+## clicking COPY LAYOUT.
+const LAYOUT_EXPORT_FLAG := "--layout-export"
 
 
 static func _user_args() -> PackedStringArray:
@@ -280,3 +290,13 @@ static func _has_flag(flag: String) -> bool:
 		if arg == flag or arg.begins_with(flag + "="):
 			return true
 	return false
+
+
+## Whether this run asked for the dev layout editor on the New Campaign screen.
+static func layout_edit() -> bool:
+	return _has_flag(LAYOUT_EDIT_FLAG)
+
+
+## Whether an edit-mode run should export its arrangement once at boot.
+static func layout_export() -> bool:
+	return _has_flag(LAYOUT_EXPORT_FLAG)

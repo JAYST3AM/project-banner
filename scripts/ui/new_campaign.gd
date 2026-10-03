@@ -73,6 +73,23 @@ func _ready() -> void:
 		_seed_input.text = str(payload.get("seed_value"))
 	_refresh_summary()
 	DebugLogger.info("new campaign screen opened", "NewCampaign")
+	if OS.get_cmdline_user_args().has("--layout-debug"):
+		var probe := Control.new()
+		probe.set_script(load("res://scripts/dev/layout_debug.gd"))
+		add_child(probe)
+	if DevFlags.layout_edit():
+		_start_layout_edit.call_deferred()
+
+
+## Dev-only: hand the Banner Editor over to the layout editor (--layout-edit). Never
+## reachable without the flag; normal runs behave exactly as before.
+func _start_layout_edit() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if _workspace == null:
+		return
+	var layer = load("res://scripts/dev/layout_edit.gd").new()
+	layer.start(_workspace)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -85,10 +102,6 @@ func _ready() -> void:
 #   header 62 (10..72) | main 78..636 | footer 68 (642..710)
 #   every guide lands on an integer; all panels snap to these edges - art conforms
 #   to the rects, never the other way around. Measured with --layout-debug.
-	if OS.get_cmdline_user_args().has("--layout-debug"):
-		var probe := Control.new()
-		probe.set_script(load("res://scripts/dev/layout_debug.gd"))
-		add_child(probe)
 
 
 func _build() -> void:
