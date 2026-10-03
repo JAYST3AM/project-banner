@@ -277,6 +277,18 @@ func _drag_to(point: Vector2) -> void:
 
 
 ## Keep a region inside the Banner Editor content rect, on integer pixels.
+## The single authority on a region's geometry: at least its combined minimum, inside the
+## Banner Editor content rect, integer position and size. Interactive resize, draft loads and
+## nudges all pass through here so no path can produce an out-of-bounds or fractional rect.
+func _normalize_rect(region: Dictionary, rect: Rect2) -> Rect2:
+	var min_size: Vector2 = region["min"]
+	var width := clampf(rect.size.x, min_size.x, maxf(size.x, min_size.x))
+	var height := clampf(rect.size.y, min_size.y, maxf(size.y, min_size.y))
+	var x := clampf(rect.position.x, 0.0, maxf(0.0, size.x - width))
+	var y := clampf(rect.position.y, 0.0, maxf(0.0, size.y - height))
+	return Rect2(Vector2(round(x), round(y)), Vector2(round(width), round(height)))
+
+
 func _clamp_position(target: Vector2, region_size: Vector2) -> Vector2:
 	var x := clampf(target.x, 0.0, maxf(0.0, size.x - region_size.x))
 	var y := clampf(target.y, 0.0, maxf(0.0, size.y - region_size.y))
@@ -325,17 +337,17 @@ func _resize_rect(region: Dictionary, rect: Rect2, delta: Vector2, handle: int, 
 	var result := Rect2(left, top, right - left, bottom - top)
 	if snap:
 		result.position = _snap_position(region, result.position, result.size)
-	return result
+	return _normalize_rect(region, result)
 
 
-func _snap_position(region: Dictionary, target: Vector2, size: Vector2) -> Vector2:
+func _snap_position(region: Dictionary, target: Vector2, region_size: Vector2) -> Vector2:
 	_guides.clear()
 	var canvas := size
 	# Candidate lines: workspace bounds and centre, every other region's edges and centres.
 	var xs: Array[float] = [0.0, canvas.x * 0.5, canvas.x]
 	var ys: Array[float] = [0.0, canvas.y * 0.5, canvas.y]
-	var nodes := [target.x, target.x + size.x * 0.5, target.x + size.x]
-	var nodeys := [target.y, target.y + size.y * 0.5, target.y + size.y]
+	var nodes := [target.x, target.x + region_size.x * 0.5, target.x + region_size.x]
+	var nodeys := [target.y, target.y + region_size.y * 0.5, target.y + region_size.y]
 	var best_x := INF
 	var best_y := INF
 	for other in _regions:
@@ -483,13 +495,33 @@ func _load_draft() -> void:
 		if typeof(entry) != TYPE_DICTIONARY:
 			continue
 		var node := region["node"] as Control
-		var rect := Rect2(
-			float(entry.get("x", node.position.x)), float(entry.get("y", node.position.y)),
-			float(entry.get("w", node.size.x)), float(entry.get("h", node.size.y)))
-		node.position = _clamp_position(rect.position, rect.size)
-		node.size = rect.size
+		var rect := Rect2(node.position, node.size)
+		var values := {}
+		for field in ["x", "y", "w", "h"]:
+			values[field] = entry.get(field, null)
+		var raw_x = values["x"]
+		var raw_y = values["y"]
+		var raw_w = values["w"]
+		var raw_h = values["h"]
+		if _is_finite_number(raw_x):
+			rect.position.x = float(raw_x)
+		if _is_finite_number(raw_y):
+			rect.position.y = float(raw_y)
+		if _is_finite_number(raw_w):
+			rect.size.x = float(raw_w)
+		if _is_finite_number(raw_h):
+			rect.size.y = float(raw_h)
+		var normal := _normalize_rect(region, rect)
+		node.position = normal.position
+		node.size = normal.size
 		_apply_region_rules(region)
 	DebugLogger.info("layout edit: draft loaded", "LayoutEdit")
+
+
+func _is_finite_number(value) -> bool:
+	if typeof(value) != TYPE_FLOAT and typeof(value) != TYPE_INT:
+		return false
+	return is_finite(float(value))
 
 
 func _reset() -> void:
