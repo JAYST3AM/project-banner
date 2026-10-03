@@ -1,0 +1,16 @@
+[gd_resource type="SpriteFrames" load_steps=7 format=3]
+
+[ext_resource type="Texture2D" path="res://assets/sprites/characters/weathered_knight/walk_right_00.png" id="1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/characters/weathered_knight/walk_right_01.png" id="2"]
+[ext_resource type="Texture2D" path="res://assets/sprites/characters/weathered_knight/walk_right_02.png" id="3"]
+[ext_resource type="Texture2D" path="res://assets/sprites/characters/weathered_knight/walk_right_03.png" id="4"]
+[ext_resource type="Texture2D" path="res://assets/sprites/characters/weathered_knight/walk_right_04.png" id="5"]
+[ext_resource type="Texture2D" path="res://assets/sprites/characters/weathered_knight/walk_right_05.png" id="6"]
+
+[resource]
+animations = [{
+"frames": [{"duration": 1.0, "texture": ExtResource("1")}, {"duration": 1.0, "texture": ExtResource("2")}, {"duration": 1.0, "texture": ExtResource("3")}, {"duration": 1.0, "texture": ExtResource("4")}, {"duration": 1.0, "texture": ExtResource("5")}, {"duration": 1.0, "texture": ExtResource("6")}],
+"loop": true,
+"name": &"walk_right",
+"speed": 8.0
+}]
