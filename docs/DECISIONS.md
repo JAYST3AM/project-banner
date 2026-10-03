@@ -4634,3 +4634,34 @@ layout contract held throughout - the fat editor frame forced a measured rebalan
 content margins, rail/right column trims, compact tool buttons) so nothing clips at 1280x720
 units; verified across six screenshot iterations. Banner suite 580/0 through every revision;
 full suite and restart check re-run before the audit.
+
+**D-169: the roster's six units are their own characters, drawn in both renderers (2026-10-03).**
+The battle used to draw one generic soldier for every troop from a git-ignored third-party atlas.
+Every unit in data/units/unit_types.json is now its own PixelLab character - peasant_recruit,
+spearman, archer, bandit_ruffian, bandit_brigand, bandit_archer - committed under
+assets/sprites/units/ with idle (4f), walk (6f), attack (3f), hurt (6f) and death (7f) in one
+direction; the game mirrors for facing. Both sides still share the six; the side still reads
+from UnitArt.side_tint alone, and an absent atlas still degrades to the discs.
+
+tools/build_unit_atlas.py is the new builder: it crops every character to one cell (the union of
+every frame), measures the anchor (the idle feet) and the head (the tallest idle frame, what the
+health bar hangs off), and lays one animation a row. The world scale was matched to the old art -
+units_per_pixel 0.065 puts a head at ~3.84 world units, the height the old soldier drew at - and
+the frame pacing kept the tuned values (idle 140 / walk 95 / attack 65 / hurt 90 / death 110 ms).
+Attack, hurt and death come from PixelLab's mannequin templates (lead-jab, taking-punch,
+falling-back-death; the set has no sword-slash and no bow-shot, so a bowman keeps his stance and
+the arrow is the tell). UnitArt.UNIT_KEYS / key_for_unit / index_for_unit replace the old
+CHARACTER_* + key_for_side; the shared fused writer (UnitSpriteWriter) keeps per-character tables
+now, and each renderer (SoldierField, the compute field's GpuCrowd) selects a soldier's character
+from his unit_type_id, falling back to the first key for an id the atlas does not carry.
+
+Verified the hard way: an independent read-only audit of the change set found two blocking items
+- stale call sites and a stale animation cascade in dev scenes the greps had missed, and the fused
+writer's inlined copy of UnitArt.plan ranking hurt above strike, which suppressed melee attack
+poses in the canvas battle exactly as the owner once reported ("the melee isn't using the sword
+swing") - fixed under its own commit with a writer test that stages both stamps active in one
+pack ("a blow through a wound"), and two scoped re-audits followed; the last also turned the
+sprite pack bench into a controlled comparison (identical workload A/B, death clamp, stride).
+Suite 38/38, 10,346 assertions, 0 failures; the atlas was pixel-compared against its sources by
+the audit; windowed battle showcase runs proved per-unit characters and side tints in the real
+renderer (a mixed run crops 4x to a green-hooded bowman against a mailed swordsman).
