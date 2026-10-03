@@ -485,6 +485,8 @@ FooterFrame/base_type = &"PanelContainer"
 FooterFrame/styles/panel = SubResource("sb_footer")
 TileParchment/base_type = &"PanelContainer"
 TileParchment/styles/panel = SubResource("sb_tile_parch")
+TileDark/base_type = &"PanelContainer"
+TileDark/styles/panel = SubResource("sb_tile_dark")
 
 default_font = ExtResource("pb_font_body")
 default_font_size = 15
