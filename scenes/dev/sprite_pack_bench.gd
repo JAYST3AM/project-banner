@@ -36,26 +36,26 @@ func _ready() -> void:
 	var t0 := Time.get_ticks_usec()
 	for rep in REPS:
 		for i in N:
-			_shape_a(buffer, i, offsets, 16, ticks, frames, uv, common)
+			_shape_a(buffer, i, positions[i], offsets, 16, ticks, frames, uv, common)
 	var a := (Time.get_ticks_usec() - t0) / float(N * REPS)
 
 	t0 = Time.get_ticks_usec()
 	for rep in REPS:
 		for i in N:
-			_shape_b(buffer, i, offsets, ticks, frames, uv, 8, common, positions[i],
+			_shape_b(buffer, i, offsets, ticks, frames, uv, 16, common, positions[i],
 				i % 13 != 0, i % 3 == 0, false, i % 40, i, false)
 	var b := (Time.get_ticks_usec() - t0) / float(N * REPS)
 
 	t0 = Time.get_ticks_usec()
 	for rep in REPS:
 		for i in N:
-			_shape_c_inline(buffer, offsets, ticks, frames, uv, 8, common, positions[i], (rep * 3 + i) % 40, i)
+			_shape_c_inline(buffer, offsets, ticks, frames, uv, 16, common, positions[i], (rep * 3 + i) % 40, i)
 	var c := (Time.get_ticks_usec() - t0) / float(N * REPS)
 
 	t0 = Time.get_ticks_usec()
 	for rep in REPS:
 		for i in N:
-			_shape_d_dirty(buffer, offsets, ticks, frames, uv, 8, common, positions[i], (rep * 3 + i) % 40, i, written, rep % 4 == 0)
+			_shape_d_dirty(buffer, offsets, ticks, frames, uv, 16, common, positions[i], (rep * 3 + i) % 40, i, written, rep % 4 == 0)
 	var d := (Time.get_ticks_usec() - t0) / float(N * REPS)
 
 	print("sprite pack bench (%d soldiers x %d reps)" % [N, REPS])
@@ -69,9 +69,9 @@ func _ready() -> void:
 
 ## ---------- shape A: the shipped call graph (simplified to the same writes) ----------
 
-func _shape_a(buffer: PackedFloat32Array, i: int, offsets: PackedInt32Array, stride: int,
-		ticks: PackedInt32Array, frames: PackedInt32Array, uv: PackedVector4Array,
-		common: PackedFloat32Array) -> void:
+func _shape_a(buffer: PackedFloat32Array, i: int, position: Vector2, offsets: PackedInt32Array,
+		stride: int, ticks: PackedInt32Array, frames: PackedInt32Array,
+		uv: PackedVector4Array, common: PackedFloat32Array) -> void:
 	# The same input domain the fused shapes see, so the comparison is one workload through
 	# different call shapes rather than different workloads: the wound/swing ages sweep 0..39
 	# and the dead/moved mix keeps every branch of the cascade reachable in an A/B pair.
@@ -82,7 +82,7 @@ func _shape_a(buffer: PackedFloat32Array, i: int, offsets: PackedInt32Array, str
 	# call shape and not in which frame of the atlas they touch.
 	var frame := _frame(anim, age + into, ticks[anim], frames[anim])
 	var cell := Vector2(common[0], common[1])
-	var origin := _origin(Vector2(float(i % 100) * 1.3, float(i / 100) * 1.1), cell, Vector2(common[2], common[3]), common[4])
+	var origin := _origin(position + Vector2(0.0, 0.85), cell, Vector2(common[2], common[3]), common[4])
 	var custom := _custom(uv[anim * 8 + frame], false)
 	_write(buffer, i, stride, offsets, origin, cell * common[4], custom)
 
@@ -150,7 +150,9 @@ func _shape_b(buffer: PackedFloat32Array, i: int, offsets: PackedInt32Array, tic
 		anim = 3
 	elif moved:
 		anim = 1
-	var frame := posmod(int((into + phase * 7) / maxi(1, ticks[anim])), maxi(1, frames[anim]))
+	var index := int((into + phase * 7) / maxi(1, ticks[anim]))
+	# A corpse holds its last pose, as the shipped writer (and _frame) clamp it; posmod wrapped.
+	var frame := clampi(index, 0, maxi(1, frames[anim]) - 1) 		if anim == 4 else posmod(index, maxi(1, frames[anim]))
 	var cell := Vector2(common[0], common[1])
 	var scale := common[4]
 	var foot := position + Vector2(0.0, 0.85)
