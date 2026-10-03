@@ -4,21 +4,17 @@ extends HBoxContainer
 ## New Campaign screen's Banner Editor panel by D-168).
 ##
 ## Everything a player does to paint a banner lives here - the grid, the locked-20 palette,
-## pencil/fill/erase, mirror, the wind and grid toggles, undo, clear, starters and the three
-## detail levels. The workspace runs three lanes: the tools toolbox, the finished banner as
-## the hero object (its own BannerView at 4x, the editor's focal point) and the editing lane -
-## the paint grid with its status line, above one grouped support card holding the reserved
-## founder slot and the true-scale map. The New Campaign screen owns the company name, the
+## pencil/fill/erase, mirror, the wind and grid toggles, undo, clear, starters, the three
+## detail levels and the preview stack. The New Campaign screen owns the company name, the
 ## world seed and the final Start Campaign; this component owns the cloth. One source of
 ## truth: the campaign map, the suites and the screen all talk to [method BannerData], and
 ## this is the only place that paints one.
 ##
-## The layout follows the approved mockup in three lanes: the tools lane (icon row, palette in
-## two rows of ten, detail and starters as compact rows), the hero lane - the finished banner
-## on its pole at 4x, the editor's focal object, and the editing lane - the paint grid with its
-## status line above one support card holding the reserved founder slot and the campaign map at
-## true scale. Detail is detail only: the cloth's size in the world never changes, so the
-## previews prove what the map will wear at every level.
+## The layout follows the approved mockup: tools as an icon row, the palette as two rows of
+## ten, detail and starters as compact rows, the paint grid recessed in a bronze frame, and a
+## preview stack of three cards - the banner on its pole (the focal card), a plainly reserved
+## founder slot, and the campaign map at true scale. Detail is detail only: the cloth's size
+## in the world never changes, so the previews prove what the map will wear at every level.
 ##
 ## The read-only accessors under "for the tests" exist so a suite can drive the paint surface
 ## through the same methods its buttons drive - not a parallel test path.
@@ -28,10 +24,8 @@ signal banner_changed
 const DIM := Color(0.66, 0.68, 0.72)
 const GOLD := Color(0.91, 0.81, 0.55)
 const OUTLINE := Color(0.02, 0.02, 0.03)
-# The on-screen editing surface: a compact render of the 16x20 grid (8px per
-# cell; the canvas no longer competes with the hero for attention).
-const DISPLAY_W := 128.0
-const DISPLAY_H := 160.0
+const CANVAS_W := 160.0
+const CANVAS_H := 200.0
 const UNDO_LIMIT := 120
 
 var _banner: BannerData = null
@@ -57,7 +51,7 @@ func _ready() -> void:
 	add_theme_constant_override("separation", 12)
 	_build_controls_column()
 	_build_canvas_column()
-	_build_hero_column()
+	_build_preview_column()
 
 
 ## Give the workspace a banner to paint (the New Campaign screen's payload or a fresh
@@ -80,15 +74,13 @@ func install_banner(banner: BannerData) -> void:
 func _build_controls_column() -> void:
 	var column := VBoxContainer.new()
 	column.name = "editor_controls"
-	column.add_theme_constant_override("separation", 10)
-	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	column.add_theme_constant_override("separation", 5)
+	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(column)
 
 	column.add_child(PixelStyle.pixel_label("Tools", 11, GOLD))
-	var tool_row := GridContainer.new()
-	tool_row.columns = 4
-	tool_row.add_theme_constant_override("h_separation", 2)
-	tool_row.add_theme_constant_override("v_separation", 2)
+	var tool_row := HBoxContainer.new()
+	tool_row.add_theme_constant_override("separation", 2)
 	column.add_child(tool_row)
 	var group := ButtonGroup.new()
 	var pencil := _icon_button("pencil", "Pencil - click or drag to paint, right-click to erase", group)
@@ -129,7 +121,7 @@ func _build_controls_column() -> void:
 	var palette := BannerData.palette()
 	for i in palette.size():
 		var swatch := Button.new()
-		swatch.custom_minimum_size = Vector2(15.0, 15.0)
+		swatch.custom_minimum_size = Vector2(17.0, 17.0)
 		swatch.tooltip_text = "#" + palette[i].to_html(false)
 		swatch.focus_mode = Control.FOCUS_NONE
 		swatch.pressed.connect(_select_colour.bind(i))
@@ -145,14 +137,14 @@ func _build_controls_column() -> void:
 	for size in BannerData.detail_sizes():
 		var detail_button := Button.new()
 		detail_button.text = "%dx%d" % [size.x, size.y]
-		detail_button.custom_minimum_size = PixelStyle.scaled_vec(Vector2(52.0, 24.0))
+		detail_button.custom_minimum_size = PixelStyle.scaled_vec(Vector2(56.0, 24.0))
 		detail_button.add_theme_font_override("font", _font)
 		detail_button.add_theme_font_size_override("font_size", PixelStyle.scaled(11))
 		detail_button.add_theme_color_override("font_color", UiTheme.TEXT)
 		detail_button.add_theme_color_override("font_hover_color", UiTheme.TEXT)
 		detail_button.add_theme_color_override("font_pressed_color", UiTheme.TEXT)
 		detail_button.add_theme_color_override("font_focus_color", UiTheme.TEXT)
-		detail_button.theme_type_variation = "UtilityButton"
+		detail_button.add_theme_color_override("font_disabled_color", Color(0.45, 0.47, 0.51))
 		detail_button.tooltip_text = "A finer grid on the same cloth - the banner's size in the game never changes."
 		detail_button.pressed.connect(set_detail.bind(size.x, size.y))
 		detail_row.add_child(detail_button)
@@ -177,19 +169,15 @@ func _build_controls_column() -> void:
 
 
 func _build_canvas_column() -> void:
-	# The editing surface: a compact dark inset, clearly smaller than the hero.
 	var column := VBoxContainer.new()
 	column.name = "editor_canvas"
 	column.add_theme_constant_override("separation", 4)
-	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(column)
-
-	column.add_child(PixelStyle.pixel_label("Edit Design", 11, GOLD))
 
 	var frame := PanelContainer.new()
 	frame.name = "canvas_frame"
-	frame.theme_type_variation = "UtilityInset"
-	frame.custom_minimum_size = Vector2(DISPLAY_W + 20.0, 0.0)
+	frame.theme_type_variation = "TileDark"
 	column.add_child(frame)
 
 	var inner := VBoxContainer.new()
@@ -199,74 +187,63 @@ func _build_canvas_column() -> void:
 	_grid = PaintGrid.new()
 	_grid.name = "paint_grid"
 	_grid.editor = self
-	_grid.grid_size = Vector2(DISPLAY_W, DISPLAY_H)
-	_grid.custom_minimum_size = Vector2(DISPLAY_W, DISPLAY_H)
+	_grid.grid_size = Vector2(CANVAS_W, CANVAS_H)
+	_grid.custom_minimum_size = Vector2(CANVAS_W, CANVAS_H)
 	inner.add_child(_grid)
 
 	_status = PixelStyle.body_label("", 13, DIM)
-	column.add_child(_status)
+	inner.add_child(_status)
 	_refresh_status()
 
 
 
-func _build_hero_column() -> void:
-	# Zone B: the finished banner is the editor's primary object - a large, simply
-	# framed render with negative space around it, centred in the middle lane.
+func _build_preview_column() -> void:
 	var column := VBoxContainer.new()
-	column.name = "editor_hero"
-	column.add_theme_constant_override("separation", 4)
+	column.add_theme_constant_override("separation", 6)
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add_child(column)
 
-	column.add_child(PixelStyle.body_label("COMPANY BANNER", 11, GOLD))
+	column.add_child(PixelStyle.pixel_label("Preview", 11, GOLD))
 
+	# Card one: the banner on its pole - the focal preview of the screen.
 	var pole_frame := PanelContainer.new()
 	pole_frame.name = "pole_frame"
-	pole_frame.theme_type_variation = "UtilityInset"
+	pole_frame.theme_type_variation = "TileDark"
 	column.add_child(pole_frame)
 	var pole_view := BannerView.new()
 	pole_view.banner = _banner
-	pole_view.view_scale = 4.0
-	pole_view.custom_minimum_size = Vector2(240.0, 284.0)
+	pole_view.view_scale = 2.9
+	pole_view.custom_minimum_size = Vector2(168.0, 232.0)
 	_views.append(pole_view)
 	pole_frame.add_child(pole_view)
 
-	# Supporting previews: the reserved founder slot and the true-scale map, side
-	# by side under the hero - proof of how the identity appears elsewhere.
-	var support := HBoxContainer.new()
-	support.name = "editor_support"
-	support.add_theme_constant_override("separation", 8)
-	column.add_child(support)
-
+	# Card two: the founder slot, plainly reserved - no control pretends to exist here.
 	var founder_frame := PanelContainer.new()
 	founder_frame.name = "founder_frame"
-	founder_frame.theme_type_variation = "UtilityInset"
-	founder_frame.custom_minimum_size = Vector2(180.0, 0.0)
+	founder_frame.theme_type_variation = "TileDark"
 	founder_frame.set_meta("reserved", true)
-	support.add_child(founder_frame)
+	column.add_child(founder_frame)
 	var founder_row := HBoxContainer.new()
-	founder_row.name = "founder_slot"
-	founder_row.add_theme_constant_override("separation", 6)
+	founder_row.add_theme_constant_override("separation", 8)
 	founder_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	founder_frame.add_child(founder_row)
-	founder_row.add_child(PixelIcons.icon("founder", 22, Color(0.44, 0.46, 0.50)))
+	founder_row.add_child(PixelIcons.icon("founder", 26, Color(0.44, 0.46, 0.50)))
 	var founder_text := VBoxContainer.new()
 	founder_text.add_theme_constant_override("separation", 0)
 	founder_row.add_child(founder_text)
 	founder_text.add_child(PixelStyle.pixel_label("FOUNDER", 10, Color(0.58, 0.60, 0.64)))
 	founder_text.add_child(PixelStyle.body_label("arrives with the founder creator", 11, Color(0.55, 0.57, 0.61)))
 
+	# Card three: the cloth at the size the campaign map actually shows.
 	var map_frame := PanelContainer.new()
 	map_frame.name = "map_frame"
-	map_frame.theme_type_variation = "UtilityInset"
-	support.add_child(map_frame)
+	map_frame.theme_type_variation = "TileDark"
+	column.add_child(map_frame)
 	var map_view := BannerView.new()
-	map_view.name = "map_preview"
 	map_view.banner = _banner
 	map_view.view_scale = 0.75
 	map_view.map_mode = true
-	map_view.custom_minimum_size = Vector2(118.0, 48.0)
+	map_view.custom_minimum_size = Vector2(190.0, 70.0)
 	_views.append(map_view)
 	map_frame.add_child(map_view)
 

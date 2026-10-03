@@ -212,7 +212,7 @@ func _section_tile(id: String, label: String, sub: String, ready: bool) -> Panel
 	tile.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	# The custom kit's own tile materials: warm parchment for the live step, the dark
 	# recessed tile for the locked ones - no hand-painted fill in this file any more.
-	tile.theme_type_variation = "TileParchment" if ready else "LockedNavTile"
+	tile.theme_type_variation = "TileParchment" if ready else "TileDark"
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 9)
@@ -281,7 +281,6 @@ func _build_right_column(parent: HBoxContainer) -> void:
 	# --- world settings -------------------------------------------------------------------
 	var world_panel := PanelContainer.new()
 	world_panel.name = "world_panel"
-	world_panel.theme_type_variation = "PrimaryPanel"
 	column.add_child(world_panel)
 	var world := _frame(world_panel, "WORLD SETTINGS")
 	world.add_child(PixelStyle.body_label("World Seed", 14, DIM))
@@ -302,7 +301,6 @@ func _build_right_column(parent: HBoxContainer) -> void:
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	world.add_child(hint)
 	var randomise := Button.new()
-	randomise.theme_type_variation = "SecondaryButton"
 	randomise.text = "Randomise Seed"
 	randomise.icon = PixelIcons.texture("dice", UiTheme.TEXT)
 	randomise.expand_icon = true
@@ -312,6 +310,7 @@ func _build_right_column(parent: HBoxContainer) -> void:
 	randomise.add_theme_color_override("font_hover_color", UiTheme.TEXT)
 	randomise.add_theme_color_override("font_pressed_color", UiTheme.TEXT)
 	randomise.add_theme_color_override("font_focus_color", UiTheme.TEXT)
+	randomise.add_theme_color_override("font_disabled_color", Color(0.45, 0.47, 0.51))
 	randomise.custom_minimum_size = Vector2(0.0, 32.0)
 	randomise.pressed.connect(randomise_seed)
 	world.add_child(randomise)
@@ -319,7 +318,6 @@ func _build_right_column(parent: HBoxContainer) -> void:
 	# --- campaign preview -----------------------------------------------------------------
 	var preview_panel := PanelContainer.new()
 	preview_panel.name = "preview_panel"
-	preview_panel.theme_type_variation = "PrimaryPanel"
 	preview_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	column.add_child(preview_panel)
 	var preview := _frame(preview_panel, "CAMPAIGN PREVIEW")
@@ -386,7 +384,6 @@ func _build_actions(column: VBoxContainer) -> void:
 
 	var back_button := Button.new()
 	back_button.name = "back_button"
-	back_button.theme_type_variation = "SecondaryButton"
 	back_button.text = "Back to Main Menu"
 	back_button.icon = PixelIcons.texture("arrow_left", UiTheme.TEXT)
 	back_button.expand_icon = true
@@ -396,6 +393,7 @@ func _build_actions(column: VBoxContainer) -> void:
 	back_button.add_theme_color_override("font_hover_color", Color(0.92, 0.93, 0.95))
 	back_button.add_theme_color_override("font_pressed_color", Color(0.74, 0.76, 0.80))
 	back_button.add_theme_color_override("font_focus_color", Color(0.74, 0.76, 0.80))
+	back_button.add_theme_color_override("font_disabled_color", Color(0.45, 0.47, 0.51))
 	back_button.custom_minimum_size = Vector2(230.0, 38.0)
 	back_button.pressed.connect(back)
 	row.add_child(back_button)
@@ -416,6 +414,7 @@ func _build_actions(column: VBoxContainer) -> void:
 	start_button.add_theme_color_override("font_hover_color", Color(0.97, 0.93, 0.78))
 	start_button.add_theme_color_override("font_pressed_color", Color(0.97, 0.93, 0.78))
 	start_button.add_theme_color_override("font_focus_color", Color(0.97, 0.93, 0.78))
+	start_button.add_theme_color_override("font_disabled_color", Color(0.55, 0.58, 0.52))
 	start_button.custom_minimum_size = Vector2(300.0, 44.0)
 	start_button.pressed.connect(start)
 	row.add_child(start_button)

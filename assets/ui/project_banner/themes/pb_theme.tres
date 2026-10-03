@@ -1,9 +1,10 @@
-[gd_resource type="Theme" load_steps=41 format=3]
+[gd_resource type="Theme" load_steps=43 format=3]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/frame_large.png" id="tex_editor"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/header_bar.png" id="tex_header"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/frames/footer_bar.png" id="tex_footer"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/inset_panel.png" id="tex_panel"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/tile_parchment.png" id="tex_tile_p"]
+[ext_resource type="Texture2D" path="res://assets/ui/project_banner/panels/tile_dark.png" id="tex_tile_d"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/buttons/secondary_dark.png" id="tex_btn"]
 [ext_resource type="Texture2D" path="res://assets/ui/project_banner/buttons/primary_green.png" id="tex_btn_start"]
 [ext_resource type="FontFile" path="res://assets/fonts/EBGaramond-Regular.ttf" id="pb_font_body"]
@@ -422,6 +423,19 @@ content_margin_left = 11
 content_margin_top = 5
 content_margin_right = 11
 content_margin_bottom = 5
+
+[sub_resource type="StyleBoxTexture" id="sb_tile_dark"]
+texture = ExtResource("tex_tile_d")
+texture_margin_left = 16
+texture_margin_top = 16
+texture_margin_right = 16
+texture_margin_bottom = 16
+content_margin_left = 18
+content_margin_top = 8
+content_margin_right = 26
+content_margin_bottom = 8
+axis_stretch_horizontal = 0
+axis_stretch_vertical = 0
 
 [resource]
 
