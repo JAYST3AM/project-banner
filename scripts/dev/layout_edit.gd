@@ -37,6 +37,7 @@ const SNAP_PX := 6.0
 const REGION_NAMES: Array[String] = [
 	"editor_controls", "editor_canvas", "pole_frame", "founder_frame", "map_frame",
 	"company_panel", "world_panel", "preview_panel", "rail_panel",
+	"header_panel", "footer_panel", "editor_panel",
 ]
 const REGION_LABELS := {
 	"editor_controls": "ToolsCluster",
@@ -48,6 +49,9 @@ const REGION_LABELS := {
 	"world_panel": "WorldSettings",
 	"preview_panel": "CampaignPreview",
 	"rail_panel": "LeftRail",
+	"header_panel": "Header",
+	"footer_panel": "FooterBar",
+	"editor_panel": "BannerEditorFrame",
 }
 
 ## Node-name prefixes that mark additional editable elements on any screen
@@ -140,9 +144,7 @@ func _pin_shells(screen: Node, workspace: Control) -> void:
 	if workspace != null:
 		workspace.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		workspace.custom_minimum_size = workspace.size
-	var editor := screen.find_child("editor_panel", true, false) as Control
-	if editor != null:
-		editor.custom_minimum_size = editor.size
+	# (The editor frame itself is an editable region now; nothing to pin for it.)
 
 
 func _discover(screen: Node, origin: Vector2) -> void:
