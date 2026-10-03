@@ -22,7 +22,7 @@ func _ready() -> void:
 	uv.resize(5 * 8)
 	for i in uv.size():
 		uv[i] = Vector4(0.01 * float(i % 6), 0.01 * float(i / 8), 0.05, 0.05)
-	var common := PackedFloat32Array([38.0, 31.0, 15.5, 0.0, 0.16, 12.0, 12.0])
+	var common := PackedFloat32Array([38.0, 31.0, 15.5, 0.0, 0.16, 18.0, 6.0])
 	var seen := PackedInt32Array()
 	seen.resize(N)
 	var written := PackedInt32Array()
@@ -43,7 +43,7 @@ func _ready() -> void:
 	for rep in REPS:
 		for i in N:
 			_shape_b(buffer, i, offsets, ticks, frames, uv, 8, common, positions[i],
-				i % 13 != 0, i % 3 == 0, false, (rep * 3 + i) % 40, i, false)
+				i % 13 != 0, i % 3 == 0, false, i % 40, i, false)
 	var b := (Time.get_ticks_usec() - t0) / float(N * REPS)
 
 	t0 = Time.get_ticks_usec()
@@ -78,7 +78,9 @@ func _shape_a(buffer: PackedFloat32Array, i: int, offsets: PackedInt32Array, str
 	var age := i % 40
 	var anim := _plan(i % 13 != 0, i % 3 == 0, age, age, int(common[5]), int(common[6]))
 	var into := i * 7
-	var frame := _frame(anim, into, ticks[anim], frames[anim])
+	# The fused shapes read the frame at (age + phase * 7); match it, so A and B differ only in
+	# call shape and not in which frame of the atlas they touch.
+	var frame := _frame(anim, age + into, ticks[anim], frames[anim])
 	var cell := Vector2(common[0], common[1])
 	var origin := _origin(Vector2(float(i % 100) * 1.3, float(i / 100) * 1.1), cell, Vector2(common[2], common[3]), common[4])
 	var custom := _custom(uv[anim * 8 + frame], false)
