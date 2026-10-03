@@ -42,8 +42,8 @@ func _ready() -> void:
 	t0 = Time.get_ticks_usec()
 	for rep in REPS:
 		for i in N:
-			_shape_b(buffer, i, offsets, ticks, frames, uv, 8, common, positions[i], true, false, false,
-				(rep * 3 + i) % 40, i, false)
+			_shape_b(buffer, i, offsets, ticks, frames, uv, 8, common, positions[i],
+				i % 13 != 0, i % 3 == 0, false, (rep * 3 + i) % 40, i, false)
 	var b := (Time.get_ticks_usec() - t0) / float(N * REPS)
 
 	t0 = Time.get_ticks_usec()
@@ -72,7 +72,11 @@ func _ready() -> void:
 func _shape_a(buffer: PackedFloat32Array, i: int, offsets: PackedInt32Array, stride: int,
 		ticks: PackedInt32Array, frames: PackedInt32Array, uv: PackedVector4Array,
 		common: PackedFloat32Array) -> void:
-	var anim := _plan(true, false, 40, 40, int(common[5]), int(common[6]))
+	# The same input domain the fused shapes see, so the comparison is one workload through
+	# different call shapes rather than different workloads: the wound/swing ages sweep 0..39
+	# and the dead/moved mix keeps every branch of the cascade reachable in an A/B pair.
+	var age := i % 40
+	var anim := _plan(i % 13 != 0, i % 3 == 0, age, age, int(common[5]), int(common[6]))
 	var into := i * 7
 	var frame := _frame(anim, into, ticks[anim], frames[anim])
 	var cell := Vector2(common[0], common[1])
