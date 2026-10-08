@@ -21,6 +21,8 @@ func run() -> void:
 	_test_camera_footprint()
 	_test_navigation_clicks_and_drags()
 	_test_resize_behaviour()
+	_test_markers_stay_inside_the_map_at_the_edges()
+	_test_a_drag_started_outside_the_map_never_navigates()
 	_test_functional_without_terrain_imagery()
 	_complete()
 
@@ -163,14 +165,17 @@ func _test_navigation_clicks_and_drags() -> void:
 	if asked.size() == 1:
 		check(asked[0].distance_to(FIELD * 0.5) < 1.5,
 			"and it asks for the world point that was clicked")
-	minimap._gui_input(_press(Vector2(1.0, 1.0), true))
-	equal(asked.size(), 1, "a press outside the map asks for nothing")
 	minimap._gui_input(_motion(map.get_center() + Vector2(40.0, 0.0)))
 	equal(asked.size(), 2, "dragging inside the map asks again as the pointer moves")
 	minimap._gui_input(_press(map.get_center(), false))
 	var before_release := asked.size()
 	minimap._gui_input(_motion(map.get_center() + Vector2(80.0, 0.0)))
 	equal(asked.size(), before_release, "after the release, moving the pointer asks for nothing")
+	# A press that never touched the map asks for nothing at all - including, per its own dedicated test
+	# below, one that later slides onto the map.
+	minimap._gui_input(_press(Vector2(1.0, 1.0), true))
+	equal(asked.size(), before_release, "a press outside the map asks for nothing")
+	minimap._gui_input(_press(Vector2(1.0, 1.0), false))
 	minimap.free()
 
 
@@ -192,6 +197,58 @@ func _test_resize_behaviour() -> void:
 	var tiny := minimap._map_rect()
 	check(tiny.size.x >= 1.0 and tiny.size.y >= 1.0,
 		"an absurdly small control still yields a usable rect")
+	minimap.free()
+
+
+func _test_markers_stay_inside_the_map_at_the_edges() -> void:
+	section("a marker on the field's edge stays inside the map instead of spilling over the panel")
+	var rect := _rect()
+	var depth := 10.0
+	var span := 4.0
+	var edge_anchors := [Vector2.ZERO, Vector2(FIELD.x, 0.0), Vector2(0.0, FIELD.y), FIELD,
+		Vector2(FIELD.x * 0.5, 0.0), Vector2(FIELD.x * 0.5, FIELD.y),
+		Vector2(0.0, FIELD.y * 0.5), Vector2(FIELD.x, FIELD.y * 0.5)]
+	for anchor in edge_anchors:
+		var polygon := BattleMinimap.marker_polygon(anchor, Vector2.RIGHT, depth, span, FIELD, rect)
+		var inside := true
+		for point in polygon:
+			var past_left := point.x < rect.position.x - 0.01
+			var past_right := point.x > rect.end.x + 0.01
+			var past_top := point.y < rect.position.y - 0.01
+			var past_bottom := point.y > rect.end.y + 0.01
+			if past_left or past_right or past_top or past_bottom:
+				inside = false
+		check(inside, "a marker anchored at %s stays within the map rectangle" % str(anchor))
+	var centred := _bounds(BattleMinimap.marker_polygon(FIELD * 0.5, Vector2.RIGHT, depth, span,
+		FIELD, rect))
+	check(absf(centred.size.x - depth * 2.0 * (rect.size.x / FIELD.x)) < 0.01,
+		"a marker in open field keeps its full width, so the clamp only bites at the boundary")
+	check(absf(centred.size.y - span * 2.0 * (rect.size.y / FIELD.y)) < 0.01,
+		"and keeps its full height")
+
+
+func _test_a_drag_started_outside_the_map_never_navigates() -> void:
+	section("a drag that starts outside the map cannot navigate, even once it moves inside")
+	var minimap := _minimap()
+	minimap.size = Vector2(420.0, 260.0)
+	var asked: Array[Vector2] = []
+	minimap.navigate_requested.connect(func(world: Vector2): asked.append(world))
+	var map := minimap._map_rect()
+	var outside := Vector2(4.0, 4.0)
+	check(not map.has_point(outside), "the point being pressed really is outside the map")
+	minimap._gui_input(_press(outside, true))
+	equal(asked.size(), 0, "pressing outside the map asks for nothing")
+	minimap._gui_input(_motion(map.get_center()))
+	equal(asked.size(), 0, "dragging in from outside asks for nothing, even over the map")
+	minimap._gui_input(_motion(map.get_center() + Vector2(30.0, 10.0)))
+	equal(asked.size(), 0, "and keeps asking for nothing while the button is held")
+	minimap._gui_input(_press(outside, false))
+	minimap._gui_input(_motion(map.get_center()))
+	equal(asked.size(), 0, "and nothing after the release either")
+	minimap._gui_input(_press(map.get_center(), true))
+	equal(asked.size(), 1, "but a press that starts on the map still navigates")
+	minimap._gui_input(_motion(map.get_center() + Vector2(30.0, 10.0)))
+	equal(asked.size(), 2, "and its drag keeps navigating")
 	minimap.free()
 
 

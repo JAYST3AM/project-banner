@@ -70,12 +70,18 @@ static func marker_polygon(anchor: Vector2, forward: Vector2, half_depth: float,
 	var stretch := Vector2(rect.size.x / maxf(1.0, field.x), rect.size.y / maxf(1.0, field.y))
 	var front := dir * depth
 	var side := across * span
-	return PackedVector2Array([
+	var corners := PackedVector2Array([
 		origin + Vector2((front.x + side.x) * stretch.x, (front.y + side.y) * stretch.y),
 		origin + Vector2((front.x - side.x) * stretch.x, (front.y - side.y) * stretch.y),
 		origin - Vector2((front.x + side.x) * stretch.x, (front.y + side.y) * stretch.y),
 		origin - Vector2((front.x - side.x) * stretch.x, (front.y - side.y) * stretch.y),
 	])
+	# A formation sitting on the field's edge projects onto the map's edge, which would let half its
+	# footprint spill over the panel. Clamp the corners so every marker stays inside the map rectangle.
+	for corner in corners.size():
+		corners[corner] = Vector2(clampf(corners[corner].x, rect.position.x, rect.end.x),
+			clampf(corners[corner].y, rect.position.y, rect.end.y))
+	return corners
 
 
 static func facing_tip(anchor: Vector2, forward: Vector2, field: Vector2, rect: Rect2) -> Vector2:
@@ -182,10 +188,15 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
 		if button.button_index == MOUSE_BUTTON_LEFT:
-			_dragging = button.pressed
-			if _dragging and _map_rect().has_point(button.position):
-				navigate_requested.emit(map_to_world(button.position, _world_size, _map_rect()))
-				accept_event()
+			if button.pressed:
+				# A drag counts only if it STARTED on the map. A press on the panel's header or border that
+				# slides over the map must not pan the camera, so the drag flag is decided at the press.
+				_dragging = _map_rect().has_point(button.position)
+				if _dragging:
+					navigate_requested.emit(map_to_world(button.position, _world_size, _map_rect()))
+					accept_event()
+			else:
+				_dragging = false
 	elif event is InputEventMouseMotion and _dragging:
 		var motion := event as InputEventMouseMotion
 		navigate_requested.emit(map_to_world(motion.position, _world_size, _map_rect()))
