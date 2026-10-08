@@ -37,7 +37,9 @@ func is_ready() -> bool:
 static func footprint_radius(files: int, ranks: int, spacing: float) -> float:
 	var half_span := float(maxi(0, files - 1)) * maxf(0.1, spacing) * 0.5 + 0.5
 	var half_depth := float(maxi(0, ranks - 1)) * maxf(0.1, spacing) * 0.5 + 0.5
-	return maxf(half_span, half_depth)
+	# A rotated rectangle's far corner is the diagonal, not the larger
+	# half-dimension. The previous max() allowed corners to clip into walls.
+	return sqrt(half_span * half_span + half_depth * half_depth)
 
 
 static func clearance_cells(terrain: BattlefieldTerrain, files: int,
