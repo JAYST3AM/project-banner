@@ -24,9 +24,19 @@ const PASS := "pass"
 const FAIL := "fail"
 const BROKEN := "broken"
 
-## No suite legitimately takes this long - every one of them finishes in a couple of seconds - so a
-## suite still going when this expires is stuck, not slow.
+## The per-suite stall marker, checked in [method _process]. It catches a suite that goes quiet
+## WHILE YIELDING. It cannot catch one that blocks the main thread, because _process does not run
+## while a synchronous suite hogs the frame. Measured 2026-10-09: test_battle_hardening (~207 s) and
+## test_formation_engagement (~146 s) are legitimately long, not stuck, and both are purely
+## synchronous (0 awaits inside run()). So this marker does NOT mean "over 90 s is stuck" - it means
+## "a suite that yields and then goes quiet for 90 s is stuck".
 const SUITE_DEADLINE_S := 90
+
+## The real bound for ANY suite, stuck or merely slow. Enforced on a detached thread so it fires even
+## when the main thread is blocked in a synchronous loop - precisely the case the marker above cannot
+## see. Set far above the slowest measured suite (~207 s) so it only ever means "this run is not
+## coming back". At expiry the process is killed with the suite named; nothing is reported as a pass.
+const HARD_DEADLINE_S := 900
 
 const SUITES: Array[String] = [
 	"res://tests/test_core_services.gd",
@@ -81,9 +91,34 @@ var _suites_broken: int = 0
 ## suite is running. Checked in [method _process], which runs while the tree is paused.
 var _deadline_ms: int = 0
 var _stuck_suite: String = ""
+## Set once the run has ended, so the hard-deadline thread can retire quietly.
+var _run_finished: bool = false
+var _hard_deadline_thread: Thread = null
+
+
+## A bound that survives a blocked main thread: the thread only sleeps, checks one flag and - if the
+## run is genuinely not coming back - names the suite and kills the process. It never touches the
+## scene tree, so it is safe off the main thread. See TI-2 in docs/TEST-INTEGRITY-FINDINGS.md.
+func _hard_deadline_watch() -> void:
+	var waited_ms := 0
+	while waited_ms < HARD_DEADLINE_S * 1000:
+		if _run_finished:
+			return
+		OS.delay_msec(500)
+		waited_ms += 500
+	if _run_finished:
+		return
+	print("")
+	print("  !! HARD DEADLINE: the run has not finished after %d seconds" % HARD_DEADLINE_S)
+	print("  !! in flight: %s" % ("(between suites)" if _stuck_suite.is_empty() else _stuck_suite))
+	print("  !! a synchronous suite cannot be interrupted from GDScript, so the process is killed")
+	print("  !! rather than left running - this is never reported as a pass")
+	OS.kill(OS.get_process_id())
 
 
 func _ready() -> void:
+	_hard_deadline_thread = Thread.new()
+	_hard_deadline_thread.start(_hard_deadline_watch)
 	# The runner has to keep running while the game is paused: a suite that pauses the tree must not
 	# be able to take the watchdog down with it.
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -107,6 +142,9 @@ func _ready() -> void:
 		print("  %d suite(s) were BROKEN - they did not run to completion" % _suites_broken)
 	print("  RESULT: %s" % ("FAIL" if failed else "PASS"))
 	print("=============================================")
+	_run_finished = true
+	if _hard_deadline_thread != null:
+		_hard_deadline_thread.wait_to_finish()
 	get_tree().quit(1 if failed else 0)
 
 
