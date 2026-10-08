@@ -17,8 +17,12 @@ This document does not authorize copying or replacing unapproved art in
 
 - Source of truth: `data/terrain/biomes.json`.
 - Seven biomes: plains, forest, highlands, swamp, arid, tundra, coastal.
-- Each battlefield biome: 4 ground variants × 4 sub-tiles, 64×64 px,
-  seamless and opaque, authored with catalogue-defined variant names.
+- Every biome currently defines 4 *variant concepts*, but only plains
+  currently enumerates the full 16 concrete 64×64 ground PNG paths.
+  The other six biomes deliberately have empty variant art lists until
+  Hermes' outputs are approved and the catalogue is updated.
+- Source images are 64×64, seamless, and base ground is opaque. Never
+  invent another biome's filenames merely from a naming convention.
 - Four overlays × two source files per biome, following catalogue paths.
 - `variant_scale` 4.0 world units; `overlay_scale` 3.0 world units;
   `terrain.visual_pixels_per_unit` 1.0.
@@ -80,3 +84,15 @@ This document does not authorize copying or replacing unapproved art in
 
 PR #2 stays a draft until the latest Godot CI and a real rendered battle
 both pass. Passing headless tests does not prove battlefield visual quality.
+
+## Tile-import verification on this branch
+
+- `scripts/battle/battle_terrain_art_audit.gd` reads only art paths already
+  present in the catalogue and checks existing textures for native 64×64
+  dimensions, exact wrap-edge compatibility, and base-ground opacity.
+- `tests/test_battle_terrain_art_audit.gd` enforces the contract on current
+  installed art, with deliberately missing assets reported but not treated
+  as errors.
+- The first Plains batch contains 16 declared ground PNG paths and 8
+  declared overlay PNG paths. Unapproved tile files remain in Hermes'
+  factory and should not be copied into `assets/` without review.
