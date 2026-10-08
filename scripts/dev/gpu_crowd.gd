@@ -495,13 +495,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_BRACKETRIGHT:
 				_tilt(TILT_STEP * 3.0)
 			KEY_T:
-				# Toggle full-field, formation-only command view; no scene swap or simulation change.
-				if _zoom_target <= ZOOM_MIN + 0.01:
-					_zoom_target = 1.0
-				else:
-					_zoom_target = ZOOM_MIN
-					_camera.position = Vector2.ZERO
-				_follow_action = false
+				_toggle_tactical_view()
 			KEY_F:
 				_follow_action = true
 				_zoom_target = 1.0
@@ -530,6 +524,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_P:
 				_clock_paused = not _clock_paused
 				print("gpu crowd: %s" % ("paused" if _clock_paused else "running"))
+			KEY_F3:
+				show_battle_diagnostics = not show_battle_diagnostics
+				if _diagnostics_panel != null:
+					_diagnostics_panel.visible = show_battle_diagnostics
 			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5:
 				var digit := (event as InputEventKey).keycode - KEY_0
 				if (event as InputEventKey).ctrl_pressed:
@@ -728,6 +726,10 @@ var _shot_taken := 0
 var _alive := Vector2i(0, 0)
 var _fallen := 0
 var _label: Label = null
+var _diagnostics_panel: PanelContainer = null
+var _command_bar: BattleCommandBar = null
+## Dev-only probe keeps its performance readout; campaign battles hide it by default.
+var show_battle_diagnostics := true
 var _camera: Camera2D = null
 var _disc_node: MultiMeshInstance2D = null
 var _bar_node: MultiMeshInstance2D = null
@@ -3276,40 +3278,64 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 20
 	add_child(layer)
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
-	panel.anchor_left = 1.0
-	panel.anchor_right = 1.0
-	panel.offset_left = -600.0
-	panel.offset_top = 12.0
-	panel.offset_right = -12.0
-	layer.add_child(panel)
-	_label = UiTheme.label("", 13, UiTheme.TEXT)
-	panel.add_child(_label)
-	# One muted line in the corner, and not one pixel more: the keys are real and nothing on screen
-	# said so - the owner's "the controls aren't there yet." The full help panel he had removed stays
-	# removed; this is the whole of the controls UI.
-	var keys := UiTheme.label(
-		"U attack  ·  H hold  ·  L / C / O formations  ·  T full map  ·  WASD pan  ·  wheel zoom  ·  F frame",
-		11, UiTheme.DIM)
-	keys.anchor_top = 1.0
-	keys.anchor_bottom = 1.0
-	keys.offset_left = 12.0
-	keys.offset_top = -30.0
-	keys.offset_right = 480.0
-	keys.offset_bottom = -10.0
-	keys.modulate.a = 0.85
-	layer.add_child(keys)
-	# Persistent formation cards occupy the bottom of the live campaign battle.
+
+	# Player-facing command HUD: no performance numbers, diagnostics, or developer filler.
+	_command_bar = BattleCommandBar.new()
+	_command_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_command_bar.offset_left = 16.0
+	_command_bar.offset_right = -16.0
+	_command_bar.offset_top = 14.0
+	_command_bar.offset_bottom = 98.0
+	_command_bar.action_requested.connect(_on_hud_action)
+	layer.add_child(_command_bar)
+
+	# Keep the existing probe telemetry available via F3 for development, not on
+	# the player's campaign battlefield.
+	_diagnostics_panel = PanelContainer.new()
+	_diagnostics_panel.add_theme_stylebox_override(
+		"panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
+	_diagnostics_panel.anchor_left = 1.0
+	_diagnostics_panel.anchor_right = 1.0
+	_diagnostics_panel.offset_left = -605.0
+	_diagnostics_panel.offset_top = 112.0
+	_diagnostics_panel.offset_right = -16.0
+	_diagnostics_panel.visible = show_battle_diagnostics
+	layer.add_child(_diagnostics_panel)
+	_label = UiTheme.label("", 12, UiTheme.TEXT)
+	_diagnostics_panel.add_child(_label)
+
 	_unit_dock = BattleUnitDock.new()
 	_unit_dock.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_unit_dock.offset_left = 115.0
-	_unit_dock.offset_right = -115.0
-	_unit_dock.offset_top = -107.0
-	_unit_dock.offset_bottom = -39.0
+	_unit_dock.offset_left = 16.0
+	_unit_dock.offset_right = -16.0
+	_unit_dock.offset_top = -123.0
+	_unit_dock.offset_bottom = -18.0
 	_unit_dock.body_chosen.connect(_on_card_chosen)
 	layer.add_child(_unit_dock)
 
+
+func _toggle_tactical_view() -> void:
+	if _zoom_target <= ZOOM_MIN + 0.01:
+		_zoom_target = 1.0
+	else:
+		_zoom_target = ZOOM_MIN
+		_camera.position = Vector2.ZERO
+	_follow_action = false
+
+
+func _on_hud_action(action: String) -> void:
+	match action:
+		"hold":
+			_order_stance(_living_selection(), true)
+		"engage":
+			_order_stance(_living_selection(), false)
+		"line", "column", "loose":
+			_set_formation(_living_selection(), action)
+		"map":
+			_toggle_tactical_view()
+		"pause":
+			_clock_paused = not _clock_paused
+	_refresh_command_ui()
 
 ## UI-only snapshot. Neither overview mode nor the dock modifies the combat state.
 func _refresh_command_ui() -> void:
@@ -3324,6 +3350,8 @@ func _refresh_command_ui() -> void:
 			"id": b,
 			"side": _side_of_body(b),
 			"name": _body_display_name(b),
+			"type_key": _body_display_name(b).to_snake_case(),
+			"order": _order_name(_order[b]),
 			"alive": _body_alive[b],
 			"started": _body_started[b] if b < _body_started.size() else _body_alive[b],
 			"shape": _body_shape_kind[b] if b < _body_shape_kind.size() else "line",
@@ -3336,6 +3364,9 @@ func _refresh_command_ui() -> void:
 	if _unit_dock != null:
 		_unit_dock.update_bodies(formations, chosen)
 	var overview := _camera_zoom <= 0.52
+	if _command_bar != null:
+		_command_bar.set_battle_status(_deploying, _alive.x, _alive.y,
+			chosen.size(), overview, _clock_paused)
 	if _overview_overlay != null:
 		_overview_overlay.visible = overview
 		if overview:
