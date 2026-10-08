@@ -3234,39 +3234,29 @@ func _log_view_geometry() -> void:
 
 
 func _build_ground() -> void:
+	# The production shader renderer is used when a biome has authored tiles.
+	# Otherwise our terrain-aware fallback paints a pixel-art field, never
+	# the old single flat colour per simulation cell.
 	var config := GameManager.config()
 	var ground := BattlefieldTerrain.generate(seed_value, field, config)
-	var cols := maxi(1, ground.cols)
-	var rows := maxi(1, ground.rows)
-	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
-	var tallest := maxf(0.001, ground.max_height())
-	for y in rows:
-		for x in cols:
-			var index := y * cols + x
-			var colour := ground.colour_of_cell(index)
-			var relief := ground.height_of_cell(index) / tallest
-			if relief > 0.5:
-				colour = colour.lightened((relief - 0.5) * 0.55)
-			else:
-				colour = colour.darkened((0.5 - relief) * 0.45)
-			image.set_pixel(x, y, colour)
-	var sprite := Sprite2D.new()
-	sprite.texture = ImageTexture.create_from_image(image)
-	sprite.centered = false
-	# One pixel a cell, stretched over the field - the same thing the battle view's
-	# single-call ground draw does.
-	sprite.scale = Vector2(field.x / float(cols), field.y / float(rows))
-	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	sprite.z_index = -20
-	# The ground is the one thing drawn as a plane rather than a point per soldier, so it gets the
-	# projection as an honest affine transform - the same one _iso() applies point by point, built
-	# from the same two constants, so the men cannot end up standing beside their own ground.
 	_view_root = Node2D.new()
 	add_child(_view_root)
-	_view_root.add_child(sprite)
-	# The marks the player makes live on the ground, between it and the men: a child of the view
-	# root, so the same transform lays them down, and below the men in depth, so a selection ring
-	# is under the formation rather than over it.
+	var fallback_image := BattleGroundPainter.bake(ground)
+	if fallback_image != null:
+		var sprite := Sprite2D.new()
+		sprite.texture = ImageTexture.create_from_image(fallback_image)
+		sprite.centered = false
+		sprite.scale = Vector2(field.x / float(fallback_image.get_width()),
+			field.y / float(fallback_image.get_height()))
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		sprite.z_index = -20
+		_view_root.add_child(sprite)
+		var ground_art := TerrainGround.new()
+		ground_art.z_index = -20
+		_view_root.add_child(ground_art)
+		if ground_art.show_field(ground, BiomeCatalog.load_from(), config):
+			sprite.visible = false
+	# Selection and command marks share the same ground-space transform.
 	var paint := Node2D.new()
 	paint.set_script(load("res://scripts/dev/battle_paint.gd"))
 	paint.z_index = -10
@@ -3276,7 +3266,6 @@ func _build_ground() -> void:
 	_overview_overlay.z_index = 6
 	_overview_overlay.visible = false
 	_view_root.add_child(_overview_overlay)
-
 
 ## A corner panel in the game's own styling, so what the picture is and what it costs can be
 ## read off the screen rather than out of a log.
