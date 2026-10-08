@@ -26,6 +26,9 @@ var _resolved := false
 
 
 func _ready() -> void:
+	# Actual campaign encounters use terrain-aware soldier collision.
+	# The standalone GPU dev probe keeps its legacy baseline for comparison.
+	enable_gpu_terrain_collision = true
 	# Keep GPU diagnostics accessible with F3, not in the campaign HUD.
 	show_battle_diagnostics = false
 	context = SceneManager.consume_payload().get("context") as BattleContext
