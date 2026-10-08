@@ -3397,10 +3397,14 @@ func _refresh_command_ui() -> void:
 		_battle_minimap.set_battle_state(formations, chosen,
 			_camera.position + field * 0.5, full_span)
 	if _overview_overlay != null:
-		_overview_overlay.visible = overview
-		if overview:
-			var size_on_map := clampi(int(13.0 / maxf(_picture_scale(), 0.1)), 2, 28)
-			_overview_overlay.set_formations(formations, chosen, size_on_map)
+		# Three readable LODs: full soldier detail, medium unit standards,
+		# and full-map formation blocks. The simulation never changes LOD.
+		var show_standards := _camera_zoom <= 1.65
+		_overview_overlay.visible = show_standards
+		if show_standards:
+			var world_label_size := clampi(int(13.0 / maxf(_picture_scale(), 0.1)), 2, 28)
+			_overview_overlay.set_formations(formations, chosen,
+				world_label_size, overview)
 	if _sprites_node != null:
 		_sprites_node.visible = not overview
 	if _disc_node != null:
