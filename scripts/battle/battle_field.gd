@@ -26,6 +26,8 @@ var _resolved := false
 
 
 func _ready() -> void:
+	# Keep GPU diagnostics accessible with F3, not in the campaign HUD.
+	show_battle_diagnostics = false
 	context = SceneManager.consume_payload().get("context") as BattleContext
 	_parse_composition()
 	if context == null and _composition.is_empty():
