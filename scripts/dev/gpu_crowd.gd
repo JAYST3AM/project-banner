@@ -740,6 +740,7 @@ var _overview_overlay: BattleTacticalOverview = null
 var _unit_dock: BattleUnitDock = null
 var _battle_minimap: BattleMinimap = null
 var _battle_terrain: BattlefieldTerrain = null
+var _battle_scenery: BattleScenery = null
 var _focus := Vector2.ZERO
 ## The health bars and the formation boxes: two instances a soldier and one line a body, the
 ## same two things the battle view draws for a formed battle.
@@ -3256,10 +3257,11 @@ func _build_ground() -> void:
 	_battle_terrain = ground
 	_view_root = Node2D.new()
 	add_child(_view_root)
+	var biomes := BiomeCatalog.load_from()
 	var ground_art := TerrainGround.new()
 	ground_art.z_index = -20
 	_view_root.add_child(ground_art)
-	if not ground_art.show_field(ground, BiomeCatalog.load_from(), config):
+	if not ground_art.show_field(ground, biomes, config):
 		# Never spend time baking fallback pixels when the biome has authored art.
 		var fallback_image := BattleGroundPainter.bake(ground)
 		if fallback_image != null:
@@ -3271,6 +3273,23 @@ func _build_ground() -> void:
 			sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 			sprite.z_index = -20
 			_view_root.add_child(sprite)
+
+	# Existing biome prop definitions supply clustered trees, bushes, rock, ruin,
+	# fence and field clutter. Build the *visual* positions separately for now.
+	# Do not apply their obstacle/collision state to a shader which cannot yet
+	# path around it; that GPU movement integration is a later combat milestone.
+	var no_props_at_deployment: Array[Rect2] = []
+	var depth := minf(field.x * 0.22, config.get_float("battle.deploy_depth", 20.0)
+		+ config.get_float("battle.deploy_margin", 8.0))
+	no_props_at_deployment.append(Rect2(Vector2.ZERO, Vector2(depth, field.y)))
+	no_props_at_deployment.append(Rect2(Vector2(field.x - depth, 0.0),
+		Vector2(depth, field.y)))
+	var visual_props := TerrainProps.build(ground, biomes, ground.terrain_seed,
+		ground.generation_version, config, no_props_at_deployment)
+	_battle_scenery = BattleScenery.new()
+	_battle_scenery.z_index = -7
+	_view_root.add_child(_battle_scenery)
+	_battle_scenery.build(visual_props)
 	# Selection and command marks share the same ground-space transform.
 	var paint := Node2D.new()
 	paint.set_script(load("res://scripts/dev/battle_paint.gd"))
