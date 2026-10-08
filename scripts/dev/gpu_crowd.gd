@@ -741,6 +741,7 @@ var _unit_dock: BattleUnitDock = null
 var _battle_minimap: BattleMinimap = null
 var _battle_terrain: BattlefieldTerrain = null
 var _battle_scenery: BattleScenery = null
+var _deployment_overlay: BattleDeploymentOverlay = null
 var _focus := Vector2.ZERO
 ## The health bars and the formation boxes: two instances a soldier and one line a body, the
 ## same two things the battle view draws for a formed battle.
@@ -1802,6 +1803,8 @@ func _process(delta: float) -> void:
 		_frame_delta = 0.0
 		_frames = 0
 	_update_camera(delta)
+	if _deployment_overlay != null:
+		_deployment_overlay.visible = _deploying
 	_refresh_command_ui()
 	# The arrows fly on the frame's clock, not the simulation's: a shot is a tenth of a second of
 	# real time whatever the tick rate, and the last volley keeps flying while a finished battle
@@ -3278,18 +3281,21 @@ func _build_ground() -> void:
 	# fence and field clutter. Build the *visual* positions separately for now.
 	# Do not apply their obstacle/collision state to a shader which cannot yet
 	# path around it; that GPU movement integration is a later combat milestone.
-	var no_props_at_deployment: Array[Rect2] = []
-	var depth := minf(field.x * 0.22, config.get_float("battle.deploy_depth", 20.0)
-		+ config.get_float("battle.deploy_margin", 8.0))
-	no_props_at_deployment.append(Rect2(Vector2.ZERO, Vector2(depth, field.y)))
-	no_props_at_deployment.append(Rect2(Vector2(field.x - depth, 0.0),
-		Vector2(depth, field.y)))
+	var deploy_depth := config.get_float("battle.deploy_depth", 20.0)
+	var deploy_margin := config.get_float("battle.deploy_margin", 8.0)
+	var no_props_at_deployment := BattleDeploymentOverlay.zones(
+		field, deploy_depth, deploy_margin)
 	var visual_props := TerrainProps.build(ground, biomes, ground.terrain_seed,
 		ground.generation_version, config, no_props_at_deployment)
 	_battle_scenery = BattleScenery.new()
 	_battle_scenery.z_index = -7
 	_view_root.add_child(_battle_scenery)
 	_battle_scenery.build(visual_props)
+	_deployment_overlay = BattleDeploymentOverlay.new()
+	_deployment_overlay.z_index = -8
+	_deployment_overlay.configure(field, deploy_depth, deploy_margin)
+	_deployment_overlay.visible = _deploying
+	_view_root.add_child(_deployment_overlay)
 	# Selection and command marks share the same ground-space transform.
 	var paint := Node2D.new()
 	paint.set_script(load("res://scripts/dev/battle_paint.gd"))
