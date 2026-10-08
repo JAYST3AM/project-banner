@@ -51,18 +51,27 @@ func _pre_shade_colour(terrain: BattlefieldTerrain, index: int) -> Color:
 
 func _test_ground_is_deterministic_and_scaled() -> void:
 	section("battlefield pixel ground is reproducible")
+	# Two INDEPENDENTLY generated terrains from the same seed, not the same object baked twice: that is what
+	# proves the painter is a function of the terrain data rather than of object identity or call order.
 	var terrain := _terrain()
+	var twin := _terrain()
 	check(terrain.is_valid(), "terrain exists")
+	check(twin.is_valid(), "and so does an independently generated twin")
+	equal(terrain.signature(), twin.signature(), "the twin really is an equivalent terrain")
 	var a := BattleGroundPainter.bake(terrain)
 	var b := BattleGroundPainter.bake(terrain)
+	var c := BattleGroundPainter.bake(twin)
 	not_null(a, "first fallback image generated")
 	not_null(b, "second fallback image generated")
-	if a == null or b == null:
+	not_null(c, "and the twin's image generated")
+	if a == null or b == null or c == null:
 		return
 	equal(a.get_size(), b.get_size(), "repeated bakes have identical bounds")
 	equal(a.get_data(), b.get_data(), "repeated bakes have byte-identical pixels")
+	equal(a.get_data(), c.get_data(), "an independently generated equivalent terrain bakes identically")
 	check(a.get_width() > terrain.cols and a.get_height() > terrain.rows,
 		"the rendered pixel grid has more detail than the simulation cells")
+	equal(c.get_size(), a.get_size(), "and the twin's image is the same size")
 
 
 func _test_ground_has_visual_detail() -> void:
@@ -82,9 +91,12 @@ func _test_ground_does_not_mutate_terrain() -> void:
 	section("painting ground never modifies combat terrain")
 	var terrain := _terrain()
 	var before := terrain.to_dict()
+	var signature_before := terrain.signature()
 	var image := BattleGroundPainter.bake(terrain)
 	check(image != null, "the ground renders")
 	equal(terrain.to_dict(), before, "simulation terrain is unchanged by rendering")
+	equal(terrain.signature(), signature_before,
+		"and its signature is unchanged too, so no map was silently refreshed")
 
 
 func _test_image_geometry_and_the_texel_clamp() -> void:
@@ -141,12 +153,13 @@ const MOTIF_TYPES := ["water", "rough", "cliff", "woods"]
 
 
 func _test_vegetation_and_wetness_apply_only_when_present() -> void:
-	section("vegetation and wetness change the ground only on the cells that carry them")
-	# The painter applies vegetation only above 0.3 and wetness only above 0.25. Whether a given generated
-	# field contains cells on BOTH sides of those thresholds is the generator's business, so this asserts the
-	# behaviour on whichever side is actually present, and names the value it used in every message. That way
-	# the test cannot pass by finding nothing, and it reports the real ranges when it runs.
+	section("vegetation and wetness change the painter's OWN output, on both sides of each threshold")
+	# Anchored on BattleGroundPainter._paint_colour - the production function - compared against a model of
+	# the same cell with and without the term in question. Comparing one test helper to another would only
+	# demonstrate that the helpers agree with each other, which is not evidence about the painter.
 	var terrain := _terrain()
+	var low := terrain.min_height()
+	var span := maxf(0.001, terrain.max_height() - low)
 	var veg_high := 0
 	var veg_low := 0
 	var wet_high := 0
@@ -163,36 +176,64 @@ func _test_vegetation_and_wetness_apply_only_when_present() -> void:
 	var cases := 0
 	var veg_top := terrain.vegetation_of_cell(veg_high)
 	if veg_top > 0.3:
-		check(_pre_shade_colour(terrain, veg_high) != _soil_only_colour(terrain, veg_high),
-			"a vegetated cell (%.3f) is changed by the vegetation pass" % veg_top)
-		check(_colour_distance(_pre_shade_colour(terrain, veg_high), VEGETATION_GREEN)
-			< _colour_distance(_soil_only_colour(terrain, veg_high), VEGETATION_GREEN),
-			"and pulled toward the vegetation green")
+		var up := _painted(terrain, veg_high, low, span)
+		check(up.is_equal_approx(_expected_paint(terrain, veg_high, low, span, true, true)),
+			"a vegetated cell (%.3f) matches the model that includes the vegetation term" % veg_top)
+		check(not up.is_equal_approx(_expected_paint(terrain, veg_high, low, span, false, true)),
+			"and departs from the model without it, so the term really fires in the painter")
 		cases += 1
 	var veg_bottom := terrain.vegetation_of_cell(veg_low)
 	if veg_bottom <= 0.3:
-		check(_pre_shade_colour(terrain, veg_low)
-			== _with_wetness(_soil_only_colour(terrain, veg_low), terrain, veg_low),
-			"a cell at or below the vegetation threshold (%.3f) gets no vegetation, wetness aside"
-				% veg_bottom)
+		var down := _painted(terrain, veg_low, low, span)
+		check(down.is_equal_approx(_expected_paint(terrain, veg_low, low, span, true, true)),
+			"a cell at or below the vegetation threshold (%.3f) matches the model without it" % veg_bottom)
+		# The discrimination for this side comes from the PAIR above: the over-threshold witness departs from
+		# the model without the term, and this one matches it. Asserting that the term would move this cell
+		# would be wrong - below the threshold the term deliberately does nothing.
+		check(veg_bottom <= 0.3, "and this witness really is on the far side of the threshold")
 		cases += 1
 	var wet_top := terrain.wetness_of_cell(wet_high)
 	if wet_top > 0.25:
-		check(_pre_shade_colour(terrain, wet_high)
-			!= _with_vegetation(_soil_only_colour(terrain, wet_high), terrain, wet_high),
-			"a wet cell (%.3f) is changed by the wetness pass, vegetation aside" % wet_top)
-		check(_pre_shade_colour(terrain, wet_high).v
-			<= _with_vegetation(_soil_only_colour(terrain, wet_high), terrain, wet_high).v,
-			"and never brightened by it")
+		var wet_up := _painted(terrain, wet_high, low, span)
+		check(wet_up.is_equal_approx(_expected_paint(terrain, wet_high, low, span, true, true)),
+			"a wet cell (%.3f) matches the model that includes the wetness term" % wet_top)
+		check(not wet_up.is_equal_approx(_expected_paint(terrain, wet_high, low, span, true, false)),
+			"and departs from the model without it, so the term really fires in the painter")
 		cases += 1
 	var wet_bottom := terrain.wetness_of_cell(wet_low)
 	if wet_bottom <= 0.25:
-		check(_pre_shade_colour(terrain, wet_low)
-			== _with_vegetation(_soil_only_colour(terrain, wet_low), terrain, wet_low),
-			"a cell at or below the wetness threshold (%.3f) gets no wetness, vegetation aside"
-				% wet_bottom)
+		var wet_down := _painted(terrain, wet_low, low, span)
+		check(wet_down.is_equal_approx(_expected_paint(terrain, wet_low, low, span, true, true)),
+			"a cell at or below the wetness threshold (%.3f) matches the model without it" % wet_bottom)
+		check(wet_bottom <= 0.25, "and this witness really is on the far side of the threshold")
 		cases += 1
-	check(cases >= 2, "the field exercised at least two threshold cases (%d of 4)" % cases)
+	check(cases >= 2, "the field exercised at least two threshold sides (%d of 4)" % cases)
+
+
+## The painter's own colour for a cell, through its production entry point rather than a test helper.
+func _painted(terrain: BattlefieldTerrain, index: int, low: float, span: float) -> Color:
+	return BattleGroundPainter._paint_colour(terrain, index, index % terrain.cols, index / terrain.cols,
+		low, span)
+
+
+## The whole pipeline modelled in one place - the pre-shade stages with each conditional term switchable, then
+## the painter's own shade formula - so an assertion can hold one term out and compare production against it.
+func _expected_paint(terrain: BattlefieldTerrain, index: int, low: float, span: float,
+		with_vegetation: bool, with_wetness: bool) -> Color:
+	var col := index % terrain.cols
+	var row := index / terrain.cols
+	var base := _soil_only_colour(terrain, index)
+	if with_vegetation:
+		base = _with_vegetation(base, terrain, index)
+	if with_wetness:
+		base = _with_wetness(base, terrain, index)
+	var here := terrain.height_of_cell(index)
+	var left := terrain.height_of_cell(row * terrain.cols + maxi(0, col - 1))
+	var above := terrain.height_of_cell(maxi(0, row - 1) * terrain.cols + col)
+	var illumination := clampf((here - (left + above) * 0.5) * 0.085, -0.14, 0.14)
+	var altitude := clampf((here - low) / span, 0.0, 1.0)
+	var shade := illumination + (altitude - 0.5) * 0.13
+	return base.lightened(shade) if shade >= 0.0 else base.darkened(-shade)
 
 
 func _test_type_motifs_fire_and_plain_types_do_not() -> void:
@@ -297,11 +338,6 @@ func _test_output_is_a_valid_opaque_rgba_image() -> void:
 				filled = false
 	check(opaque, "every sampled pixel is fully opaque")
 	check(filled, "and none is left black, which is what an unwritten texel of a fresh image is")
-
-
-## Color has no distance method, so compare in RGB space explicitly.
-func _colour_distance(a: Color, b: Color) -> float:
-	return Vector3(a.r - b.r, a.g - b.g, a.b - b.b).length()
 
 
 ## The colour as far as the soil tint. The vegetation and wetness assertions compare AGAINST this, so they
