@@ -62,7 +62,8 @@ func _ready() -> void:
 	# take our own. Awaited, because this repo treats an un-awaited coroutine call as an error.
 	var shot := _arg_value("--shot=")
 	if not shot.is_empty():
-		await _take_screenshot(shot, int(_arg_value("--shot-delay=", "2000")))
+		await _take_screenshot(shot, int(_arg_value("--shot-delay=", "2000")),
+			_arg_value("--shot-size="))
 
 
 func _layout() -> void:
@@ -97,17 +98,31 @@ func _arg_value(prefix: String, fallback: String = "") -> String:
 	return fallback
 
 
-func _take_screenshot(path: String, delay_ms: int) -> void:
+func _take_screenshot(path: String, delay_ms: int, size_arg: String) -> void:
 	## This harness takes its OWN screenshot. The global --screenshot probe is wired by main.gd, and a
 	## direct dev-scene run never executes main.gd, so the flag is silently inert here - the same reason
 	## gpu_crowd and iso_spike write their own PNGs. Verified the hard way: eight runs produced eight
 	## clean logs and zero images before this existed.
+	##
+	## --shot-size=WxH resizes the window before capturing, because the project's own window size beats
+	## --resolution on the command line, and GameSettings.apply() then beats an early resize too: the
+	## owner's settings.cfg is applied at startup and forces a 2560x1440 window, so the resize has to
+	## happen AFTER that has settled and immediately before the capture. Eight captures all came out
+	## 1440p whatever size was asked for until this was done here rather than on entry.
 	await get_tree().create_timer(maxf(0.4, float(delay_ms) / 1000.0)).timeout
+	if not size_arg.is_empty():
+		var parts := size_arg.split("x")
+		if parts.size() == 2:
+			get_window().size = Vector2i(int(parts[0]), int(parts[1]))
+			await get_tree().process_frame
+			await get_tree().process_frame
+			await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	var image := get_viewport().get_texture().get_image()
 	var err := image.save_png(path)
 	if err == OK:
-		print("preview screenshot: %s (%dx%d)" % [path, image.get_width(), image.get_height()])
+		print("preview screenshot: %s (%dx%d) window %s" % [path, image.get_width(), image.get_height(),
+			str(get_window().size)])
 	else:
 		printerr("preview screenshot FAILED for %s (error %d)" % [path, err])
 	if OS.get_cmdline_user_args().has("--shot-quit"):
