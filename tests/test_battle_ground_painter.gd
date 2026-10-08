@@ -152,12 +152,37 @@ func _test_soil_colours_cover_every_type_and_fall_back() -> void:
 const MOTIF_TYPES := ["water", "rough", "cliff", "woods"]
 
 
+## A field that genuinely straddles BOTH thresholds, found by searching seeds. The default field tops out at
+## 0.240 wetness, just under the painter's 0.25, so on it the wetness term never fires and the guard below
+## would be asserting about a branch that never ran. Returns null rather than a field that only half qualifies,
+## so the caller can fail closed.
+func _straddling_terrain() -> BattlefieldTerrain:
+	for offset in 12:
+		var candidate := _terrain(SEED + offset)
+		var veg_low := 2.0
+		var veg_high := -1.0
+		var wet_low := 2.0
+		var wet_high := -1.0
+		for index in candidate.cell_count():
+			veg_low = minf(veg_low, candidate.vegetation_of_cell(index))
+			veg_high = maxf(veg_high, candidate.vegetation_of_cell(index))
+			wet_low = minf(wet_low, candidate.wetness_of_cell(index))
+			wet_high = maxf(wet_high, candidate.wetness_of_cell(index))
+		if veg_low <= 0.3 and veg_high > 0.3 and wet_low <= 0.25 and wet_high > 0.25:
+			return candidate
+	return null
+
+
 func _test_vegetation_and_wetness_apply_only_when_present() -> void:
 	section("vegetation and wetness change the painter's OWN output, on both sides of each threshold")
 	# Anchored on BattleGroundPainter._paint_colour - the production function - compared against a model of
 	# the same cell with and without the term in question. Comparing one test helper to another would only
 	# demonstrate that the helpers agree with each other, which is not evidence about the painter.
-	var terrain := _terrain()
+	var terrain := _straddling_terrain()
+	# No found-check here on purpose: if the search fails, this returns early with cases still 0 and the
+	# equal(cases, 4) guard below fails, so the test fails closed without spending an extra assertion.
+	if terrain == null:
+		return
 	var low := terrain.min_height()
 	var span := maxf(0.001, terrain.max_height() - low)
 	var veg_high := 0
@@ -207,7 +232,7 @@ func _test_vegetation_and_wetness_apply_only_when_present() -> void:
 			"a cell at or below the wetness threshold (%.3f) matches the model without it" % wet_bottom)
 		check(wet_bottom <= 0.25, "and this witness really is on the far side of the threshold")
 		cases += 1
-	check(cases >= 2, "the field exercised at least two threshold sides (%d of 4)" % cases)
+	equal(cases, 4, "all four vegetation/wetness threshold cases were exercised - veg %.3f..%.3f, wet %.3f..%.3f" % [veg_top, veg_bottom, wet_top, wet_bottom])
 
 
 ## The painter's own colour for a cell, through its production entry point rather than a test helper.
