@@ -60,3 +60,41 @@ Build and playtest *one* visually complete encounter before scaling the spectacl
 ## Release gate
 
 Never call a battle scene **Total War-grade** until it passes a hands-on visual and interaction review. Passing headless unit tests, rendering a textured field, or importing sprite atlases is necessary infrastructure—not proof of production-ready visuals.
+
+
+## GPU terrain collision integration acceptance (pending windowed test)
+
+The campaign battle now carries **the exact same traversability cells** to the
+soldier compute shader as to the formation pathfinder and the terrain renderer.
+The read-only `BattleTerrainGpuMask` buffer is bound as storage binding **14**.
+The standalone crowd stress probe intentionally leaves terrain collision
+disabled, preserving baseline GPU combat reproducibility/performance.
+
+**Must verify in a real Godot RenderingDevice window before approving PR #2:**
+
+1. The imported `crowd_sim.glsl` compute shader compiles with binding 14, with
+   no Vulkan descriptor / SPIR-V errors.
+2. Spawn a small campaign battle with an obstacle between two formations.
+   Advancing and engaging soldiers must not penetrate the blocked cell during
+   normal walking **or** subsequent GPU separation/settling iterations.
+3. Repeat from the same seed and orders; outcomes, positions and casualties
+   must remain deterministic within the project's combat test contract.
+4. Place a narrow prop/wall opening and issue an order to two formations of
+   different widths. The wider formation's **anchor path** must reject the
+   narrow passage, and individual soldiers must still avoid the wall.
+5. Verify movement around narrow corners and diagonals. The GPU's first-pass
+   collision uses axis sliding, not a full local-avoidance steering algorithm.
+   Check for stuck bodies and avoid introducing a false claim of full
+   pathfinding/formation cohesion.
+6. Verify troop starting positions remain traversable after
+   `clear_for_deployment` and `build_props`.
+7. Compare frame times and simulation speed for disabled probe vs a campaign
+   battle containing props. No unacceptable GPU stalls or CPU readbacks.
+8. Confirm the soldier attack/death/reposition loop, campaign casualty tally,
+   battle resolution, and save/restart all still work.
+
+**Known limits:** An agent can still become stuck behind its comrades or
+at an obstructed desired lattice slot. We do not yet have a dedicated
+local-steering system, replanning when a whole formation becomes stuck, or
+dynamic obstacle avoidance for moving soldiers. Collision masks currently
+encode *static* terrain obstacles only.
