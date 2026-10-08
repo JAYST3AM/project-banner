@@ -226,6 +226,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# already came from - this is the same fact told to the picture.
 	_man_ranged.resize(agents)
 	_man_ranged.fill(0)
+	_man_art_index.resize(agents)
 	_body_shape_kind.resize(_bodies)
 	_body_unit_label.resize(_bodies)
 
@@ -292,6 +293,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 			_man_file[i] = member_index % files
 			_man_rank[i] = member_index / files
 			_man_ranged[i] = 1 if unit.ranged else 0
+			_man_art_index[i] = UnitArt.index_for_unit(unit.unit_type_id)
 
 
 ## The catalog's numbers for one of its shapes, as the deployment needs them: files_cap is the
