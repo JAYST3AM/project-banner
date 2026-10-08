@@ -76,8 +76,10 @@ def part_b_real_kill() -> None:
     print("\n=== B. the bound fires on a REAL synchronous suite, and the tree dies ===")
     running = godot_count()
     if running != 0:
+        # GPT-6 (c0d496a): a mandatory negative control that cannot run must FAIL the selftest, not
+        # skip quietly - a skipped control reads as a pass and is exactly how a gate stops gating.
         check("(a) real kill test could run (no other Godot process)", running, 0)
-        print("  (real kill test NOT RUN: another Godot is active; acceptance selftest must fail)")
+        print("  (real kill test NOT RUN: another Godot is active; the acceptance selftest must fail)")
         return
     suite = "test_battle_hardening"          # ~207 s when left alone; it must be cut off well before that
     logdir = os.path.join(WORKTREE, "logs", "verify")
@@ -98,8 +100,13 @@ def part_c_missing_baseline() -> None:
     io.open(suite_list, "w", encoding="utf-8").write(
         "| Suite | Result | Assertions | Failures | ms |\n|---|---|---|---|---|\n"
         "| `test_core_services` | PASS | 83 | 0 | 80 |\n")
-    empty_baseline = os.path.join(tmp, "empty-baseline.md")
-    io.open(empty_baseline, "w", encoding="utf-8").write("| Suite | Result | Assertions | Failures | ms |\n|---|---|---|---|---|\n")
+    empty_baseline = os.path.join(tmp, "other-baseline.md")
+    # A non-empty baseline for a DIFFERENT registered suite: the input validation must pass (so the run
+    # reaches the rule under test) and the requested suite must still have no entry - which is what the
+    # missing-baseline rule is for.
+    io.open(empty_baseline, "w", encoding="utf-8").write(
+        "| Suite | Result | Assertions | Failures | ms |\n|---|---|---|---|---|\n"
+        "| `test_roads` | PASS | 74 | 0 | 400 |\n")
     out = os.path.join(tmp, "report.md")
     p = subprocess.run([sys.executable, os.path.join(HERE, "verify_branch.py"),
                         "--worktree", WORKTREE, "--out", out, "--suite-list", suite_list,
@@ -122,7 +129,7 @@ def part_d_dirty_tree() -> None:
     runner = os.path.join(dirty, "tests", "test_runner.gd")
     if not os.path.exists(runner):
         check("(D) dirty-tree fixture created", False, True)
-        print("  (dirty-tree test NOT RUN: fixture creation failed; acceptance selftest must fail)")
+        print("  (dirty-tree test NOT RUN: fixture creation failed; the acceptance selftest must fail)")
         return
     text = io.open(runner, encoding="utf-8", newline="").read()
     io.open(runner, "w", encoding="utf-8", newline="").write(text.replace("const SUITE_DEADLINE_S := 90",
@@ -142,9 +149,54 @@ def part_d_dirty_tree() -> None:
                    capture_output=True, text=True)
 
 
+def part_e_input_validation() -> None:
+    """GPT-6's requirements on the inputs themselves (2026-10-09): every requested name must exactly match
+    a registered suite, no duplicate names, no duplicate or stale baseline entries, no silent test_
+    normalization - and the verifier must record the HASHES of the inputs it certified under.
+
+    No engine needed: validation happens before any suite runs, which is the point of it.
+    """
+    print("\n=== E. input validation (exact names, duplicates, stale entries, hashes) ===")
+    reg = vb.registered_suites(WORKTREE)
+    check("the runner's registered suites are readable", len(reg) > 0, True)
+    list_path = os.path.join(HERE, "..", "docs", "tasks", "m02-suite-list.md")
+    mine = vb.suites_from_report(list_path)
+    fix = {"battle_formation_navigator": "test_battle_formation_navigator",
+           "battle_formation_cohesion": "test_battle_formation_cohesion",
+           "battle_placement": "test_battle_placement"}
+    canon = [fix.get(s, s) for s in mine]
+
+    # The shipped list is canonical now (aligned 2026-10-09), so the aliased case is built here rather
+    # than read from the file - a test that depends on the file being wrong stops testing anything the
+    # moment somebody fixes the file.
+    aliased = [{"test_battle_formation_navigator": "battle_formation_navigator",
+                "test_battle_formation_cohesion": "battle_formation_cohesion",
+                "test_battle_placement": "battle_placement"}.get(s, s) for s in canon]
+    p, _ = vb.input_problems(aliased, aliased, reg, True)
+    check("(E) an aliased name is refused", any("not registered suites" in x for x in p), True)
+    p2, w2 = vb.input_problems(canon, canon, reg, True)
+    check("(E) a canonical pair is clean", (p2, w2), ([], []))
+    p3, _ = vb.input_problems(canon + ["test_roads"], canon, reg, True)
+    check("(E) a duplicated list name is refused", any("more than once" in x for x in p3), True)
+    p4, _ = vb.input_problems(canon, canon + ["test_roads"], reg, True)
+    check("(E) a duplicated baseline entry is refused", any("more than one entry" in x for x in p4), True)
+    p5, _ = vb.input_problems(canon, canon + ["test_removed"], reg, True)
+    check("(E) a stale baseline entry is refused", any("not registered" in x for x in p5), True)
+    p6, w6 = vb.input_problems(["test_roads"], ["test_roads"], reg, True)
+    check("(E) a subset run is allowed but WARNED", (p6 == [], len(w6)), (True, 1))
+    p7, _ = vb.input_problems(canon, canon, [], True)
+    check("(E) an unreadable runner is refused", any("could not read" in x for x in p7), True)
+    if hasattr(vb, "sha256_of"):
+        h = vb.sha256_of(list_path)
+        check("(E) input hashes are recorded", len(h) == 64 and all(c in "0123456789abcdef" for c in h), True)
+    else:
+        check("(E) the gate records input hashes", False, True)
+
+
 def main() -> int:
     print(f"testing the gate that will actually run: {vb.__file__}")
     part_a_verdict_rules()
+    part_e_input_validation()
     if "--with-engine" in sys.argv:
         part_b_real_kill()
         part_c_missing_baseline()

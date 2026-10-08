@@ -1,12 +1,12 @@
 # Verification run — pb-m00-docs
 
-**Accepted baseline commit:** `391de01d38462ee9616a5ba4feea422893b80446`
+**Commit:** `b6fb396aebc41bc2ff8e6b3624b47a4f83e7378b`
 **Engine:** Godot 4.7.2-stable, headless, `--require-native`, one process per suite
-**Suites:** 41
+**Suites:** 38
 
 ## Verdict
 
-**ALL SUITES PASS.** 10800 assertions, 0 failures across 41 suites.
+**ALL SUITES PASS.** 10346 assertions, 0 failures across 38 suites.
 
 | Suite | Result | Assertions | Failures | ms | vs baseline |
 |---|---|---|---|---|---|
@@ -31,9 +31,6 @@
 | `test_formation` | PASS | 328 | 0 | 628 | new |
 | `test_formation_battle` | PASS | 132 | 0 | 6822 | new |
 | `test_battle_view` | PASS | 8 | 0 | 522 | new |
-| `test_battle_formation_navigator` | PASS | 124 | 0 | 0 | new |
-| `test_battle_formation_cohesion` | PASS | 305 | 0 | 0 | new |
-| `test_battle_placement` | PASS | 25 | 0 | 0 | new |
 | `test_spatial_grid` | PASS | 111 | 0 | 503 | new |
 | `test_overlap` | PASS | 189 | 0 | 6700 | new |
 | `test_overlap_oracle` | PASS | 4283 | 0 | 3932 | new |
@@ -53,8 +50,6 @@
 | `test_runner_contract` | PASS | 30 | 0 | 32 | new |
 
 Raw per-suite output: `logs/verify/*.log`
-
-The three formation suites were added with M02 Slice A. Their assertion counts are
-from the accepted 41-suite / 10,800-assertion merged-tree verification; their
-`ms` values here are placeholders (0), not timing measurements. This file is an
-assertion-count baseline, not a timing benchmark.
+| `test_battle_formation_navigator` | PASS | 124 | 0 | 0 |
+| `test_battle_placement` | PASS | 25 | 0 | 0 |
+| `test_battle_formation_cohesion` | PASS | 305 | 0 | 0 |

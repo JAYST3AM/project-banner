@@ -58,6 +58,95 @@ def baseline_numbers(path: str) -> dict[str, int]:
     return out
 
 
+def baseline_rows(path: str) -> list[tuple[str, int]]:
+    """The baseline as ROWS, not a dict: a dict silently collapses a duplicate, and "every requested
+    suite must have exactly one matching entry" cannot be checked against a structure that cannot
+    represent two."""
+    rows = []
+    for line in open(path, encoding="utf-8"):
+        m = re.match(r"\|\s*`([A-Za-z0-9_]+)`\s*\|\s*(PASS|FAIL)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|",
+                     line.strip())
+        if m:
+            rows.append((m.group(1), int(m.group(3))))
+    return rows
+
+
+def registered_suites(worktree: str) -> list[str]:
+    """The canonical suite names, read from the runner's own SUITES list.
+
+    Exact comparison only: the runner strips a leading "test_" when matching --suite, so a list can name
+    a suite wrongly and still run it (battle_formation_navigator ran and reported
+    "== test_battle_formation_navigator =="). Only comparing against these names catches that, and GPT-6
+    is explicit that names must never be silently normalized in either direction.
+    """
+    path = os.path.join(worktree, "tests", "test_runner.gd")
+    if not os.path.exists(path):
+        return []
+    names = []
+    for line in open(path, encoding="utf-8"):
+        m = re.search(r"res://tests/([A-Za-z0-9_]+)\.gd", line)
+        if m:
+            names.append(m.group(1))
+    return names
+
+
+def sha256_of(path: str) -> str:
+    """Hash of a verification INPUT, so a report names the rules it was certified under, not just the
+    commit. Two runs of the same commit under different baselines are different certifications."""
+    if not path:
+        return ""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def input_problems(suites: list[str], bnames: list[str], registered: list[str],
+                   has_baseline: bool) -> tuple[list[str], list[str]]:
+    """(problems, warnings) for a (suite list, baseline, registered suites) triple.
+
+    Problems refuse the run: a report whose inputs disagree is not evidence of anything.
+    Warnings do not refuse it, but are recorded in the report - a registered suite that the list does not
+    request is untested, and saying so is the whole point. That gap is exactly the B1 case: the branch
+    registers three new suites while the accepted baseline still covers 41.
+
+    Names are compared EXACTLY, in both directions. The runner strips a leading "test_" when matching
+    --suite, so an aliased name in a list still runs the right suite and looks fine; only an exact
+    comparison catches it (GPT-6, 2026-10-09, after battle_formation_navigator ran as
+    test_battle_formation_navigator).
+    """
+    problems: list[str] = []
+    warnings: list[str] = []
+    dupes = sorted({s for s in suites if suites.count(s) > 1})
+    if dupes:
+        problems.append(f"the suite list names the same suite more than once: {dupes}")
+    if not registered:
+        problems.append("could not read the runner's registered suites (tests/test_runner.gd), so the "
+                        "requested names cannot be proven real")
+    else:
+        unknown = [s for s in suites if s not in registered]
+        if unknown:
+            problems.append("requested names are not registered suites (no aliases, and no adding or "
+                            f"stripping test_): {unknown}")
+        unrun = [s for s in registered if s not in suites]
+        if unrun:
+            warnings.append(f"REGISTERED BUT NOT REQUESTED - {len(unrun)} registered suite(s) were not "
+                            f"run and are therefore untested by this report: {unrun}")
+    if has_baseline:
+        bdupes = sorted({n for n in bnames if bnames.count(n) > 1})
+        if bdupes:
+            problems.append(f"the baseline has more than one entry for: {bdupes}")
+        if registered:
+            stale = [n for n in bnames if n not in registered]
+            if stale:
+                problems.append(f"the baseline has entries for suites that are not registered: {stale}")
+        if not bnames:
+            problems.append("the baseline has no readable entries")
+    return problems, warnings
+
+
 def kill_tree(pid: int) -> None:
     """Kill the process AND its children: the Godot console shim spawns the real engine, so killing the
     parent alone leaves an engine burning CPU - which then inflates every later timing on this machine."""
@@ -132,6 +221,8 @@ def main() -> int:
                     help=f"per-suite wall bound in seconds, enforced on the child process "
                          f"(default {DEFAULT_TIMEOUT})")
     ap.add_argument("--json", default="", help="also write raw results as JSON here")
+    ap.add_argument("--allow-input-errors", action="store_true",
+                    help="certify even when the suite list and baseline disagree (normally refused)")
     ap.add_argument("--allow-dirty", action="store_true",
                     help="certify a worktree that differs from HEAD (normally refused - see below)")
     args = ap.parse_args()
@@ -157,7 +248,43 @@ def main() -> int:
     if not suites:
         print("no suite list given/found")
         return 2
-    base = baseline_numbers(args.baseline) if args.baseline else {}
+    rows_raw = baseline_rows(args.baseline) if args.baseline else []
+    base = dict(rows_raw)
+    bnames = [n for n, _ in rows_raw]
+
+    # The acceptance contract is (suite list) + (baseline) + (commit). Validate all three up front: a
+    # run whose inputs disagree is not a certification of anything.
+    registered = registered_suites(args.worktree)
+    problems, warnings = input_problems(suites, bnames, registered, bool(args.baseline))
+    if problems and not args.allow_input_errors:
+        print("REFUSING TO CERTIFY: the verification inputs do not agree.\n")
+        for p in problems:
+            print(f"   - {p}")
+        print("\nFix the inputs and run again: a report whose list, baseline and commit disagree is not "
+              "evidence of anything. (--allow-input-errors overrides, and says so in the report.)")
+        return 1
+    for w in warnings:
+        print(f"WARNING: {w}")
+
+    inputs = {
+        "suite_list": args.suite_list,
+        "suite_list_sha256": sha256_of(args.suite_list),
+        "baseline": args.baseline,
+        "baseline_sha256": sha256_of(args.baseline),
+        "runner": os.path.join(args.worktree, "tests", "test_runner.gd"),
+        "runner_sha256": sha256_of(os.path.join(args.worktree, "tests", "test_runner.gd")),
+    }
+    if problems and not args.allow_input_errors:
+        print("REFUSING TO CERTIFY: the verification inputs do not agree.\n")
+        for p in problems:
+            print(f"   - {p}")
+        print("\nFix the inputs and run again: a report whose list, baseline and commit disagree is not "
+              "evidence of anything. (--allow-input-errors overrides, and says so in the report.)")
+        return 1
+    print(f"inputs: suite list {inputs['suite_list_sha256'][:12]}  baseline "
+          f"{inputs['baseline_sha256'][:12]}  runner {inputs['runner_sha256'][:12]}")
+    print(f"registered suites: {len(registered)} | requested: {len(suites)} | baseline entries: {len(bnames)}\n")
+
     logdir = os.path.join(args.worktree, "logs", "verify")
     os.makedirs(logdir, exist_ok=True)
 
@@ -209,7 +336,19 @@ def main() -> int:
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(f"# Verification run — {os.path.basename(args.worktree)}\n\n")
-        fh.write(f"**Commit:** `{head}`\n**Engine:** Godot 4.7.2-stable, headless, `--require-native`, "
+        fh.write(f"**Commit:** `{head}`\n")
+        fh.write(f"**Suite list:** `{os.path.basename(inputs['suite_list'])}` sha256 "
+                 f"`{inputs['suite_list_sha256'][:16]}`\n")
+        fh.write(f"**Baseline:** `{os.path.basename(inputs['baseline'])}` sha256 "
+                 f"`{inputs['baseline_sha256'][:16]}`\n")
+        fh.write(f"**Runner:** `tests/test_runner.gd` sha256 `{inputs['runner_sha256'][:16]}` "
+                 f"({len(registered)} suites registered)\n")
+        if problems:
+            fh.write(f"**INPUT PROBLEMS (certified under --allow-input-errors):** " +
+                     "; ".join(problems) + "\n")
+        for w in warnings:
+            fh.write(f"**WARNING:** {w}\n")
+        fh.write(f"**Engine:** Godot 4.7.2-stable, headless, `--require-native`, "
                  f"one process per suite\n**Suites:** {len(rows)}\n"
                  f"**Per-suite bound:** {args.timeout} s, enforced by this verifier on the child "
                  f"process (not by the engine)\n\n")
@@ -242,7 +381,9 @@ def main() -> int:
     print(f"wrote {args.out}")
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:
-            json.dump({"head": head, "rows": rows, "missing_baseline": missing}, fh, indent=1)
+            json.dump({"head": head, "rows": rows, "missing_baseline": missing,
+                       "inputs": inputs, "input_problems": problems, "input_warnings": warnings,
+                       "registered_suites": registered}, fh, indent=1)
         print(f"wrote {args.json}")
     return 0 if (not bad and not drift and not missing) else 1
 
