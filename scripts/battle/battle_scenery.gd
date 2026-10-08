@@ -154,9 +154,10 @@ func build(props: TerrainProps) -> int:
 				textures[texture_key] = texture
 		if not by_texture.has(texture_key):
 			by_texture[texture_key] = []
-		if (by_texture[texture_key] as Array).size() < MAX_INSTANCES_PER_BATCH:
-			(by_texture[texture_key] as Array).append(index)
+		(by_texture[texture_key] as Array).append(index)
 
+	# Large fields may have thousands of one kind. Split into bounded batches
+	# rather than silently dropping scenery after the first 4,000 instances.
 	for key in by_texture.keys():
 		var texture: Texture2D = textures.get(key)
 		if texture == null:
@@ -164,38 +165,43 @@ func build(props: TerrainProps) -> int:
 		var indices: Array = by_texture[key]
 		if indices.is_empty():
 			continue
-		var instance := MultiMeshInstance2D.new()
-		instance.texture = texture
-		instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		instance.z_index = -4
-		var mesh := QuadMesh.new()
-		mesh.size = Vector2.ONE
-		var batch := MultiMesh.new()
-		batch.mesh = mesh
-		batch.transform_format = MultiMesh.TRANSFORM_2D
-		batch.use_colors = true
-		batch.instance_count = indices.size()
-		batch.visible_instance_count = indices.size()
-		for slot in indices.size():
-			var index := int(indices[slot])
-			var kind := props.kind_id_at(index)
-			var bounds := texture.get_size()
-			var height := maxf(1.0, props.scale_at(index) * 2.1)
-			if kind == "crop" or kind == "debris" or kind == "reed":
-				height *= 0.70
-			var width := height * float(bounds.x) / maxf(1.0, float(bounds.y))
-			var transform := Transform2D(
-				Vector2(width, 0.0), Vector2(0.0, height),
-				props.position_at(index) - Vector2(0.0, height * 0.5))
-			batch.set_instance_transform_2d(slot, transform)
-			var variation := 0.91 + float((index * 17 + kind.length() * 11) % 13) / 130.0
-			batch.set_instance_color(slot, Color(variation, variation, variation, 1.0))
-		instance.multimesh = batch
-		add_child(instance)
-		_batch_count += 1
-		built_count += indices.size()
-		if str(key).begins_with("__fallback_"):
-			fallback_count += indices.size()
-		else:
-			authored_count += indices.size()
+		var first := 0
+		while first < indices.size():
+			var count := mini(MAX_INSTANCES_PER_BATCH, indices.size() - first)
+			var instance := MultiMeshInstance2D.new()
+			instance.texture = texture
+			instance.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			instance.z_index = -4
+			var mesh := QuadMesh.new()
+			mesh.size = Vector2.ONE
+			var batch := MultiMesh.new()
+			batch.mesh = mesh
+			batch.transform_format = MultiMesh.TRANSFORM_2D
+			batch.use_colors = true
+			batch.instance_count = count
+			batch.visible_instance_count = count
+			for slot in count:
+				var index := int(indices[first + slot])
+				var kind := props.kind_id_at(index)
+				var bounds := texture.get_size()
+				var height := maxf(1.0, props.scale_at(index) * 2.1)
+				if kind == "crop" or kind == "debris" or kind == "reed":
+					height *= 0.70
+				var width := height * float(bounds.x) / maxf(1.0, float(bounds.y))
+				var transform := Transform2D(
+					Vector2(width, 0.0), Vector2(0.0, height),
+					props.position_at(index) - Vector2(0.0, height * 0.5))
+				batch.set_instance_transform_2d(slot, transform)
+				var variation := 0.91 + float((index * 17 + kind.length() * 11) % 13) / 130.0
+				batch.set_instance_color(slot,
+					Color(variation, variation, variation, 1.0))
+			instance.multimesh = batch
+			add_child(instance)
+			_batch_count += 1
+			built_count += count
+			if str(key).begins_with("__fallback_"):
+				fallback_count += count
+			else:
+				authored_count += count
+			first += count
 	return built_count
