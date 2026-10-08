@@ -265,6 +265,9 @@ const PITCH_MAX := 1.0
 const PAN_SPEED := 260.0
 const ZOOM_MIN := 0.4
 const ZOOM_MAX := 8.0
+## Single authoritative transition points for soldier/detail overview.
+const ZOOM_FULL_MAP_THRESHOLD := 0.52
+const ZOOM_STANDARDS_THRESHOLD := 1.65
 const ZOOM_STEP := 1.14
 const TILT_STEP := 0.02
 const YAW_DRAG := 0.006
@@ -707,6 +710,10 @@ var _anim_seen := PackedByteArray()
 var _anim_flip := PackedByteArray()
 
 var _tick := 0
+## Full battle UI snapshots are expensive at 30 formations. Rebuild only on
+## a new simulation tick or when crossing a tactical zoom LOD boundary.
+var _ui_last_snapshot_tick := -1
+var _ui_last_snapshot_lod := -1
 var _tick_usec := 0
 var _readback_usec := 0
 ## Four ints a man, straight from the tallies buffer: see [method tally].
@@ -1814,7 +1821,14 @@ func _process(delta: float) -> void:
 	_update_camera(delta)
 	if _deployment_overlay != null:
 		_deployment_overlay.visible = _deploying
-	_refresh_command_ui()
+	var tactical_lod := _current_tactical_lod()
+	if _tick != _ui_last_snapshot_tick or tactical_lod != _ui_last_snapshot_lod:
+		_refresh_command_ui()
+	elif _battle_minimap != null and _camera != null:
+		# Camera pan/zoom must remain fluid even between simulation ticks.
+		_battle_minimap.set_camera(_camera.position + field * 0.5,
+			Vector2(get_viewport().get_visible_rect().size) /
+				maxf(0.001, _picture_scale()))
 	# The arrows fly on the frame's clock, not the simulation's: a shot is a tenth of a second of
 	# real time whatever the tick rate, and the last volley keeps flying while a finished battle
 	# is still on the screen - the frame the final one lands is redrawn too, or its shaft stays
@@ -3406,10 +3420,21 @@ func _on_hud_action(action: String) -> void:
 			_clock_paused = not _clock_paused
 	_refresh_command_ui()
 
+## Current LOD is independent of animation, order state or rendering FPS.
+func _current_tactical_lod() -> int:
+	if _camera_zoom <= ZOOM_FULL_MAP_THRESHOLD:
+		return 0
+	if _camera_zoom <= ZOOM_STANDARDS_THRESHOLD:
+		return 1
+	return 2
+
+
 ## UI-only snapshot. Neither overview mode nor the dock modifies the combat state.
 func _refresh_command_ui() -> void:
 	if _unit_dock == null and _overview_overlay == null:
 		return
+	_ui_last_snapshot_tick = _tick
+	_ui_last_snapshot_lod = _current_tactical_lod()
 	var formations: Array[Dictionary] = []
 	for b in _bodies:
 		var files := maxf(1.0, _body_state[b * 8 + 4])
@@ -3432,7 +3457,7 @@ func _refresh_command_ui() -> void:
 	var chosen := _living_selection()
 	if _unit_dock != null:
 		_unit_dock.update_bodies(formations, chosen)
-	var overview := _camera_zoom <= 0.52
+	var overview := _camera_zoom <= ZOOM_FULL_MAP_THRESHOLD
 	if _command_bar != null:
 		_command_bar.set_battle_status(_deploying, _alive.x, _alive.y,
 			chosen.size(), overview, _clock_paused)
@@ -3444,7 +3469,7 @@ func _refresh_command_ui() -> void:
 	if _overview_overlay != null:
 		# Three readable LODs: full soldier detail, medium unit standards,
 		# and full-map formation blocks. The simulation never changes LOD.
-		var show_standards := _camera_zoom <= 1.65
+		var show_standards := _camera_zoom <= ZOOM_STANDARDS_THRESHOLD
 		_overview_overlay.visible = show_standards
 		if show_standards:
 			var world_label_size := clampi(int(13.0 / maxf(_picture_scale(), 0.1)), 2, 28)
@@ -3697,7 +3722,7 @@ func _body_at(world: Vector2) -> int:
 				best = b
 	if best >= 0:
 		return best
-	if _camera_zoom <= 0.52:
+	if _camera_zoom <= ZOOM_FULL_MAP_THRESHOLD:
 		return -1
 	# Nothing under the pointer: offer the nearest formation within reach of it, so a click just off
 	# a line still picks the line up rather than the grass behind it.
