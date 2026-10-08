@@ -553,6 +553,8 @@ var _body_side := PackedInt32Array()
 ## the body takes the field and kept up to date by every re-form, so the journal can say which
 ## formation it is reporting on rather than leaving a reader to reverse it out of files and ranks.
 var _body_shape_kind := PackedStringArray()
+## Gameplay-facing name (e.g. Spearmen); the probe falls back to numbered formations.
+var _body_unit_label := PackedStringArray()
 
 var field := Vector2(200.0, 120.0)
 var grid := Vector2i(0, 0)
@@ -1350,6 +1352,12 @@ func _body_name(b: int) -> String:
 		if _side_of_body(other) == _side_of_body(b):
 			ordinal += 1
 	return "%s%d" % ["P" if _side_of_body(b) == 0 else "E", ordinal]
+
+
+func _body_display_name(b: int) -> String:
+	if b >= 0 and b < _body_unit_label.size() and not _body_unit_label[b].is_empty():
+		return _body_unit_label[b]
+	return _body_name(b)
 
 
 ## A body changing its mind about who it is fighting is a rare, reviewable event, so it is printed
@@ -3309,7 +3317,7 @@ func _refresh_command_ui() -> void:
 		formations.append({
 			"id": b,
 			"side": _side_of_body(b),
-			"name": _body_name(b),
+			"name": _body_display_name(b),
 			"alive": _body_alive[b],
 			"started": _body_started[b] if b < _body_started.size() else _body_alive[b],
 			"shape": _body_shape_kind[b] if b < _body_shape_kind.size() else "line",
