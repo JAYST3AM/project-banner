@@ -5,6 +5,9 @@ const FIELD := Vector2(260.0, 130.0)
 
 var _world: Node2D
 var _command: BattleCommandBar
+var _overview: BattleTacticalOverview
+var _formations: Array[Dictionary] = []
+var _full_map := true
 
 
 func _ready() -> void:
@@ -18,9 +21,9 @@ func _ready() -> void:
 	var overlay := BattleDeploymentOverlay.new()
 	_world.add_child(overlay)
 	overlay.configure(FIELD, 20.0, 8.0)
-	var overview := BattleTacticalOverview.new()
-	_world.add_child(overview)
-	overview.set_formations([
+	_overview = BattleTacticalOverview.new()
+	_world.add_child(_overview)
+	_formations = [
 		{"id": 1, "side": 0, "anchor": Vector2(40, 42),
 		 "forward": Vector2.RIGHT, "half_depth": 8.0, "half_span": 13.0,
 		 "name": "Spearmen", "alive": 32, "started": 40, "type_key": "spear"},
@@ -33,12 +36,13 @@ func _ready() -> void:
 		{"id": 4, "side": 1, "anchor": Vector2(220, 92),
 		 "forward": Vector2.LEFT, "half_depth": 6.0, "half_span": 9.0,
 		 "name": "Bowmen", "alive": 14, "started": 20, "type_key": "bow"},
-	], [1], 4, true)
+	]
+	_overview.set_formations(_formations, [1], 4, _full_map)
 	_command = BattleCommandBar.new()
 	add_child(_command)
 	_command.set_battle_status(false, 50, 39, 1, true, false)
 	var title := Label.new()
-	title.text = "M02 / B1 — COMPONENT PREVIEW (NOT A LIVE BATTLE)"
+	title.text = "M02 / B1 — COMPONENT PREVIEW (M: TOGGLE MAP / MEDIUM)"
 	title.add_theme_color_override("font_color", Color("e9e6dc"))
 	title.add_theme_font_size_override("font_size", 16)
 	title.position = Vector2(24, 12)
@@ -62,3 +66,10 @@ func _layout() -> void:
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("141b17"), true)
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_M:
+		_full_map = not _full_map
+		_overview.set_formations(_formations, [1], 4, _full_map)
