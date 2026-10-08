@@ -44,7 +44,21 @@ func _cell(point: Vector2) -> Vector2i:
 
 
 func _walkable(cell: Vector2i) -> bool:
-	return cell.x >= 0 and cell.y >= 0 and cell.x < _terrain.cols 		and cell.y < _terrain.rows and not _grid.is_point_solid(cell)
+	if cell.x < 0 or cell.y < 0 or cell.x >= _terrain.cols or cell.y >= _terrain.rows:
+		return false
+	return not _grid.is_point_solid(cell)
+
+
+## Authoritative movement pace from the field's already-composed terrain,
+## soil, moisture and slope penalty. This is used by body advance and never
+## recomputed from the visual textures or the colour of a tile.
+static func speed_scale(terrain: BattlefieldTerrain, point: Vector2) -> float:
+	if terrain == null or not terrain.is_valid():
+		return 1.0
+	var cell := terrain.cell_index_at(point)
+	if cell < 0:
+		return 1.0
+	return clampf(terrain.move_multiplier_of_cell(cell), 0.05, 1.0)
 
 
 ## Choose a nearby reachable-looking cell when a waypoint falls inside a
@@ -72,17 +86,45 @@ func _nearest_walkable(wanted: Vector2i) -> Vector2i:
 
 
 ## Deterministic path to a world point, with long straight runs reduced to
-## corners. Empty means the route is blocked/unavailable — never fall back to
-## a straight line that would walk straight through the obstruction.
+## corners. For blocked destinations, searches the nearest *reachable* free
+## neighbour rather than choosing an inaccessible location across a barrier.
+## Empty means the route is blocked/unavailable — never send a formation
+## straight through the obstruction.
 func route(start: Vector2, destination: Vector2) -> PackedVector2Array:
 	var result := PackedVector2Array()
 	if not is_ready():
 		return result
 	var from := _nearest_walkable(_cell(start))
-	var to := _nearest_walkable(_cell(destination))
-	if from.x < 0 or to.x < 0:
+	if from.x < 0:
 		return result
-	var cells: Array[Vector2i] = _grid.get_id_path(from, to)
+	var requested := _cell(destination)
+	var to := requested
+	var cells: Array[Vector2i] = []
+	if _walkable(requested):
+		cells = _grid.get_id_path(from, requested)
+	else:
+		# A blocked click should resolve to a cell the army can actually
+		# reach from its current side of the obstacle. The nearest unblocked
+		# cell can otherwise be across an impassable wall.
+		for radius in range(1, SEARCH_RADIUS_CELLS + 1):
+			var best_score := INF
+			for y in range(-radius, radius + 1):
+				for x in range(-radius, radius + 1):
+					if maxi(absi(x), absi(y)) != radius:
+						continue
+					var candidate := requested + Vector2i(x, y)
+					if not _walkable(candidate):
+						continue
+					var attempt: Array[Vector2i] = _grid.get_id_path(from, candidate)
+					if attempt.is_empty():
+						continue
+					var score := float((candidate - requested).length_squared())
+					if score < best_score:
+						best_score = score
+						to = candidate
+						cells = attempt
+			if not cells.is_empty():
+				break
 	if cells.is_empty():
 		return result
 	if cells.size() == 1:
