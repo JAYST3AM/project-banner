@@ -32,10 +32,15 @@ const BROKEN := "broken"
 ## "a suite that yields and then goes quiet for 90 s is stuck".
 const SUITE_DEADLINE_S := 90
 
-## The real bound for ANY suite, stuck or merely slow. Enforced on a detached thread so it fires even
-## when the main thread is blocked in a synchronous loop - precisely the case the marker above cannot
-## see. Set far above the slowest measured suite (~207 s) so it only ever means "this run is not
-## coming back". At expiry the process is killed with the suite named; nothing is reported as a pass.
+## The bound the EXTERNAL VERIFIER enforces, per suite and on the child process
+## (project-banner-mcp/tools/verify_branch.py). It kills the process TREE on expiry and fails the gate
+## whatever this process manages to print, because a forced kill can lose buffered output. 900 s is a
+## safety ceiling, not a performance target: it sits far above the slowest measured suite (~207 s) so it
+## only ever means "this run is not coming back".
+##
+## This constant also arms the in-process thread below, which is DIAGNOSTICS ONLY - it names the suite and
+## kills the process so that a DIRECT multi-suite run, with no verifier around it, cannot hang forever. It
+## is not the thing that makes a failed run fail.
 const HARD_DEADLINE_S := 900
 
 const SUITES: Array[String] = [
