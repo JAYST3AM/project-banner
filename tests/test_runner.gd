@@ -24,9 +24,19 @@ const PASS := "pass"
 const FAIL := "fail"
 const BROKEN := "broken"
 
-## No suite legitimately takes this long - every one of them finishes in a couple of seconds - so a
-## suite still going when this expires is stuck, not slow.
+## The per-suite stall marker, checked in [method _process]. It catches a suite that goes quiet
+## WHILE YIELDING. It cannot catch one that blocks the main thread, because _process does not run
+## while a synchronous suite hogs the frame. Measured 2026-10-09: test_battle_hardening (~207 s) and
+## test_formation_engagement (~146 s) are legitimately long, not stuck, and both are purely
+## synchronous (0 awaits inside run()). So this marker does NOT mean "over 90 s is stuck" - it means
+## "a suite that yields and then goes quiet for 90 s is stuck".
 const SUITE_DEADLINE_S := 90
+
+## The real bound for ANY suite, stuck or merely slow. Enforced on a detached thread so it fires even
+## when the main thread is blocked in a synchronous loop - precisely the case the marker above cannot
+## see. Set far above the slowest measured suite (~207 s) so it only ever means "this run is not
+## coming back". At expiry the process is killed with the suite named; nothing is reported as a pass.
+const HARD_DEADLINE_S := 900
 
 const SUITES: Array[String] = [
 	"res://tests/test_core_services.gd",
@@ -81,9 +91,47 @@ var _suites_broken: int = 0
 ## suite is running. Checked in [method _process], which runs while the tree is paused.
 var _deadline_ms: int = 0
 var _stuck_suite: String = ""
+## Set once the run has ended, so the hard-deadline thread can retire quietly.
+var _run_finished: bool = false
+var _hard_deadline_thread: Thread = null
+## Guards every variable the deadline thread shares with the main thread (GPT-6 review, TI-2).
+var _mutex := Mutex.new()
+## When the suite currently in flight started, so the bound re-arms per suite instead of counting
+## from process start. Zero means "between suites" - nothing to bound.
+var _suite_started_ms: int = 0
+
+
+## A bound that survives a blocked main thread: the thread only sleeps, checks one flag and - if the
+## run is genuinely not coming back - names the suite and kills the process. It never touches the
+## scene tree, so it is safe off the main thread. See TI-2 in docs/TEST-INTEGRITY-FINDINGS.md.
+## Diagnostics only, and deliberately not the mechanism that guarantees a failed run. The external
+## verifier (project-banner-mcp/tools/verify_branch.py) owns the authoritative per-suite bound: it owns
+## the child process, terminates it and fails the gate independently of anything printed here - a forced
+## kill can lose buffered output, so nothing in this process may be the only safeguard.
+## This thread exists so that a DIRECT multi-suite run (no verifier around it) still cannot hang forever,
+## which is why it re-arms per suite rather than counting from process start.
+func _hard_deadline_watch() -> void:
+	while true:
+		OS.delay_msec(500)
+		_mutex.lock()
+		var finished := _run_finished
+		var started_ms := _suite_started_ms
+		var in_flight := _stuck_suite
+		_mutex.unlock()
+		if finished:
+			return
+		if started_ms > 0 and Time.get_ticks_msec() - started_ms > HARD_DEADLINE_S * 1000:
+			print("")
+			print("  !! HARD DEADLINE: the suite in flight has not finished after %d seconds" % HARD_DEADLINE_S)
+			print("  !! in flight: %s" % ("(between suites)" if in_flight.is_empty() else in_flight))
+			print("  !! a synchronous suite cannot be interrupted from GDScript, so the process is killed")
+			print("  !! rather than left running - the verifier's own timeout is what fails the gate")
+			OS.kill(OS.get_process_id())
 
 
 func _ready() -> void:
+	_hard_deadline_thread = Thread.new()
+	_hard_deadline_thread.start(_hard_deadline_watch)
 	# The runner has to keep running while the game is paused: a suite that pauses the tree must not
 	# be able to take the watchdog down with it.
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -107,6 +155,11 @@ func _ready() -> void:
 		print("  %d suite(s) were BROKEN - they did not run to completion" % _suites_broken)
 	print("  RESULT: %s" % ("FAIL" if failed else "PASS"))
 	print("=============================================")
+	_mutex.lock()
+	_run_finished = true
+	_mutex.unlock()
+	if _hard_deadline_thread != null:
+		_hard_deadline_thread.wait_to_finish()
 	get_tree().quit(1 if failed else 0)
 
 
@@ -223,10 +276,16 @@ func evaluate(path: String) -> Dictionary:
 	# A watchdog by the clock, checked in _process: a suite cannot be interrupted - GDScript has no
 	# way to cancel a coroutine awaiting something that will never arrive - but the run does not have
 	# to be silent about it. Nineteen times the honest cost of a suite, so only a stuck one reaches it.
+	_mutex.lock()
 	_deadline_ms = Time.get_ticks_msec() + SUITE_DEADLINE_S * 1000
 	_stuck_suite = suite.suite_name
+	_suite_started_ms = Time.get_ticks_msec()
+	_mutex.unlock()
 	await suite.run()
+	_mutex.lock()
 	_stuck_suite = ""
+	_suite_started_ms = 0
+	_mutex.unlock()
 
 	# Order matters. A suite that aborted mid-run still carries whatever assertions
 	# it got through, and those all passed - checking failure count first would call
