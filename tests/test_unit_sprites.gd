@@ -146,8 +146,11 @@ func _test_the_fields_own_geometry_clears_the_sprite() -> void:
 
 func _test_every_roster_unit_draws_as_itself_and_sides_read_from_the_tint() -> void:
 	section("every roster unit draws as its own character, the sides read from the tint")
-	for key in UnitArt.UNIT_KEYS:
+	for index in UnitArt.UNIT_KEYS.size():
+		var key := UnitArt.UNIT_KEYS[index]
 		equal(UnitArt.key_for_unit(key), key, "a roster id is its own character key: %s" % key)
+		equal(UnitArt.index_for_unit(key), index,
+			"every individual roster archetype maps to its own sprite table index: %s" % key)
 	equal(UnitArt.key_for_unit("no_such_unit"), UnitArt.UNIT_KEYS[0],
 		"an id the atlas does not carry falls back to the first character")
 	equal(UnitArt.index_for_unit("archer"), UnitArt.UNIT_KEYS.find("archer"),
