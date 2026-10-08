@@ -3930,7 +3930,8 @@ func _navigation_waypoint(b: int, current: Vector2) -> Vector2:
 	return route[index]
 
 
-func _set_navigation(b: int, destination: Vector2, append_order: bool = false) -> bool:
+func _set_navigation(b: int, destination: Vector2, append_order: bool = false,
+		requested_files: int = -1) -> bool:
 	var can_append := append_order and _order[b] == Order.ADVANCE
 	var old_route: PackedVector2Array = _body_routes.get(b, PackedVector2Array())
 	var starting_point := _order_point[b] if can_append else _anchor_of(b)
@@ -3939,7 +3940,17 @@ func _set_navigation(b: int, destination: Vector2, append_order: bool = false) -
 		# Only the developer probe uses this fallback, not valid campaign terrain.
 		route.append(destination)
 	else:
-		route = _formation_navigator.route(starting_point, destination)
+		# Plan using the real unit's proposed files, ranks, spacing and full
+		# original troop slot count. Never squeeze a 20-file line through an
+		# opening only one soldier wide, and never mutate width on a bad order.
+		var total := maxi(1, _body_started[b])
+		var files := clampi(requested_files if requested_files > 0 else
+			int(_body_state[b * 8 + 4]), 1, total)
+		var ranks := ceili(float(total) / float(files))
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		var clearance := BattleFormationNavigator.footprint_radius(
+			files, ranks, spacing)
+		route = _formation_navigator.route(starting_point, destination, clearance)
 	if route.is_empty():
 		# Failed path searches must not delete an existing valid movement order.
 		push_warning("battle formation %d: no traversable path to order" % b)
@@ -3973,7 +3984,7 @@ func _apply_placement(plan: Array[Dictionary], queue_order: bool = false) -> voi
 		var facing: Vector2 = placement.get("forward", _forward_of(b))
 		var files := maxi(1, int(placement.get("files", _body_state[b * 8 + 4])))
 		if not _deploying:
-			if not _set_navigation(b, target, queue_order):
+			if not _set_navigation(b, target, queue_order, files):
 				continue
 		# Only mutate width/facing after the path has been accepted.
 		if files != int(_body_state[b * 8 + 4]):
