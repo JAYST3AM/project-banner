@@ -1614,8 +1614,11 @@ func _advance_bodies() -> void:
 			Order.HOLD:
 				pass
 			Order.ADVANCE:
-				# Follow precomputed terrain corners; don't cut a straight line
-				# through rivers, cliffs, scenery obstacles or slow ground.
+				# In addition to A* costs, actually slow the body's anchor on
+				# mud, slopes and thick vegetation. Using the generator's
+				# movement channel makes this gameplay, not a shader effect.
+				var ground_pace := BattleFormationNavigator.speed_scale(_battle_terrain, mine)
+				# Follow precomputed terrain corners without crossing blocked cells.
 				var waypoint := _navigation_waypoint(b, mine)
 				var to_point := waypoint - mine
 				var remaining := to_point.length()
@@ -1626,7 +1629,7 @@ func _advance_bodies() -> void:
 					print("gpu crowd: scripted | %s arrived at (%.0f, %.0f) on tick %d and holds there" % [
 						_body_name(b), mine.x, mine.y, _tick])
 				elif remaining > 0.0001:
-					move = (to_point / remaining) * minf(remaining, rate * DT)
+					move = (to_point / remaining) * minf(remaining, rate * ground_pace * DT)
 			Order.ENGAGE:
 				# Never walk through our own line. A body of archers standing behind the melee used to
 				# creep forward every time the fighting opened a gap ahead of it, through the spearmen
