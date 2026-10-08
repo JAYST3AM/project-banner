@@ -58,6 +58,11 @@ func _ready() -> void:
 	add_child(title)
 	resized.connect(_layout)
 	_layout()
+	# A direct run of this scene never executes main.gd, so the global --screenshot probe is inert here;
+	# take our own. Awaited, because this repo treats an un-awaited coroutine call as an error.
+	var shot := _arg_value("--shot=")
+	if not shot.is_empty():
+		await _take_screenshot(shot, int(_arg_value("--shot-delay=", "2000")))
 
 
 func _layout() -> void:
@@ -82,3 +87,28 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			and event.keycode == KEY_M:
 		_full_map = not _full_map
 		_overview.set_formations(_formations, [1], 4, _full_map)
+
+
+func _arg_value(prefix: String, fallback: String = "") -> String:
+	## Dev-run flags of the form "--name=value", read the way every other dev scene here reads them.
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with(prefix):
+			return arg.substr(prefix.length())
+	return fallback
+
+
+func _take_screenshot(path: String, delay_ms: int) -> void:
+	## This harness takes its OWN screenshot. The global --screenshot probe is wired by main.gd, and a
+	## direct dev-scene run never executes main.gd, so the flag is silently inert here - the same reason
+	## gpu_crowd and iso_spike write their own PNGs. Verified the hard way: eight runs produced eight
+	## clean logs and zero images before this existed.
+	await get_tree().create_timer(maxf(0.4, float(delay_ms) / 1000.0)).timeout
+	await RenderingServer.frame_post_draw
+	var image := get_viewport().get_texture().get_image()
+	var err := image.save_png(path)
+	if err == OK:
+		print("preview screenshot: %s (%dx%d)" % [path, image.get_width(), image.get_height()])
+	else:
+		printerr("preview screenshot FAILED for %s (error %d)" % [path, err])
+	if OS.get_cmdline_user_args().has("--shot-quit"):
+		get_tree().quit()
