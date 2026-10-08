@@ -19,6 +19,7 @@ extends Sprite2D
 ## How many sub-variants an atlas holds. Four, always: fewer than four is padded by repeating, so the
 ## shader can index atlas slots without asking how many there are.
 const ATLAS_SLOTS := 4
+const SHADER_PATH := "res://shaders/battle/ground.gdshader"
 
 var terrain: BattlefieldTerrain = null
 var biomes: BiomeCatalog = null
@@ -45,6 +46,13 @@ func show_field(p_field: BattlefieldTerrain, p_biomes: BiomeCatalog, p_config: G
 		visible = false
 		built_for = ""
 		return false
+	# The engine might have biome PNGs before the terrain shader is
+	# installed; never claim the material rendered or leave a grey void.
+	# Returning false lets the caller keep its proven procedural fallback.
+	if not ResourceLoader.exists(SHADER_PATH):
+		visible = false
+		built_for = ""
+		return false
 	if built_for == terrain.signature() and _material != null:
 		visible = true
 		return true
@@ -68,7 +76,7 @@ static func has_art(terrain: BattlefieldTerrain, p_biomes: BiomeCatalog) -> bool
 func _build(config: GameConfig) -> void:
 	if _material == null:
 		_material = ShaderMaterial.new()
-		_material.shader = load("res://shaders/battle/ground.gdshader")
+		_material.shader = load(SHADER_PATH) as Shader
 		material = _material
 	centered = false
 	position = Vector2.ZERO
