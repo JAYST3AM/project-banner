@@ -3886,8 +3886,9 @@ func _navigation_waypoint(b: int, current: Vector2) -> Vector2:
 	if route.is_empty():
 		return _order_point[b]
 	var index := clampi(int(_body_route_cursor.get(b, 0)), 0, route.size() - 1)
-	var tolerance := maxf(ARRIVED, 0.15 * _battle_terrain.cell_size) \
-		if _battle_terrain != null else ARRIVED
+	var tolerance := ARRIVED
+	if _battle_terrain != null:
+		tolerance = maxf(ARRIVED, 0.15 * _battle_terrain.cell_size)
 	while index < route.size() - 1 and current.distance_to(route[index]) <= tolerance:
 		index += 1
 	_body_route_cursor[b] = index
@@ -4094,7 +4095,20 @@ func _update_marks() -> void:
 		var from := _anchor_of(b)
 		match _order[b]:
 			Order.ADVANCE:
-				lines.append([from, _order_point[b], ORDER_COLOUR, 1.1, 3.0])
+				# Draw the actual obstacle-aware route, not a misleading
+				# straight line through trees and blocked terrain.
+				var points: PackedVector2Array = _body_routes.get(b,
+					PackedVector2Array())
+				var previous := from
+				if points.is_empty():
+					lines.append([from, _order_point[b], ORDER_COLOUR, 1.1, 3.0])
+				else:
+					var cursor := clampi(int(_body_route_cursor.get(b, 0)),
+						0, points.size() - 1)
+					for step in range(cursor, points.size()):
+						lines.append([previous, points[step], ORDER_COLOUR,
+							1.1, 3.0])
+						previous = points[step]
 			Order.ENGAGE:
 				var target := _order_target[b]
 				if target >= 0 and target < _bodies and _body_alive[target] > 0:
