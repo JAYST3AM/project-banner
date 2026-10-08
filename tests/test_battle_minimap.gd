@@ -22,6 +22,7 @@ func run() -> void:
 	_test_navigation_clicks_and_drags()
 	_test_resize_behaviour()
 	_test_markers_stay_inside_the_map_at_the_edges()
+	_test_facing_tips_stay_inside_the_map_at_the_edges()
 	_test_the_camera_footprint_never_leaves_the_map()
 	_test_a_hostile_formation_can_never_be_highlighted()
 	_test_a_drag_started_outside_the_map_never_navigates()
@@ -227,6 +228,30 @@ func _test_markers_stay_inside_the_map_at_the_edges() -> void:
 		"a marker in open field keeps its full width, so the clamp only bites at the boundary")
 	check(absf(centred.size.y - span * 2.0 * (rect.size.y / FIELD.y)) < 0.01,
 		"and keeps its full height")
+
+
+func _test_facing_tips_stay_inside_the_map_at_the_edges() -> void:
+	section("a facing tip cannot escape the map, even on an outward-facing boundary formation")
+	var rect := _rect()
+	var radius := BattleMinimap.TIP_RADIUS
+	var edge_anchors := [Vector2.ZERO, Vector2(FIELD.x, 0.0), Vector2(0.0, FIELD.y), FIELD,
+		Vector2(FIELD.x * 0.5, 0.0), Vector2(FIELD.x * 0.5, FIELD.y),
+		Vector2(0.0, FIELD.y * 0.5), Vector2(FIELD.x, FIELD.y * 0.5)]
+	var cardinals := [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]
+	for anchor in edge_anchors:
+		for heading in cardinals:
+			var tip := BattleMinimap.facing_tip(anchor, heading, FIELD, rect)
+			var inside_left := tip.x - radius >= rect.position.x - 0.01
+			var inside_top := tip.y - radius >= rect.position.y - 0.01
+			var inside_right := tip.x + radius <= rect.end.x + 0.01
+			var inside_bottom := tip.y + radius <= rect.end.y + 0.01
+			check(inside_left and inside_top and inside_right and inside_bottom,
+				"a tip from %s facing %s keeps its whole dot inside the map" % [
+					str(anchor), str(heading)])
+	var open_tip := BattleMinimap.facing_tip(FIELD * 0.5, Vector2.RIGHT, FIELD, rect)
+	check(open_tip.is_equal_approx(BattleMinimap.world_to_map(FIELD * 0.5, FIELD, rect)
+		+ Vector2(BattleMinimap.FACING_TIP_PX, 0.0)),
+		"a tip in open field is still drawn at its full offset, so the clamp only bites at the boundary")
 
 
 func _test_the_camera_footprint_never_leaves_the_map() -> void:
