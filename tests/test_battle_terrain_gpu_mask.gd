@@ -7,6 +7,9 @@ func run() -> void:
 	_test_header_matches_authoritative_terrain()
 	_test_mask_blocks_existing_terrain_cells()
 	_test_slide_prevents_solid_overlap()
+	_test_fast_motion_cannot_tunnel_through_wall()
+	_test_diagonal_cannot_cut_blocked_corner()
+	_test_too_long_motion_is_rejected()
 	_test_empty_mask_preserves_dev_probe()
 	_test_packing_does_not_mutate_simulation()
 	_complete()
@@ -60,13 +63,16 @@ func _test_slide_prevents_solid_overlap() -> void:
 	check(not BattleTerrainGpuMask.is_blocked(mask, adjusted),
 		"diagonal movement never ends inside the boulder")
 	check(adjusted != stop, "a blocked destination does not consume movement")
-	check(adjusted.x == start.x or adjusted.y == start.y,
-		"free axis is used when diagonal motion is blocked")
+	check(adjusted.distance_to(stop) > 0.01,
+		"collision rejects the requested blocked destination")
 	terrain._traversable[terrain.cell_of_col_row(4, 5)] = 0
 	terrain._traversable[terrain.cell_of_col_row(5, 4)] = 0
 	mask = BattleTerrainGpuMask.from_terrain(terrain)
-	equal(BattleTerrainGpuMask.slide(mask, start, stop), start,
-		"movement halts when both adjacent slides are impassable")
+	var corner := BattleTerrainGpuMask.slide(mask, start, stop)
+	check(not BattleTerrainGpuMask.is_blocked(mask, corner),
+		"blocked axial neighbours cannot push a soldier into the corner")
+	check(terrain.cell_col_at(corner) == 4 and terrain.cell_row_at(corner) == 4,
+		"cannot leave the starting tile through two impassable neighbours")
 
 
 func _test_empty_mask_preserves_dev_probe() -> void:
@@ -88,3 +94,48 @@ func _test_packing_does_not_mutate_simulation() -> void:
 	var mask := BattleTerrainGpuMask.from_terrain(terrain)
 	check(mask.size() > 4, "GPU mask exists")
 	equal(terrain.to_dict(), before, "source terrain is unchanged by encoding")
+
+
+func _test_fast_motion_cannot_tunnel_through_wall() -> void:
+	section("fast movement cannot pass through intermediate blocked cells")
+	var terrain := _fixture()
+	for row in terrain.rows:
+		terrain._traversable[terrain.cell_of_col_row(5, row)] = 0
+	var mask := BattleTerrainGpuMask.from_terrain(terrain)
+	var start := terrain.cell_centre(terrain.cell_of_col_row(3, 5))
+	var far_side := terrain.cell_centre(terrain.cell_of_col_row(8, 5))
+	check(not BattleTerrainGpuMask.is_blocked(mask, far_side),
+		"requested endpoint is clear even though a wall lies between")
+	var result := BattleTerrainGpuMask.slide(mask, start, far_side)
+	check(terrain.cell_col_at(result) < 5,
+		"substep collision catches the intermediate wall instead of tunnelling")
+	check(not BattleTerrainGpuMask.is_blocked(mask, result),
+		"last resolved position is still on open terrain")
+
+
+func _test_diagonal_cannot_cut_blocked_corner() -> void:
+	section("diagonal terrain collision cannot slip between wall corners")
+	var terrain := _fixture()
+	terrain._traversable[terrain.cell_of_col_row(5, 4)] = 0
+	terrain._traversable[terrain.cell_of_col_row(4, 5)] = 0
+	var mask := BattleTerrainGpuMask.from_terrain(terrain)
+	var start := terrain.cell_centre(terrain.cell_of_col_row(4, 4))
+	var diagonal := terrain.cell_centre(terrain.cell_of_col_row(5, 5))
+	check(not BattleTerrainGpuMask.is_blocked(mask, diagonal),
+		"diagonal tile is open but neighbouring corner cells are blocked")
+	var result := BattleTerrainGpuMask.slide(mask, start, diagonal)
+	check(terrain.cell_col_at(result) == 4 and terrain.cell_row_at(result) == 4,
+		"agent remains on accessible side of blocked corner")
+	check(not BattleTerrainGpuMask.is_blocked(mask, result),
+		"blocking an illegal diagonal never traps the agent in terrain")
+
+
+func _test_too_long_motion_is_rejected() -> void:
+	section("unreasonably large GPU corrections never bypass sampling")
+	var terrain := _fixture()
+	var mask := BattleTerrainGpuMask.from_terrain(terrain)
+	var start := terrain.cell_centre(terrain.cell_of_col_row(2, 2))
+	var far_target := terrain.cell_centre(
+		terrain.cell_of_col_row(terrain.cols - 3, terrain.rows - 3))
+	equal(BattleTerrainGpuMask.slide(mask, start, far_target), start,
+		"oversized movement is rejected instead of skipping obstruction checks")
