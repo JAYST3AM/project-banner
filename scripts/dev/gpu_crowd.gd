@@ -3241,21 +3241,21 @@ func _build_ground() -> void:
 	var ground := BattlefieldTerrain.generate(seed_value, field, config)
 	_view_root = Node2D.new()
 	add_child(_view_root)
-	var fallback_image := BattleGroundPainter.bake(ground)
-	if fallback_image != null:
-		var sprite := Sprite2D.new()
-		sprite.texture = ImageTexture.create_from_image(fallback_image)
-		sprite.centered = false
-		sprite.scale = Vector2(field.x / float(fallback_image.get_width()),
-			field.y / float(fallback_image.get_height()))
-		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		sprite.z_index = -20
-		_view_root.add_child(sprite)
-		var ground_art := TerrainGround.new()
-		ground_art.z_index = -20
-		_view_root.add_child(ground_art)
-		if ground_art.show_field(ground, BiomeCatalog.load_from(), config):
-			sprite.visible = false
+	var ground_art := TerrainGround.new()
+	ground_art.z_index = -20
+	_view_root.add_child(ground_art)
+	if not ground_art.show_field(ground, BiomeCatalog.load_from(), config):
+		# Never spend time baking fallback pixels when the biome has authored art.
+		var fallback_image := BattleGroundPainter.bake(ground)
+		if fallback_image != null:
+			var sprite := Sprite2D.new()
+			sprite.texture = ImageTexture.create_from_image(fallback_image)
+			sprite.centered = false
+			sprite.scale = Vector2(field.x / float(fallback_image.get_width()),
+				field.y / float(fallback_image.get_height()))
+			sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			sprite.z_index = -20
+			_view_root.add_child(sprite)
 	# Selection and command marks share the same ground-space transform.
 	var paint := Node2D.new()
 	paint.set_script(load("res://scripts/dev/battle_paint.gd"))
