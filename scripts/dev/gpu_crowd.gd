@@ -735,6 +735,8 @@ var _disc_node: MultiMeshInstance2D = null
 var _bar_node: MultiMeshInstance2D = null
 var _overview_overlay: BattleTacticalOverview = null
 var _unit_dock: BattleUnitDock = null
+var _battle_minimap: BattleMinimap = null
+var _battle_terrain: BattlefieldTerrain = null
 var _focus := Vector2.ZERO
 ## The health bars and the formation boxes: two instances a soldier and one line a body, the
 ## same two things the battle view draws for a formed battle.
@@ -3244,6 +3246,7 @@ func _build_ground() -> void:
 	var config := GameManager.config()
 	var ground := BattlefieldTerrain.generate(seed_value, field, config,
 		null, null, battlefield_biome_id)
+	_battle_terrain = ground
 	_view_root = Node2D.new()
 	add_child(_view_root)
 	var ground_art := TerrainGround.new()
@@ -3313,6 +3316,27 @@ func _build_hud() -> void:
 	_unit_dock.body_chosen.connect(_on_card_chosen)
 	layer.add_child(_unit_dock)
 
+	# Upper-right of the roster, not on top of the cards or the command HUD.
+	_battle_minimap = BattleMinimap.new()
+	_battle_minimap.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_battle_minimap.offset_left = -249.0
+	_battle_minimap.offset_top = -292.0
+	_battle_minimap.offset_right = -16.0
+	_battle_minimap.offset_bottom = -135.0
+	_battle_minimap.navigate_requested.connect(_on_minimap_navigate)
+	layer.add_child(_battle_minimap)
+	if _battle_terrain != null:
+		_battle_minimap.set_terrain(_battle_terrain)
+
+
+## Change camera focus without issuing formation orders.
+func _on_minimap_navigate(world: Vector2) -> void:
+	if _camera == null:
+		return
+	_follow_action = false
+	_camera.position = _iso(Vector2(
+		clampf(world.x, 0.0, field.x), clampf(world.y, 0.0, field.y)))
+
 
 func _toggle_tactical_view() -> void:
 	if _zoom_target <= ZOOM_MIN + 0.01:
@@ -3367,6 +3391,11 @@ func _refresh_command_ui() -> void:
 	if _command_bar != null:
 		_command_bar.set_battle_status(_deploying, _alive.x, _alive.y,
 			chosen.size(), overview, _clock_paused)
+	if _battle_minimap != null and _camera != null:
+		var full_span := Vector2(get_viewport().get_visible_rect().size) / maxf(
+			0.001, _picture_scale())
+		_battle_minimap.set_battle_state(formations, chosen,
+			_camera.position + field * 0.5, full_span)
 	if _overview_overlay != null:
 		_overview_overlay.visible = overview
 		if overview:
