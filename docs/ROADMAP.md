@@ -1,10 +1,4 @@
-Planning mode confirmed. No further code changes, commits, pushes or merges.
-
-
-
-Below is the proposed replacement for `docs/ROADMAP.md`. It preserves the distinction between historical achievements, current verified functionality, and work that still requires testing. Jay's approval is required before execution begins.
-
-
+<!-- Approved roadmap. Captured from the planning conversation 2026-10-08; preamble removed. -->
 
 # Project Banner — Master Development Roadmap
 
@@ -14,7 +8,7 @@ Below is the proposed replacement for `docs/ROADMAP.md`. It preserves the distin
 
 **Date:** 8 October 2026\
 
-**Status:** AWAITING JAY'S APPROVAL\
+Status: APPROVED — M00 complete 2026-10-08 (D-170). Execution proceeds M01 → M17.
 
 **Project owner:** Jay\
 
@@ -946,7 +940,7 @@ These may be worthwhile later, but they must not prevent the first complete game
 
 
 
-**Status:** NOT STARTED\
+**Status:** DONE — Jay approved 2026-10-08 (D-170)\
 
 **Priority:** Critical\
 
@@ -1018,7 +1012,7 @@ Approve the initial scope, release target and technical direction.
 
 
 
-**Status:** NOT STARTED\
+**Status:** IN PROGRESS — working tree snapshot pushed as backup/jay-tree-2026-10-08\
 
 **Priority:** Critical\
 
