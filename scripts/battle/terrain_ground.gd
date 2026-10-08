@@ -19,6 +19,7 @@ extends Sprite2D
 ## How many sub-variants an atlas holds. Four, always: fewer than four is padded by repeating, so the
 ## shader can index atlas slots without asking how many there are.
 const ATLAS_SLOTS := 4
+const SHADER_PATH := "res://shaders/battle/ground.gdshader"
 
 var terrain: BattlefieldTerrain = null
 var biomes: BiomeCatalog = null
@@ -45,6 +46,13 @@ func show_field(p_field: BattlefieldTerrain, p_biomes: BiomeCatalog, p_config: G
 		visible = false
 		built_for = ""
 		return false
+	# The engine might have biome PNGs before the terrain shader is
+	# installed; never claim the material rendered or leave a grey void.
+	# Returning false lets the caller keep its proven procedural fallback.
+	if not ResourceLoader.exists(SHADER_PATH):
+		visible = false
+		built_for = ""
+		return false
 	if built_for == terrain.signature() and _material != null:
 		visible = true
 		return true
@@ -68,7 +76,7 @@ static func has_art(terrain: BattlefieldTerrain, p_biomes: BiomeCatalog) -> bool
 func _build(config: GameConfig) -> void:
 	if _material == null:
 		_material = ShaderMaterial.new()
-		_material.shader = load("res://shaders/battle/ground.gdshader")
+		_material.shader = load(SHADER_PATH) as Shader
 		material = _material
 	centered = false
 	position = Vector2.ZERO
@@ -76,10 +84,15 @@ func _build(config: GameConfig) -> void:
 	scale = terrain.size
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
-	var ppu := terrain.visual_pixels_per_unit(config)
+	# September's terrain revert removed BattlefieldTerrain.visual_pixels_per_unit().
+	# Read the existing catalogue-level resolution directly rather than
+	# depending on a method that no longer exists. Keep the terrain model
+	# untouched so Hermes can install authored tiles without changing its data.
+	var ppu: float = maxf(0.25, config.get_float(
+		"terrain.visual_pixels_per_unit", 1.0)) if config != null else 1.0
 	_material.set_shader_parameter("ground_map", ImageTexture.create_from_image(terrain.build_ground_map(ppu)))
 	_material.set_shader_parameter("overlay_map", ImageTexture.create_from_image(terrain.build_overlay_map(ppu)))
-	_material.set_shader_parameter("type_map", ImageTexture.create_from_image(terrain.build_type_map(ppu)))
+	_material.set_shader_parameter("type_map", ImageTexture.create_from_image(_build_type_map(ppu)))
 	_material.set_shader_parameter("map_span", terrain.size)
 
 	# The biome's four variants, atlas by atlas. A variant with no art falls back to the first one
@@ -101,18 +114,34 @@ func _build(config: GameConfig) -> void:
 		if atlas != null:
 			_material.set_shader_parameter(_variant_parameter(index), atlas)
 
+	var active_overlays := Vector4.ZERO
+	var overlay_strengths := Vector4.ZERO
+	var defined_overlays := biomes.overlays(terrain.biome_id)
 	for index in 4:
 		var overlay := biomes.overlay_id(terrain.biome_id, index)
-		var art := _overlay_art(overlay)
-		if art.is_empty():
-			continue
-		var texture := _first_texture(art)
+		var texture := _first_texture(_overlay_art(overlay))
 		if texture != null:
 			_material.set_shader_parameter("overlay_%d" % (index + 1), texture)
+			active_overlays[index] = 1.0
+		if index < defined_overlays.size():
+			overlay_strengths[index] = clampf(float(
+				(defined_overlays[index] as Dictionary).get("strength", 0.7)), 0.0, 1.0)
+	_material.set_shader_parameter("overlay_active", active_overlays)
+	_material.set_shader_parameter("overlay_strengths", overlay_strengths)
 
-	_material.set_shader_parameter("type_water", _atlas(_type_art("water")))
-	_material.set_shader_parameter("type_rock", _first_texture(_type_art("cliff")))
-	_material.set_shader_parameter("type_mud", _first_texture(_type_art("mud")))
+	var water_art := _atlas(_type_art("water"))
+	var rock_art := _first_texture(_type_art("cliff"))
+	var mud_art := _first_texture(_type_art("mud"))
+	if water_art != null:
+		_material.set_shader_parameter("type_water", water_art)
+	if rock_art != null:
+		_material.set_shader_parameter("type_rock", rock_art)
+	if mud_art != null:
+		_material.set_shader_parameter("type_mud", mud_art)
+	_material.set_shader_parameter("type_active", Vector3(
+		1.0 if water_art != null else 0.0,
+		1.0 if rock_art != null else 0.0,
+		1.0 if mud_art != null else 0.0))
 
 	_material.set_shader_parameter("tile_units", _tile_units("variant_scale", 4.0))
 	_material.set_shader_parameter("overlay_units", _tile_units("overlay_scale", 3.0))
@@ -122,6 +151,29 @@ func _build(config: GameConfig) -> void:
 
 ## World units per repeat, from the biome's own terrain block. Read through the catalogue so a biome
 ## can tile its ground tighter or looser without touching the shader.
+## Read the terrain's existing type IDs into the ground renderer's three
+## visual material masks. The September revert removed build_type_map() from
+## BattlefieldTerrain; keep this picture-only adapter here instead of changing
+## the deterministic gameplay model.
+## R = standing water, G = exposed cliff/rock, B = mud, A = opaque.
+func _build_type_map(pixels_per_unit: float) -> Image:
+	var width := maxi(2, int(roundf(terrain.size.x * maxf(0.05, pixels_per_unit))))
+	var height := maxi(2, int(roundf(terrain.size.y * maxf(0.05, pixels_per_unit))))
+	var image := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
+	for y in height:
+		var world_y := (float(y) + 0.5) / float(height) * terrain.size.y
+		for x in width:
+			var world_x := (float(x) + 0.5) / float(width) * terrain.size.x
+			var cell := terrain.cell_index_at(Vector2(world_x, world_y))
+			var kind := terrain.type_id_of_cell(cell)
+			image.set_pixel(x, y, Color(
+				1.0 if kind == "water" else 0.0,
+				1.0 if kind == "cliff" else 0.0,
+				1.0 if kind == "mud" else 0.0,
+				1.0))
+	return image
+
+
 func _tile_units(key: String, fallback: float) -> float:
 	if biomes == null:
 		return fallback

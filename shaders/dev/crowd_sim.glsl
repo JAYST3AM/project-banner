@@ -93,6 +93,14 @@ layout(set = 0, binding = 10, std430) restrict buffer Corr { ivec4 c[]; } corr;
 // none), y = the simulation tick its next scheduled look is due, zw spare. Written only by the
 // soldier itself, so no two threads race for it. See the header's target-acquisition note.
 layout(set = 0, binding = 11, std430) restrict buffer Targets { ivec4 t[]; } targets;
+// Immutable traversability grid built by BattleTerrainGpuMask from the
+// *same* terrain whose props/cover/ground the player sees. Header words:
+// [0] columns, [1] rows, [2] world cell size * 1000, [3] enabled.
+// The shader only reads it; combat outcomes and collision resolution remain
+// deterministic across GPU workgroup dispatch order.
+layout(set = 0, binding = 14, std430) readonly buffer TerrainMask {
+	uint occupancy[];
+} terrain_mask;
 
 layout(push_constant, std430) uniform PC { uint mode; uint a; uint b; uint c; } pc;
 
@@ -134,6 +142,85 @@ const uint NO_KILLER = 0xFFFFFFFFu;
 // war every run - measured, tick 2, with 1,192 of 1,193 ticks differing between two identical
 // runs. Integers add the same way whatever the order.
 const float FIXED = 1024.0;
+
+// A zero-enabled mask preserves the original developer-benchmark simulation.
+bool terrain_blocked(vec2 world) {
+	if (terrain_mask.occupancy[3] == 0u) {
+		return false;
+	}
+	uint columns = terrain_mask.occupancy[0];
+	uint rows = terrain_mask.occupancy[1];
+	float stride = float(terrain_mask.occupancy[2]) * 0.001;
+	if (columns == 0u || rows == 0u || stride <= 0.0 ||
+		world.x < 0.0 || world.y < 0.0) {
+		return true;
+	}
+	ivec2 index = ivec2(floor(world / stride));
+	if (index.x < 0 || index.y < 0 ||
+		index.x >= int(columns) || index.y >= int(rows)) {
+		return true;
+	}
+	return terrain_mask.occupancy[4u + uint(index.y) * columns + uint(index.x)] != 0u;
+}
+
+// Each short substep tests the destination and both diagonal neighbours.
+// Without segment sampling an agent could tunnel through a thin wall when a
+// correction or walk crosses the wall but happens to land in a free cell.
+const int TERRAIN_MAX_SUBSTEPS = 24;
+const float TERRAIN_SUBSTEP_FRACTION = 0.33;
+
+vec2 terrain_slide_step(vec2 before, vec2 after) {
+	vec2 along_x = vec2(after.x, before.y);
+	vec2 along_y = vec2(before.x, after.y);
+	bool open_x = !terrain_blocked(along_x);
+	bool open_y = !terrain_blocked(along_y);
+	bool destination_open = !terrain_blocked(after);
+	bool diagonal = abs(after.x - before.x) > 0.00001 &&
+		abs(after.y - before.y) > 0.00001;
+
+	if (destination_open && (!diagonal || (open_x && open_y))) {
+		return after;
+	}
+	if (open_x && open_y) {
+		return abs(after.x - before.x) >= abs(after.y - before.y) ?
+			along_x : along_y;
+	}
+	if (open_x) {
+		return along_x;
+	}
+	if (open_y) {
+		return along_y;
+	}
+	return before;
+}
+
+vec2 terrain_slide(vec2 before, vec2 after) {
+	if (terrain_mask.occupancy[3] == 0u) {
+		return after;
+	}
+	// A bad deployment must be fixed at source rather than being teleported
+	// away by the shader, changing results based on collision order.
+	if (terrain_blocked(before)) {
+		return before;
+	}
+	float terrain_cell = max(0.001, float(terrain_mask.occupancy[2]) * 0.001);
+	float total = length(after - before);
+	int steps = max(1, int(ceil(total / max(0.01,
+		terrain_cell * TERRAIN_SUBSTEP_FRACTION))));
+	if (steps > TERRAIN_MAX_SUBSTEPS) {
+		// Reject enormous displacements: skipping samples would tunnel.
+		return before;
+	}
+	vec2 increment = (after - before) / float(steps);
+	vec2 position = before;
+	for (int i = 0; i < TERRAIN_MAX_SUBSTEPS; i++) {
+		if (i >= steps) {
+			break;
+		}
+		position = terrain_slide_step(position, position + increment);
+	}
+	return position;
+}
 
 void main() {
 	uint gid = gl_GlobalInvocationID.x;
@@ -623,6 +710,7 @@ void main() {
 				acc = (acc / alen) * max_push;
 			}
 			vec2 settled = clamp(pos + acc, vec2(0.0), vec2(fw, fh));
+			settled = terrain_slide(pos, settled);
 			agents.s[gid] = vec4(settled, agents.s[gid].zw);
 		}
 		return;
@@ -689,6 +777,7 @@ void main() {
 	vec2 p = pos + step + correction;
 	p.x = clamp(p.x, 0.0, fw);
 	p.y = clamp(p.y, 0.0, fh);
+	p = terrain_slide(pos, p);
 	// How far this tick actually moved him, for the probe's displacement ceiling.
 	atomicMax(counters.c[6], uint(length(p - pos) * 1000.0));
 	agents.s[gid] = vec4(p, step / max(dt, 0.0001));

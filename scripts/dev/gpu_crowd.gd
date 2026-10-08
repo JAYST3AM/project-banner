@@ -247,6 +247,8 @@ var run_seconds := 0.0
 ## armies take longer to meet passes a later value so the shot catches the fighting.
 var shot_at := 6.0
 var seed_value := 780780
+## Campaign adapter specifies the battle's actual biome, not the default plains.
+var battlefield_biome_id: String = ""
 var out_dir := "F:/VSC Projects/pb-bench/gpu_crowd"
 ## How far the camera is pushed in past the fit-the-field zoom: at 1.0 the whole field is
 ## visible and a six-thousand-man army is a dot matrix, which is not what a battle looks
@@ -263,6 +265,9 @@ const PITCH_MAX := 1.0
 const PAN_SPEED := 260.0
 const ZOOM_MIN := 0.4
 const ZOOM_MAX := 8.0
+## Single authoritative transition points for soldier/detail overview.
+const ZOOM_FULL_MAP_THRESHOLD := 0.52
+const ZOOM_STANDARDS_THRESHOLD := 1.65
 const ZOOM_STEP := 1.14
 const TILT_STEP := 0.02
 const YAW_DRAG := 0.006
@@ -373,6 +378,11 @@ func _zoom_at(screen: Vector2, factor: float) -> void:
 	var wanted := clampf(_zoom_target * factor, ZOOM_MIN, ZOOM_MAX)
 	if is_equal_approx(wanted, _zoom_target):
 		return
+	if wanted <= ZOOM_MIN + 0.01:
+		_zoom_target = wanted
+		_follow_action = false
+		_camera.position = Vector2.ZERO
+		return
 	var anchor := _uniso(screen)
 	var old_scale := _picture_scale()
 	_zoom_target = wanted
@@ -420,7 +430,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					_right_held = true
 					_right_moved = 0.0
 					_right_at = button.position
-					_rotating = true
+					_command_preview.clear()
+					# Right-drag places selected formations; camera movement remains on MMB/WASD.
+					_rotating = _living_selection().is_empty()
 					_last_mouse = button.position
 				MOUSE_BUTTON_MIDDLE:
 					# The other half of the convention: middle drags the ground itself.
@@ -441,8 +453,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				MOUSE_BUTTON_RIGHT:
 					_right_held = false
 					_rotating = false
-					if _right_moved < RIGHT_DRAG_SLOP:
-						_right_click(_uniso(button.position))
+					if _right_moved >= RIGHT_DRAG_SLOP and not _living_selection().is_empty():
+						_apply_placement(_drag_plan(_right_at, button.position))
+					elif _right_moved < RIGHT_DRAG_SLOP:
+						_right_click(_uniso(button.position), button.shift_pressed)
+					_command_preview.clear()
+					_update_marks()
 				MOUSE_BUTTON_MIDDLE:
 					_panning = false
 	elif event is InputEventMouseMotion and _drag_body >= 0:
@@ -452,6 +468,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		_place_body(_drag_body, _uniso((event as InputEventMouseMotion).position) - _drag_grab)
 	elif event is InputEventMouseMotion and _box_active:
 		_box_to = (event as InputEventMouseMotion).position
+	elif event is InputEventMouseMotion and _right_held and not _rotating:
+		var motion := event as InputEventMouseMotion
+		_right_moved += motion.relative.length()
+		if _right_moved >= RIGHT_DRAG_SLOP:
+			_command_preview = _drag_plan(_right_at, motion.position)
+			_update_marks()
 	elif event is InputEventMouseMotion and _rotating:
 		var motion := event as InputEventMouseMotion
 		_right_moved += motion.relative.length()
@@ -475,6 +497,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_tilt(-TILT_STEP * 3.0)
 			KEY_BRACKETRIGHT:
 				_tilt(TILT_STEP * 3.0)
+			KEY_T:
+				_toggle_tactical_view()
 			KEY_F:
 				_follow_action = true
 				_zoom_target = 1.0
@@ -503,6 +527,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_P:
 				_clock_paused = not _clock_paused
 				print("gpu crowd: %s" % ("paused" if _clock_paused else "running"))
+			KEY_F3:
+				show_battle_diagnostics = not show_battle_diagnostics
+				if _diagnostics_panel != null:
+					_diagnostics_panel.visible = show_battle_diagnostics
 			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5:
 				var digit := (event as InputEventKey).keycode - KEY_0
 				if (event as InputEventKey).ctrl_pressed:
@@ -526,6 +554,7 @@ var buf_corr: RID
 var buf_attrs: RID
 var buf_bodies: RID
 var buf_stats: RID
+var buf_terrain: RID
 ## The remembered opponent and its next awareness tick, one ivec4 a soldier. See the shader.
 var buf_targets: RID
 var uniform_set: RID
@@ -540,6 +569,8 @@ var _body_side := PackedInt32Array()
 ## the body takes the field and kept up to date by every re-form, so the journal can say which
 ## formation it is reporting on rather than leaving a reader to reverse it out of files and ranks.
 var _body_shape_kind := PackedStringArray()
+## Gameplay-facing name (e.g. Spearmen); the probe falls back to numbered formations.
+var _body_unit_label := PackedStringArray()
 
 var field := Vector2(200.0, 120.0)
 var grid := Vector2i(0, 0)
@@ -609,6 +640,9 @@ var _arrow_drawn := 0
 ## all melee), and the damage tally he had dealt at the last pack - a rise in it is the only
 ## evidence a shot leaves on the readback.
 var _man_ranged := PackedByteArray()
+## The actual roster art index of each soldier. Never infer character appearance
+## from team side: player and enemy can each contain all six unit archetypes.
+var _man_art_index := PackedInt32Array()
 var _dealt_seen := PackedInt32Array()
 ## The first shot of a battle is reported once, so a run says whether the wiring fires.
 var _arrow_reported := false
@@ -677,6 +711,10 @@ var _anim_seen := PackedByteArray()
 var _anim_flip := PackedByteArray()
 
 var _tick := 0
+## Full battle UI snapshots are expensive at 30 formations. Rebuild only on
+## a new simulation tick or when crossing a tactical zoom LOD boundary.
+var _ui_last_snapshot_tick := -1
+var _ui_last_snapshot_lod := -1
 var _tick_usec := 0
 var _readback_usec := 0
 ## Four ints a man, straight from the tallies buffer: see [method tally].
@@ -699,7 +737,28 @@ var _shot_taken := 0
 var _alive := Vector2i(0, 0)
 var _fallen := 0
 var _label: Label = null
+var _diagnostics_panel: PanelContainer = null
+var _command_bar: BattleCommandBar = null
+## Dev-only probe keeps its performance readout; campaign battles hide it by default.
+var show_battle_diagnostics := true
 var _camera: Camera2D = null
+var _disc_node: MultiMeshInstance2D = null
+var _bar_node: MultiMeshInstance2D = null
+var _overview_overlay: BattleTacticalOverview = null
+var _unit_dock: BattleUnitDock = null
+var _battle_minimap: BattleMinimap = null
+var _battle_terrain: BattlefieldTerrain = null
+var _battle_props: TerrainProps = null
+var _battle_scenery: BattleScenery = null
+## The dev probe preserves its historical combat baseline. The actual
+## campaign battle opts into terrain-solid GPU soldiers explicitly.
+var enable_gpu_terrain_collision := false
+var _formation_navigator: BattleFormationNavigator = null
+## Routes are calculated only when an order arrives. Each formation advances a
+## waypoint cursor; there is no A* running per frame/per soldier.
+var _body_routes: Dictionary = {}
+var _body_route_cursor: Dictionary = {}
+var _deployment_overlay: BattleDeploymentOverlay = null
 var _focus := Vector2.ZERO
 ## The health bars and the formation boxes: two instances a soldier and one line a body, the
 ## same two things the battle view draws for a formed battle.
@@ -990,6 +1049,7 @@ func _build() -> void:
 	defence_mitigation = battle_config.get_float("battle.defence_mitigation", 0.05)
 	_load_unit_stats()
 	_deploy(state, meta, attrs)
+	_prepare_battle_terrain()
 	# What each body's men can strike at, needed by the march whether or not a journal is open: a
 	# body of archers holds at its own range (see [method _engage_room]).
 	_refresh_body_reach()
@@ -1020,6 +1080,9 @@ func _build() -> void:
 	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
 	buf_bodies = _storage(_body_state.to_byte_array(), _bodies * 8 * 4)
+	var terrain_bytes := BattleTerrainGpuMask.from_terrain(
+		_battle_terrain if enable_gpu_terrain_collision else null).to_byte_array()
+	buf_terrain = _storage(terrain_bytes, terrain_bytes.size())
 	# Every soldier starts with nobody remembered and a look phase taken from its own index, so
 	# the first look is staggered across the cadence rather than massed on tick one. This is the
 	# schedule D-080 requires to be a property of the soldier, not of the moment.
@@ -1048,6 +1111,7 @@ func _build() -> void:
 	uniforms.append(_uniform(11, buf_targets))
 	uniforms.append(_uniform(12, buf_stats))
 	uniforms.append(_uniform(13, buf_tallies))
+	uniforms.append(_uniform(14, buf_terrain))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
 
 	_build_ground()
@@ -1162,8 +1226,11 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# deploys flies an arrow. The campaign's field fills this from the roster's unit types.
 	_man_ranged.resize(agents)
 	_man_ranged.fill(0)
+	_man_art_index.resize(agents)
 	for i in agents:
 		var side := 0 if i < per_side else 1
+		# The dev probe deliberately compares two example characters.
+		_man_art_index[i] = side
 		var within := i % per_side
 		var band_index := mini(bodies_per_side - 1, within / per_body)
 		var in_body := within % per_body
@@ -1333,6 +1400,12 @@ func _body_name(b: int) -> String:
 		if _side_of_body(other) == _side_of_body(b):
 			ordinal += 1
 	return "%s%d" % ["P" if _side_of_body(b) == 0 else "E", ordinal]
+
+
+func _body_display_name(b: int) -> String:
+	if b >= 0 and b < _body_unit_label.size() and not _body_unit_label[b].is_empty():
+		return _body_unit_label[b]
+	return _body_name(b)
 
 
 ## A body changing its mind about who it is fighting is a rare, reviewable event, so it is printed
@@ -1517,6 +1590,8 @@ func _advance_bodies() -> void:
 		# is the one time a body keeps the facing it was given: a formation that turns itself while
 		# the player is still placing it is the formation making a decision for him.
 		var aim := _aim_for(b) if not _deploying else Vector2.ZERO
+		if _ordered_facing.has(b) and (_order[b] == Order.ADVANCE or _hold_ordered[b] == 1):
+			aim = Vector2.RIGHT.rotated(float(_ordered_facing[b]))
 		if aim != Vector2.ZERO:
 			var want := wrapf(aim.angle() - _heading[b], -PI, PI)
 			_heading[b] += clampf(want, -TURN_RATE * DT, TURN_RATE * DT)
@@ -1549,15 +1624,31 @@ func _advance_bodies() -> void:
 			Order.HOLD:
 				pass
 			Order.ADVANCE:
-				var to_point := _order_point[b] - mine
+				# In addition to A* costs, actually slow the body's anchor on
+				# mud, slopes and thick vegetation. Using the generator's
+				# movement channel makes this gameplay, not a shader effect.
+				var ground_pace := BattleFormationNavigator.speed_scale(_battle_terrain, mine)
+				# Slow the commanded anchor when actual surviving soldiers cannot
+				# keep up with their slots. Otherwise the anchor can march around
+				# an obstacle while the men remain pinned to its far side.
+				# Existing measured cohesion costs no new GPU readback.
+				var formation_pace := 1.0
+				if enable_gpu_terrain_collision and b < _body_cohesion.size():
+					formation_pace = BattleFormationCohesion.march_multiplier(
+						_body_cohesion[b], _body_state[b * 8 + 6])
+				# Follow precomputed terrain corners without crossing blocked cells.
+				var waypoint := _navigation_waypoint(b, mine)
+				var to_point := waypoint - mine
 				var remaining := to_point.length()
-				if remaining <= ARRIVED:
+				if _navigation_is_final(b) and remaining <= ARRIVED:
 					_order[b] = Order.HOLD
 					_hold_ordered[b] = 1
+					_clear_navigation(b)
 					print("gpu crowd: scripted | %s arrived at (%.0f, %.0f) on tick %d and holds there" % [
 						_body_name(b), mine.x, mine.y, _tick])
-				else:
-					move = (to_point / remaining) * minf(remaining, rate * DT)
+				elif remaining > 0.0001:
+					move = (to_point / remaining) * minf(remaining,
+						rate * ground_pace * formation_pace * DT)
 			Order.ENGAGE:
 				# Never walk through our own line. A body of archers standing behind the melee used to
 				# creep forward every time the fighting opened a gap ahead of it, through the spearmen
@@ -1750,6 +1841,16 @@ func _process(delta: float) -> void:
 		_frame_delta = 0.0
 		_frames = 0
 	_update_camera(delta)
+	if _deployment_overlay != null:
+		_deployment_overlay.visible = _deploying
+	var tactical_lod := _current_tactical_lod()
+	if _tick != _ui_last_snapshot_tick or tactical_lod != _ui_last_snapshot_lod:
+		_refresh_command_ui()
+	elif _battle_minimap != null and _camera != null:
+		# Camera pan/zoom must remain fluid even between simulation ticks.
+		_battle_minimap.set_camera(_camera.position + field * 0.5,
+			Vector2(get_viewport().get_visible_rect().size) /
+				maxf(0.001, _picture_scale()))
 	# The arrows fly on the frame's clock, not the simulation's: a shot is a tenth of a second of
 	# real time whatever the tick rate, and the last volley keeps flying while a finished battle
 	# is still on the screen - the frame the final one lands is redrawn too, or its shaft stays
@@ -2558,6 +2659,7 @@ func _build_view() -> void:
 	mm.instance_count = agents
 	mm.visible_instance_count = agents
 	node.multimesh = mm
+	_disc_node = node
 
 	instances.resize(agents * STRIDE)
 	var scale := DISC_RADIUS * 2.0
@@ -2926,6 +3028,7 @@ func _build_bars() -> void:
 	_bars.instance_count = agents * 2
 	_bars.visible_instance_count = 0
 	node.multimesh = _bars
+	_bar_node = node
 	_bar_buffer.resize(agents * 2 * STRIDE)
 
 
@@ -3062,9 +3165,10 @@ func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
 		death_age = _tick - _anim_died_tick[i]
 	# One call: the animation, the frame, the placement, the tint and the four writes, with the
 	# per-character tables and the "what changed" memory inside the writer both renderers share.
-	# The dev crowd fields the first two roster units, one a side, so the two armies still read
-	# apart at a glance.
-	_sprite_writer.write(_sprite_buffer, i, i, picture, side, side, alive, moved, hurt_age,
+	# Both armies may contain every roster archetype: a soldier's pixel-art
+	# character follows his unit_type_id, while tint follows his team side.
+	var art_index := _man_art_index[i] if i < _man_art_index.size() else side
+	_sprite_writer.write(_sprite_buffer, i, i, picture, art_index, side, alive, moved, hurt_age,
 		strike_age, death_age, _anim_flip[i] == 1, _tick)
 
 
@@ -3191,46 +3295,69 @@ func _log_view_geometry() -> void:
 		str(flat_view), rad_to_deg(yaw), squash, _iso(field * 0.5).x, _iso(field * 0.5).y])
 
 
-func _build_ground() -> void:
+## One authoritative terrain is used by ground art, the CPU pathfinder,
+## props and the GPU soldier-occupancy buffer. Build once, after the army
+## composition is known and before creating any RenderingDevice buffers.
+func _prepare_battle_terrain() -> void:
 	var config := GameManager.config()
-	var ground := BattlefieldTerrain.generate(seed_value, field, config)
-	var cols := maxi(1, ground.cols)
-	var rows := maxi(1, ground.rows)
-	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
-	var tallest := maxf(0.001, ground.max_height())
-	for y in rows:
-		for x in cols:
-			var index := y * cols + x
-			var colour := ground.colour_of_cell(index)
-			var relief := ground.height_of_cell(index) / tallest
-			if relief > 0.5:
-				colour = colour.lightened((relief - 0.5) * 0.55)
-			else:
-				colour = colour.darkened((0.5 - relief) * 0.45)
-			image.set_pixel(x, y, colour)
-	var sprite := Sprite2D.new()
-	sprite.texture = ImageTexture.create_from_image(image)
-	sprite.centered = false
-	# One pixel a cell, stretched over the field - the same thing the battle view's
-	# single-call ground draw does.
-	sprite.scale = Vector2(field.x / float(cols), field.y / float(rows))
-	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	sprite.z_index = -20
-	# The ground is the one thing drawn as a plane rather than a point per soldier, so it gets the
-	# projection as an honest affine transform - the same one _iso() applies point by point, built
-	# from the same two constants, so the men cannot end up standing beside their own ground.
+	var biomes := BiomeCatalog.load_from()
+	var generated := BattlefieldTerrain.generate(seed_value, field, config,
+		null, biomes, battlefield_biome_id)
+	var depth := config.get_float("battle.deploy_depth", 20.0)
+	var margin := config.get_float("battle.deploy_margin", 8.0)
+	var zones := BattleDeploymentOverlay.zones(field, depth, margin)
+	generated.clear_for_deployment(zones)
+	_battle_props = generated.build_props(config, biomes, zones)
+	_battle_terrain = generated
+	_formation_navigator = BattleFormationNavigator.new()
+	_formation_navigator.setup(generated)
+
+
+func _build_ground() -> void:
+	# The same real terrain used for soldier/formation collision, not a
+	# second regenerated map that could disagree about a blocked cell.
+	var config := GameManager.config()
+	var biomes := BiomeCatalog.load_from()
+	var ground := _battle_terrain
+	if ground == null or not ground.is_valid():
+		push_error("gpu crowd: battle terrain must be prepared before ground")
+		return
 	_view_root = Node2D.new()
 	add_child(_view_root)
-	_view_root.add_child(sprite)
-	# The marks the player makes live on the ground, between it and the men: a child of the view
-	# root, so the same transform lays them down, and below the men in depth, so a selection ring
-	# is under the formation rather than over it.
+	var ground_art := TerrainGround.new()
+	ground_art.z_index = -20
+	_view_root.add_child(ground_art)
+	if not ground_art.show_field(ground, biomes, config):
+		var fallback_image := BattleGroundPainter.bake(ground)
+		if fallback_image != null:
+			var sprite := Sprite2D.new()
+			sprite.texture = ImageTexture.create_from_image(fallback_image)
+			sprite.centered = false
+			sprite.scale = Vector2(field.x / float(fallback_image.get_width()),
+				field.y / float(fallback_image.get_height()))
+			sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			sprite.z_index = -20
+			_view_root.add_child(sprite)
+	_battle_scenery = BattleScenery.new()
+	_battle_scenery.z_index = -7
+	_view_root.add_child(_battle_scenery)
+	_battle_scenery.build(_battle_props)
+	_deployment_overlay = BattleDeploymentOverlay.new()
+	_deployment_overlay.z_index = -8
+	_deployment_overlay.configure(field,
+		config.get_float("battle.deploy_depth", 20.0),
+		config.get_float("battle.deploy_margin", 8.0))
+	_deployment_overlay.visible = _deploying
+	_view_root.add_child(_deployment_overlay)
 	var paint := Node2D.new()
 	paint.set_script(load("res://scripts/dev/battle_paint.gd"))
 	paint.z_index = -10
 	_view_root.add_child(paint)
 	_paint = paint
-
+	_overview_overlay = BattleTacticalOverview.new()
+	_overview_overlay.z_index = 6
+	_overview_overlay.visible = false
+	_view_root.add_child(_overview_overlay)
 
 ## A corner panel in the game's own styling, so what the picture is and what it costs can be
 ## read off the screen rather than out of a log.
@@ -3238,30 +3365,164 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 20
 	add_child(layer)
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
-	panel.anchor_left = 1.0
-	panel.anchor_right = 1.0
-	panel.offset_left = -600.0
-	panel.offset_top = 12.0
-	panel.offset_right = -12.0
-	layer.add_child(panel)
-	_label = UiTheme.label("", 13, UiTheme.TEXT)
-	panel.add_child(_label)
-	# One muted line in the corner, and not one pixel more: the keys are real and nothing on screen
-	# said so - the owner's "the controls aren't there yet." The full help panel he had removed stays
-	# removed; this is the whole of the controls UI.
-	var keys := UiTheme.label(
-		"U attack  ·  H hold  ·  L / C / O line, column, loose  ·  WASD pan  ·  wheel zoom  ·  F frame",
-		11, UiTheme.DIM)
-	keys.anchor_top = 1.0
-	keys.anchor_bottom = 1.0
-	keys.offset_left = 12.0
-	keys.offset_top = -30.0
-	keys.offset_right = 480.0
-	keys.offset_bottom = -10.0
-	keys.modulate.a = 0.85
-	layer.add_child(keys)
+
+	# Player-facing command HUD: no performance numbers, diagnostics, or developer filler.
+	_command_bar = BattleCommandBar.new()
+	_command_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_command_bar.offset_left = 16.0
+	_command_bar.offset_right = -16.0
+	_command_bar.offset_top = 14.0
+	_command_bar.offset_bottom = 98.0
+	_command_bar.action_requested.connect(_on_hud_action)
+	layer.add_child(_command_bar)
+
+	# Keep the existing probe telemetry available via F3 for development, not on
+	# the player's campaign battlefield.
+	_diagnostics_panel = PanelContainer.new()
+	_diagnostics_panel.add_theme_stylebox_override(
+		"panel", UiTheme.panel_style(UiTheme.PANEL_DEEP))
+	_diagnostics_panel.anchor_left = 1.0
+	_diagnostics_panel.anchor_right = 1.0
+	_diagnostics_panel.offset_left = -605.0
+	_diagnostics_panel.offset_top = 112.0
+	_diagnostics_panel.offset_right = -16.0
+	_diagnostics_panel.visible = show_battle_diagnostics
+	layer.add_child(_diagnostics_panel)
+	_label = UiTheme.label("", 12, UiTheme.TEXT)
+	_diagnostics_panel.add_child(_label)
+
+	_unit_dock = BattleUnitDock.new()
+	_unit_dock.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_unit_dock.offset_left = 16.0
+	_unit_dock.offset_right = -16.0
+	_unit_dock.offset_top = -123.0
+	_unit_dock.offset_bottom = -18.0
+	_unit_dock.body_chosen.connect(_on_card_chosen)
+	layer.add_child(_unit_dock)
+
+	# Upper-right of the roster, not on top of the cards or the command HUD.
+	_battle_minimap = BattleMinimap.new()
+	_battle_minimap.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_battle_minimap.offset_left = -249.0
+	_battle_minimap.offset_top = -292.0
+	_battle_minimap.offset_right = -16.0
+	_battle_minimap.offset_bottom = -135.0
+	_battle_minimap.navigate_requested.connect(_on_minimap_navigate)
+	layer.add_child(_battle_minimap)
+	if _battle_terrain != null:
+		_battle_minimap.set_terrain(_battle_terrain)
+
+
+## Change camera focus without issuing formation orders.
+func _on_minimap_navigate(world: Vector2) -> void:
+	if _camera == null:
+		return
+	_follow_action = false
+	_camera.position = _iso(Vector2(
+		clampf(world.x, 0.0, field.x), clampf(world.y, 0.0, field.y)))
+
+
+func _toggle_tactical_view() -> void:
+	if _zoom_target <= ZOOM_MIN + 0.01:
+		_zoom_target = 1.0
+	else:
+		_zoom_target = ZOOM_MIN
+		_camera.position = Vector2.ZERO
+	_follow_action = false
+
+
+func _on_hud_action(action: String) -> void:
+	match action:
+		"hold":
+			_order_stance(_living_selection(), true)
+		"engage":
+			_order_stance(_living_selection(), false)
+		"line", "column", "loose":
+			_set_formation(_living_selection(), action)
+		"map":
+			_toggle_tactical_view()
+		"pause":
+			_clock_paused = not _clock_paused
+	_refresh_command_ui()
+
+## Current LOD is independent of animation, order state or rendering FPS.
+func _current_tactical_lod() -> int:
+	if _camera_zoom <= ZOOM_FULL_MAP_THRESHOLD:
+		return 0
+	if _camera_zoom <= ZOOM_STANDARDS_THRESHOLD:
+		return 1
+	return 2
+
+
+## UI-only snapshot. Neither overview mode nor the dock modifies the combat state.
+func _refresh_command_ui() -> void:
+	if _unit_dock == null and _overview_overlay == null:
+		return
+	_ui_last_snapshot_tick = _tick
+	_ui_last_snapshot_lod = _current_tactical_lod()
+	var formations: Array[Dictionary] = []
+	for b in _bodies:
+		var files := maxf(1.0, _body_state[b * 8 + 4])
+		var ranks := maxf(1.0, _body_state[b * 8 + 5])
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		formations.append({
+			"id": b,
+			"side": _side_of_body(b),
+			"name": _body_display_name(b),
+			"type_key": _body_display_name(b).to_snake_case(),
+			"order": _order_name(_order[b]),
+			"alive": _body_alive[b],
+			"started": _body_started[b] if b < _body_started.size() else _body_alive[b],
+			"shape": _body_shape_kind[b] if b < _body_shape_kind.size() else "line",
+			"anchor": _anchor_of(b),
+			"forward": _forward_of(b),
+			"half_depth": maxf(3.0, (ranks - 1.0) * spacing * 0.5) + 3.0,
+			"half_span": maxf(3.0, (files - 1.0) * spacing * 0.5) + 3.0,
+		})
+	var chosen := _living_selection()
+	if _unit_dock != null:
+		_unit_dock.update_bodies(formations, chosen)
+	var overview := _camera_zoom <= ZOOM_FULL_MAP_THRESHOLD
+	if _command_bar != null:
+		_command_bar.set_battle_status(_deploying, _alive.x, _alive.y,
+			chosen.size(), overview, _clock_paused)
+	if _battle_minimap != null and _camera != null:
+		var full_span := Vector2(get_viewport().get_visible_rect().size) / maxf(
+			0.001, _picture_scale())
+		_battle_minimap.set_battle_state(formations, chosen,
+			_camera.position + field * 0.5, full_span)
+	if _overview_overlay != null:
+		# Three readable LODs: full soldier detail, medium unit standards,
+		# and full-map formation blocks. The simulation never changes LOD.
+		var show_standards := _camera_zoom <= ZOOM_STANDARDS_THRESHOLD
+		_overview_overlay.visible = show_standards
+		if show_standards:
+			var world_label_size := clampi(int(13.0 / maxf(_picture_scale(), 0.1)), 2, 28)
+			_overview_overlay.set_formations(formations, chosen,
+				world_label_size, overview)
+	if _sprites_node != null:
+		_sprites_node.visible = not overview
+	if _disc_node != null:
+		_disc_node.visible = not overview
+	if _bar_node != null:
+		_bar_node.visible = not overview
+	if _arrow_node != null:
+		_arrow_node.visible = not overview
+	for line in _outlines:
+		line.visible = not overview
+
+
+func _on_card_chosen(body_id: int, additive: bool) -> void:
+	if body_id < 0 or body_id >= _bodies or not _is_mine(body_id) or _body_alive[body_id] <= 0:
+		return
+	if not additive:
+		_selected.clear()
+	if _selected.has(body_id):
+		if additive:
+			_selected.erase(body_id)
+	else:
+		_selected.append(body_id)
+	_announce_selection()
 
 
 func _save_shot(index: int) -> void:
@@ -3356,6 +3617,13 @@ var _box_from := Vector2.ZERO
 var _box_to := Vector2.ZERO
 var _drag_body := -1
 var _drag_grab := Vector2.ZERO
+## A right-drag previews destinations without applying commands until mouse release.
+var _command_preview: Array[Dictionary] = []
+## Explicit formation headings. A player-placed body keeps its ordered orientation
+## while moving and after arrival; an attack/engage order gives target-facing back.
+var _ordered_facing: Dictionary = {}
+## The width a unit last took when deployed by frontage drag, kept per body.
+var _preferred_line_files: Dictionary = {}
 ## The line's own width in files, as deployed. A formation ordered into a column and back into a
 ## line has to become the line it was, which means remembering the width it was given rather than
 ## deriving a new one from however many men are left standing.
@@ -3479,6 +3747,8 @@ func _body_at(world: Vector2) -> int:
 				best = b
 	if best >= 0:
 		return best
+	if _camera_zoom <= ZOOM_FULL_MAP_THRESHOLD:
+		return -1
 	# Nothing under the pointer: offer the nearest formation within reach of it, so a click just off
 	# a line still picks the line up rather than the grass behind it.
 	for b in _bodies:
@@ -3522,6 +3792,8 @@ func _selection_names() -> String:
 
 func _announce_selection() -> void:
 	print("gpu crowd: selected %s" % _selection_names())
+	_update_marks()
+	_refresh_command_ui()
 
 
 ## The command line on the panel: whose formations are in the player's hand, how many are in his
@@ -3541,7 +3813,7 @@ func _command_line() -> String:
 ## The right hand's command: an enemy formation under the pointer is an order to attack it,
 ## anything else is an order to march there. One button, two orders, decided by what is under it -
 ## which is why the player never has to learn a modifier.
-func _right_click(world: Vector2) -> void:
+func _right_click(world: Vector2, queue_order: bool = false) -> void:
 	var mine := _living_selection()
 	if mine.is_empty():
 		return
@@ -3549,20 +3821,42 @@ func _right_click(world: Vector2) -> void:
 	if target >= 0 and not _is_mine(target):
 		_order_attack(mine, target)
 	elif target >= 0 and _is_mine(target):
-		# Pointing at one's own formation with a selection in hand reads as "form up on that
-		# one", not "attack my own men".
-		_order_move(mine, _anchor_of(target))
+		# Shift-right-click queues a destination onto each formation's existing
+		# route; normal right-click replaces the route.
+		_order_move(mine, _anchor_of(target), queue_order)
 	else:
-		_order_move(mine, world)
+		_order_move(mine, world, queue_order)
 
 
 func _click_select(world: Vector2, add: bool) -> void:
 	var hit := _body_at(world)
 	if not add:
 		_selected.clear()
-	if _is_mine(hit) and not _selected.has(hit):
-		_selected.append(hit)
+	if _is_mine(hit):
+		if add and _selected.has(hit):
+			_selected.erase(hit)
+		elif not _selected.has(hit):
+			_selected.append(hit)
 	_announce_selection()
+
+
+## Rotated-rectangle against drag-box overlap, using the four separating axes.
+## Selecting any visible part of a formation selects that formation, not just its centre.
+func _body_intersects_box(b: int, rect: Rect2) -> bool:
+	var centre := _anchor_of(b)
+	var forward := _forward_of(b).normalized()
+	var across := Vector2(-forward.y, forward.x)
+	var spacing := maxf(0.5, _body_state[b * 8 + 6])
+	var half_depth := maxf(3.0, (_body_state[b * 8 + 5] - 1.0) * spacing * 0.5) + 3.0
+	var half_span := maxf(3.0, (_body_state[b * 8 + 4] - 1.0) * spacing * 0.5) + 3.0
+	var box_centre := rect.position + rect.size * 0.5
+	var delta := centre - box_centre
+	for axis in [Vector2.RIGHT, Vector2.DOWN, forward, across]:
+		var body_radius := absf(axis.dot(forward)) * half_depth + absf(axis.dot(across)) * half_span
+		var box_radius := absf(axis.x) * rect.size.x * 0.5 + absf(axis.y) * rect.size.y * 0.5
+		if absf(delta.dot(axis)) > body_radius + box_radius:
+			return false
+	return true
 
 
 func _box_select(from: Vector2, to: Vector2, add: bool) -> void:
@@ -3572,7 +3866,7 @@ func _box_select(from: Vector2, to: Vector2, add: bool) -> void:
 	for b in _bodies:
 		if not _is_mine(b) or _body_alive[b] <= 0:
 			continue
-		if rect.has_point(_anchor_of(b)) and not _selected.has(b):
+		if _body_intersects_box(b, rect) and not _selected.has(b):
 			_selected.append(b)
 	_announce_selection()
 
@@ -3597,17 +3891,169 @@ func _group_recall(digit: int) -> void:
 
 
 ## The player's order to move: the same ADVANCE a scripted event gives, to a point on the ground.
-func _order_move(bodies: Array, point: Vector2) -> void:
-	var moved := 0
-	for b in bodies:
+func _command_bodies(ids: Array) -> Array[Dictionary]:
+	var bodies: Array[Dictionary] = []
+	for b in ids:
 		if not _is_mine(b) or _body_alive[b] <= 0:
 			continue
-		_order[b] = Order.ADVANCE
-		_order_point[b] = point
-		_hold_ordered[b] = 0
-		moved += 1
-	if moved > 0:
-		print("gpu crowd: %s ordered to (%.0f, %.0f)" % [_selection_names(), point.x, point.y])
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		bodies.append({
+			"id": b, "anchor": _anchor_of(b), "forward": _forward_of(b),
+			"files": maxi(1, int(_body_state[b * 8 + 4])),
+			"spacing": spacing, "members": maxi(_body_alive[b],
+				_body_started[b] if b < _body_started.size() else 1)
+		})
+	return bodies
+
+
+func _drag_plan(start_screen: Vector2, end_screen: Vector2) -> Array[Dictionary]:
+	return BattlePlacementPlanner.frontage(_command_bodies(_living_selection()),
+		_uniso(start_screen), _uniso(end_screen), field)
+
+
+## Right click is a group translation: every body retains its relative location.
+func _order_move(bodies: Array, point: Vector2, queue_order: bool = false) -> void:
+	var commands := _command_bodies(bodies)
+	if queue_order:
+		# Preserve relative group layout at the end of the preceding order.
+		for body in commands:
+			var b := int(body.get("id", -1))
+			if b >= 0 and b < _bodies and _order[b] == Order.ADVANCE:
+				body["anchor"] = _order_point[b]
+	var plan := BattlePlacementPlanner.translated(commands, point, field)
+	_apply_placement(plan, queue_order)
+
+
+func _clear_navigation(b: int) -> void:
+	_body_routes.erase(b)
+	_body_route_cursor.erase(b)
+
+
+func _navigation_is_final(b: int) -> bool:
+	if not _body_routes.has(b):
+		return true
+	var route: PackedVector2Array = _body_routes[b]
+	return int(_body_route_cursor.get(b, 0)) >= route.size() - 1
+
+
+func _navigation_waypoint(b: int, current: Vector2) -> Vector2:
+	if not _body_routes.has(b):
+		return _order_point[b]
+	var route: PackedVector2Array = _body_routes[b]
+	if route.is_empty():
+		return _order_point[b]
+	var index := clampi(int(_body_route_cursor.get(b, 0)), 0, route.size() - 1)
+	var tolerance := ARRIVED
+	if _battle_terrain != null:
+		tolerance = maxf(ARRIVED, 0.15 * _battle_terrain.cell_size)
+	while index < route.size() - 1 and current.distance_to(route[index]) <= tolerance:
+		index += 1
+	_body_route_cursor[b] = index
+	return route[index]
+
+
+func _set_navigation(b: int, destination: Vector2, append_order: bool = false,
+		requested_files: int = -1) -> bool:
+	var can_append := append_order and _order[b] == Order.ADVANCE
+	var old_route: PackedVector2Array = _body_routes.get(b, PackedVector2Array())
+	var starting_point := _order_point[b] if can_append else _anchor_of(b)
+	var route := PackedVector2Array()
+	if _formation_navigator == null or not _formation_navigator.is_ready():
+		# Only the developer probe uses this fallback, not valid campaign terrain.
+		route.append(destination)
+	else:
+		# Plan using the real unit's proposed files, ranks, spacing and full
+		# original troop slot count. Never squeeze a 20-file line through an
+		# opening only one soldier wide, and never mutate width on a bad order.
+		var total := maxi(1, _body_started[b])
+		var files := clampi(requested_files if requested_files > 0 else
+			int(_body_state[b * 8 + 4]), 1, total)
+		var ranks := ceili(float(total) / float(files))
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		var clearance := BattleFormationNavigator.footprint_radius(
+			files, ranks, spacing)
+		route = _formation_navigator.route(starting_point, destination, clearance)
+	if route.is_empty():
+		# Failed path searches must not delete an existing valid movement order.
+		push_warning("battle formation %d: no traversable path to order" % b)
+		return false
+	if can_append and not old_route.is_empty():
+		# Avoid unbounded player-generated paths that make the world overlay
+		# and order queue too expensive during large army battles.
+		if old_route.size() + route.size() > 512:
+			push_warning("battle formation %d: waypoints at queue limit" % b)
+			return false
+		var cursor := int(_body_route_cursor.get(b, 0))
+		var combined := old_route.duplicate()
+		combined.append_array(route)
+		_body_routes[b] = combined
+		_body_route_cursor[b] = cursor
+	else:
+		_body_routes[b] = route
+		_body_route_cursor[b] = 0
+	var assigned: PackedVector2Array = _body_routes[b]
+	_order_point[b] = assigned[assigned.size() - 1]
+	return true
+
+
+func _apply_placement(plan: Array[Dictionary], queue_order: bool = false) -> void:
+	var changed := 0
+	for placement in plan:
+		var b := int(placement.get("id", -1))
+		if not _is_mine(b) or _body_alive[b] <= 0:
+			continue
+		var target: Vector2 = placement.get("anchor", _anchor_of(b))
+		var facing: Vector2 = placement.get("forward", _forward_of(b))
+		var files := maxi(1, int(placement.get("files", _body_state[b * 8 + 4])))
+		if not _deploying:
+			if not _set_navigation(b, target, queue_order, files):
+				continue
+		# Only mutate width/facing after the path has been accepted.
+		if files != int(_body_state[b * 8 + 4]):
+			_resize_body_frontage(b, files)
+			_preferred_line_files[b] = files
+		_ordered_facing[b] = facing.angle()
+		if _deploying:
+			_place_body(b, target)
+			_heading[b] = facing.angle()
+			_body_state[b * 8 + 2] = facing.x
+			_body_state[b * 8 + 3] = facing.y
+		else:
+			_order[b] = Order.ADVANCE
+			_hold_ordered[b] = 0
+		changed += 1
+	if changed > 0:
+		print("gpu crowd: %d formation(s) placed independently" % changed)
+
+
+## A frontage drag changes files/ranks without merging units or teleporting them.
+## The shader moves each soldier into the new slot using its normal walk logic.
+func _resize_body_frontage(b: int, requested_files: int) -> void:
+	var members := 0
+	for i in agents:
+		if _man_body[i] == b:
+			members += 1
+	if members == 0:
+		return
+	var files := clampi(requested_files, 1, members)
+	var ranks := ceili(float(members) / float(files))
+	if files == int(_body_state[b * 8 + 4]):
+		return
+	var bytes := rd.buffer_get_data(buf_attrs)
+	var at := 0
+	for i in agents:
+		if _man_body[i] != b:
+			continue
+		var lane := at % files
+		var rank := at / files
+		_man_file[i] = lane
+		_man_rank[i] = rank
+		bytes.encode_u32(i * 16 + 4, lane)
+		bytes.encode_u32(i * 16 + 8, rank)
+		at += 1
+	rd.buffer_update(buf_attrs, 0, bytes.size(), bytes)
+	_body_state[b * 8 + 4] = float(files)
+	_body_state[b * 8 + 5] = float(ranks)
 
 
 ## The player's order to attack, which outranks whatever the body would have chosen for itself -
@@ -3622,6 +4068,8 @@ func _order_attack(bodies: Array, target: int) -> void:
 		_order[b] = Order.ENGAGE
 		_order_target[b] = target
 		_hold_ordered[b] = 0
+		_clear_navigation(b)
+		_ordered_facing.erase(b)
 		sent += 1
 	if sent > 0:
 		print("gpu crowd: %s ordered to attack %s" % [_selection_names(), _body_name(target)])
@@ -3634,8 +4082,10 @@ func _order_stance(bodies: Array, hold: bool) -> void:
 			continue
 		_order[b] = Order.HOLD if hold else Order.ENGAGE
 		_hold_ordered[b] = 1 if hold else 0
+		_clear_navigation(b)
 		if not hold:
 			_order_target[b] = -1
+			_ordered_facing.erase(b)
 		set += 1
 	if set > 0:
 		print("gpu crowd: %s told to %s" % [_selection_names(), "hold" if hold else "engage at will"])
@@ -3673,7 +4123,9 @@ func _relay_body(b: int, shape: Dictionary) -> bool:
 			count += 1
 	if count <= 0:
 		return false
-	var wide := float(maxi(2, _line_files if _line_files > 0 else _body_state[b * 8 + 4]))
+	var restored := int(_preferred_line_files.get(b,
+		_line_files if _line_files > 0 else _body_state[b * 8 + 4]))
+	var wide := float(maxi(2, restored))
 	var cap := float(shape.get("files_cap", 999.0))
 	var wanted := wide * cap if cap < 1.0 else minf(wide, cap)
 	var files := int(clampf(round(wanted), 2.0, wide))
@@ -3729,13 +4181,52 @@ func _update_marks() -> void:
 		var from := _anchor_of(b)
 		match _order[b]:
 			Order.ADVANCE:
-				lines.append([from, _order_point[b], ORDER_COLOUR, 1.1, 3.0])
+				# Draw the actual obstacle-aware route, not a misleading
+				# straight line through trees and blocked terrain.
+				var points: PackedVector2Array = _body_routes.get(b,
+					PackedVector2Array())
+				var previous := from
+				if points.is_empty():
+					lines.append([from, _order_point[b], ORDER_COLOUR, 1.1, 3.0])
+				else:
+					var cursor := clampi(int(_body_route_cursor.get(b, 0)),
+						0, points.size() - 1)
+					for step in range(cursor, points.size()):
+						lines.append([previous, points[step], ORDER_COLOUR,
+							1.1, 3.0])
+						previous = points[step]
 			Order.ENGAGE:
 				var target := _order_target[b]
 				if target >= 0 and target < _bodies and _body_alive[target] > 0:
 					lines.append([from, _anchor_of(target), ENEMY_COLOUR, 1.1, 3.0])
 	if _box_active:
 		rects.append([Rect2(_uniso(_box_from), _uniso(_box_to) - _uniso(_box_from)).abs(), BOX_COLOUR, 0.9, 0.10])
+	# Ghost formation frames during right-drag, based on the eventual actual slots.
+	for placement in _command_preview:
+		var b := int(placement.get("id", -1))
+		if b < 0 or b >= _bodies:
+			continue
+		var centre: Vector2 = placement.get("anchor", Vector2.ZERO)
+		var forward: Vector2 = placement.get("forward", Vector2.RIGHT)
+		var across := Vector2(-forward.y, forward.x)
+		var files := maxi(1, int(placement.get("files", 1)))
+		var members := maxi(1, _body_started[b] if b < _body_started.size()
+			else _body_alive[b])
+		var ranks := ceili(float(members) / float(files))
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		var depth := (float(ranks - 1) * spacing) * 0.5 + 2.5
+		var span := (float(files - 1) * spacing) * 0.5 + 2.5
+		var corners := [
+			centre + forward * depth + across * span,
+			centre + forward * depth - across * span,
+			centre - forward * depth - across * span,
+			centre - forward * depth + across * span
+		]
+		for i in corners.size():
+			lines.append([corners[i], corners[(i + 1) % corners.size()],
+				SELECT_COLOUR, 0.9, 0.0])
+		lines.append([centre, centre + forward * (depth + 3.0),
+			SELECT_COLOUR, 0.75, 0.0])
 	_paint.lines = lines
 	_paint.rects = rects
 	_paint.queue_redraw()
