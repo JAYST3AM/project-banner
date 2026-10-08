@@ -45,14 +45,27 @@ static func is_blocked(mask: PackedInt32Array, point: Vector2) -> bool:
 	return mask[HEADER_INTS + row * columns + col] != 0
 
 
-static func slide(mask: PackedInt32Array, origin: Vector2,
+## For one move, never cross more than one-third of a terrain cell without
+## checking collision. A fixed upper bound prevents malicious or broken
+## displacement from creating an unbounded GPU loop.
+const MAX_SUBSTEPS := 24
+const SUBSTEP_CELL_FRACTION := 0.33
+
+
+## CPU reference for the shader. Check both axial neighbours on diagonal
+## moves, even if the diagonal destination itself is technically traversable:
+## that prevents soldiers from walking through the *corner* of a wall.
+static func _slide_step(mask: PackedInt32Array, origin: Vector2,
 		proposed: Vector2) -> Vector2:
-	if not is_blocked(mask, proposed):
-		return proposed
 	var x_only := Vector2(proposed.x, origin.y)
 	var y_only := Vector2(origin.x, proposed.y)
 	var x_safe := not is_blocked(mask, x_only)
 	var y_safe := not is_blocked(mask, y_only)
+	var destination_safe := not is_blocked(mask, proposed)
+	var diagonal := not is_equal_approx(proposed.x, origin.x) and \
+		not is_equal_approx(proposed.y, origin.y)
+	if destination_safe and (not diagonal or (x_safe and y_safe)):
+		return proposed
 	if x_safe and y_safe:
 		return x_only if absf(proposed.x - origin.x) >= absf(
 			proposed.y - origin.y) else y_only
@@ -61,3 +74,26 @@ static func slide(mask: PackedInt32Array, origin: Vector2,
 	if y_safe:
 		return y_only
 	return origin
+
+
+static func slide(mask: PackedInt32Array, origin: Vector2,
+		proposed: Vector2) -> Vector2:
+	if mask.size() < HEADER_INTS + 1 or mask[3] == 0:
+		return proposed
+	if is_blocked(mask, origin):
+		# An invalid spawn is not repaired by teleporting through a rock.
+		# Such a deployment should be reported and corrected at the source.
+		return origin
+	var stride := float(mask[2]) / float(MILLIMETRES)
+	var distance := origin.distance_to(proposed)
+	var steps := maxi(1, ceili(distance / maxf(0.01,
+		stride * SUBSTEP_CELL_FRACTION)))
+	if steps > MAX_SUBSTEPS:
+		# Every sampled step must remain short enough to detect obstacles.
+		# Reject excessively long displacements rather than tunnelling.
+		return origin
+	var delta := (proposed - origin) / float(steps)
+	var position := origin
+	for i in steps:
+		position = _slide_step(mask, position, position + delta)
+	return position
