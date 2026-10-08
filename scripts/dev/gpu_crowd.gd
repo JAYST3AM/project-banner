@@ -741,6 +741,11 @@ var _unit_dock: BattleUnitDock = null
 var _battle_minimap: BattleMinimap = null
 var _battle_terrain: BattlefieldTerrain = null
 var _battle_scenery: BattleScenery = null
+var _formation_navigator: BattleFormationNavigator = null
+## Routes are calculated only when an order arrives. Each formation advances a
+## waypoint cursor; there is no A* running per frame/per soldier.
+var _body_routes: Dictionary = {}
+var _body_route_cursor: Dictionary = {}
 var _deployment_overlay: BattleDeploymentOverlay = null
 var _focus := Vector2.ZERO
 ## The health bars and the formation boxes: two instances a soldier and one line a body, the
@@ -1602,14 +1607,18 @@ func _advance_bodies() -> void:
 			Order.HOLD:
 				pass
 			Order.ADVANCE:
-				var to_point := _order_point[b] - mine
+				# Follow precomputed terrain corners; don't cut a straight line
+				# through rivers, cliffs, scenery obstacles or slow ground.
+				var waypoint := _navigation_waypoint(b, mine)
+				var to_point := waypoint - mine
 				var remaining := to_point.length()
-				if remaining <= ARRIVED:
+				if _navigation_is_final(b) and remaining <= ARRIVED:
 					_order[b] = Order.HOLD
 					_hold_ordered[b] = 1
+					_clear_navigation(b)
 					print("gpu crowd: scripted | %s arrived at (%.0f, %.0f) on tick %d and holds there" % [
 						_body_name(b), mine.x, mine.y, _tick])
-				else:
+				elif remaining > 0.0001:
 					move = (to_point / remaining) * minf(remaining, rate * DT)
 			Order.ENGAGE:
 				# Never walk through our own line. A body of archers standing behind the melee used to
@@ -3285,8 +3294,12 @@ func _build_ground() -> void:
 	var deploy_margin := config.get_float("battle.deploy_margin", 8.0)
 	var no_props_at_deployment := BattleDeploymentOverlay.zones(
 		field, deploy_depth, deploy_margin)
-	var visual_props := TerrainProps.build(ground, biomes, ground.terrain_seed,
-		ground.generation_version, config, no_props_at_deployment)
+	# Use the terrain's own API so the *same* visible blocking props also
+	# appear as obstacles to formation-anchor routes. GPU soldier collision
+	# against prop geometry remains a separate future integration.
+	var visual_props := ground.build_props(config, biomes, no_props_at_deployment)
+	_formation_navigator = BattleFormationNavigator.new()
+	_formation_navigator.setup(ground)
 	_battle_scenery = BattleScenery.new()
 	_battle_scenery.z_index = -7
 	_view_root.add_child(_battle_scenery)
@@ -3854,6 +3867,50 @@ func _order_move(bodies: Array, point: Vector2) -> void:
 	_apply_placement(plan)
 
 
+func _clear_navigation(b: int) -> void:
+	_body_routes.erase(b)
+	_body_route_cursor.erase(b)
+
+
+func _navigation_is_final(b: int) -> bool:
+	if not _body_routes.has(b):
+		return true
+	var route: PackedVector2Array = _body_routes[b]
+	return int(_body_route_cursor.get(b, 0)) >= route.size() - 1
+
+
+func _navigation_waypoint(b: int, current: Vector2) -> Vector2:
+	if not _body_routes.has(b):
+		return _order_point[b]
+	var route: PackedVector2Array = _body_routes[b]
+	if route.is_empty():
+		return _order_point[b]
+	var index := clampi(int(_body_route_cursor.get(b, 0)), 0, route.size() - 1)
+	var tolerance := maxf(ARRIVED, 0.15 * _battle_terrain.cell_size) \
+		if _battle_terrain != null else ARRIVED
+	while index < route.size() - 1 and current.distance_to(route[index]) <= tolerance:
+		index += 1
+	_body_route_cursor[b] = index
+	return route[index]
+
+
+func _set_navigation(b: int, destination: Vector2) -> bool:
+	_clear_navigation(b)
+	if _formation_navigator == null or not _formation_navigator.is_ready():
+		# Legacy developer probe fallback: no valid terrain means existing
+		# straight-line movement, not an empty route that silently stalls.
+		_order_point[b] = destination
+		return true
+	var route := _formation_navigator.route(_anchor_of(b), destination)
+	if route.is_empty():
+		push_warning("battle formation %d: no traversable path to order" % b)
+		return false
+	_body_routes[b] = route
+	_body_route_cursor[b] = 0
+	_order_point[b] = route[route.size() - 1]
+	return true
+
+
 func _apply_placement(plan: Array[Dictionary]) -> void:
 	var changed := 0
 	for placement in plan:
@@ -3873,8 +3930,9 @@ func _apply_placement(plan: Array[Dictionary]) -> void:
 			_body_state[b * 8 + 2] = facing.x
 			_body_state[b * 8 + 3] = facing.y
 		else:
+			if not _set_navigation(b, target):
+				continue
 			_order[b] = Order.ADVANCE
-			_order_point[b] = target
 			_hold_ordered[b] = 0
 		changed += 1
 	if changed > 0:
@@ -3923,6 +3981,7 @@ func _order_attack(bodies: Array, target: int) -> void:
 		_order[b] = Order.ENGAGE
 		_order_target[b] = target
 		_hold_ordered[b] = 0
+		_clear_navigation(b)
 		_ordered_facing.erase(b)
 		sent += 1
 	if sent > 0:
@@ -3936,6 +3995,7 @@ func _order_stance(bodies: Array, hold: bool) -> void:
 			continue
 		_order[b] = Order.HOLD if hold else Order.ENGAGE
 		_hold_ordered[b] = 1 if hold else 0
+		_clear_navigation(b)
 		if not hold:
 			_order_target[b] = -1
 			_ordered_facing.erase(b)
