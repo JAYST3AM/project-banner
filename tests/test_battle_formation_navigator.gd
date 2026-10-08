@@ -46,12 +46,20 @@ func _test_route_avoids_obstacle_wall() -> void:
 	check(route.size() > 2, "a route needs intermediate turns through the wall opening")
 	check(navigator.route_avoids_obstacles(route), "each waypoint remains on passable ground")
 	var crossed_near_gap := false
+	var previous := _point(terrain, 2, 2)
 	for point in route:
-		var cell := terrain.cell_index_at(point)
-		if cell >= 0 and terrain.cell_col_at(point) == wall 				and terrain.cell_row_at(point) == opening:
-			crossed_near_gap = true
-	check(crossed_near_gap, "route passes through the actual opening")
-
+		var count := maxi(1, ceili(previous.distance_to(point) /
+			maxf(0.2, terrain.cell_size * 0.25)))
+		for i in range(count + 1):
+			var sample := previous.lerp(point, float(i) / float(count))
+			var cell := terrain.cell_index_at(sample)
+			if cell >= 0:
+				if terrain.cell_col_at(sample) == wall and terrain.cell_row_at(sample) == opening:
+					crossed_near_gap = true
+				check(terrain.is_cell_traversable(cell),
+					"sampled route segment avoids blocked cells")
+		previous = point
+	check(crossed_near_gap, "route crosses through the actual wall opening")
 
 func _test_route_is_deterministic() -> void:
 	section("identical battle state produces identical movement orders")
