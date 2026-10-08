@@ -120,7 +120,7 @@ func _test_the_fields_own_geometry_clears_the_sprite() -> void:
 	greater(SoldierField.FOOT_LIFT, 0.0, "the sprite's feet are lifted above the soldier's position")
 	var art := UnitArt.load_if_present()
 	if art == null:
-		check(true, "absent art is a legitimate outcome, not a failure")
+		check(false, "the unit atlas fixture is MISSING: this suite exists to test atlas behaviour, so absence must fail rather than let the suite shed its assertions (TI-1)")
 		return
 	var field := SoldierField.new()
 	field.art = art
@@ -165,7 +165,7 @@ func _test_the_precomputed_tables_hold_together_when_the_art_is_present() -> voi
 	section("the precomputed per-character tables, when the atlas is in this tree")
 	var art := UnitArt.load_if_present()
 	if art == null:
-		check(true, "absent art is a legitimate outcome, not a failure")
+		check(false, "the unit atlas fixture is MISSING: this suite exists to test atlas behaviour, so absence must fail rather than let the suite shed its assertions (TI-1)")
 		return
 	for key in UnitArt.UNIT_KEYS:
 		var data := art.renderer_data(key, 30.0)
@@ -212,7 +212,7 @@ func _test_the_instance_write_follows_the_layout() -> void:
 	section("what one packed sprite instance actually contains")
 	var art := UnitArt.load_if_present()
 	if art == null:
-		check(true, "absent art is a legitimate outcome, not a failure")
+		check(false, "the unit atlas fixture is MISSING: this suite exists to test atlas behaviour, so absence must fail rather than let the suite shed its assertions (TI-1)")
 		return
 	var field := SoldierField.new()
 	field.art = art
@@ -259,7 +259,7 @@ func _test_the_writer_matches_the_pure_functions() -> void:
 	section("the fused writer against the pure functions")
 	var art := UnitArt.load_if_present()
 	if art == null:
-		check(true, "absent art is a legitimate outcome, not a failure")
+		check(false, "the unit atlas fixture is MISSING: this suite exists to test atlas behaviour, so absence must fail rather than let the suite shed its assertions (TI-1)")
 		return
 	var field := SoldierField.new()
 	field.art = art
@@ -369,8 +369,8 @@ func _test_the_atlas_table_holds_together_when_the_art_is_present() -> void:
 	section("the atlas table, when the pack is on this machine")
 	var art := UnitArt.load_if_present()
 	if art == null:
-		print("    (the atlas is not present: the field draws its discs, and that path is unchanged)")
-		check(true, "absent art is a legitimate outcome, not a failure")
+		print("    (the atlas is MISSING from this tree - this suite cannot test atlas behaviour without it)")
+		check(false, "the unit atlas fixture is MISSING: this suite exists to test atlas behaviour, so absence must fail rather than let the suite shed its assertions (TI-1)")
 		return
 	greater(art.atlas_size().x, 0.0, "the atlas has a width")
 	greater(art.atlas_size().y, 0.0, "and a height")
