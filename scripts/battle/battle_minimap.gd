@@ -93,19 +93,28 @@ static func marker_ink(friendly: bool) -> Color:
 
 
 static func marker_outline(friendly: bool, chosen: bool) -> Color:
-	return SELECTION if chosen else marker_ink(friendly).lightened(0.35)
+	## The selection colour is friendly-only and enforced here rather than trusted from the caller: a hostile
+	## formation must never be highlighted, whatever combination of arguments reaches this function.
+	return SELECTION if (chosen and friendly) else marker_ink(friendly).lightened(0.35)
 
 
 static func marker_tip_colour(friendly: bool, chosen: bool) -> Color:
-	return SELECTION if chosen else marker_ink(friendly).lightened(0.45)
+	return SELECTION if (chosen and friendly) else marker_ink(friendly).lightened(0.45)
 
 
 static func viewport_rect(camera_centre: Vector2, camera_span: Vector2, field: Vector2,
 		rect: Rect2) -> Rect2:
 	## The camera's real footprint, so both a pan and a zoom move it - unlike a fixed crosshair.
+	## The minimum SIZE is applied first and the POSITION is clamped afterwards, in that order on purpose:
+	## clamping first would let a small footprint be pushed along the edge by its own width, and clamping a
+	## corner-only position would let the rest of the rectangle hang outside the map.
 	var low := world_to_map(camera_centre - camera_span * 0.5, field, rect)
 	var high := world_to_map(camera_centre + camera_span * 0.5, field, rect)
-	return Rect2(low, (high - low).max(MIN_VIEWPORT_PX))
+	var footprint := Rect2(low, (high - low).max(MIN_VIEWPORT_PX))
+	footprint.position = Vector2(
+		clampf(footprint.position.x, rect.position.x, rect.end.x - footprint.size.x),
+		clampf(footprint.position.y, rect.position.y, rect.end.y - footprint.size.y))
+	return footprint
 
 
 func _map_rect() -> Rect2:

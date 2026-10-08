@@ -22,6 +22,8 @@ func run() -> void:
 	_test_navigation_clicks_and_drags()
 	_test_resize_behaviour()
 	_test_markers_stay_inside_the_map_at_the_edges()
+	_test_the_camera_footprint_never_leaves_the_map()
+	_test_a_hostile_formation_can_never_be_highlighted()
 	_test_a_drag_started_outside_the_map_never_navigates()
 	_test_functional_without_terrain_imagery()
 	_complete()
@@ -225,6 +227,50 @@ func _test_markers_stay_inside_the_map_at_the_edges() -> void:
 		"a marker in open field keeps its full width, so the clamp only bites at the boundary")
 	check(absf(centred.size.y - span * 2.0 * (rect.size.y / FIELD.y)) < 0.01,
 		"and keeps its full height")
+
+
+func _test_the_camera_footprint_never_leaves_the_map() -> void:
+	section("a camera footprint stays wholly inside the map, at every corner and at any zoom")
+	var rect := _rect()
+	var corners := [Vector2.ZERO, Vector2(FIELD.x, 0.0), Vector2(0.0, FIELD.y), FIELD]
+	var spans := [Vector2.ZERO, Vector2(4.0, 4.0), Vector2(12.0, 8.0)]
+	for corner in corners:
+		for span in spans:
+			var footprint := BattleMinimap.viewport_rect(corner, span, FIELD, rect)
+			var inside_left := footprint.position.x >= rect.position.x - 0.01
+			var inside_top := footprint.position.y >= rect.position.y - 0.01
+			var inside_right := footprint.end.x <= rect.end.x + 0.01
+			var inside_bottom := footprint.end.y <= rect.end.y + 0.01
+			check(inside_left and inside_top and inside_right and inside_bottom,
+				"a camera at %s with span %s keeps its whole footprint inside the map" % [
+					str(corner), str(span)])
+	for span in [FIELD, FIELD * 2.0, FIELD * 8.0]:
+		var footprint := BattleMinimap.viewport_rect(FIELD * 0.5, span, FIELD, rect)
+		check(footprint.position.is_equal_approx(rect.position)
+			and footprint.end.is_equal_approx(rect.end),
+			"a camera span of %s covers the map and no more" % str(span))
+	var corner_cam := BattleMinimap.viewport_rect(Vector2(FIELD.x, FIELD.y * 0.5), Vector2.ZERO,
+		FIELD, rect)
+	check(corner_cam.size.is_equal_approx(BattleMinimap.MIN_VIEWPORT_PX),
+		"a zero-span camera at the map's right edge keeps its minimum size rather than being squashed")
+	check(corner_cam.end.y <= rect.end.y + 0.01,
+		"and is moved inside rather than allowed to hang past the edge")
+	check(corner_cam.position.x < rect.end.x, "so the whole footprint sits within the map")
+
+
+func _test_a_hostile_formation_can_never_be_highlighted() -> void:
+	section("the helpers refuse to highlight a hostile formation, whatever a caller passes")
+	check(BattleMinimap.marker_outline(false, true) != BattleMinimap.SELECTION,
+		"marker_outline(false, true) does not return the selection colour")
+	equal(BattleMinimap.marker_outline(false, true), BattleMinimap.marker_ink(false).lightened(0.35),
+		"it returns the hostile outline instead")
+	check(BattleMinimap.marker_tip_colour(false, true) != BattleMinimap.SELECTION,
+		"marker_tip_colour(false, true) does not return the selection colour")
+	equal(BattleMinimap.marker_tip_colour(false, true), BattleMinimap.marker_ink(false).lightened(0.45),
+		"it returns the hostile tip colour instead")
+	equal(BattleMinimap.marker_outline(true, true), BattleMinimap.SELECTION,
+		"a friendly chosen formation still gets the selection colour")
+	equal(BattleMinimap.marker_tip_colour(true, true), BattleMinimap.SELECTION, "and so does its tip")
 
 
 func _test_a_drag_started_outside_the_map_never_navigates() -> void:

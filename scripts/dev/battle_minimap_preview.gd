@@ -27,25 +27,58 @@ var _formations: Array[Dictionary] = [
 ]
 
 
+func _edge_formations() -> Array[Dictionary]:
+	## Formations sitting ON the field's edges and facing OUTWARD, plus one in a corner facing out diagonally.
+	## Their oriented footprints would spill past the map without the boundary clamp, which is the point of
+	## this fixture: the normal layout sits in open field and cannot demonstrate that fix at all.
+	return [
+		{"id": 1, "side": 0, "anchor": Vector2(0, 160), "forward": Vector2.LEFT, "alive": 30,
+		 "half_depth": 16.0, "half_span": 40.0},
+		{"id": 2, "side": 0, "anchor": Vector2(0, 60), "forward": Vector2(-0.7, -0.7), "alive": 18,
+		 "half_depth": 12.0, "half_span": 26.0},
+		{"id": 3, "side": 0, "anchor": Vector2(300, 0), "forward": Vector2.UP, "alive": 22,
+		 "half_depth": 14.0, "half_span": 34.0},
+		{"id": 4, "side": 1, "anchor": Vector2(600, 160), "forward": Vector2.RIGHT, "alive": 26,
+		 "half_depth": 15.0, "half_span": 36.0},
+		{"id": 5, "side": 1, "anchor": Vector2(300, 320), "forward": Vector2.DOWN, "alive": 14,
+		 "half_depth": 11.0, "half_span": 24.0},
+		{"id": 6, "side": 1, "anchor": Vector2(600, 320), "forward": Vector2(0.7, 0.7), "alive": 9,
+		 "half_depth": 10.0, "half_span": 20.0},
+		{"id": 7, "side": 0, "anchor": Vector2(0, 320), "forward": Vector2(-0.7, 0.7), "alive": 0,
+		 "half_depth": 8.0, "half_span": 16.0},
+	]
+
+
 func _ready() -> void:
 	var with_terrain := not OS.get_cmdline_user_args().has("--no-terrain")
+	var edge_stress := OS.get_cmdline_user_args().has("--edge-stress")
 	_minimap = BattleMinimap.new()
 	_minimap.position = Vector2(28.0, 92.0)
 	_minimap.size = Vector2(470.0, 310.0)
 	add_child(_minimap)
 	_minimap.set_terrain_texture(_terrain_image() if with_terrain else null, FIELD)
-	_minimap.set_battle_state(_formations, [1], Vector2(300.0, 160.0), Vector2(260.0, 140.0))
+	# The edge-stress layout puts the camera on the battlefield's bottom-right corner with a small span. That
+	# is the case that showed the footprint bug: the position clamped to the corner but the rectangle then
+	# hung off the map, because the minimum size has to be applied BEFORE the position is clamped.
+	var camera_centre := FIELD if edge_stress else Vector2(300.0, 160.0)
+	var camera_span := Vector2(40.0, 30.0) if edge_stress else Vector2(260.0, 140.0)
+	_minimap.set_battle_state(_edge_formations() if edge_stress else _formations, [1],
+		camera_centre, camera_span)
 
 	var title := Label.new()
-	title.text = "M02 / B2b — TACTICAL MINIMAP — %s" % (
-		"TERRAIN IMAGE SUPPLIED" if with_terrain else "NO TERRAIN IMAGE")
+	title.text = "M02 / B2b — TACTICAL MINIMAP — %s%s" % [
+		"EDGE STRESS — " if edge_stress else "",
+		"TERRAIN IMAGE SUPPLIED" if with_terrain else "NO TERRAIN IMAGE"]
 	title.add_theme_color_override("font_color", Color("e9e6dc"))
 	title.add_theme_font_size_override("font_size", 20)
 	title.position = Vector2(28.0, 20.0)
 	add_child(title)
 
 	var legend := Label.new()
-	legend.text = "friendly teal left / hostile red right   ·   gold outline = selected (formation 1)   ·   " \
+	legend.text = ("formations sit ON every edge, facing OUTWARD, and the camera is on the bottom-right "
+		+ "corner with a tiny span   ·   nothing may spill past the map   ·   "
+		if edge_stress else "") \
+		+ "friendly teal / hostile red   ·   gold outline = selected (formation 1)   ·   " \
 		+ "thin rectangle = the camera's footprint   ·   the destroyed formation is not drawn"
 	legend.add_theme_color_override("font_color", Color("b5b8a7"))
 	legend.add_theme_font_size_override("font_size", 13)
@@ -66,8 +99,9 @@ func _ready() -> void:
 
 
 func _update_status(with_terrain: bool) -> void:
-	_status.text = "terrain imagery: %s   |   field %.0fx%.0f   |   camera centre (300,160) span (260,140)" % [
-		"supplied" if with_terrain else "none - flat field, still fully functional", FIELD.x, FIELD.y]
+	_status.text = "terrain imagery: %s   |   field %.0fx%.0f   |   camera centre %s span %s" % [
+		"supplied" if with_terrain else "none - flat field, still fully functional",
+		FIELD.x, FIELD.y, str(_minimap._camera_centre), str(_minimap._camera_span)]
 
 
 func _terrain_image() -> ImageTexture:
