@@ -7,6 +7,7 @@ func run() -> void:
 	_test_ground_is_deterministic_and_scaled()
 	_test_ground_has_visual_detail()
 	_test_ground_does_not_mutate_terrain()
+	_test_renderer_has_safe_fallback_without_art_or_shader()
 	_complete()
 
 
@@ -50,3 +51,23 @@ func _test_ground_does_not_mutate_terrain() -> void:
 	var image := BattleGroundPainter.bake(terrain)
 	check(image != null, "the ground renders")
 	equal(terrain.to_dict(), before, "simulation terrain is unchanged by rendering")
+
+
+func _test_renderer_has_safe_fallback_without_art_or_shader() -> void:
+	section("authored ground renderer parses and yields to fallback when unavailable")
+	var terrain := _terrain()
+	var biomes := BiomeCatalog.load_from()
+	var config := GameManager.config()
+	var painter := TerrainGround.new()
+	not_null(painter, "authored renderer script can be instantiated after revert")
+	var shader_available := ResourceLoader.exists(TerrainGround.SHADER_PATH)
+	var art_available := TerrainGround.has_art(terrain, biomes)
+	var displayed := painter.show_field(terrain, biomes, config)
+	if not art_available or not shader_available:
+		check(not displayed, "missing assets never claim a successful ground render")
+		check(not painter.visible, "the authored layer stays hidden while fallback draws")
+		var fallback := BattleGroundPainter.bake(terrain)
+		check(fallback != null, "fallback stays available without authored resources")
+	else:
+		check(displayed, "complete authored ground assets can render")
+	painter.free()
