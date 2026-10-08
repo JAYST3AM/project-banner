@@ -76,7 +76,8 @@ def part_b_real_kill() -> None:
     print("\n=== B. the bound fires on a REAL synchronous suite, and the tree dies ===")
     running = godot_count()
     if running != 0:
-        print(f"  (another Godot is running ({running}) - skipping so the evidence stays clean)")
+        check("(a) real kill test could run (no other Godot process)", running, 0)
+        print("  (real kill test NOT RUN: another Godot is active; acceptance selftest must fail)")
         return
     suite = "test_battle_hardening"          # ~207 s when left alone; it must be cut off well before that
     logdir = os.path.join(WORKTREE, "logs", "verify")
@@ -120,7 +121,8 @@ def part_d_dirty_tree() -> None:
     subprocess.run(["git", "-C", WORKTREE, "worktree", "add", dirty, "HEAD"], capture_output=True, text=True)
     runner = os.path.join(dirty, "tests", "test_runner.gd")
     if not os.path.exists(runner):
-        print("  (could not build the dirty fixture - skipping)")
+        check("(D) dirty-tree fixture created", False, True)
+        print("  (dirty-tree test NOT RUN: fixture creation failed; acceptance selftest must fail)")
         return
     text = io.open(runner, encoding="utf-8", newline="").read()
     io.open(runner, "w", encoding="utf-8", newline="").write(text.replace("const SUITE_DEADLINE_S := 90",
