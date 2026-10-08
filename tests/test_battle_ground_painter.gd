@@ -179,9 +179,10 @@ func _test_vegetation_and_wetness_apply_only_when_present() -> void:
 	# the same cell with and without the term in question. Comparing one test helper to another would only
 	# demonstrate that the helpers agree with each other, which is not evidence about the painter.
 	var terrain := _straddling_terrain()
-	# No found-check here on purpose: if the search fails, this returns early with cases still 0 and the
-	# equal(cases, 4) guard below fails, so the test fails closed without spending an extra assertion.
+	# The early return has to record its own failure: it sits ABOVE the guard below, so without this a search
+	# that found nothing would leave the test passing while asserting nothing about the thresholds at all.
 	if terrain == null:
+		check(false, "no terrain fixture straddles both vegetation and wetness thresholds")
 		return
 	var low := terrain.min_height()
 	var span := maxf(0.001, terrain.max_height() - low)
