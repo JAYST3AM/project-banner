@@ -453,7 +453,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					if _right_moved >= RIGHT_DRAG_SLOP and not _living_selection().is_empty():
 						_apply_placement(_drag_plan(_right_at, button.position))
 					elif _right_moved < RIGHT_DRAG_SLOP:
-						_right_click(_uniso(button.position))
+						_right_click(_uniso(button.position), button.shift_pressed)
 					_command_preview.clear()
 					_update_marks()
 				MOUSE_BUTTON_MIDDLE:
@@ -3763,7 +3763,7 @@ func _command_line() -> String:
 ## The right hand's command: an enemy formation under the pointer is an order to attack it,
 ## anything else is an order to march there. One button, two orders, decided by what is under it -
 ## which is why the player never has to learn a modifier.
-func _right_click(world: Vector2) -> void:
+func _right_click(world: Vector2, queue_order: bool = false) -> void:
 	var mine := _living_selection()
 	if mine.is_empty():
 		return
@@ -3771,11 +3771,11 @@ func _right_click(world: Vector2) -> void:
 	if target >= 0 and not _is_mine(target):
 		_order_attack(mine, target)
 	elif target >= 0 and _is_mine(target):
-		# Pointing at one's own formation with a selection in hand reads as "form up on that
-		# one", not "attack my own men".
-		_order_move(mine, _anchor_of(target))
+		# Shift-right-click queues a destination onto each formation's existing
+		# route; normal right-click replaces the route.
+		_order_move(mine, _anchor_of(target), queue_order)
 	else:
-		_order_move(mine, world)
+		_order_move(mine, world, queue_order)
 
 
 func _click_select(world: Vector2, add: bool) -> void:
@@ -3862,9 +3862,16 @@ func _drag_plan(start_screen: Vector2, end_screen: Vector2) -> Array[Dictionary]
 
 
 ## Right click is a group translation: every body retains its relative location.
-func _order_move(bodies: Array, point: Vector2) -> void:
-	var plan := BattlePlacementPlanner.translated(_command_bodies(bodies), point, field)
-	_apply_placement(plan)
+func _order_move(bodies: Array, point: Vector2, queue_order: bool = false) -> void:
+	var commands := _command_bodies(bodies)
+	if queue_order:
+		# Preserve relative group layout at the end of the preceding order.
+		for body in commands:
+			var b := int(body.get("id", -1))
+			if b >= 0 and b < _bodies and _order[b] == Order.ADVANCE:
+				body["anchor"] = _order_point[b]
+	var plan := BattlePlacementPlanner.translated(commands, point, field)
+	_apply_placement(plan, queue_order)
 
 
 func _clear_navigation(b: int) -> void:
@@ -3895,24 +3902,40 @@ func _navigation_waypoint(b: int, current: Vector2) -> Vector2:
 	return route[index]
 
 
-func _set_navigation(b: int, destination: Vector2) -> bool:
-	_clear_navigation(b)
+func _set_navigation(b: int, destination: Vector2, append_order: bool = false) -> bool:
+	var can_append := append_order and _order[b] == Order.ADVANCE
+	var old_route: PackedVector2Array = _body_routes.get(b, PackedVector2Array())
+	var starting_point := _order_point[b] if can_append else _anchor_of(b)
+	var route := PackedVector2Array()
 	if _formation_navigator == null or not _formation_navigator.is_ready():
-		# Legacy developer probe fallback: no valid terrain means existing
-		# straight-line movement, not an empty route that silently stalls.
-		_order_point[b] = destination
-		return true
-	var route := _formation_navigator.route(_anchor_of(b), destination)
+		# Only the developer probe uses this fallback, not valid campaign terrain.
+		route.append(destination)
+	else:
+		route = _formation_navigator.route(starting_point, destination)
 	if route.is_empty():
+		# Failed path searches must not delete an existing valid movement order.
 		push_warning("battle formation %d: no traversable path to order" % b)
 		return false
-	_body_routes[b] = route
-	_body_route_cursor[b] = 0
-	_order_point[b] = route[route.size() - 1]
+	if can_append and not old_route.is_empty():
+		# Avoid unbounded player-generated paths that make the world overlay
+		# and order queue too expensive during large army battles.
+		if old_route.size() + route.size() > 512:
+			push_warning("battle formation %d: waypoints at queue limit" % b)
+			return false
+		var cursor := int(_body_route_cursor.get(b, 0))
+		var combined := old_route.duplicate()
+		combined.append_array(route)
+		_body_routes[b] = combined
+		_body_route_cursor[b] = cursor
+	else:
+		_body_routes[b] = route
+		_body_route_cursor[b] = 0
+	var assigned: PackedVector2Array = _body_routes[b]
+	_order_point[b] = assigned[assigned.size() - 1]
 	return true
 
 
-func _apply_placement(plan: Array[Dictionary]) -> void:
+func _apply_placement(plan: Array[Dictionary], queue_order: bool = false) -> void:
 	var changed := 0
 	for placement in plan:
 		var b := int(placement.get("id", -1))
@@ -3921,6 +3944,10 @@ func _apply_placement(plan: Array[Dictionary]) -> void:
 		var target: Vector2 = placement.get("anchor", _anchor_of(b))
 		var facing: Vector2 = placement.get("forward", _forward_of(b))
 		var files := maxi(1, int(placement.get("files", _body_state[b * 8 + 4])))
+		if not _deploying:
+			if not _set_navigation(b, target, queue_order):
+				continue
+		# Only mutate width/facing after the path has been accepted.
 		if files != int(_body_state[b * 8 + 4]):
 			_resize_body_frontage(b, files)
 			_preferred_line_files[b] = files
@@ -3931,8 +3958,6 @@ func _apply_placement(plan: Array[Dictionary]) -> void:
 			_body_state[b * 8 + 2] = facing.x
 			_body_state[b * 8 + 3] = facing.y
 		else:
-			if not _set_navigation(b, target):
-				continue
 			_order[b] = Order.ADVANCE
 			_hold_ordered[b] = 0
 		changed += 1
