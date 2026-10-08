@@ -1,57 +1,106 @@
 class_name BattleFormationNavigator
 extends RefCounted
-## CPU-side routes for *formation anchors*, not an individual-soldier pathfinder.
-## Reads the authoritative battle terrain and its applied prop obstacles.
-## No pathfinding is performed inside a per-frame/per-soldier GPU loop.
+## Deterministic terrain-aware routing for whole formation anchors.
+## A wider/deeper formation needs a larger corridor than a single soldier.
+## No per-frame or per-agent path searches: callers plan only when ordering.
+##
+## The integral occupancy map allows O(1) rectangular clearance checks.
+## Grids are cached by clearance radius; each expensive grid is built once.
 
 const SEARCH_RADIUS_CELLS := 12
 const PATH_EPSILON := 0.001
 
 var _terrain: BattlefieldTerrain = null
-var _grid: AStarGrid2D = null
+var _grids: Dictionary = {} # clearance radius in cells -> AStarGrid2D
+var _blocked_prefix := PackedInt32Array()
 
 
 func setup(terrain: BattlefieldTerrain) -> bool:
 	_terrain = terrain
-	_grid = null
+	_grids.clear()
+	_blocked_prefix = PackedInt32Array()
 	if terrain == null or not terrain.is_valid():
 		return false
-	var astar := AStarGrid2D.new()
-	astar.region = Rect2i(0, 0, terrain.cols, terrain.rows)
-	astar.cell_size = Vector2.ONE
-	astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
-	astar.update()
-	for row in terrain.rows:
-		for col in terrain.cols:
-			var index := row * terrain.cols + col
-			var cell := Vector2i(col, row)
-			if not terrain.is_cell_traversable(index):
-				astar.set_point_solid(cell, true)
-				continue
-			# Slow ground should be expensive to cross, not merely darker on screen.
-			astar.set_point_weight_scale(cell,
-				1.0 / maxf(0.05, terrain.move_multiplier_of_cell(index)))
-	_grid = astar
+	_build_occupancy()
+	_grid_for_radius(0)
 	return true
 
 
 func is_ready() -> bool:
-	return _grid != null and _terrain != null
+	return _terrain != null and _terrain.is_valid() and _grids.has(0)
+
+
+## Radius is the disc enclosing the actual files/ranks at any facing,
+## conservatively reduced by half a cell because A* works on cell centres.
+## The body never silently squeezes through narrower gaps or changes its
+## player-selected formation width.
+static func clearance_cells(terrain: BattlefieldTerrain, files: int,
+		ranks: int, spacing: float) -> int:
+	if terrain == null or not terrain.is_valid():
+		return 0
+	var half_span := float(maxi(0, files - 1)) * maxf(0.1, spacing) * 0.5 + 0.5
+	var half_depth := float(maxi(0, ranks - 1)) * maxf(0.1, spacing) * 0.5 + 0.5
+	var radius := maxf(half_span, half_depth)
+	return maxi(0, ceili((radius - terrain.cell_size * 0.5) /
+		maxf(0.1, terrain.cell_size)))
+
+
+func _build_occupancy() -> void:
+	var pitch := _terrain.cols + 1
+	_blocked_prefix.resize(pitch * (_terrain.rows + 1))
+	_blocked_prefix.fill(0)
+	for row in _terrain.rows:
+		for col in _terrain.cols:
+			var idx := row * _terrain.cols + col
+			var slot := (row + 1) * pitch + col + 1
+			var blocked := 0 if _terrain.is_cell_traversable(idx) else 1
+			_blocked_prefix[slot] = blocked + _blocked_prefix[slot - 1] 				+ _blocked_prefix[slot - pitch] 				- _blocked_prefix[slot - pitch - 1]
+
+
+func _fits(cell: Vector2i, radius: int) -> bool:
+	var x0 := cell.x - radius
+	var y0 := cell.y - radius
+	var x1 := cell.x + radius
+	var y1 := cell.y + radius
+	if x0 < 0 or y0 < 0 or x1 >= _terrain.cols or y1 >= _terrain.rows:
+		return false
+	var pitch := _terrain.cols + 1
+	var occupied := _blocked_prefix[(y1 + 1) * pitch + x1 + 1] 		- _blocked_prefix[y0 * pitch + x1 + 1] 		- _blocked_prefix[(y1 + 1) * pitch + x0] 		+ _blocked_prefix[y0 * pitch + x0]
+	return occupied == 0
+
+
+func _grid_for_radius(radius: int) -> AStarGrid2D:
+	if _grids.has(radius):
+		return _grids[radius] as AStarGrid2D
+	var grid := AStarGrid2D.new()
+	grid.region = Rect2i(0, 0, _terrain.cols, _terrain.rows)
+	grid.cell_size = Vector2.ONE
+	grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	grid.update()
+	for row in _terrain.rows:
+		for col in _terrain.cols:
+			var cell := Vector2i(col, row)
+			if not _fits(cell, radius):
+				grid.set_point_solid(cell, true)
+				continue
+			var index := row * _terrain.cols + col
+			grid.set_point_weight_scale(cell, 1.0 / maxf(0.05,
+				_terrain.move_multiplier_of_cell(index)))
+	_grids[radius] = grid
+	return grid
 
 
 func _cell(point: Vector2) -> Vector2i:
 	return Vector2i(_terrain.cell_col_at(point), _terrain.cell_row_at(point))
 
 
-func _walkable(cell: Vector2i) -> bool:
+func _walkable(cell: Vector2i, grid: AStarGrid2D) -> bool:
 	if cell.x < 0 or cell.y < 0 or cell.x >= _terrain.cols or cell.y >= _terrain.rows:
 		return false
-	return not _grid.is_point_solid(cell)
+	return not grid.is_point_solid(cell)
 
 
-## Authoritative movement pace from the field's already-composed terrain,
-## soil, moisture and slope penalty. This is used by body advance and never
-## recomputed from the visual textures or the colour of a tile.
+## Uses the terrain's authoritative composed movement multiplier.
 static func speed_scale(terrain: BattlefieldTerrain, point: Vector2) -> float:
 	if terrain == null or not terrain.is_valid():
 		return 1.0
@@ -61,64 +110,62 @@ static func speed_scale(terrain: BattlefieldTerrain, point: Vector2) -> float:
 	return clampf(terrain.move_multiplier_of_cell(cell), 0.05, 1.0)
 
 
-## Choose a nearby reachable-looking cell when a waypoint falls inside a
-## boulder, lake or cliff. The actual path search still decides connectivity.
-func _nearest_walkable(wanted: Vector2i) -> Vector2i:
-	if _walkable(wanted):
+func _nearest_walkable(wanted: Vector2i, grid: AStarGrid2D) -> Vector2i:
+	if _walkable(wanted, grid):
 		return wanted
-	var chosen := Vector2i(-1, -1)
-	var best_distance := INF
 	for radius in range(1, SEARCH_RADIUS_CELLS + 1):
+		var chosen := Vector2i(-1, -1)
+		var best := INF
 		for y in range(-radius, radius + 1):
 			for x in range(-radius, radius + 1):
 				if maxi(absi(x), absi(y)) != radius:
 					continue
 				var candidate := wanted + Vector2i(x, y)
-				if not _walkable(candidate):
+				if not _walkable(candidate, grid):
 					continue
-				var distance := float((candidate - wanted).length_squared())
-				if distance < best_distance:
-					best_distance = distance
+				var score := float((candidate - wanted).length_squared())
+				if score < best:
+					best = score
 					chosen = candidate
 		if chosen.x >= 0:
-			break
-	return chosen
+			return chosen
+	return Vector2i(-1, -1)
 
 
-## Deterministic path to a world point, with long straight runs reduced to
-## corners. For blocked destinations, searches the nearest *reachable* free
-## neighbour rather than choosing an inaccessible location across a barrier.
-## Empty means the route is blocked/unavailable — never send a formation
-## straight through the obstruction.
-func route(start: Vector2, destination: Vector2) -> PackedVector2Array:
+## clearance_radius is a world-unit radius enclosing the formation; zero
+## retains legacy single-anchor behaviour for old tests and probes.
+## When a destination lies in an obstacle, seek the nearest *reachable*
+## alternative on the army's side of the wall.
+func route(start: Vector2, destination: Vector2,
+		clearance_radius: float = 0.0) -> PackedVector2Array:
 	var result := PackedVector2Array()
 	if not is_ready():
 		return result
-	var from := _nearest_walkable(_cell(start))
+	var radius := maxi(0, ceili((clearance_radius - _terrain.cell_size * 0.5) /
+		maxf(0.1, _terrain.cell_size)))
+	var grid := _grid_for_radius(radius)
+	var from := _nearest_walkable(_cell(start), grid)
 	if from.x < 0:
 		return result
-	var requested := _cell(destination)
-	var to := requested
+	var wanted := _cell(destination)
+	var to := wanted
 	var cells: Array[Vector2i] = []
-	if _walkable(requested):
-		cells = _grid.get_id_path(from, requested)
+	if _walkable(wanted, grid):
+		cells = grid.get_id_path(from, wanted)
 	else:
-		# A blocked click should resolve to a cell the army can actually
-		# reach from its current side of the obstacle. The nearest unblocked
-		# cell can otherwise be across an impassable wall.
-		for radius in range(1, SEARCH_RADIUS_CELLS + 1):
+		for search_radius in range(1, SEARCH_RADIUS_CELLS + 1):
 			var best_score := INF
-			for y in range(-radius, radius + 1):
-				for x in range(-radius, radius + 1):
-					if maxi(absi(x), absi(y)) != radius:
+			for y in range(-search_radius, search_radius + 1):
+				for x in range(-search_radius, search_radius + 1):
+					if maxi(absi(x), absi(y)) != search_radius:
 						continue
-					var candidate := requested + Vector2i(x, y)
-					if not _walkable(candidate):
+					var candidate := wanted + Vector2i(x, y)
+					if not _walkable(candidate, grid):
 						continue
-					var attempt: Array[Vector2i] = _grid.get_id_path(from, candidate)
+					var attempt: Array[Vector2i] = grid.get_id_path(from, candidate)
 					if attempt.is_empty():
 						continue
-					var score := float((candidate - requested).length_squared())
+					var score := float((candidate - wanted).length_squared())
 					if score < best_score:
 						best_score = score
 						to = candidate
@@ -127,32 +174,31 @@ func route(start: Vector2, destination: Vector2) -> PackedVector2Array:
 				break
 	if cells.is_empty():
 		return result
-	if cells.size() == 1:
-		result.append(destination if to == _cell(destination) else _terrain.cell_centre(
-			_terrain.cell_of_col_row(to.x, to.y)))
-		return result
-	var last_direction := Vector2i.ZERO
-	for i in range(1, cells.size()):
-		var direction := cells[i] - cells[i - 1]
-		# Each bend is a waypoint. Skipping straight runs keeps formation
-		# movement smooth and reduces command traffic.
-		if i > 1 and direction != last_direction:
-			var corner := cells[i - 1]
-			result.append(_terrain.cell_centre(
-				_terrain.cell_of_col_row(corner.x, corner.y)))
-		last_direction = direction
-	var end := destination if to == _cell(destination) else _terrain.cell_centre(
-		_terrain.cell_of_col_row(to.x, to.y))
+	if cells.size() > 1:
+		var last_direction := Vector2i.ZERO
+		for i in range(1, cells.size()):
+			var direction := cells[i] - cells[i - 1]
+			if i > 1 and direction != last_direction:
+				var corner := cells[i - 1]
+				result.append(_terrain.cell_centre(
+					_terrain.cell_of_col_row(corner.x, corner.y)))
+			last_direction = direction
+	# Cell-centre final targets prevent the corners of a broad formation
+	# from clipping an obstacle because the click landed at a tile boundary.
+	var end := destination if radius == 0 and to == wanted else 		_terrain.cell_centre(_terrain.cell_of_col_row(to.x, to.y))
 	if result.is_empty() or result[result.size() - 1].distance_to(end) > PATH_EPSILON:
 		result.append(end)
 	return result
 
 
-## For gameplay tests: no sampled waypoint may live in a blocked terrain cell.
-func route_avoids_obstacles(route_points: PackedVector2Array) -> bool:
+func route_avoids_obstacles(points: PackedVector2Array,
+		clearance_radius: float = 0.0) -> bool:
 	if not is_ready():
 		return false
-	for point in route_points:
-		if not _walkable(_cell(point)):
+	var radius := maxi(0, ceili((clearance_radius - _terrain.cell_size * 0.5) /
+		maxf(0.1, _terrain.cell_size)))
+	var grid := _grid_for_radius(radius)
+	for point in points:
+		if not _walkable(_cell(point), grid):
 			return false
 	return true
