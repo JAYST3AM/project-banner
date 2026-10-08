@@ -14,8 +14,7 @@ func _test_actions_are_forwarded_without_simulation() -> void:
 	var bar := BattleCommandBar.new()
 	runner.add_child(bar)
 	var actions: Array[String] = []
-	bar.action_requested.connect(func(action: String) -> void:
-		actions.append(action))
+	bar.action_requested.connect(func(action: String): actions.append(action))
 	bar._invoke("hold")
 	equal(actions.size(), 1, "a command emits exactly one action")
 	if actions.size() == 1:
