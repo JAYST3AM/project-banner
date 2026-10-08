@@ -19,11 +19,11 @@ func run() -> void:
 	_test_image_geometry_and_the_texel_clamp()
 	_test_soil_colours_cover_every_type_and_fall_back()
 	_test_vegetation_and_wetness_apply_only_when_present()
-	_test_each_type_motif_paints_a_distinct_block()
+	_test_type_motifs_fire_and_plain_types_do_not()
 	_test_output_is_a_valid_opaque_rgba_image()
 	_test_seed_changes_the_grain_not_the_geometry()
 	_test_raised_ground_is_lit_and_hollows_are_shaded()
-	_test_a_flat_field_is_lit_only_by_altitude()
+	_test_altitude_alone_lights_higher_ground()
 	_test_type_motifs_are_local_and_type_driven()
 	_test_invalid_or_missing_terrain_yields_no_image()
 	_complete()
@@ -136,6 +136,10 @@ func _test_soil_colours_cover_every_type_and_fall_back() -> void:
 		"an unknown soil keeps the caller's colour rather than inventing one")
 
 
+## The four terrain types whose motifs override the plain brush pattern.
+const MOTIF_TYPES := ["water", "rough", "cliff", "woods"]
+
+
 func _test_vegetation_and_wetness_apply_only_when_present() -> void:
 	section("vegetation and wetness change the ground only on the cells that carry them")
 	# The painter applies vegetation only above 0.3 and wetness only above 0.25. Whether a given generated
@@ -174,8 +178,12 @@ func _test_vegetation_and_wetness_apply_only_when_present() -> void:
 		cases += 1
 	var wet_top := terrain.wetness_of_cell(wet_high)
 	if wet_top > 0.25:
-		check(_pre_shade_colour(terrain, wet_high).v <= _soil_only_colour(terrain, wet_high).v,
-			"a wet cell (%.3f) is never brightened by the wetness pass" % wet_top)
+		check(_pre_shade_colour(terrain, wet_high)
+			!= _with_vegetation(_soil_only_colour(terrain, wet_high), terrain, wet_high),
+			"a wet cell (%.3f) is changed by the wetness pass, vegetation aside" % wet_top)
+		check(_pre_shade_colour(terrain, wet_high).v
+			<= _with_vegetation(_soil_only_colour(terrain, wet_high), terrain, wet_high).v,
+			"and never brightened by it")
 		cases += 1
 	var wet_bottom := terrain.wetness_of_cell(wet_low)
 	if wet_bottom <= 0.25:
@@ -187,32 +195,86 @@ func _test_vegetation_and_wetness_apply_only_when_present() -> void:
 	check(cases >= 2, "the field exercised at least two threshold cases (%d of 4)" % cases)
 
 
-func _test_each_type_motif_paints_a_distinct_block() -> void:
-	section("water, rough, cliff and woods each paint their own block")
+func _test_type_motifs_fire_and_plain_types_do_not() -> void:
+	section("a motif type departs from the plain brush pattern; a plain type obeys it exactly")
+	# The brush pattern alone paints only three colours inside a cell - the base, a 0.095-darkened shadow and a
+	# 0.11-lightened highlight - chosen by a hash of the cell and the texel. Water, rough, cliff and woods then
+	# OVERRIDE that. So the honest test of a motif is that the block DIVERGES from the brush rule, and the
+	# honest test of a plain type is that it matches it exactly. Merely showing the four blocks differ would be
+	# satisfied by the base colour changing with the type, which is not the motif at work at all.
 	var terrain := _terrain()
-	var index := terrain.cell_count() / 2
-	var centre := terrain.cell_centre(index)
-	var blocks: Dictionary = {}
-	for kind in ["water", "rough", "cliff", "woods"]:
+	# One cell, chosen so that ONLY its type can move the brush pattern: a type with no motif, and vegetation
+	# below the threshold that triggers the tuft overlay. The first two attempts at this control used the
+	# middle of the field and then any non-motif type, and both were caught by the assertion below - woods is
+	# a motif type, and a plain type with tall vegetation still departs from the rule.
+	var target := -1
+	var plain := ""
+	for cell in terrain.cell_count():
+		var candidate := terrain.type_id_of_cell(cell)
+		if not candidate in MOTIF_TYPES and terrain.vegetation_of_cell(cell) <= 0.35:
+			target = cell
+			plain = candidate
+			break
+	check(target >= 0, "the field contains a plain, low-vegetation cell to test (%s)" % plain)
+	if target < 0:
+		return
+	check(not plain in MOTIF_TYPES, "and its type carries no motif")
+	check(terrain.vegetation_of_cell(target) <= 0.35,
+		"and its vegetation is below the tuft threshold (%.3f)" % terrain.vegetation_of_cell(target))
+	var centre := terrain.cell_centre(target)
+	var col := target % terrain.cols
+	var row := target / terrain.cols
+	var per_cell := mini(TEXEL_CEILING,
+		maxi(1, BattleGroundPainter.TARGET_WIDTH / maxi(terrain.cols, terrain.rows)))
+	for kind in ["water", "rough", "cliff", "woods", plain]:
 		check(terrain.set_type_at(centre, kind), "the fixture can set the cell to %s" % kind)
 		var image := BattleGroundPainter.bake(terrain)
 		if image == null:
 			check(false, "the ground renders with a %s cell" % kind)
 			return
-		var per_cell := maxi(1, image.get_width() / maxi(1, terrain.cols))
-		var col := index % terrain.cols
-		var row := index / terrain.cols
-		var signature := ""
+		var block: Array[Color] = []
 		for py in per_cell:
 			for px in per_cell:
-				signature += image.get_pixel(col * per_cell + px, row * per_cell + py).to_html()
-		blocks[kind] = signature
-		check(signature.length() > 0, "the %s cell has texels of its own" % kind)
-	equal(blocks.size(), 4, "all four types were baked")
-	var distinct: Dictionary = {}
-	for kind in blocks:
-		distinct[blocks[kind]] = true
-	equal(distinct.size(), 4, "and no two types paint an identical block")
+				block.append(image.get_pixel(col * per_cell + px, row * per_cell + py))
+		var off_rule := _texels_off_the_brush_rule(block, per_cell, col, row, terrain.terrain_seed)
+		if kind == plain:
+			equal(off_rule, 0, "a plain %s cell obeys the brush pattern exactly" % kind)
+		else:
+			greater(float(off_rule), 0.0,
+				"a %s cell departs from the brush pattern, so its motif fired" % kind)
+
+
+## How many texels in a cell's block differ from what the plain brush pattern would have painted. The block's
+## most common colour is the cell's base: eleven of the seventeen brush values leave the base untouched, so
+## the mode identifies it without the test needing to know the pre-shade pipeline.
+func _texels_off_the_brush_rule(block: Array[Color], per_cell: int, col: int, row: int,
+		seed_value: int) -> int:
+	var tally: Dictionary = {}
+	var base: Color = block[0]
+	var most := 0
+	for pixel in block:
+		var html := pixel.to_html()
+		tally[html] = int(tally.get(html, 0)) + 1
+		if tally[html] > most:
+			most = tally[html]
+			base = pixel
+	var shadow := base.darkened(0.095)
+	var light := base.lightened(0.11)
+	var detail := BattleGroundPainter._mix_id(col, row, seed_value)
+	var off_rule := 0
+	var at := 0
+	for py in per_cell:
+		for px in per_cell:
+			var brush := (detail + (px / 2) * 17 + (py / 2) * 29) % 17
+			var expected := base
+			if brush <= 2:
+				expected = shadow
+			elif brush >= 15:
+				expected = light
+			if block[at] != expected:
+				off_rule += 1
+			at += 1
+	return off_rule
 
 
 func _test_output_is_a_valid_opaque_rgba_image() -> void:
@@ -225,8 +287,9 @@ func _test_output_is_a_valid_opaque_rgba_image() -> void:
 	check(image.get_width() > 0 and image.get_height() > 0, "it has real dimensions")
 	var opaque := true
 	var filled := true
-	for y in mini(image.get_height(), 32):
-		for x in mini(image.get_width(), 32):
+	# The WHOLE image, not a corner of it: an unwritten texel anywhere is the bug this exists to catch.
+	for y in image.get_height():
+		for x in image.get_width():
 			var pixel := image.get_pixel(x, y)
 			if pixel.a < 0.999:
 				opaque = false
@@ -314,30 +377,49 @@ func _test_raised_ground_is_lit_and_hollows_are_shaded() -> void:
 		"and one lying below them is painted darker than the same cell shaded by nothing")
 
 
-func _test_a_flat_field_is_lit_only_by_altitude() -> void:
-	section("with no relief, brightness comes only from how high the cell sits")
+func _test_altitude_alone_lights_higher_ground() -> void:
+	section("with relief held flat, the higher of two cells receives the brighter shade")
+	# The shade is relief PLUS an altitude term. Two cells with zero relief leave altitude as the only
+	# difference, and comparing the shade each RECEIVED - rather than their raw colours, which soil and
+	# vegetation also move - isolates that term. There is deliberately no branch here that can pass without
+	# testing the painter; a field with no flat ground fails this rather than skipping it.
 	var terrain := _terrain()
 	var low := terrain.min_height()
 	var span := maxf(0.001, terrain.max_height() - low)
-	var found := -1
+	var flat_low := -1
+	var flat_high := -1
+	var lowest_alt := 2.0
+	var highest_alt := -1.0
 	for row in terrain.rows:
 		for col in terrain.cols:
 			var index := row * terrain.cols + col
 			var here := terrain.height_of_cell(index)
 			var left := terrain.height_of_cell(row * terrain.cols + maxi(0, col - 1))
 			var above := terrain.height_of_cell(maxi(0, row - 1) * terrain.cols + col)
-			if absf(here - (left + above) * 0.5) < 0.02 and absf((here - low) / span - 0.5) < 0.06:
-				found = index
-				break
-		if found >= 0:
-			break
-	if found < 0:
-		check(true, "this field has no exactly-flat cell at mid altitude to check - skipped, not failed")
+			if absf(here - (left + above) * 0.5) > 0.01:
+				continue
+			var altitude := (here - low) / span
+			if altitude < lowest_alt:
+				lowest_alt = altitude
+				flat_low = index
+			if altitude > highest_alt:
+				highest_alt = altitude
+				flat_high = index
+	check(flat_low >= 0 and flat_high >= 0, "the field contains flat ground to compare")
+	if flat_low < 0 or flat_high < 0:
 		return
-	var colour := BattleGroundPainter._paint_colour(terrain, found, found % terrain.cols,
-		found / terrain.cols, low, span)
-	check(absf(colour.v - _pre_shade_colour(terrain, found).v) < 0.02,
-		"flat ground at mid altitude is left essentially unshaded")
+	check(highest_alt - lowest_alt > 0.1,
+		"and that flat ground spans a real altitude range (%.3f to %.3f)" % [lowest_alt, highest_alt])
+	if highest_alt - lowest_alt <= 0.1:
+		return
+	var low_painted := BattleGroundPainter._paint_colour(terrain, flat_low, flat_low % terrain.cols,
+		flat_low / terrain.cols, low, span)
+	var high_painted := BattleGroundPainter._paint_colour(terrain, flat_high, flat_high % terrain.cols,
+		flat_high / terrain.cols, low, span)
+	var low_shade := low_painted.v - _pre_shade_colour(terrain, flat_low).v
+	var high_shade := high_painted.v - _pre_shade_colour(terrain, flat_high).v
+	check(high_shade > low_shade,
+		"the higher flat cell takes the brighter shade (%.4f against %.4f)" % [high_shade, low_shade])
 
 
 func _test_type_motifs_are_local_and_type_driven() -> void:
