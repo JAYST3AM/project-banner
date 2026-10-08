@@ -27,6 +27,8 @@ const MIN_VIEWPORT_PX := Vector2(1.5, 1.5)
 ## How far the facing tip sits from the marker's centre, in map pixels rather than world units, so it stays
 ## visible when a formation's footprint shrinks to nothing.
 const FACING_TIP_PX := 3.5
+## The drawn radius of that tip, used both to draw it and to keep it inside the map.
+const TIP_RADIUS := 1.3
 
 var _terrain_texture: Texture2D = null
 var _world_size := Vector2.ONE
@@ -85,7 +87,13 @@ static func marker_polygon(anchor: Vector2, forward: Vector2, half_depth: float,
 
 
 static func facing_tip(anchor: Vector2, forward: Vector2, field: Vector2, rect: Rect2) -> Vector2:
-	return world_to_map(anchor, field, rect) + facing(forward) * FACING_TIP_PX
+	## The facing tip is drawn in map pixels rather than world units, so it stays visible when a formation's
+	## footprint shrinks to nothing. The footprint corners being clamped is not enough on its own: the tip is
+	## offset from the ANCHOR, so an outward-facing formation on a boundary projected its tip over the panel.
+	## Clamp the dot's centre inset by its own drawn radius, so the whole dot stays inside the map.
+	return (world_to_map(anchor, field, rect) + facing(forward) * FACING_TIP_PX).clamp(
+		rect.position + Vector2(TIP_RADIUS, TIP_RADIUS),
+		rect.end - Vector2(TIP_RADIUS, TIP_RADIUS))
 
 
 static func marker_ink(friendly: bool) -> Color:
@@ -186,7 +194,7 @@ func _draw() -> void:
 		var edge := marker_outline(friendly, chosen)
 		for corner in 4:
 			draw_line(polygon[corner], polygon[(corner + 1) % 4], edge, 2.0 if chosen else 1.0, true)
-		draw_circle(facing_tip(anchor, forward, _world_size, map), 1.3,
+		draw_circle(facing_tip(anchor, forward, _world_size, map), TIP_RADIUS,
 			marker_tip_colour(friendly, chosen))
 	var footprint := viewport_rect(_camera_centre, _camera_span, _world_size, map)
 	draw_rect(footprint, Color(0.94, 0.9, 0.76, 0.055), true)
