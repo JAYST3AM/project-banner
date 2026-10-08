@@ -4665,3 +4665,71 @@ sprite pack bench into a controlled comparison (identical workload A/B, death cl
 Suite 38/38, 10,346 assertions, 0 failures; the atlas was pixel-compared against its sources by
 the audit; windowed battle showcase runs proved per-unit characters and side tints in the real
 renderer (a mixed run crops 4x to a green-hooded bowman against a mailed swordsman).
+
+## D-170: Roadmap v1.0 approved; scope frozen for the Playable Alpha
+
+**Decision.** Jay approved the Master Development Roadmap (v1.0, 8 October 2026) on 8 October 2026.
+M00 is therefore complete: scope is approved, the previous roadmap is preserved as history
+(`docs/ROADMAP-archive-2026-10-08.md`), and no milestone may begin before this approval existed.
+
+**Why.** The project had accumulated impressive subsystems without one complete player-facing loop.
+The roadmap makes that loop the unit of progress: new company → banner → campaign → settlement →
+recruit → travel → encounter → deploy → command → win/lose/retreat → consequences → return → save,
+exit, reload → continue. Alpha scope is the seventeen blocking milestones M01–M17; the exclusions
+(sieges, multiplayer, naval, diplomacy, kingdom management, extensive cavalry, large class lists,
+thousands of soldiers per encounter, cinematic-grade animation) are acknowledged and are not to
+block the first complete game.
+
+## D-171: The GPU battlefield is the production target
+
+**Decision.** The GPU battle scene is the shipping path. The CPU battle path is a reference and
+test harness, not the product, and shall not be maintained as a parallel player-facing
+implementation.
+
+**Why.** Two battle systems exist, which is the largest architectural risk in the repository: work
+can appear correct in one and be absent in the other, and players will only ever see one. Choosing
+now prevents further duplicated effort and makes every future "it works" claim answerable against a
+single implementation. Reconciling them is M03 and must precede new gameplay features.
+
+## D-172: Target platform, test machine and display resolutions
+
+**Decision.** Primary target is a Windows desktop build of Godot 4.7.2-stable (Forward+). Development
+and acceptance testing happen on Jay's machine: Windows 11, Intel i9-12900K, NVIDIA RTX 3080 Ti,
+32 GB RAM. Required acceptance resolutions are 1280x720, 1920x1080 and 2560x1080.
+
+**Why.** An acceptance check that cannot name the hardware it ran on is not reproducible. Recording
+the test machine and the three resolutions now means performance and HUD claims (M14, M15) can be
+compared like for like, and a stranger playtest (M17) is run on the hardware the game is built for.
+
+## D-173: Jay's unfinished local work is protected, not discarded
+
+**Decision.** The uncommitted work in Jay's working tree (strategic zoom LOD in `battle.gd`,
+`battle_view.gd`, `game_config.json`, plus sprite and tooling work) is declared protected. A
+tracked-change snapshot was taken without altering the working tree and pushed as branch
+`backup/jay-tree-2026-10-08` (snapshot commit `bd96e0df4e37`).
+
+**Why.** The roadmap's first milestone is baseline and repository protection. Overwriting or
+stashing away a developer's in-progress work to get a clean baseline is how work gets lost. The LOD
+work is also directly relevant to M08 (strategic zoom and formation readability), so it is inputs,
+not clutter.
+
+## D-174: Acceptance reports have one shape; branch rules are fixed
+
+**Decision.** Every completed task reports in the format defined in
+`docs/ACCEPTANCE-REPORT-FORMAT.md`: `[PB-RESULT] ID | BASE SHA | HEAD SHA | FILES | TEST COMMAND |
+PASS/FAIL | EVIDENCE | LIMITATIONS`. Branches are cut from a stated base, pushed before review, and
+never merged without independent verification.
+
+**Why.** A verdict without raw output, a base commit to diff against, or a named limitation cannot
+be checked by anyone else. The format forces the reviewer to be told what was and was not tested.
+
+## D-175: Delivery model — GPT-6 authors, Hermes verifies, Jay authorises
+
+**Decision.** GPT-6 makes architecture decisions and authors implementation code, committing to
+isolated GitHub branches. Hermes retrieves those commits into separate local worktrees, runs the
+tests, reviews behaviour, and returns raw evidence including failures. Jay authorises integration.
+No change merges on the strength of a commit message, a test count or a summary.
+
+**Why.** An author cannot be the only witness to its own work; the value of the loop is that the
+party who writes the code is not the party who declares it working. The four-worker board that ran
+briefly on 8 October was stood down by Jay the same day; the discipline it encoded survives here.

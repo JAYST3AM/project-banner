@@ -1,958 +1,3555 @@
-# Roadmap
+Planning mode confirmed. No further code changes, commits, pushes or merges.
 
-The plan of record. Each step ends with a commit, a tested build and updated docs.
 
-Status legend: `DONE` / `IN PROGRESS` / `TODO`
 
-| Step | Milestone | Status |
-| --- | --- | --- |
-| 0 | Bootstrap Godot development environment | **DONE** |
-| 1 | Project architecture and campaign foundation | **DONE** |
-| 2 | Playable world map and settlement travel | **DONE** |
-| 3 | Persistent soldiers, recruitment, party roster | **DONE** |
-| 4 | World encounters and tactical battle transition | **DONE** |
-| 5 | First functional tactical combat | **DONE** |
-| 6 | Persistent campaign save/load validation | **DONE** |
-| 6.5 | External audit remediation (hardening pass, no new gameplay) | **DONE** |
-| 6.6 | Final foundation lock (enemy persistence, legacy menu, CI) | **DONE** |
-| — | **First major checkpoint: the full vertical slice** | **DONE** |
-| 7 | Tactical Combat 2.0: terrain and formation foundation | **DONE** |
-| 7.1 | Formation hardening (membership, contact, bounds, slope) | **DONE** |
-| 7+ | Post-checkpoint systems (see below) | TODO |
+Below is the proposed replacement for `docs/ROADMAP.md`. It preserves the distinction between historical achievements, current verified functionality, and work that still requires testing. Jay's approval is required before execution begins.
 
----
 
-## Step 0 - Development environment (`milestone-00`)
 
-Godot 4.7.2-stable installed and on `PATH`; repository created; boot scene runs
-headless and windowed; the edit -> run -> test -> commit -> push loop verified.
-See `DEVELOPMENT_ENVIRONMENT.md`.
+# Project Banner — Master Development Roadmap
 
-## Step 1 - Architecture and campaign foundation (`milestone-01`)
 
-**Goal:** the game launches into a main menu and can create a placeholder campaign.
 
-- Core services: `DebugLogger`, `GameData`, `SaveManager`, `SceneManager`, `GameManager`
-- Data model: `CampaignState`, `Party`, `Soldier`, `Settlement`, `WorldParty`, `CampaignClock`, `RngService`
-- Main menu: New Campaign (name + seed) / Continue (disabled without a save) / Quit
-- Scene registry with transition payloads; world map placeholder scene
-- Save format v1 with a version field and migration hook
-- Headless test harness (`tests/`, `scenes/dev/tests.tscn`)
-- Documentation: this file plus architecture, current state and decisions
+**Version:** 1.0 — Planning Draft\
 
-**Definition of done:** project launches, main menu works, New Campaign creates
-state, the world-map placeholder loads, no duplicated globals across transitions,
-architecture documented. Verified by `tests/test_campaign_flow.gd`.
+**Date:** 8 October 2026\
 
-## Step 2 - World map prototype (`milestone-02`)
+**Status:** AWAITING JAY'S APPROVAL\
 
-**Goal:** the first playable overworld; the player can travel between locations.
+**Project owner:** Jay\
 
-- `WorldMap` scene with a placeholder party icon and persistent world coordinates
-- Settlements: Greywatch (town), Brackenford (town), Redmoor (village), Thornwood Hollow (wilderness)
-- Roads drawn between settlements; click to select, inspect, and travel
-- "Enter Settlement" available once the party arrives
-- Campaign time advances during travel, with Paused / Normal / Fast speed states
-- World HUD: gold, party size, day/time, destination, game speed
-- Debug panel: teleport, add gold, change speed, show coordinates/destination/time
-- Camera pan (WASD/arrows/middle-drag) and zoom (wheel)
-- `DevFlags` command-line switches (`--autostart-campaign`, `--autotravel`) so the
-  real rendered world map can be driven without a mouse
+**Technical lead:** GPT-6\
 
-**Definition of done:** Main Menu -> New Campaign -> World Map -> select Brackenford
--> travel -> arrive -> Enter Settlement. Verified headlessly (88 assertions in
-`tests/test_world_map.gd`) and in a windowed run that logs
-`arrived at Brackenford on Day 1 - 14:08`.
+**Local implementation verifier:** Hermes\
 
-## Step 3 - Soldiers and recruitment (`milestone-03`)
+**Engine:** Godot 4.7.2-stable\
 
-**Goal:** recruit persistent, named, individual soldiers.
+**Repository:** `JAYST3AM/project-banner`
 
-- Settlement screen: town info, gold, party size, available recruits, recruit
-  controls, party roster, leave town
-- Data-driven unit archetypes: Peasant Recruit, Spearman, Archer
-- Procedural medieval name pools (`data/names/`)
-- Recruitment: availability check, gold check, cost deduction, soldier creation,
-  party add, pool decrement, UI refresh
-- Party roster with a soldier detail panel
-- Soldiers persist everywhere: world map, settlement, battle, save/load
 
-**Definition of done:** enter town -> recruit -> inspect -> leave -> travel ->
-return -> the same soldiers are still there. Verified by 188 assertions in
-`tests/test_recruitment.gd`, including that exact path end to end, and in a
-windowed run that recruits four soldiers through the real button handler.
-
-## Step 4 - Encounters and battle transition (`milestone-04`)
-
-**Goal:** connect the overworld to tactical combat.
-
-- Overworld party architecture covering player, bandit, caravan and army parties
-- Bandit parties of 5-8 soldiers that wander near their spawn region
-- Encounter trigger: pause the world, show BANDITS with both strengths and Attack / Retreat
-- `BattleContext`: battle id, both parties, world position, terrain seed, battle
-  seed, campaign time, weather placeholder, attacker, defender
-- Battle scene: placeholder markers, camera pan/zoom, Start Battle, Retreat
-
-**Definition of done:** travel -> encounter bandits -> Attack -> battlefield loads
-with the correct units -> return to the same campaign. Verified by 282 assertions in
-`tests/test_encounters.gd`, including that exact path through the real battle scene,
-and in a windowed run that recruits four soldiers, meets eight bandits, attacks, and
-logs all twelve of them by name on the field.
-
-## Step 5 - First functional combat (`milestone-05`)
-
-**Goal:** units move, fight, die, and the outcome sticks.
-
-- `BattleSimulator`: HP, speed, damage, range, cooldown, target, team, alive/dead,
-  and a persistent soldier id per unit - pure logic, no nodes
-- Selection: click, box-drag, move order, attack order
-- Basic combat AI: seek, close, attack, retarget
-- Death recorded against the soldier, but campaign data is only mutated at
-  resolution via `BattleResult` (never mid-fight)
-- `BattleResult`: winner, survivors, dead, casualties, kills per soldier, XP, gold,
-  loot, duration
-- Battle results screen; Continue returns to the world map
-- Configurable XP for participation, kills, survival and victory
-
-**Definition of done:** the Step 5 end-to-end path, driven headlessly in
-`tests/test_e2e_loop.gd` (127 assertions, through the real scenes) and played by
-hand in windowed runs. Balance measured across 24 seeds: 20/24 wins against the
-weakest bandit band, 3/24 against the strongest.
-
-## Step 6 - Save/load validation (`milestone-06`)
-
-**Goal:** the vertical slice survives a complete application restart.
-
-- Persist campaign metadata, seed, time, position, destination, gold, party,
-  soldiers, XP, kills, level, alive/dead, settlements, recruit pools and enemy parties
-- Versioned saves with a migration path, and a refusal for saves from a newer build
-- `tests/test_persistence.gd` (129 assertions) covering every listed field
-- `scenes/dev/persistence_check.tscn`: a **two-process** restart check, because a
-  same-process save/load does not prove the game can be closed and reopened
-
-**Definition of done:** New Campaign -> recruit -> fight -> earn XP -> save -> quit
--> relaunch -> Continue, with every value intact. Verified by 91 cross-process
-assertions (`26 soldiers restored, 9 of them dead`, every field identical) and by a
-real windowed launch driving the whole loop through the UI.
 
 ---
 
-## Step 6.5 - External audit remediation (`milestone-06.5`)
 
-**Goal:** nothing new. Harden what Steps 0-6 built, after an external review found
-seven defects, and leave a regression test behind for every one.
 
-Not a milestone with a feature; a pass over work already thought finished. It was
-worth doing because six of the seven were **silent** - the game kept running and
-looked fine while behaving wrongly.
+# 0. Executive Direction
 
-- **Retreat was a progression loop.** Pressing Retreat on a battlefield still ran
-  the normal survivor path, so participation and survived-battle XP could be farmed
-  at no risk. Withdrawal is now its own outcome: `battles_fought` yes, XP for kills
-  only, no `battles_survived`, no spoils, enemy stays.
-- **A timeout did not stop the fight.** The finishing step carried on processing a
-  full delta of combat against a battle already declared over; units could still
-  move, strike and die. Now it returns immediately.
-- **Dead soldiers slowed the party.** Travel pace used the roster count rather than
-  the active force, so casualties made the column no faster; the HUD showed roster
-  against capacity while recruitment counted the living. Membership and force are
-  now separate, named quantities.
-- **Legacy saves could break the main menu.** `peek_metadata()` assumed the current
-  shape, so the exact save the v0 migration exists to handle errored before Continue
-  was pressed. Metadata extraction is now shape-tolerant and never writes.
-- **The Step 5 end-to-end test proved nothing about the results payload.** It queued
-  a second `battle_results` transition with no payload, replacing the real one, then
-  asserted the scene existed. It now waits rather than causes, and checks the real
-  result against the campaign chronicle and against what the screen renders.
-- **A typo in `--suite=` produced a green run with no tests.** Now a failure.
-- **A suite that aborted mid-run could pass.** Reaching a completion marker is now
-  required; verified against Godot 4.7.2 rather than assumed.
 
-**Definition of done:** all seven fixed, each with a test that fails without the
-fix; all suites green; the two-process restart check green; a windowed run of the
-whole loop clean. **1557 assertions, 0 failures, 11 of 11 suites** headless, and
-**91 checks, 0 failures** across the restart. See D-033 to D-040.
+
+## 0.1 What Project Banner is
+
+
+
+Project Banner is a single-player medieval mercenary-company strategy game combining:
+
+
+
+- A persistent campaign world containing settlements, companies and hostile forces.
+
+- Recruitment and management of individual soldiers.
+
+- Company identity, including customizable banners and eventually a founder character.
+
+- Tactical real-time battles involving independently commanded formations.
+
+- Battlefield terrain, unit positioning, army manoeuvres and large-scale tactical overview.
+
+- Persistent consequences: casualties, experience, equipment, money and company progression.
+
+
+
+Its core influences include Battle Brothers, Total War and medieval tactical strategy games.
+
+
+
+Its intended visual identity is **grounded medieval HD pixel art**, combining detailed characters and believable landscapes with the readability of large-scale strategy games.
+
+
+
+Project Banner must eventually feel like a coherent game, not a collection of impressive technical demonstrations.
+
+
+
+## 0.2 Primary development objective
+
+
+
+**Produce one complete, enjoyable, independently verified campaign gameplay loop before expanding the feature set.**
+
+
+
+The objective is not to implement every planned system.
+
+
+
+The objective is to build a game that strangers can understand, play, enjoy and return to.
+
+
+
+## 0.3 Current development policy
+
+
+
+Development is paused until Jay approves this roadmap.
+
+
+
+After approval:
+
+
+
+1. GPT-6 makes architecture decisions and authors implementation code.
+
+2. GPT-6 commits changes to isolated GitHub branches.
+
+3. Hermes retrieves those commits into separate local worktrees.
+
+4. Hermes runs tests, reviews behaviour and returns raw evidence.
+
+5. GPT-6 reviews results and corrects defects.
+
+6. Jay authorizes integration when acceptance criteria are satisfied.
+
+
+
+No automatic merges. No unverified success claims. No modification of Jay's unfinished local work without explicit authorization.
+
+
+
+**One coherent change is completed and verified before the next begins.**
+
+
 
 ---
 
-## Step 6.6 - Final foundation lock (`milestone-06.6`)
 
-**Goal:** close the last persistence and infrastructure gaps so Steps 0-6 can be
-declared foundation-locked. Still no new gameplay - nothing from Step 7, no
-formations, terrain, cavalry, projectiles or morale.
 
-Three gaps, each one a case of the game knowing something and not writing it down:
+# A. Where the Game Actually Is
 
-- **Enemy soldiers were persisted one-sidedly.** `BattleResult` described enemy dead
-  but not enemy survivors, so a band that survived a fight - through a withdrawal, a
-  defeat, or a timeout - came back to the campaign at full strength. Every withdrawal
-  was a free reset *for the enemy*, and a hostile band could never be worn down. Enemy
-  survivors now return with their real remaining hit points, their kills and their
-  battle count; enemy dead keep the kills they made before falling, which
-  `_fallen_entry` had been recording and `apply()` discarding.
-- **The real main menu was never tested against a legacy save.** Step 6.5 fixed
-  `peek_metadata()` and tested the Continue *path*, but not the menu scene the player
-  actually meets - which reads metadata, decides whether to offer Continue, and
-  formats its own status line. Now driven directly.
-- **No independent CI gate.** Local tests cannot catch a suite that depends on a
-  local import cache, a leftover save, or a working directory. GitHub Actions now runs
-  the suite and both persistence phases on a clean runner, pinned to Godot 4.7.2-stable.
 
-**Definition of done:** the same persistent enemy can be damaged, withdrawn from,
-saved, reloaded and fought again without resetting; the real menu opens a legacy save
-and Continue migrates it; CI is green on the pushed commit. **1708 assertions, 0
-failures, 13 of 13 suites** headless, **95 checks, 0 failures** across the restart,
-windowed flow clean. CI green on the first run —
-[run 34741699176](https://github.com/JAYST3AM/project-banner/actions/runs/34741699176).
-See D-041 and D-042.
+
+## A.1 Evidence classification
+
+
+
+The project contains substantial working code and historical test evidence. However, a previously passing test does not establish that every current game path works.
+
+
+
+Every status claim must use one of these classifications:
+
+
+
+| Status                  | Meaning                                                                         |
+
+| ----------------------- | ------------------------------------------------------------------------------- |
+
+| VERIFIED                | Executed on the specified commit with raw passing evidence                      |
+
+| HISTORICALLY VERIFIED   | Documented as passing previously; not freshly re-run                            |
+
+| IMPLEMENTED, UNVERIFIED | Code exists, but current execution evidence is incomplete                       |
+
+| PARTIAL                 | Some functional requirements exist; the complete player-facing feature does not |
+
+| NOT IMPLEMENTED         | Required functionality has not been built                                       |
+
+| UNKNOWN                 | Insufficient evidence to classify accurately                                    |
+
+| BLOCKED                 | A known prerequisite or defect prevents acceptance                              |
+
+
+
+GitHub commits prove that source code exists. They do not prove the code compiles, behaves correctly or performs adequately.
+
+
+
+Headless tests prove their specific assertions. They do not automatically prove windowed rendering, GPU behaviour or player usability.
+
+
+
+## A.2 Main branch baseline
+
+
+
+At the last confirmed inspection:
+
+
+
+- Branch: `main`
+
+- Commit: `70a6017`
+
+- Engine: Godot 4.7.2-stable
+
+- Historical test baseline: 38 suites, 10,115 assertions, zero failures.
+
+- Additional historical evidence includes native-query tests, separation-equivalence tests and a two-process persistence check.
+
+
+
+These numbers are documented in `docs/CURRENT_STATE.md`. They are **historical evidence**, not a fresh validation of every branch or local modification.
+
+
+
+The repository's existing `docs/ROADMAP.md` contains approximately 959 lines of historical milestones. Its completed work must not be silently discarded when adopting this new plan.
+
+
+
+**Documentation preservation rule:** Before replacing the old roadmap, archive it under an explicitly named historical document and retain its Git history.
+
+
+
+## A.3 Existing systems audit
+
+
+
+| System                      | Current assessment           | Evidence and qualification                                                                   |
+
+| --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- |
+
+| Godot project architecture  | Historically verified        | Autoload services, scenes, configuration and tests exist                                     |
+
+| Main menu                   | Historically verified        | Campaign creation and Continue paths have tests                                              |
+
+| New Campaign screen         | Implemented                  | Company naming, world seed and banner workspace                                              |
+
+| Banner editor               | Historically verified        | Pixel painting, editing tools and campaign-map banner integration documented                 |
+
+| Campaign map                | Historically verified        | Travel, settlements, parties and camera controls                                             |
+
+| Recruitment                 | Historically verified        | Persistent individual soldiers and recruitment rules                                         |
+
+| Soldier statistics          | Implemented                  | Individual records, battle attributes and progression infrastructure                         |
+
+| Encounters                  | Historically verified        | Bandit encounters and context transfer                                                       |
+
+| CPU combat                  | Historically verified        | `BattleSimulator`, formations, combat and result tests                                       |
+
+| GPU battle                  | Partial                      | Campaign launches GPU scene; full current gameplay acceptance remains unproven               |
+
+| Tactical formations         | Partial                      | Existing CPU implementation and GPU formation logic; unresolved integration/behaviour checks |
+
+| Formation navigation        | Implemented, partly verified | Feature-branch navigator and blocked-command fix                                             |
+
+| Terrain generation          | Historically verified        | Deterministic terrain data and channels                                                      |
+
+| GPU terrain collision       | Implemented, unverified      | Collision mask and shader integration; required windowed checks remain open                  |
+
+| Strategic camera            | Partial                      | Zoom/pan infrastructure and overview components exist                                        |
+
+| Strategic LOD               | Implemented, unverified      | Local CPU LOD changes still need complete review/testing                                     |
+
+| Command interface           | Partial                      | UI components exist on feature branch, not accepted into main                                |
+
+| Unit portraits/roster cards | Partial                      | Feature-branch implementation awaits integration and visual review                           |
+
+| Audio                       | Unknown/incomplete           | No accepted production audio coverage established                                            |
+
+| Combat VFX                  | Partial                      | Some projectiles and animation hooks; full effect coverage unverified                        |
+
+| Save/load                   | Historically verified        | CPU-path persistence and separate-process validation                                         |
+
+| GPU battle-to-save contract | Unverified                   | Must be exercised through the real campaign GPU battlefield                                  |
+
+| Performance                 | Historically measured        | GPU probe benchmarks exist, but production scene targets need current measurements           |
+
+| Asset licensing             | Incomplete audit             | Some external assets identified; complete commercial manifest not established                |
+
+| Distribution build          | Unverified                   | No accepted external-player release package established                                      |
+
+
+
+These classifications are intentionally conservative.
+
+
+
+## A.4 The two-battle-system problem
+
+
+
+This is one of the project's most important architectural issues.
+
+
+
+### CPU reference path
+
+
+
+- `scripts/battle/battle.gd`
+
+- `scripts/battle/battle_simulator.gd`
+
+- `scripts/battle/battle_view.gd`
+
+- `scripts/battle/soldier_field.gd`
+
+
+
+The CPU implementation has extensive headless test coverage and serves as an important behavioural reference.
+
+
+
+### GPU campaign path
+
+
+
+- `scenes/battle/battle_field.tscn`
+
+- `scripts/battle/battle_field.gd`
+
+- `scripts/dev/gpu_crowd.gd`
+
+- `shaders/dev/crowd_sim.glsl`
+
+
+
+The actual world-map encounter flow calls:
+
+
+
+`SceneManager.change_scene("battle_field", {"context": context})`
+
+
+
+The primary existing end-to-end test still enters:
+
+
+
+`SceneManager.change_scene_and_wait("battle", {"context": context})`
+
+
+
+**Consequence:** The CPU end-to-end test does not prove that the GPU campaign battle completes the same journey correctly.
+
+
+
+The GPU implementation has a real campaign adapter, combat simulation, rendering and result-resolution code. It also has documented windowed demonstrations.
+
+
+
+However, the currently reviewed evidence does not establish one independently verified, automated, complete GPU-path campaign-to-battle-to-campaign-to-restart contract on the current integration state.
+
+
+
+This must be closed before calling the new game loop verified.
+
+
+
+### Architectural decision
+
+
+
+- The GPU battlefield is the intended production battle implementation.
+
+- The CPU battlefield remains a reference and testing oracle during reconciliation.
+
+- Common data contracts should be shared where practical.
+
+- The CPU and GPU systems do not need identical implementation details or identical frame-by-frame visuals.
+
+- They must honour the same defined gameplay contracts where parity is required.
+
+- No second permanent set of gameplay rules should be developed casually.
+
+- The CPU reference must not be deleted until replacement tests are sufficient and Jay approves its retirement.
+
+
+
+The September `docs/BATTLE_MIGRATION_PLAN.md` contains older statements describing CPU battles as the live campaign path. The current scene registry and world-map code show that this routing has since changed. That document needs a historical-status annotation.
+
+
+
+## A.5 The 88-commit feature branch
+
+
+
+Primary branch:
+
+
+
+`feature/battle-command-overview-v1`
+
+
+
+Related branch:
+
+
+
+`wt/nav-blocked-command`
+
+
+
+At the last direct GitHub comparison:
+
+
+
+- Main base: `70a6017`
+
+- Feature branch: 87 commits ahead of main.
+
+- Navigator-fix branch: 88 commits ahead of main.
+
+- Overall changed-file set: 32 files.
+
+
+
+The reported 88-commit figure reflects the navigator continuation. Branch heads should be rechecked when development resumes.
+
+
+
+### What this branch contains
+
+
+
+The feature branch combines several distinct systems.
+
+
+
+**Battle commands and presentation**
+
+
+
+- `battle_command_bar.gd`
+
+- `battle_unit_dock.gd`
+
+- `battle_minimap.gd`
+
+- `battle_tactical_overview.gd`
+
+- `battle_deployment_overlay.gd`
+
+
+
+**Formation movement**
+
+
+
+- `battle_formation_navigator.gd`
+
+- `battle_placement_planner.gd`
+
+- `battle_formation_cohesion.gd`
+
+
+
+**Terrain and rendering**
+
+
+
+- `battle_ground_painter.gd`
+
+- `battle_scenery.gd`
+
+- `battle_terrain_art_audit.gd`
+
+- `battle_terrain_gpu_mask.gd`
+
+- Terrain rendering updates and associated shaders.
+
+
+
+**Live battlefield integration**
+
+
+
+- Extensive changes to `scripts/dev/gpu_crowd.gd`
+
+- Related changes to `battle_field.gd`, `battle_view.gd` and GPU compute shaders.
+
+
+
+**Tests and specifications**
+
+
+
+- Additional battle module test suites.
+
+- Test-runner registrations.
+
+- Visual-target and terrain-integration documentation.
+
+
+
+### What is wrong with its current state?
+
+
+
+The primary problem is not that this code is necessarily broken.
+
+
+
+The problem is that it is **too much unreviewed integration work in one development lineage**.
+
+
+
+Risks include:
+
+
+
+- A passing low-level test hiding an integration failure.
+
+- Multiple independent features depending on the same large controller changes.
+
+- CPU/GPU behaviour drifting without an explicit contract.
+
+- A renderer or shader change appearing correct on paper but failing on hardware.
+
+- Difficult regression isolation.
+
+- Features being described as complete before they are exposed and usable in the campaign.
+
+- Large merges conflicting with Jay's local changes.
+
+- Accumulated changes eventually becoming too expensive to review.
+
+
+
+The branch must remain preserved, but it must not be merged wholesale merely to clear the backlog.
+
+
+
+## A.6 Navigator fix status
+
+
+
+Commit: `a4a42b8`
+
+
+
+The blocked-command fix rejects a nearest-reachable fallback path consisting solely of the formation's current tile.
+
+
+
+The diff has been reviewed and its logic accepted at code-review level.
+
+
+
+Hermes reported passing navigator and related suites, with multiple rounds of verification.
+
+
+
+It remains subject to integration verification when its parent branch is decomposed.
+
+
+
+## A.7 GPT-6 formation foundation branch
+
+
+
+Branch:
+
+
+
+`gpt6/formation-command-foundation-v1`
+
+
+
+Commit:
+
+
+
+`1a6695a2ee0a781b96e1cbf77e9aef8738fb4986`
+
+
+
+This is a single main-based extraction containing:
+
+
+
+- Formation navigation.
+
+- Formation placement.
+
+- Formation cohesion.
+
+- The blocked-command fix.
+
+- Boundary movement handling that preserves group spacing.
+
+- Three test suites and runner registration.
+
+- Supporting documentation.
+
+
+
+Eight files changed.
+
+
+
+**Status: committed, pushed, not locally accepted.**
+
+
+
+The commit has not received Hermes' completed Godot verification report in this conversation.
+
+
+
+It is frozen during planning mode.
+
+
+
+It must not be merged or extended until this roadmap is approved and its tests pass.
+
+
+
+## A.8 Uncommitted local LOD work
+
+
+
+Jay's local working tree contains unfinished changes in:
+
+
+
+- `scripts/battle/battle.gd`
+
+- `scripts/battle/battle_view.gd`
+
+- `data/config/game_config.json`
+
+
+
+These changes implement a strategic zoom presentation handoff between individual soldiers and grouped battlefield rectangles.
+
+
+
+Reported evidence:
+
+
+
+- Code applied and compiled.
+
+- Existing targeted suites passed: `battle_view` 8/8, `unit_sprites` 460/460 and `formation_battle` 132/132.
+
+
+
+Still unverified:
+
+
+
+- Newly required threshold and transition tests.
+
+- Selection and orders across all zoom levels.
+
+- Cache invalidation after casualties and formation changes.
+
+- Long-run render/simulation equivalence.
+
+- Windowed four-zoom captures.
+
+- Performance measurements.
+
+- Full regression against the changed tree.
+
+- Interaction with the actual GPU campaign battlefield.
+
+
+
+This code stays untouched until it is safely captured and reviewed.
+
+
+
+**Important:** The CPU zoom thresholds and GPU camera thresholds describe different rendering paths. They must not be assumed numerically interchangeable.
+
+
+
+## A.9 What has not been proved
+
+
+
+The following are outstanding acceptance gaps, not blanket claims that the functionality has never run:
+
+
+
+1. A complete current GPU campaign encounter, controlled by a player, through battle resolution and restart, with independently captured evidence.
+
+2. Reliable selection and movement orders at every required strategic zoom level in the live GPU campaign scene.
+
+3. Shader-backed terrain collision through realistic battle scenarios, including diagonal movement and separation.
+
+4. A fully reviewed and mergeable replacement for the unreviewed feature branch.
+
+5. Consistent production rendering at target resolutions, including dense formation overlap.
+
+6. Commercial readiness of every shipped art/audio asset.
+
+7. Reproducible production performance measurements against an agreed hardware target.
+
+8. A packaged build successfully played by someone unfamiliar with the project.
+
+
+
+These are central roadmap blockers.
+
+
 
 ---
 
-# First major checkpoint - REACHED
 
-The loop the brief calls the game's first real vertical slice:
+
+# B. Definition of Done
+
+
+
+## B.1 The single indispensable gameplay loop
+
+
 
 ```
-NEW CAMPAIGN -> WORLD MAP -> TRAVEL -> TOWN -> RECRUIT -> INDIVIDUAL SOLDIERS
--> WORLD MAP -> BANDITS -> TACTICAL BATTLE -> CASUALTIES -> XP -> LOOT
--> WORLD MAP -> SAVE -> CLOSE GAME -> LOAD -> CONTINUE CAMPAIGN
+
+NEW COMPANY
+
+     ↓
+
+CREATE BANNER / CHOOSE COMPANY NAME
+
+     ↓
+
+ENTER CAMPAIGN WORLD
+
+     ↓
+
+VISIT SETTLEMENT
+
+     ↓
+
+RECRUIT AND PREPARE SOLDIERS
+
+     ↓
+
+TRAVEL / ENCOUNTER ENEMY
+
+     ↓
+
+DEPLOY FORMATIONS
+
+     ↓
+
+COMMAND A TACTICAL BATTLE
+
+     ↓
+
+WIN / LOSE / RETREAT
+
+     ↓
+
+APPLY CASUALTIES, REWARDS AND PROGRESSION
+
+     ↓
+
+RETURN TO THE SAME CAMPAIGN
+
+     ↓
+
+SAVE → EXIT → RELOAD
+
+     ↓
+
+CONTINUE WITH THE SAME COMPANY
+
 ```
 
-Every step is implemented, verified by automated runs, and documented. The
-consequences of a fight - who died, who earned what, what was taken - are written
-to individual soldiers and survive closing and reopening the game.
+
+
+**This is the foundation of Project Banner.**
+
+
+
+Every major development decision should be evaluated against whether it improves, stabilizes or meaningfully expands this loop.
+
+
+
+## B.2 First shippable target: Playable Alpha
+
+
+
+The initial shippable target is a **self-contained single-player Windows alpha** suitable for external playtesting.
+
+
+
+It is not a full commercial release.
+
+
+
+### Minimum player-facing experience
+
+
+
+A stranger can:
+
+
+
+- Launch the game without an editor, debugger or developer instructions.
+
+- Create a company, name it and select a banner.
+
+- Understand the world map and move between useful locations.
+
+- Recruit and manage a small army.
+
+- Encounter hostile forces through normal play.
+
+- Deploy and command several distinct formations.
+
+- Zoom from individual soldiers to a readable battlefield overview.
+
+- Use the intended GPU battle scene.
+
+- Win, lose or retreat and understand the consequences.
+
+- Obtain meaningful rewards and improve their company.
+
+- Save, close the application, reload and continue playing.
+
+
+
+### Minimum tactical content
+
+
+
+- At least three mechanically distinct troop archetypes, including melee and ranged troops.
+
+- A manageable encounter with multiple formations on each side.
+
+- Hold, move and engage commands.
+
+- Selection, group selection and understandable order feedback.
+
+- Meaningful formation facing and frontage.
+
+- At least one battlefield with tactically relevant terrain.
+
+- Actual casualties and consistent results.
+
+- A coherent presentation at close, medium and full-map zoom.
+
+
+
+### Minimum campaign content
+
+
+
+- A coherent playable starting region.
+
+- Accessible settlement and recruitment systems.
+
+- Hostile encounters with meaningful risk.
+
+- An understandable money/recruitment/reward loop.
+
+- Persistent soldiers, company state and enemy consequences.
+
+- A reason to undertake another encounter after the first one.
+
+
+
+### Minimum production quality
+
+
+
+- No unavoidable progress blockers in the core loop.
+
+- No known save corruption or silent loss of campaign data.
+
+- No obvious placeholder/debug UI in ordinary gameplay.
+
+- Readable controls and tooltips.
+
+- Functional audio and visual feedback for major actions.
+
+- All included assets cleared for distribution.
+
+- Stable performance on the explicitly agreed target hardware.
+
+- An external tester can complete the full loop without developer intervention.
+
+
+
+**A feature is not done because code exists. It is done when a player can use it and its acceptance evidence is recorded.**
+
+
+
+## B.3 Commercial-release definition
+
+
+
+A paid release requires additional standards beyond the first playable alpha:
+
+
+
+- Sufficient replayability and content variety to justify the price.
+
+- Visual consistency rather than mixed temporary assets.
+
+- Credible encounter balance and progression.
+
+- Settings, accessibility and basic quality-of-life features.
+
+- Robust packaging, installation, crash handling and user support.
+
+- Commercial licensing compliance.
+
+- Independent playtest feedback and defect resolution.
+
+- A release plan, storefront assets and clear communication of feature scope.
+
+
+
+Commercial-release timing must be based on demonstrated quality and player interest, not a predetermined date.
+
+
+
+## B.4 Explicitly outside the first alpha
+
+
+
+The following are not required for the first playable release:
+
+
+
+- Full kingdom management.
+
+- Diplomacy and political simulation.
+
+- Castle sieges.
+
+- Multiplayer.
+
+- Naval warfare.
+
+- Massive procedural faction economies.
+
+- Extensive cavalry systems.
+
+- Hundreds of recruitable character classes.
+
+- Thousands of soldiers in an ordinary player encounter.
+
+- Cinematic animation quality matching modern 3D Total War games.
+
+
+
+These may be worthwhile later, but they must not prevent the first complete game from existing.
+
+
 
 ---
 
-# After the checkpoint
-
-Deliberately not implemented before Steps 0-6 work. Ordered roughly by how much
-they lean on what already exists:
-
-1. **Combat depth** - formations, spears, archery, cavalry, shields, weapons,
-   armour, fatigue, wounds, morale effects
-2. **Soldier depth** - equipment, inventory, troop upgrade trees, named captains,
-   traits that do things, loyalty, aging, permadeath, personal history surfacing
-3. **Battlefield** - terrain, procedural battlefields, weather, siege maps
-4. **Overworld life** - AI parties, caravans, trade, settlement production,
-   supply and demand, world events
-5. **Grand strategy** - faction ownership, lords, armies, wars, diplomacy,
-   territory, castles, sieges, prisoners, mercenaries, kingdom creation
-6. **World generation** - procedural map and political simulation, relationships
-
----
-
-## Step 7 - Tactical Combat 2.0: terrain and formation foundation (`milestone-07`)
-
-**Goal:** turn a collection of individually moving combatants into the beginning of a
-real formation-based battlefield system, on deterministic terrain, with an architecture
-that can grow toward very large battles. Still a foundation milestone: it deliberately
-implements no shield wall, no phalanx, no bracing, no projectiles, no cavalry, no morale,
-no advanced tactical AI and no large-battle optimisation.
-
-This begins item 1 of the post-checkpoint list above. Three systems, all of them
-load-bearing rather than decorative:
-
-- **Deterministic battlefield terrain.** `BattlefieldTerrain` is a data grid - type,
-  elevation and a resolved movement multiplier per cell - generated from
-  `BattleContext.terrain_seed` by hashing lattice coordinates, so the same seed always
-  produces the same ground and generating it cannot disturb any other random stream.
-  Four types (open, rough, light woods, high ground) from a JSON catalogue. Terrain
-  affects movement, which is a real consequence, and nothing else - see D-045 for why a
-  defence modifier is deliberately absent.
-- **A generic formation engine.** `BattleFormation` is a first-class object with real
-  geometry: anchor, facing, desired facing, frontage, depth, spacing, file and rank
-  counts, generated slot positions, an order, and a measured cohesion. LINE, COLUMN and
-  LOOSE come from a data table and differ in ways the tests measure rather than assert.
-  Slots are generated in the formation's own frame, so arbitrary facing works and the
-  directional mechanics that come later have the hook they need.
-- **A benchmark harness.** `scenes/dev/battle_benchmark.tscn` runs the same battle at
-  100 to 5,000 soldiers, reports cost per tick and a setup checksum for cross-commit
-  comparison, and attributes the cost by re-running with terrain and formations switched
-  off. It exists so that "is this getting slower?" has an answer that is a number.
-
-**The architectural change, stated plainly:** a soldier's formation slot is its whole
-job. It fights what it can reach, otherwise it walks to the place it was given. It does
-not pick its own ground and does not chase. Formations move as bodies, turn rather than
-snap, and reform by their soldiers walking into a new shape. `BattleAI` sits above them
-and does the only thing a commander does at this stage - face the enemy and order the
-body to engage.
-
-**Two defects found by running it, not by reading it:**
-
-- **A battle could stall forever.** Nine players against one enemy, stopped for four
-  simulated minutes: the survivor stood in the gap left by a fallen man, 2.6 units from
-  the next soldier along, which is further than a sword reaches. Both bodies were engaged
-  and both had stopped, so neither closed and neither could reach. Fixed with a narrow
-  rule - a stopped, engaged body whose side has *nobody* in contact lets its soldiers
-  press forward - which cannot dissolve a fighting line into a crowd because the contact
-  check turns it off the moment anyone is actually fighting. See D-050.
-- **The formation arrival tolerance was a waypoint tolerance.** A body closing on an
-  enemy stopped six tenths of a unit short of it, which is indistinguishable from
-  stopping. Engaged bodies now close to 0.05.
-
-**Definition of done:** deterministic terrain as data, influenced by `terrain_seed`;
-LINE, COLUMN and LOOSE with deterministic slots and arbitrary facing; formations that
-move, turn, reform physically and measure their own cohesion; the same engine used by
-both sides; player formation orders; **2058 assertions across 16 suites, 0 failures**;
-the two-process restart check unchanged; the windowed flow clean; CI green. See D-043
-through D-053.
-
----
-
-## Step 7.1 - Formation hardening (`milestone-07.1`)
-
-**Goal:** close the edge cases an external audit found in Step 7 before it is locked. No
-new gameplay, no redesign, and nothing from Step 8.
-
-Five fixes and one piece of test tooling:
-
-- **Formation membership invalidates its own geometry.** `set_units()`, `remove_units()`,
-  `add_unit()` and `remove_unit()` are the only ways to change a body's roster, and each
-  one rebuilds the slots before returning. Step 7 let the simulator edit a donor's
-  `unit_ids` directly and then call `ensure_slots()`, which rebuilds only if something
-  has already marked the geometry dirty - and nothing had. A player detaching four men
-  from a dressed twelve-man line left that line reporting ten files, two ranks and the
-  frontage of a body four men larger, indefinitely. `set_type()` had the same defect one
-  layer over and is fixed the same way. See D-054.
-- **The AI stops taking orders against corpses.** `is_empty()` and `has_living_units()`
-  are different questions: a wiped-out body is not empty, because casualties stay on the
-  roll so a gap in a line stays a gap. The AI now asks the same question the battlefield
-  asks. See D-055.
-- **Contact belongs to a body, not to a side.** A wing that has not reached the enemy can
-  close while the centre is fighting, instead of being told it is engaged because
-  somebody else is. See D-056.
-- **Debug bounds describe a rotated body**, derived from the slots rather than from the
-  body's own axes. See D-058.
-- **`slope_between()` honours its contract** and returns zero when *either* endpoint is
-  off the field, not only when both are. See D-057.
-- **A formation drill for automated runs** (`--autoformations`) drives the battle scene's
-  real order methods - select, detach, move, merge, turn, reshape, toggle the overlay -
-  and reports whether any body's geometry disagrees with the soldiers it holds.
-
-**Definition of done:** membership cannot change without invalidating geometry; a partial
-detachment rebuilds the donor correctly and leaves every soldier on exactly one roll;
-repeated transfers stay correct; the AI ignores all-dead bodies; contact is per
-formation; rotated bounds contain every slot; **2207 assertions across 16 suites, 0
-failures**; 95 restart checks, 0 failures; the windowed flow clean with the drill; CI
-green. See D-054 through D-058.
-
-
-## Step 7.2 - Battle simulation scaling foundation (`milestone-07.2`)
-
-**Goal:** remove the architectural bottleneck the Step 7 benchmark exposed. An
-engineering milestone: no new gameplay, and nothing from Step 8.
-
-The Step 7 measurement put the cost precisely: fifty times the soldiers was about
-2,300 times the time per tick, from two loops that compared every soldier with every
-other soldier. Both predated Step 7.
-
-- **A battlefield proximity index.** `BattleSpatialGrid` is a uniform grid, `RefCounted`
-  and data-first, `battle.spatial_cell_size` units to a cell, rebuilt in one linear pass
-  per tick. Buckets are a linked list in packed arrays, so nothing is allocated after
-  configuration and a query writes into a caller-supplied array. It answers in cells
-  rather than in circles and the order is part of its contract, because two callers
-  depend on it. See D-059, D-060, D-066, D-068.
-- **Target acquisition searches outward and stops.** Within
-  `battle.target_search_max_radius` the answer is *provably identical* to the exhaustive
-  scan it replaced, and a test proves it soldier-for-soldier against a brute-force
-  reference. Beyond that bound a soldier is pointed at the fighting by its body rather
-  than measuring the whole battlefield for itself. See D-061, D-065, D-067.
-- **Overlap resolution goes local**, with a pair resolved once by the lower id and in the
-  order the old loop used, so it produces the same positions rather than merely a
-  defensible set. See D-062.
-- **Dead soldiers are excluded at query time, not only at index time** - a defect the
-  equivalence probe found in a live battle, not by reading the code. See D-063.
-- **Phase instrumentation**, off by default and free when off. See D-064.
-- **The benchmark reports before and after**, at Step 7's sizes plus 10,000 and 20,000,
-  with the busiest cell and whether contact was reached, and measures the spatial layer
-  alone at constant density.
-
-**Definition of done:** measured; 17 suites, **2364 assertions, 0 failures**; 95 restart
-checks, 0 failures; the windowed flow clean; CI green. See D-059 through D-069.
-
-
-## Step 7.3 - Dense battle / overlap scaling (`milestone-07.3`)
-
-**Goal:** remove the next measured bottleneck. Step 7.2 replaced the quadratic proximity
-scans and reported that 66% of a tick at five thousand soldiers was the separation pass.
-An engineering milestone: no new gameplay, nothing from Step 8.
-
-- **The measurement came first.** The separation pass was given counters before it was
-  changed, and they said it was handed **95.6 candidates per soldier to find 226 touching
-  pairs** army-wide, with the broadphase 62-66% of the phase. See D-071.
-- **A dedicated separation index.** `BattleOverlapGrid`, with its own cell size
-  (`battle.overlap_cell_size`, 1.35 - one body's width, chosen by a sweep), enumerating
-  cell against cell so every pair is produced once with no per-soldier query. See D-073,
-  D-078.
-- **Pushes accumulated rather than applied**, which removes order dependence from the
-  physics entirely and makes order independence a property that can be checked instead of
-  preserved. It is a deliberate change in relaxation and is documented as one. See D-074.
-- **A displacement ceiling**, so a crush cannot fling a soldier across the field. D-075.
-- **Formation geometry does the spacing.** Settled interiors of a body are skipped on a
-  proof, never across two bodies, and never where the formation's own spacing is tight.
-  See D-076.
-- **Two benchmark families**, because one battlefield cannot answer both "what if an army
-  is packed into too small a space" and "what does a battle of twenty thousand cost".
-  See D-077.
-- **Two Step 7.2 hardening fixes**: the grid's bucket tails are persistent storage rather
-  than a per-rebuild allocation (D-070), and an explicit attack order is resolved before
-  the automatic target search rather than after it (D-072).
-
-**Definition of done:** measured; **18 suites, 2490 assertions, 0 failures**; 95 restart
-checks, 0 failures; the windowed flow clean; CI green. Total simulation time improved at
-every size, 1.07x to 7.36x. See D-070 through D-078.
-
-## Step 7.4 - Target acquisition scaling (`milestone-07.4`)
-
-**Goal:** remove the next measured bottleneck. Step 7.3 took the separation pass off the
-top of the profile and reported what was left: at five thousand soldiers **target selection
-alone was 248.542 ms a tick, 66% of the tick**, because every soldier looked for an enemy
-on every simulation tick. An engineering milestone: no new gameplay, nothing from Step 8,
-no threads, no C++, no GDExtension, no multi-rate simulation.
-
-- **The counters came first.** Target handling was instrumented before it was changed, and
-  what the counters said chose the milestone: the search was not too slow, it happened far
-  too often. See D-079.
-- **Target persistence.** A soldier keeps a valid opponent - alive, hostile, still nearby -
-  instead of asking for the nearest enemy every tick. `BattleUnit.auto_target_id` and
-  nothing more elaborate than an id and a tick: no node references, no timers, no
-  coroutines, no per-soldier dictionaries, no signals, and nothing that reaches a campaign
-  save. See D-080, D-085.
-- **A deterministic staggered cadence.** `battle.target_reacquisition_ticks` (4), phased as
-  `unit.id % interval`, so a quarter of the army looks on any given tick rather than the
-  whole army on every fourth. Simulation ticks, never a wall clock. See D-080, D-081.
-- **A retention radius**, so a remembered opponent is finite: past
-  `battle.target_retention_radius` a soldier stops continuing with it rather than running
-  after it across a battlefield. Shipped equal to the search ceiling, on purpose, and swept
-  at 8, 16, 24 and 32 first. See D-082.
-- **Hysteresis** (`battle.target_switch_advantage`, 1.25): an opponent is not abandoned
-  because something else is a hundredth of a unit closer. See D-081.
-- **Urgency, and one kind of it.** The only search allowed to run off the cadence is one for
-  an opponent lost inside the soldier's own reach. Configurable, tested on and off, measured
-  by a death-storm benchmark that kills an entire front rank on one tick. See D-083.
-- **The search itself untouched.** The local search, its ladder and its tie-breaking are
-  Step 7.2's, and the brute-force equivalence tests still drive them. See D-085.
-- **Generic foundations for the ranged milestone**, with no archers in this one: a unit
-  declares `awareness_radius`, and nothing in the target path branches on what it carries.
-  See D-086.
-- **A spike analysis**, because a staggered system is exactly the kind that can average
-  well and spike: per-tick phases are sampled and reported as average, p50, p95, p99 and
-  worst. See D-084.
-
-**Definition of done:** measured; **19 suites, 2732 assertions, 0 failures**; 95 restart
-checks, 0 failures; the windowed flow clean; CI green. Total simulation time improves at
-every size of both benchmark families (1.43x to 2.66x on the fixed-area torture test, 2.0x to
-3.9x at realistic density), and target acquisition itself is **3.5x cheaper** at the sizes
-where both builds were measured at the same window. The next bottleneck is named by the
-measurement rather than guessed: formation focus. See D-079 through D-087.
-
----
-
-## Step 7.5 - Formation battlefield focus scaling (`milestone-07.5`)
-
-**Goal:** remove the next measured bottleneck, and this time the measurement is
-unambiguous: at twenty thousand soldiers on a battle-sized field, **formation focus cost
-760 ms of a 1,786 ms tick**, with an earlier run of the same build putting it at 856 ms of a
-1,940 ms tick. Step 7.4 had just made target selection four times cheaper, and
-what that revealed was the same shape of work one level up - every body answering "where is
-the fighting" with a fresh walk of the whole army. An engineering milestone: no new
-gameplay, nothing from Step 8, no projectiles, no cavalry, no morale, no threads, no C++, no
-GDExtension, no ECS, no second multi-rate system.
-
-- **The counters came first, again.** The focus path was instrumented before it was changed,
-  and what the counters said chose the architecture: 100 whole-army walks a tick for 100
-  bodies, 2,205,806 soldier-visits, and ten of those walks made on behalf of a single soldier
-  from inside the target loop. See D-088.
-- **A transient formation summary.** Living count, centre and a box, rebuilt once per tick
-  from each body's own roll, with the soldiers no body claimed collected as each side's loose
-  run. No nodes, no per-soldier objects, no persistence. See D-089.
-- **Formation-level enemy selection.** Bodies are compared against bodies, nearest box first,
-  and the search stops as soon as no remaining body could hold a nearer soldier - which makes
-  it the *same answer* a full scan gives rather than a cheaper approximation of it. See
-  D-089.
-- **Soldiers consume the cached answer.** A soldier reads its body's focus: a field read, not
-  a search. Its body's answer dying mid-tick is corrected once for the body, and a body with
-  nobody left to watch is not asked again inside the same tick. See D-090.
-- **No global soldier fallback, and a counter that proves it.**
-  `foc_scans_from_soldiers` counts whole-army walks made by the focus logic on behalf of a
-  soldier. It was 10.3 per tick at twenty thousand soldiers; it is now zero, in every battle
-  the suite drives.
-- **Allocation audited rather than asserted.** Every buffer is sized when the army is handed
-  over and reused; a test drives sixty ticks and asserts the allocation count does not move.
-  See D-091.
-- **No retention rule, deliberately.** A body's answer changes 38 times a tick across a
-  hundred bodies, and the pass is now cheap enough that a hysteresis rule would be new
-  behaviour bought with no measurable saving. Declining it is a decision with a reason rather
-  than an omission. See D-089.
-
-**Definition of done:** measured; **20 suites, 2831 assertions, 0 failures**; 95 restart
-checks, 0 failures; the windowed flow clean; CI green. See D-088 through D-091.
-
-## Step 7.6 - Automatic target search cost scaling (`milestone-07.6`)
-
-**Goal:** remove the next measured bottleneck. Step 7.5 left the profile unambiguous - at
-twenty thousand soldiers on the realistic benchmark, target acquisition cost 575 ms of a 965 ms
-tick, 57% of the simulation - and this milestone set out to make the local search cheaper
-without changing a single answer it gives. It finished by leaving the search exactly as it was,
-because every cheaper one measured slower. The milestone's product is the measurement that
-establishes that, and the instruments that make it checkable.
-
-**Where the target phase actually goes.** Counted before anything was changed, at twenty
-thousand soldiers:
-
-| component | ms/tick | share of the phase |
-| --- | ---: | ---: |
-| the spatial query | 509.7 | **85.2%** |
-| answering with the formation (the focus path) | 21.2 | 3.5% |
-| deciding whether a remembered opponent is worth keeping | 19.4 | 3.2% |
-| deciding whether a look is worth making (the D-087 proof) | 7.7 | 1.3% |
-| hysteresis and storing the answer | 2.6 | 0.4% |
-| the rest of the target loop | 37.9 | 6.3% |
-| **the phase** | **598.5** | 100% |
-
-And the query itself, per look: **1.77 grid queries** (one per rung), **260 cells read**, **171
-candidates measured** to keep one, 24% of looks answered by the first radius, 44% after
-widening, 32% by nobody at all. The second rung is 78% of the query time.
-
-**What was tried.** Five exact re-implementations of the search, all of them designed to
-inspect less ground than the ladder, all of them measured against it in a purpose-built
-micro-benchmark (`scripts/dev/search_bench.gd`) and in live battles:
-
-| implementation | measured |
-| --- | --- |
-| Chebyshev ring walk, outward from the soldier | 2.6x slower |
-| rectangle walk, per-cell distance bound | 2.3x slower |
-| row walk, nearest rows first | 1.9x slower |
-| row walk with an exact reach | 1.9x slower |
-| block-indexed walk over a coarse side mask | 3.9x slower |
-
-The best of them read 122 cells and measured 45 candidates per look - **half the ladder's work**
-- and was still nearly twice as slow. The reason is the interpreter and it is now a recorded
-number: one radius-32 box costs about 300 us however it is walked, a bound test in a loop body
-costs about 0.3 us, and the empty cell it skips costs about 0.12 us to open and dismiss. Pruning
-inside the loop cannot pay for itself; the ladder is cheap because its *first* rung is small and
-answers most looks before the second one is reached.
-
-- **The search is unchanged, and that is the decision.** No re-implementation ships. The
-  block-indexed attempt went with the block mask it required, because the mask cost a write per
-  soldier per tick in the spatial rebuild for a path that never runs. See D-094.
-- **What ships is the measurement.** Search-shape counters (queries per look, cells read and
-  cells walked twice, candidates split by rung, escalations, the distance an answer was found
-  at, exact per-search percentiles), per-rung query timings, and sub-phase timings for the rest
-  of the target loop. All of it is development-only, behind the profile flag, and the shipped
-  simulation pays nothing for it.
-- **Nothing else changed.** Same suite, same battles, same numbers as Step 7.5 - which is the
-  regression argument for a milestone whose only code changes are instruments.
-
-**Definition of done:** measured; **21 suites, 2881 assertions, 0 failures**; the restart check
-unchanged; the windowed flow clean; CI green. The target phase is unchanged at ~598 ms/tick and
-the next bottleneck is the same one: the second rung of the search. See D-094.
-
----
-
-## Standing design principle
-
-Individual soldiers should feel like people rather than numbers. `Soldier`
-already carries the fields this needs - age, traits, loyalty, level, kills,
-battles survived, and an open-ended `history` log. The systems that fill that log
-come later; the storage for it exists now so those systems never have to
-retro-fit identity onto a stat block.
-
-## Step 7.7 - Native spatial query feasibility spike (`milestone-07.7`)
-
-The question was where the boundary should sit, not whether to write C++: the target search's
-spatial kernel was measured twice - broadphase only, and broadphase plus the exact test - and the
-two answers were 1.04x and 1.91x on the realistic twenty-thousand-soldier tick. The second shape
-ships; the first is kept as a mode because its exactness is structural.
-
-Done: the `NativeTargetQuery` accelerator with both boundary shapes, the two mirror hooks that
-keep its live state true, a comparison backend that diffs the implementations per rung, an
-equivalence suite that caught two real defects before any benchmark quoted a number, a
-bridge-cost benchmark, matched before/after tables for both families, a spike distribution, the
-toolchain pin and a CI build that proves the native class loaded.
-
-Not done, and not this milestone: threads, ECS, per-soldier nodes, any second native kernel, or
-any change to what the simulation decides. The GDScript reference remains the authority and the
-fallback, and `CURRENT_STATE.md` carries the measured numbers.
-
-## Step 7.8 - separation-pass optimisation (`milestone-07.8`)
-
-**Done.** The Step 7.8 first pass measured the tick and found the separation pass to be the largest
-single phase at realistic scale (~200.6 ms/tick at 20,000 soldiers). This pass:
-
-- corrected the two profiler counters the audit found wrong (`dev_coincident` counted touching
-  pairs; `dev_usec_pairs` was never assigned) and added the assertions that pin them (D-096);
-- diagnosed the settled-cell skip rather than assuming it: it fires during dressing and approach
-  and cannot fire at contact, because a real fight has almost no settled soldiers in it. The proof
-  was left exactly as it was (D-097);
-- split the phase's own cost by measurement - rebuild, same-cell traversal, neighbour traversal,
-  apply, and the exact pair work by subtraction (D-096);
-- measured a packed GDScript candidate (2.3-3.7x the reference's phase, bit-for-bit equivalent on
-  1,500 generated states) and shipped it as the portable fast path (D-098);
-- built a native shape-C kernel that performs the whole pass and returns one displacement per
-  soldier per axis: **42.7 ms/tick at 20,000 on a realistic field, against 238.0 for the
-  reference, a 5.6x overlap speedup and a whole-tick 650.5 -> 454.7 ms/tick in matched windows**
-  (D-099);
-- ran the 300 v 300 windowed showcase the brief asked for, which found a formation-layer stalemate
-  at that scale and documents it with numbers rather than impressions (D-100).
-
-**Next measured bottleneck:** the per-soldier update loop - 246.6 ms/tick of the 474.6 ms/tick at
-20,000 soldiers, of which automatic target selection is 106.2 ms. The next largest phases are the
-formation focus layer (49.0 ms) and the spatial grid rebuild (45.3 ms). One suspicion is already
-located and not yet proved: `BattleSimulator._attack()` walks the whole roster on every kill to
-clear hunting orders, which is O(deaths x army) per tick.
-
-**Not started:** Step 7.9, and any optimisation of the above.
-
-## Step 7.8B - large-battle stalemate hardening (`milestone-07.8b`)
-
-**Done.** Step 7.8's showcase found a formed 300 v 300 battle freezing at half casualties, and
-recorded it with numbers rather than fixing it (D-100). This pass diagnoses it, fixes it at the
-formation layer, and proves the headline case resolves:
-
-- reproduced the freeze headlessly, tick by tick, on the showcase's own battle - and put that
-  deployment in one place (`ShowcaseBattle`) so the watched run, the probe and the test all report
-  the same setup checksum (`600:f8a81f4d`);
-- measured the frozen state rather than describing it: 0 of 298 soldiers within reach, nearest
-  hostile 2.556 units, both bodies' centres **0.050003 units apart**, all six bodies reporting
-  `moving`, 15,616 ticks with no blow struck, and press-forward firing **zero** times in the whole
-  battle;
-- found two nested causes - a body out of contact steering at the enemy's *anchor* (so centres were
-  driven onto each other and the surviving ranks interleaved one lattice spacing apart, just outside
-  melee reach), and a body then unable to express the last 3e-6 units of movement, which left
-  `is_moving()` permanently true and the press-forward rule permanently disabled;
-- fixed both at the level they belong to: the engaged body's station is where the two bodies'
-  *surviving fronts* meet, one spacing per rank lost, and never inside the enemy's centre (D-101),
-  and a step the centre cannot express is an arrival (D-102);
-- established the fixed simulation step in the runtime, because the scene was feeding the simulator
-  the rendered frame delta and the same seed fought a different battle on a different machine
-  (D-103);
-- measured the fix at 20,000 soldiers in interleaved matched windows: **+2.6 ms/tick (+0.7%)** on
-  the torture field and **+9.2 ms/tick (+2.4%)** on the realistic field, after a first version that
-  cost +31.7 ms/tick was made to read the summary the tick already builds (D-104);
-- re-ran the windowed 300 v 300 showcase, which now fights to a decision inside the production
-  battle clock.
-
-**The headline gate:** seed 780780 (the showcase's own) resolves at 611.1 s of battle time - 596
-casualties, the player's army destroyed, 4 enemy soldiers standing, longest silence 24 ticks, zero
-stall windows - and the windowed showcase reaches the same result to the tick. Ten further seeds
-all resolve by annihilation with zero stalemates. Small battles (6 v 6 to 100 v 100) are unchanged
-in shape and all resolve.
-
-**Next measured bottleneck:** unchanged by this milestone, and deliberately not touched - the
-per-soldier update loop at 231.7 ms/tick of a 437.1 ms/tick instrumented tick, of which automatic
-target selection is 104.5 ms. The suspected O(deaths x army) walk in `_attack()` remains a
-hypothesis.
-
-**Not started:** Step 7.9, and any optimisation of the above.
-
-## Step 7.8 (formation-driven engagement) (`milestone-07.8c`)
-
-**Done.** A feasibility spike into whether strategic awareness should live at the body rather than
-in every soldier, and whether formations can be split and merged at runtime without a battlefield
-rebuild. Both answered, measured, and shipped behind a switch:
-
-- formation-level target selection - each body picks the enemy body it is fighting, once per
-  ten-tick cadence, by box distance with hysteresis, overridable by an explicit order;
-- a *contact band* derived from the two bodies' actual weapon reaches, so a soldier is asked to
-  look for its own opponent only when the fight could be his. Measured: **zero searches a tick**
-  with the armies far apart or merely marching, **6.9x fewer** at full contact, and **9.9x fewer**
-  in a five-hundred-a-side showcase battle (169,738 -> 17,112), with the individual-mode share
-  falling from 100% to 14.9%;
-- a soldier that has just been struck strikes back at its attacker for one index probe and no
-  search, which is what keeps a flank or a rear attack answerable without a global scan;
-- `split_formation()` and `merge_formations()` as membership edits: **0.27 ms a split at six
-  thousand soldiers**, soldier ids, health and history preserved, no soldier created, destroyed or
-  duplicated, and an invariant checker that proves it;
-- the whole layer is switchable off (`PB_ENGAGEMENT=off`) so every measurement above is a pair of
-  runs in one build, and with it off the Step 7.4/7.6 target suite passes unchanged;
-- battles end the same way on both sides of the switch (40 casualties against 43 at full contact,
-  103 against 103 in the flank case), and the suite asserts the safety property directly: no
-  soldier is ever refused a look while it could have struck somebody.
-
-**Behavioural gate:** 193 new assertions across forty scenarios - distance, approach, contact,
-flanks, rear attacks, two enemies at once, dead bodies, explicit orders, split while distant,
-approaching and engaged, unequal and arbitrary splits, merge, ownership invariants, randomized
-membership transitions, and cross-seed reproducibility.
-
-**Next measured bottleneck:** unchanged and deliberately not touched - the per-soldier update loop
-at 231.7 ms/tick of a 437.1 ms/tick instrumented tick at twenty thousand soldiers, of which
-automatic target selection is 104.5 ms.
-
-**Not started:** the Cohort layer (the design is compatible; nothing was built), multi-rate
-simulation, threading, and any optimisation of the phases above.
+
+
+# C. Ordered Development Roadmap
+
+
+
+## Milestone 00 — Approve Scope and Freeze the Baseline
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Documentation, design\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** Jay's approval
+
+
+
+### Deliverables
+
+
+
+- Approve or revise this roadmap.
+
+- Confirm that the GPU battlefield is the production target.
+
+- Approve the first-alpha feature boundaries.
+
+- Confirm the initial target platform and display resolutions.
+
+- Preserve the previous roadmap as historical documentation.
+
+- Define acceptance-report formatting and branch rules.
+
+- Record important design decisions in `docs/DECISIONS.md`.
+
+
+
+### Acceptance checks
+
+
+
+- Jay explicitly approves the roadmap.
+
+- Scope exclusions are acknowledged.
+
+- Target platform and intended test machine are recorded.
+
+- Existing unfinished work is declared protected.
+
+- Development remains paused until this approval is complete.
+
+
+
+### Dependency note
+
+
+
+This milestone authorizes the others. No implementation begins before it.
+
+
+
+### Jay's decision required
+
+
+
+Approve the initial scope, release target and technical direction.
+
 
 
 ---
 
-## Step 7.9 - the kill-cleanup walk, measured inside real ticks
-
-**What it is.** A measurement milestone. Every death walks the entire roster to clear the explicit
-attack orders that were hunting the soldier who fell, which is O(roster) per death - the last
-suspected quadratic path inside the per-soldier update loop, the largest measured phase. It was
-suspected for two milestones and never proved. It is proved now, and nothing was optimised: this
-project's rule is that a measurement establishes the need before an optimisation is written.
-
-**Measured inside ticks the game ran** (`scenes/dev/death_storm_probe.tscn`, seed 70909, one `step()`
-per row, ordered attackers against one-hit-point enemies):
-
-| soldiers | deaths in that tick | entries inspected | the cleanup | the whole tick | share |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 388 | 388,000 | 36.3 ms | 46.7 ms | **77.8%** |
-| 5,000 | 1,915 | 9,575,000 | 1,027.3 ms | 1,093.5 ms | **93.9%** |
-| 20,000 | 7,542 | 150,840,000 | 23,599.0 ms | 24,003.6 ms | **98.3%** |
-
-**And the scaling**, killing a known number of soldiers at 20,000 through the production `_attack()`
-path: one death 20,000 entries and 4.0 ms, fifty 1,000,000 and 194.8 ms, four hundred 8,000,000 and
-1,596.9 ms. Entries inspected per death equals the roster size exactly at 100, 1,000, 5,000 and
-20,000 soldiers, so the cost is deaths x army. Order density barely moves the time - raising the
-orders cleared at 20,000 from 9,999 to 19,999 left the timing unchanged - because the inspections
-dominate and the clears are free.
-
-Against the measured 437.1 ms tick at twenty thousand soldiers, one death is invisible and a
-front-rank-death tick is entirely this walk. **The order index that would fix it is the next
-milestone**, and this table is its brief. See D-110.
-
-**An independent audit rejected the first version**, and two of its three findings were code: the
-disabled path kept a counter test per roster entry (now two loops, one instrumented and one exactly
-the loop it always was), and the storm's "all living units" workload only ordered one side (now every
-soldier but the victim). Its third finding is why the first table is measured inside `step()`: a storm
-batched by hand can show a total but cannot claim a share of a tick.
-
-**Definition of done:** measured inside real ticks; **26 suites, 8878 assertions, 0 failures**; the two-process restart check 6/0 write and 95/0 verify; the windowed DevFlags loop deploys five against five by name and resolves a battle with no script errors; the probe prints its checksum, its per-size per-density report and its storm-tick table.
-
-**Not touched.** Battle outcomes, targeting cadence, target-search logic, formation-driven engagement,
-explicit-order precedence, movement, separation, balance data, saves, and the locked Step 7.8 overlap
-optimisation and its native kernel. The order-lapse behaviour is asserted by the new tests, so the
-counters cannot have been added by changing it.
 
 
-## Step 7.10 - the order index (`milestone-07.10`)
-
-**What it is.** The fix Step 7.9's measurement asked for. Every death used to walk the whole roster to
-clear the orders hunting the soldier who fell - O(deaths x army), 98.3% of a twenty-thousand-soldier
-tick on a mass-casualty storm. The soldiers holding an order are now chained onto the man they were
-ordered to kill, once a tick, so a death walks its own chain and inspects nobody else.
-
-**Measured, paired, in one build and on one seed** (`scenes/dev/death_storm_probe.tscn`, seed 70909):
-
-| at 20,000 soldiers | Step 7.9 | **Step 7.10** |
-| --- | ---: | ---: |
-| 50 deaths, no orders | 1,000,000 inspections, 160.5 ms | **0 inspections, 0.011 ms** |
-| 50 deaths, every soldier ordered at one man | 1,000,000 inspections, 162.8 ms | **19,999 inspections, 16.2 ms** |
-| a storm tick, 7,542 deaths | 23,599.0 ms of a 24,003.6 ms tick (**98.3%**) | **7.6 ms of a 230.1 ms tick** (**3.3%**) |
-
-The storm tick is **104 times cheaper**. The cost follows the orders rather than the army: one hunter
-costs one inspection at a roster of ten or sixty thousand, which is the exact inverse of Step 7.9.
-
-**The equivalence is proved, not asserted.** The suite performs the reference scan itself and checks
-that the indexed cleanup clears exactly what a full walk would, that every hunter's order lapses, and
-that an order aimed at a living soldier does not move. The behaviour assertions from Step 7.9 are
-unchanged, because the milestone changed what the cleanup costs, not what it does. The chains are
-rebuilt when the tick's index is stale, because the probe and the suites call `_attack()` directly and
-an unbuilt index would have silently cleared nothing - the failure mode the Step 7.5 focus work hit.
-
-**What is verified.** 26 suites / 8,895 assertions / 0 failures headless - the target suite grew from
-268 to 285 with the equivalence, inverse-scaling, chain and no-hunter tests - the two-process restart
-check unchanged, and the windowed DevFlags loop resolving a battle with no script errors. See D-111.
-
-## Step 7.11 - the per-soldier loop, counted by path and priced by operation
-
-**What it is.** A measurement milestone, in the shape Step 7.9 established: count what the per-soldier
-loop actually does, price each operation it performs, and only then name a fix. Nothing changes
-behaviour. Step 7.9 and 7.10 left the per-soldier loop the largest phase of a tick - 203.1 ms of a
-399.0 ms instrumented tick at 20,000 soldiers in the fixed-area benchmark - of which automatic target
-selection is 72.1 ms, leaving about 131 ms attributed to nothing.
-
-**What the army actually does** (the benchmark's own counters, at 20,000 soldiers, per tick):
-
-| path | per tick | share of soldiers |
-| --- | ---: | ---: |
-| through the per-soldier loop | 20,000 | 100% |
-| resolved a target (so paid the facing normalise and the range check) | 20,000 | 100% |
-| already in attack range | 0 | 0% |
-| took the formed path | 20,000 | 100% |
-| computed a formation slot | 20,000 | 100% |
-| moved (a terrain lookup and a native call each) | 20,000 | 100% |
-| **calls into the native accelerator** | **20,000** | one per moving soldier |
-
-A path nobody walks cannot be the missing time, and every path here is walked by every soldier.
-
-**What one call costs** (`scenes/dev/unit_price_probe.tscn`, 200,000 iterations each, live state):
-
-| operation | us per call | per tick at 20,000 |
-| --- | ---: | ---: |
-| an empty control function (the act of calling) | 0.2707 | 5.4 ms |
-| [code]_can_press_forward()[/code] | 1.4697 | **29.4 ms** |
-| the terrain multiplier | 0.9422 | 18.8 ms |
-| [code]formation_slot()[/code] | 0.6661 | 13.3 ms |
-| [code]native_moved()[/code] | 0.5441 | 10.9 ms |
-| the range check | 0.2279 | 4.6 ms |
-| the facing normalise (two square roots) | 0.2071 | 4.1 ms |
-| **together** | | **81.1 ms of the ~131 ms** |
-
-Six such calls happen per soldier per tick, so about 32.5 ms of that total is the act of calling rather
-than the work - which is itself a finding about how a per-soldier loop is written, not a footnote.
-
-**What it means.** The largest single item is a side-contact check run once per formed soldier per tick,
-and it answers a question about the whole *side*, not the soldier - so it belongs to the side, computed
-once. Reading it explains the price: six field reads delivered through four function calls, at roughly
-0.37 us each, which is the measured cost of *calling* rather than of checking. The same is true of the
-next three items, and it is the milestone's real finding: a per-soldier loop of twenty thousand
-soldiers pays for every call it makes, and the way to make it cheaper is to make fewer calls per
-soldier - cache the side-contact answer per body per tick, apply the body's own step to the soldiers
-already in their places (which is where the slot, terrain and position arithmetic disappear), and
-mirror moved soldiers into the accelerator once a tick instead of twenty thousand times. See D-112.
-
-**Not touched.** Battle outcomes, targeting cadence and search, formation-driven engagement, explicit
-order precedence, movement semantics, separation (Step 7.8 is locked), balance data, saves, and the
-native kernel's interface. The counters are inert with profiling off; both instruments live under
-[code]scripts/dev[/code] and [code]scenes/dev[/code].
+## Milestone 01 — Reproducible Baseline and Repository Protection
 
 
-## Step 7.12 - the per-soldier loop's calls, part one (in progress)
 
-**What it is.** The fix Step 7.11 asked for, taken in slices, because each slice has to prove it changed
-cost and not behaviour. Three slices so far, each keeping its previous shape in the same build behind a
-switch, so every number below is a paired run rather than a comparison against an older log.
+**Status:** NOT STARTED\
 
-| slice | what it removes | switch | measured at 20,000 soldiers, one seed |
-| --- | --- | --- | --- |
-| 1. the press-forward gate decided per body | three calls per formed soldier (D-113) | `PB_PRESS_CACHE=off` | soldiers 204.365 -> 193.643 ms, tick 399.965 -> 389.244 ms: **10.7 ms** |
-| 2. the native mirror's guard spelled out | one call per moving soldier (D-114) | `PB_NATIVE_GUARD=call` | soldiers 190.484 ms against 193.639 ms: **3.2 ms** |
-| 3. the terrain path collapsed to one call | four calls per moving soldier (D-114) | `PB_TERRAIN_FAST=off` | soldiers 169.468 ms against 191.260 ms: **21.8 ms** |
+**Priority:** Critical\
 
-**Where the loop stands.** The soldiers phase at twenty thousand soldiers has gone from 204.4 ms to
-169.4 ms - about 17 per cent - and the whole tick from about 400 ms to about 363 ms. Target selection,
-the other large phase, was not touched: this milestone is only about what the per-soldier loop spends
-outside it.
+**Type:** Tooling, testing, documentation\
 
-**What is proved rather than asserted.** Slice 1's equivalence is a test that drives one showcase battle
-twice, forty ticks with both commanders thinking, comparing every soldier's answer, every soldier's
-position, and the per-tick count of soldiers allowed to press forward - the count being what catches the
-mid-loop contact case. Slices 2 and 3 hold no state, so their equivalence is by construction - the same
-reads, in the same order, at the same point in the tick - and their evidence is the paired measurement.
-An independent reviewer shaped all of this: it asked for the mid-loop fixture, for the reference to stay
-in the build, and for the native case to be established rather than assumed, and it was right each time.
+**Release gate:** BLOCKING\
 
-**Not touched.** Movement semantics, iteration order, separation (Step 7.8 is locked), D-108's rigid
-path, balance data and saves. Every switch is development-facing and every shipped default is on.
-
-**Next.** The two items that need proofs rather than inlining: the body transform - a body's slot lattice
-is an exact anchor-centred rigid transform of the previous tick's, verified on real battles to 1.7e-5,
-but it needs a long-battle drift fixture before anything may depend on it - and the native batch, which
-replaces twenty thousand boundary crossings a tick with one and is architectural work against D-095.
+**Dependencies:** M00
 
 
-## Step 7.13 - the target phase's calls (in progress)
 
-**What it is.** The other large phase. Step 7.12 took the per-soldier loop from 204.4 ms to 169.4 ms and
-left target selection alone, and said so; this milestone starts on it with the same rule: price the
-operation, remove the call, keep the previous shape in the build as a reference, and prove identity
-rather than plausibility.
-
-| slice | what it removes | switch | measured (20,000 soldiers, one seed) |
-| --- | --- | --- | --- |
-| 1. the formed-soldier focus fast path | four calls per question, for an answer the body already has (D-115) | `PB_FOCUS_INLINE=method` | target phase 72.101 -> 56.410 ms, soldiers 170.411 -> 154.531 ms: **15.7 ms** |
-| 2. the per-soldier sub-item timers gated | two to three timed reads a soldier, instrument inside the thing being measured (D-116) | `PB_TGT_TIMING=off` | whole tick 352.600 -> 346.275 ms: the instrument costs **6.3 ms**; the sub-item breakdown reads zero |
-
-**Where the loop stands.** The soldiers phase at twenty thousand soldiers is now 154.5 ms instrumented -
-about 151 ms with the instrument's per-soldier timers off, D-116 - down from 204.4 ms before Step 7.12,
-and the whole tick 346.3 ms with the timers off against 352.6 ms with them on. The target phase is 56.4 ms
-of that, having been 72.1 ms.
-
-**What was abandoned, and why it stays in the record.** The turning-body transform - a body's slot
-lattice is an exact anchor-centred rigid transform of the previous tick's, verified over 80,000 samples
-to 1.7e-5 - was measured for coverage before anything was built on it, and priced out: at the game's own
-arrival epsilon only 1.4 per cent of soldier-ticks are on a body whose facing changed, which is the only
-case the existing rigid step path does not already cover. That is about a millisecond a tick in exchange
-for a change to the most sensitive path in the game, so the reviewer's ruling was to abandon it rather
-than leave a half-verified idea lying around.
-
-**Next.** Whatever else the counters name inside the target phase, then the native mirror batch - one
-boundary crossing a tick instead of twenty thousand, which needs a method on the C++ side and work
-against D-095.
-
-| 3. the native mirror batched | one bridge crossing per moving soldier (D-118) | `PB_NATIVE_BATCH=off` | soldiers 156.864 -> 153.703 ms and tick 352.953 -> 350.570 ms: **3.16 ms off the phase, 2.38 ms off the tick** |
-
-**The lesson the three slices taught about prices.** An isolated price ranks candidates and does not size
-them: the press-forward cache was predicted at 16-18 ms from its price and measured 10.7; the terrain
-collapse was predicted at 10-16 and measured 21.8; the native batch was predicted near twenty and
-measured 3.2. Every slice is chosen on its price and accepted on its paired run, which is why every
-switch keeps its reference in the same build.
+### Deliverables
 
 
-## Step 8 - roads as a living thing (`milestone-08`)
 
-**What it is.** The road network stops being a build-time artifact and becomes part of the world's
-state: links carry a tier (`none | dirt | track | road`), traffic wears them up, years of neglect wear
-them down, a settlement founded later links itself to its nearest neighbour by a dirt road, and the
-priced grid, the eta and the walking pace all read the tier's bonus. Agreed with the owner in
-conversation ("real roads that also get built over time, because later we will have settlements being
-built by the ai", "a very small bonus", "roadless, it takes years though... I doubt it will ever
-happen"), recorded as D-120 and D-121.
+- Record main branch and all development branch heads.
 
-| piece | where |
-| --- | --- |
-| the ledger, tiers, traffic, decay, `connect_settlement` | `scripts/world/road_network.gd` (new) |
-| per-link grid stamping at the tier's price, `factor_at` | `scripts/world/travel_costs.gd` |
-| pace and eta read the ground's own number; walking wears the link | `scripts/world/travel_service.gd` |
-| tier drawing - width and colour per tier, `none` not drawn | `scripts/world/world_map_view.gd` |
-| wiring, the review clock, the grid re-price on a tier change | `scripts/world/world_map.gd` |
-| the checks | `tests/test_roads.gd` (new, 74) and `test_world_map` rebuilt to 116/0 |
+- Inventory the protected dirty working tree.
 
-**Settings** live in `data/config/game_config.json` under `roads`: the ladder and its bonuses, the
-traffic each tier needs to rise, the decay span, and the scan/review windows. **Verified** by the
-suite and by a live debug-1 run that walks a route, enters, recruits and returns with no script
-errors. **Next**: nothing in the world founds settlements at runtime yet - the road side of that
-exists as `connect_settlement`; the settlement side is its own milestone.
+- Capture the uncommitted LOD patch without changing its contents.
 
-**Follow-ups from the owner playing it (same day).** The walk now hugs the drawn curves: a route's
-road stretches are spliced onto the link curves (D-122), after the on/off-road travel log - added
-at the owner's request, "that way you can see whats actually happening" - proved the priced blocks
-disagreed with the line by up to 31 units. A march to open ground is a real march again (a stale
-route from a previous settlement order no longer finishes under the party's feet, D-123), and the
-debug panel's pace line shows the effective pace with its ground factor - "~275 u/h (ground x2.00)"
-on a road - so the road bonus is visible in play rather than only in the log. And a last pass gave
-the pace and the eta the same truth (D-124): `RoadNetwork.bonus_at` reads the drawn corridor the
-wear scan and the snap already use, the grid went back to doing only what it is good at - pricing
-the route - so the speed changes exactly at the road's visible edge, a crossing march gets its
-blip, and a painted block can no longer leak road speed past the drawn line. The pace counts the
-road by its drawn width (10 u, D-126) while wear and the snap keep the 48 u shoulder. And the road
-curve now reads the terrain (D-127): a road never simply runs over water - a crossing within
-`roads.bridge_max_span` is crossed by a **bridge** (timber, posted, priced and walked as road) and a
-wider lake bends the road around it - while the roads themselves draw as trodden earth, not UI
-strokes.
+- Establish an isolated Git worktree for Hermes validation.
+
+- Establish repeatable headless and windowed verification commands.
+
+- Produce an accurate baseline test report.
+
+- Confirm that the machine remains usable during local testing.
 
 
-## Step 9 - the company banner (`milestone-09`)
 
-**What it is.** After **New Game** the player founds the company by painting its banner: a pixel
-grid (8x10 / 16x20 / 32x40) in the locked 20-colour palette, with the tools the owner specified in
-the paint prototype (pencil, fill, eraser, mirror, wind, grid, undo, clear, starters, right-click
-erase). The campaign is created at **confirm**; the same cloth then rides the party marker on the
-campaign map, where the disc used to be. The owner's two calls shaped it: "I want the player to be
-able to edit their banners ... by pixel art painting", and "the amount of grid shouldn't change the
-size in game. it should just be more detailed" - so the cloth is one fixed 32x40 units and the grid
-is detail only.
+### Acceptance checks
 
-| piece | where |
-| --- | --- |
-| the grid, serialisation, the cloth shape, the wind maths | `scripts/world/banner_data.gd` (new) |
-| the renderer: pole, finial, crossbar, waving cloth -> a cached 56x70 texture | `scripts/world/banner_art.gd` (new) |
-| the screen: paint surface, palette, tools, previews (D-168: embedded as `BannerWorkspace` in the `new_campaign` screen, with company name + world seed + START CAMPAIGN around it) | `scripts/ui/banner_workspace.gd`, `scripts/ui/new_campaign.gd`, `scenes/ui/new_campaign.tscn` |
-| the flow: menu -> banner screen -> campaign; `new_campaign(name, seed, banner)` | `scripts/ui/main_menu.gd`, `scripts/core/game_manager.gd` |
-| the marker; `PB_BANNER_MARKER=dot` restores the old disc, `PB_BANNER_WIND=off` stills the wind | `scripts/world/world_map_view.gd` |
-| palette, detail levels, wind constants | `data/config/banner.json` (new) |
-| the checks | `tests/test_banner.gd` (new) |
 
-**Measured:** drawing the cloth live costs ~2 ms/frame on the map (166 fps against the disc's 248);
-the cached texture puts the map back at 211-236 fps, worst frame 6.4 ms. **Reworked (D-168):** the
-standalone banner screen became `BannerWorkspace`, embedded in one full-screen New Campaign
-creation surface (section rail / company name + paint workspace / world seed + live summary /
-Back + START CAMPAIGN); the campaign is still founded only at START CAMPAIGN and the menu's
-name/seed mini-form is gone. **Verified** by the suite and by creation-screen and campaign-map
-windowed runs. **Next:** faction banners (the data model
-stores one per company and `Party.faction_id` already exists), and the founder sections slot into
-the D-168 rail as their systems arrive. See D-167 and D-168.
+
+- Full headless suite run on clean main with raw logs.
+
+- Suite count, assertions, failures and exit code recorded.
+
+- Two-process restart test executed.
+
+- Windowed launch smoke test executed.
+
+- Local dirty files verified unchanged.
+
+- Test output identifies branch, full commit SHA, Godot version and renderer.
+
+- A local verification failure is never reported as a passing change.
+
+
+
+### Dependency note
+
+
+
+All subsequent verification relies on an honest baseline.
+
+
+
+### Operational restriction
+
+
+
+GPU/windowed tests must be coordinated with Jay. Heavy rendering, benchmark and stress tests must not monopolize his desktop during normal use.
+
+
+
+---
+
+
+
+## Milestone 02 — Reconcile the Unreviewed Battle Feature Branch
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Code integration, tests, documentation\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M01
+
+
+
+### Objective
+
+
+
+Convert the approximately 88-commit experimental development lineage into small, understandable, testable integration slices.
+
+
+
+### Proposed extraction order
+
+
+
+**Slice A — Formation-command foundation**
+
+
+
+Use `gpt6/formation-command-foundation-v1` as the starting candidate, subject to Hermes' verification and any necessary corrections.
+
+
+
+Contains pure navigation, placement and cohesion logic.
+
+
+
+**Slice B — Standalone battle UI**
+
+
+
+Command bar, unit dock, minimap, tactical overview and deployment overlay, with isolated UI tests.
+
+
+
+**Slice C — Terrain presentation**
+
+
+
+Ground painter, terrain visuals and scenery, without GPU collision logic changes.
+
+
+
+**Slice D — GPU terrain collision**
+
+
+
+Terrain-mask serialization, compute shader bindings and associated collision behaviour.
+
+
+
+**Slice E — Live GPU battlefield integration**
+
+
+
+Controller wiring, selection, orders, camera transitions and UI lifecycle.
+
+
+
+**Slice F — Documentation and remaining tests**
+
+
+
+Reconcile manuals, feature matrices and integration tests after the actual functionality is verified.
+
+
+
+### Acceptance checks
+
+
+
+- Complete file and dependency map of the feature lineage.
+
+- Original experimental branches preserved.
+
+- No whole-branch blind merge.
+
+- Each slice builds independently against its declared prerequisites.
+
+- Tests associated with each slice are registered and executed.
+
+- All new standalone files are checked for unused or duplicate implementations.
+
+- Shared-controller changes are reviewed by functional hunk.
+
+- No unexpected simulation or shader changes in presentation-only slices.
+
+- Every proposed merge receives independent Hermes execution, GPT-6 code review and Jay approval.
+
+- GitHub main passes the regression gate after each accepted integration.
+
+
+
+### Dependency note
+
+
+
+This milestone produces a trustworthy integration base. Later features must not rely on unreconciled experimental code.
+
+
+
+### Special risks
+
+
+
+`gpu_crowd.gd` is a major integration hotspot. Large changes to it cannot be reviewed as an indivisible feature.
+
+
+
+---
+
+
+
+## Milestone 03 — Resolve CPU/GPU Architecture and Feature Parity
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Architecture, code, tests, documentation\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M02
+
+
+
+### Objective
+
+
+
+Define exactly which combat rules and outcomes the GPU battlefield must reproduce.
+
+
+
+### Deliverables
+
+
+
+A verified comparison matrix covering:
+
+
+
+- Soldier identity and persistence.
+
+- Formation identity and membership.
+
+- Movement and path orders.
+
+- Target acquisition.
+
+- Hit chance and damage.
+
+- Attack cooldown and range.
+
+- Death and casualty recording.
+
+- Formation cohesion and behaviour.
+
+- Terrain movement and collision.
+
+- Battle termination.
+
+- Victory, defeat and retreat.
+
+- Reward and persistence semantics.
+
+- Random-seed behaviour and determinism.
+
+
+
+Each row must identify the current CPU rule, GPU behaviour, source files, test evidence and required action.
+
+
+
+### Acceptance checks
+
+
+
+- Every player-visible combat contract classified as matching, intentionally different, missing or unverified.
+
+- No assumption that the two engines share implementation semantics.
+
+- Gameplay differences explicitly approved or corrected.
+
+- Both engines tested against shared reference scenarios where applicable.
+
+- CPU reference remains runnable.
+
+- Documentation updated to distinguish live GPU gameplay from CPU reference tests.
+
+
+
+### Dependency note
+
+
+
+Gameplay correctness cannot be measured reliably until there is an agreed contract.
+
+
+
+### Architecture decision
+
+
+
+The GPU system becomes the only intended production battlefield. The CPU implementation remains a validation oracle until its useful contracts are covered elsewhere.
+
+
+
+---
+
+
+
+## Milestone 04 — Real GPU Campaign Battle Harness
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Code, testing, tooling\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M02–M03
+
+
+
+### Objective
+
+
+
+Build an executable integration test of the actual campaign battle path.
+
+
+
+### Deliverables
+
+
+
+A deterministic test scenario covering:
+
+
+
+`world_map → battle_field → battle resolution → world_map`
+
+
+
+It must exercise the real `BattleContext`, real campaign adapter and real GPU battlefield, not substitute the CPU scene.
+
+
+
+Because the compute scene requires a functioning rendering device, the GPU-specific test must run in a real rendering environment.
+
+
+
+Headless tests continue to cover non-GPU contracts.
+
+
+
+### Acceptance checks
+
+
+
+- Actual campaign-generated battle context reaches `battle_field`.
+
+- Soldier IDs, sides, quantities and attributes are preserved.
+
+- GPU simulation starts and advances.
+
+- Player-issued orders affect the intended formations.
+
+- Battle reaches a defined outcome or supported retreat.
+
+- Outcome returns to campaign state.
+
+- No duplicate result application.
+
+- No shader compilation or descriptor errors.
+
+- Raw log and run configuration attached.
+
+- Test repeatable without manual reconstruction of the scenario.
+
+
+
+### Dependency note
+
+
+
+This becomes the primary foundation for future gameplay verification.
+
+
+
+---
+
+
+
+## Milestone 05 — Reliable Formation Movement and Commands
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Code, tests\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M03–M04
+
+
+
+### Objective
+
+
+
+Make directing formations reliable, predictable and understandable.
+
+
+
+### Deliverables
+
+
+
+- Select one or several formations.
+
+- Order movement to legal positions.
+
+- Preserve relative formation spacing when moving groups.
+
+- Allow frontage changes without merging formations.
+
+- Retain meaningful facing.
+
+- Reject impossible movement instead of silently accepting standing still.
+
+- Prevent illegal pathing through obstacles.
+
+- Preserve valid queued orders after rejected requests.
+
+
+
+### Acceptance checks
+
+
+
+- Single-formation movement works.
+
+- Multi-formation movement preserves independent identities.
+
+- A wide formation cannot pass through an undersized route.
+
+- An impossible move produces visible refusal feedback.
+
+- Rejection preserves existing route, cursor, width, facing and order.
+
+- Formation membership and positions remain valid after casualties.
+
+- No teleportation, stacking or silently compressed placement.
+
+- Equivalent seed/order sequences remain deterministic.
+
+- Full relevant regression passes.
+
+
+
+### Dependency note
+
+
+
+Advanced camera and UI work is not useful if orders do not behave reliably.
+
+
+
+---
+
+
+
+## Milestone 06 — Combat Reliability and Resolution
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Code, tests\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M03–M05
+
+
+
+### Objective
+
+
+
+Prove that battles fight, progress and finish correctly.
+
+
+
+### Deliverables
+
+
+
+- Correct attack targeting and target replacement.
+
+- Appropriate melee and ranged attack timing.
+
+- Consistent health, damage and death.
+
+- Formation engagement and disengagement.
+
+- Predictable stop/arrival behaviour.
+
+- Victory, defeat, withdrawal and timeout rules.
+
+- Reliable battle termination and result generation.
+
+
+
+### Acceptance checks
+
+
+
+- Melee and ranged combat produce valid outcomes.
+
+- Combat animation events correspond to actual simulation events.
+
+- Destroyed formations cease issuing movement or combat effects.
+
+- Living units can reacquire valid opponents.
+
+- Battle does not freeze permanently when surviving forces can still engage.
+
+- Victory, defeat and retreat scenarios have explicit tests.
+
+- Same seed and identical input timeline reproduce authoritative tick results.
+
+- Results contain the correct persistent soldier IDs and casualties.
+
+- No battle continues mutating state after resolution.
+
+
+
+### Dependency note
+
+
+
+The result and persistence pipeline requires trustworthy combat outcomes.
+
+
+
+---
+
+
+
+## Milestone 07 — Terrain Collision and Battlefield Legality
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** High\
+
+**Type:** Code, tests, tooling\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M04–M06
+
+
+
+### Objective
+
+
+
+Make the battlefield's gameplay terrain agree with what soldiers can traverse.
+
+
+
+### Deliverables
+
+
+
+- Verified GPU terrain-mask handling.
+
+- Correct use of static obstacles.
+
+- Terrain-aware formation anchor routing.
+
+- Collision during normal movement and separation.
+
+- Legal deployment positions.
+
+- Usable obstacle and elevation presentation.
+
+
+
+### Acceptance checks
+
+
+
+- GPU shader's expected terrain binding compiles and executes.
+
+- Traversable and blocked cells match the authoritative terrain data.
+
+- Soldiers cannot move through tested blocked terrain during regular movement.
+
+- Separation iterations cannot push soldiers through tested walls.
+
+- Diagonal corners and narrow gaps checked.
+
+- Wide and narrow formation pathing differ appropriately.
+
+- No soldiers spawn inside impassable terrain.
+
+- Same seeds produce equivalent terrain and legal deployment.
+
+- Performance impact of collision support measured.
+
+- Known local-steering limitations documented rather than concealed.
+
+
+
+### Dependency note
+
+
+
+Terrain must be mechanically correct before its artwork is considered finished.
+
+
+
+---
+
+
+
+## Milestone 08 — Camera, Strategic Zoom and Formation Readability
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Code, art/presentation, tests\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M04–M07
+
+
+
+### Objective
+
+
+
+Deliver the player-facing scale transition that is central to Project Banner's identity.
+
+
+
+### Deliverables
+
+
+
+- Close zoom: readable individual soldiers.
+
+- Middle zoom: recognizable formations and order context.
+
+- Far zoom: clear tactical formation rectangles or footprints.
+
+- Consistent facing, strength and ownership information.
+
+- Selection and issuing orders at every supported command scale.
+
+- Smooth camera pan, zoom and field framing.
+
+
+
+### Acceptance checks
+
+
+
+- CPU LOD patch separately reviewed and tested.
+
+- Live GPU zoom behaviour tested in its own camera scale.
+
+- Soldier/formation representations do not duplicate or disappear at thresholds.
+
+- Formations remain selectable and orderable at minimum zoom.
+
+- Friendly and enemy units visually distinguishable.
+
+- Casualties and rotation update overview graphics correctly.
+
+- No stale formation rectangles after movement, death or reforming.
+
+- No visually empty transition frames.
+
+- No simulation change from zooming.
+
+- Screenshots captured at all required scales.
+
+- Dense overlapping formations evaluated for selectable hit regions.
+
+- Frame costs compared using the same battle and hardware.
+
+
+
+### Required technical comparison
+
+
+
+CPU strategic LOD thresholds currently include 6.0, 1.5 and 0.6 with a 0.4 minimum camera zoom.
+
+
+
+The GPU camera currently has separate tactical-overview thresholds around 1.65 and 0.52.
+
+
+
+These are separate systems and must be evaluated independently before deciding whether their behaviours should converge.
+
+
+
+### Dependency note
+
+
+
+This is an essential differentiating feature, not optional visual polish.
+
+
+
+### Jay's decision required
+
+
+
+Approve the final visual hierarchy at close, middle and whole-battlefield zoom.
+
+
+
+---
+
+
+
+## Milestone 09 — Battle HUD, Deployment and Order Feedback
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** High\
+
+**Type:** Code, UI art, tests\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M05 and M08
+
+
+
+### Objective
+
+
+
+Make the battlefield usable without knowing its implementation.
+
+
+
+### Deliverables
+
+
+
+- Clear deployment interface.
+
+- Selection highlights and readable formation cards.
+
+- Order command strip.
+
+- Current stance and unit strength.
+
+- Battle state, pause and resume indicators.
+
+- Navigable minimap.
+
+- Movement destination and frontage previews.
+
+- Meaningful feedback for refused orders.
+
+
+
+### Acceptance checks
+
+
+
+- Each command invokes the correct action once.
+
+- Cards show actual living troops.
+
+- Eliminated or absent formations do not leave misleading interactive cards.
+
+- Selected formation remains correctly highlighted.
+
+- Minimap navigation does not accidentally issue orders.
+
+- Deployment and combat controls cannot be confused.
+
+- HUD does not conceal important battlefield regions.
+
+- 1280×720, 1920×1080 and ultrawide layout checks completed.
+
+- Ordinary gameplay hides developer diagnostics.
+
+- A new player can identify selected troops, their current stance and their destination.
+
+
+
+### Dependency note
+
+
+
+Commands and battlefield representations must stabilize before their user interface is polished.
+
+
+
+---
+
+
+
+## Milestone 10 — Persistent Battle Consequences
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Code, tests, tooling\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M04 and M06
+
+
+
+### Objective
+
+
+
+Ensure that the actual GPU battlefield produces persistent, correct campaign consequences.
+
+
+
+### Deliverables
+
+
+
+- Casualty and survivor transfer.
+
+- Experience and reward application.
+
+- Persistent enemy damage and losses.
+
+- Victory, defeat and retreat semantics.
+
+- Save/load after battle.
+
+- Save compatibility and corruption handling.
+
+
+
+### Acceptance checks
+
+
+
+- Real GPU battle result changes the correct campaign.
+
+- Soldier health and death persist accurately.
+
+- No reward or XP applied more than once.
+
+- Retreat does not generate unintended victory rewards.
+
+- Surviving enemies preserve their actual condition.
+
+- Save, exit process, relaunch and Continue restore exact tested state.
+
+- Re-saving loaded state remains stable.
+
+- Corrupt or incompatible saves fail safely without overwriting good saves.
+
+- Existing persistence regression suites remain green.
+
+
+
+### Dependency note
+
+
+
+This is the milestone that turns a battlefield into part of a continuing strategy game.
+
+
+
+---
+
+
+
+## Milestone 11 — Minimum Meaningful Campaign Progression
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** High\
+
+**Type:** Code, content, design, tests\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M10
+
+
+
+### Objective
+
+
+
+Make another battle feel worthwhile.
+
+
+
+### Deliverables
+
+
+
+A minimal sustainable company loop:
+
+
+
+- Recruit troops.
+
+- Spend money to expand or maintain the company.
+
+- Travel to meaningful encounters.
+
+- Win rewards or suffer losses.
+
+- Improve surviving soldiers or company capability.
+
+- Make an informed decision about what to do next.
+
+
+
+Implement only the minimum additional progression functionality that the existing systems cannot already provide.
+
+
+
+### Acceptance checks
+
+
+
+- Gold income and expenditure are understandable.
+
+- Recruitment and rewards have visible consequences.
+
+- Soldier improvement provides a meaningful gameplay benefit.
+
+- Losses create pressure without making ordinary play routinely unrecoverable.
+
+- There is a useful next objective after the first successful battle.
+
+- Campaign cannot trivially generate unlimited resources through repeatable exploits.
+
+- Multiple starting seeds provide a viable first encounter.
+
+- At least one repeated campaign loop works across successive battles.
+
+
+
+### Dependency note
+
+
+
+A stable battle does not become an engaging game until it supports a reason to continue.
+
+
+
+### Jay's decision required
+
+
+
+Approve the intended difficulty, permadeath severity and initial progression philosophy.
+
+
+
+---
+
+
+
+## Milestone 12 — Minimum Visual Content and Art Direction
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** High\
+
+**Type:** Art, content, tooling\
+
+**Release gate:** BLOCKING for minimum quality\
+
+**Dependencies:** M07–M09
+
+
+
+### Objective
+
+
+
+Give Project Banner one coherent, believable visual identity.
+
+
+
+### Deliverables
+
+
+
+- One visually complete battlefield environment.
+
+- Consistent terrain tiles, roads and obstacle assets.
+
+- Readable medieval soldiers with class-specific silhouettes.
+
+- Coherent banners and faction colours.
+
+- Formation standards and strength indicators.
+
+- Consistent HUD palette, fonts, borders and icons.
+
+- Correct animation orientation and transparent assets.
+
+
+
+### Acceptance checks
+
+
+
+- No obvious debug terrain cells in normal gameplay.
+
+- Ground tiles blend without conspicuous seams.
+
+- Unit types distinguishable at practical viewing distances.
+
+- All sprites have correct orientation, anchors and rendering order.
+
+- Visible effects correspond to actual gameplay events.
+
+- Selected and enemy formations remain readable against the ground.
+
+- Artwork is consistent in perspective, shading and material style.
+
+- Asset source files and exported atlases can be rebuilt reproducibly.
+
+- Every included asset has recorded licensing status.
+
+- Jay approves representative screenshots before mass production of related assets.
+
+
+
+### Scope limitation
+
+
+
+Do not attempt hundreds of animations or six completely different biomes before completing one polished battle environment.
+
+
+
+Do not enlarge low-resolution raster artwork and treat it as newly detailed art.
+
+
+
+### Dependency note
+
+
+
+Visual polish follows mechanical correctness, but essential readability is a requirement from the beginning.
+
+
+
+### Jay's decision required
+
+
+
+Approve the final medieval pixel-art reference standard and representative combat visuals.
+
+
+
+---
+
+
+
+## Milestone 13 — Audio and Combat Feedback
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Medium\
+
+**Type:** Audio, code, content\
+
+**Release gate:** BLOCKING for minimum feedback; advanced audio optional\
+
+**Dependencies:** M06, M09, M12
+
+
+
+### Objective
+
+
+
+Make gameplay actions understandable through sound and visual response.
+
+
+
+### Deliverables
+
+
+
+- Selection and order acknowledgment sounds.
+
+- Soldier footsteps and movement ambience.
+
+- Weapon impact, misses and ranged attack sounds.
+
+- Basic combat ambience.
+
+- Victory and defeat feedback.
+
+- Volume settings and mute controls.
+
+- Safe sound-event handling during large battles.
+
+
+
+### Acceptance checks
+
+
+
+- Audio triggered by authoritative events rather than unrelated cosmetic timers.
+
+- No missed-action sound implies a successful hit.
+
+- Mass combat does not produce excessive overlapping audio.
+
+- Audio does not cause noticeable frame instability.
+
+- Settings persist after restart.
+
+- Missing optional sounds fail gracefully.
+
+- All sound assets licensed for intended distribution.
+
+- Jay approves the sound palette and intensity.
+
+
+
+### Dependency note
+
+
+
+Audio must follow established gameplay events, not define combat behaviour.
+
+
+
+### Scope limitation
+
+
+
+Procedurally generated or AI-created sound effects must be auditioned and approved before integration.
+
+
+
+---
+
+
+
+## Milestone 14 — Performance, Stability and Determinism
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Code, testing, tooling\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M04–M13
+
+
+
+### Objective
+
+
+
+Deliver stable, responsive gameplay rather than impressive isolated benchmark figures.
+
+
+
+### Deliverables
+
+
+
+- Repeatable production battle benchmarks.
+
+- Per-system simulation and render measurements.
+
+- Memory usage and resource-lifecycle checks.
+
+- Large army stability checks.
+
+- Performance comparison across camera scales.
+
+- Reliable battle clock and deterministic state checks.
+
+- Graphics settings where needed for supported hardware.
+
+
+
+### Proposed performance acceptance targets
+
+
+
+These are **provisional design targets, not achieved benchmarks**.
+
+
+
+For the first agreed test hardware configuration:
+
+
+
+- Target smooth 60 FPS presentation in ordinary small-to-medium battles.
+
+- Aim for median frame time at or below 16.7 ms.
+
+- Aim for p95 frame time at or below 33.3 ms during active representative combat.
+
+- No persistent gameplay freezes.
+
+- No sustained simulation backlog.
+
+- No accumulating resources or unbounded memory growth.
+
+- No frame-rate-dependent changes to authoritative combat results.
+
+
+
+If the baseline shows these targets are unrealistic, document actual results and ask Jay to approve a revised target rather than claiming success.
+
+
+
+### Acceptance checks
+
+
+
+- Machine, GPU, driver and rendering backend recorded.
+
+- Fixed scenario and seed used across comparisons.
+
+- Small, medium and stress scenarios measured.
+
+- Median and p95 frame timings recorded.
+
+- Simulation ticks/sec measured separately from rendered FPS.
+
+- Repeatability checked across relevant frame caps.
+
+- No unexplained visual regression after optimization.
+
+- No memory growth across repeated scene transitions.
+
+- Real campaign battlefield tested, not only the standalone stress probe.
+
+
+
+### Dependency note
+
+
+
+Final performance optimization follows representative gameplay implementation. Major regressions discovered earlier remain immediate blockers.
+
+
+
+---
+
+
+
+## Milestone 15 — Release-Focused UX and Quality Assurance
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** High\
+
+**Type:** Code, UI, testing, documentation\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M10–M14
+
+
+
+### Objective
+
+
+
+Make the game understandable and resilient for a player with no development knowledge.
+
+
+
+### Deliverables
+
+
+
+- Clear new-game flow.
+
+- Helpful controls and tooltips.
+
+- Readable information hierarchy.
+
+- Accessible settings and predictable input behaviour.
+
+- Pause, resume and exit handling.
+
+- Graceful failure when resources or saves are unavailable.
+
+- Clear victory, loss and next-step feedback.
+
+- A concise player-controls reference.
+
+
+
+### Acceptance checks
+
+
+
+- New player can navigate without developer console access.
+
+- Essential actions visible or discoverable.
+
+- No unexplained nonfunctional controls.
+
+- Quit/Continue behaviour predictable.
+
+- Window resize does not destroy input usability.
+
+- Save errors and invalid actions produce comprehensible messages.
+
+- Keyboard/mouse controls do not conflict.
+
+- Known crashes and progression blockers triaged and addressed.
+
+- Fresh-install smoke test passes.
+
+
+
+### Dependency note
+
+
+
+This hardening milestone happens after the core systems are functionally complete, but usability defects found earlier should be logged immediately.
+
+
+
+---
+
+
+
+## Milestone 16 — Licensing, Packaging and Build Reproducibility
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** High\
+
+**Type:** Tooling, documentation, content\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M12–M15
+
+
+
+### Objective
+
+
+
+Create a legitimate, portable build that can safely be distributed to testers.
+
+
+
+### Deliverables
+
+
+
+- Commercial asset provenance manifest.
+
+- Licenses and attribution documentation.
+
+- Reproducible asset import pipeline.
+
+- Windows export configuration.
+
+- Clear build/version identifiers.
+
+- Clean-install instructions.
+
+- Separate user data and test data.
+
+- Basic crash/error-log collection strategy.
+
+
+
+### Acceptance checks
+
+
+
+- Every third-party asset has a documented origin and permitted use.
+
+- Restricted source assets are not redistributed improperly.
+
+- No API keys, user credentials or private files in the build.
+
+- Fresh exported build launches outside the editor.
+
+- No dependency on absolute paths from Jay's machine.
+
+- Build can be recreated from repository state and permitted asset inputs.
+
+- Save files remain separate from executable data.
+
+- Build includes version and diagnostic information.
+
+
+
+### Dependency note
+
+
+
+A project that works inside the developer's editor is not necessarily distributable.
+
+
+
+### Jay's decision required
+
+
+
+Approve the first platform and distribution channel.
+
+
+
+---
+
+
+
+## Milestone 17 — First Stranger Playtest
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Critical\
+
+**Type:** Testing, design, content\
+
+**Release gate:** BLOCKING\
+
+**Dependencies:** M00–M16
+
+
+
+### Objective
+
+
+
+Prove that Project Banner is actually playable and understandable without Jay or Hermes explaining it.
+
+
+
+### Procedure
+
+
+
+Provide an exported build to one or more external testers who have not been involved in development.
+
+
+
+Observe normal use and record errors, confusion and engagement.
+
+
+
+### Acceptance checks
+
+
+
+- Tester launches without developer assistance.
+
+- Tester creates a company.
+
+- Tester recruits troops and enters a real campaign encounter.
+
+- Tester deploys and commands formations.
+
+- Tester understands win/loss outcome and consequences.
+
+- Tester returns to campaign and finds another useful objective.
+
+- Tester saves and continues after a process restart.
+
+- No critical progression blocker encountered.
+
+- Confusing controls and unused features documented.
+
+- Tester feedback identifies whether the core loop is enjoyable.
+
+
+
+### Qualitative evaluation
+
+
+
+Ask what was fun, confusing, frustrating or unrewarding.
+
+
+
+Do not substitute test counts, screenshots or performance statistics for actual player feedback.
+
+
+
+### Dependency note
+
+
+
+This is the first meaningful confirmation that the engineering has produced a real game.
+
+
+
+### Jay's decision required
+
+
+
+Approve testers, distribution and the level of polish appropriate for the alpha.
+
+
+
+---
+
+
+
+## Milestone 18 — Public Demo or Early-Access Release Gate
+
+
+
+**Status:** NOT STARTED\
+
+**Priority:** Future\
+
+**Type:** Code, content, art, audio, testing, documentation\
+
+**Release gate:** BLOCKING for public/commercial release\
+
+**Dependencies:** M17 and Jay's release authorization
+
+
+
+### Objective
+
+
+
+Convert the validated alpha into a public-facing product.
+
+
+
+### Deliverables
+
+
+
+- Additional replayable encounters and content diversity.
+
+- Balance and progression improvements based on tester feedback.
+
+- Stable release build.
+
+- Finished minimum marketing presentation.
+
+- Store description accurately reflecting implemented features.
+
+- Screenshots and trailer captured from actual gameplay.
+
+- Release notes, known limitations and player support workflow.
+
+- Clearly documented save compatibility policy.
+
+
+
+### Acceptance checks
+
+
+
+- All release-critical playtest defects resolved.
+
+- No known data-loss defects.
+
+- Release build tested on a clean installation.
+
+- Store claims backed by actual features.
+
+- All shipped content approved and licensed.
+
+- External feedback confirms the core experience is worthwhile.
+
+- Jay explicitly authorizes release.
+
+
+
+### Dependency note
+
+
+
+Shipping is a product decision, not the automatic result of completing the code roadmap.
+
+
+
+---
+
+
+
+# D. Post-Alpha Expansion Roadmap
+
+
+
+These milestones are **optional for the first playable alpha**. Their ordering is provisional and must respond to player feedback.
+
+
+
+## Milestone 19 — Soldier Identity and Equipment
+
+
+
+**Type:** Code, content, art\
+
+**Release gate:** OPTIONAL\
+
+**Dependencies:** M10–M17
+
+
+
+### Deliverables
+
+
+
+Equipment slots, visible gear changes, soldier specialties, traits, upgrades and stronger individual identity.
+
+
+
+### Acceptance checks
+
+
+
+- Equipment has consistent mechanical effects.
+
+- Visuals correctly represent equipped gear where promised.
+
+- Equipment and progression survive save/reload.
+
+- Balance tests prevent trivial dominant loadouts.
+
+
+
+### Jay's decision required
+
+
+
+Choose how deep soldier customization should become.
+
+
+
+---
+
+
+
+## Milestone 20 — Tactical Depth and Battlefield Variety
+
+
+
+**Type:** Code, content, art, audio\
+
+**Release gate:** OPTIONAL\
+
+**Dependencies:** M06–M17
+
+
+
+### Deliverables
+
+
+
+More formation types, tactical stances, morale, fatigue, cavalry, weather effects, tactical AI improvements and battlefield variants.
+
+
+
+### Acceptance checks
+
+
+
+- Each added mechanic produces a meaningful decision.
+
+- No silent conflict with existing simulation rules.
+
+- Distinct enemy strategies demonstrated.
+
+- New maps remain navigable and performant.
+
+- Existing encounters remain balanced and completable.
+
+
+
+---
+
+
+
+## Milestone 21 — Living Campaign World
+
+
+
+**Type:** Code, design, content\
+
+**Release gate:** OPTIONAL\
+
+**Dependencies:** M11, M17
+
+
+
+### Deliverables
+
+
+
+Dynamic factions, richer settlements, trade, roaming forces, contracts, relationships and evolving world events.
+
+
+
+### Acceptance checks
+
+
+
+- World activities produce meaningful player decisions.
+
+- NPC state is persistent and deterministic under declared rules.
+
+- Campaign remains recoverable after normal setbacks.
+
+- Systems do not cause runaway simulation costs.
+
+- Long campaigns remain stable and saveable.
+
+
+
+---
+
+
+
+## Milestone 22 — Grand Strategy Expansion
+
+
+
+**Type:** Code, content, UI, art\
+
+**Release gate:** OPTIONAL\
+
+**Dependencies:** M20–M21
+
+
+
+### Deliverables
+
+
+
+Territory control, diplomacy, political factions, castles, sieges, larger armies and expanded strategic systems.
+
+
+
+### Acceptance checks
+
+
+
+- Complete gameplay contracts and tests for each major system.
+
+- Strategic decisions have measurable consequences.
+
+- No unbounded complexity in economy or AI simulation.
+
+- Interfaces remain usable at increasing scale.
+
+- Large scenarios meet agreed performance targets.
+
+
+
+**This milestone is not permission to expand into a full Total War clone before the core game succeeds.**
+
+
+
+---
+
+
+
+# E. Development Ownership and Verification
+
+
+
+## E.1 GPT-6 — Technical lead
+
+
+
+Responsibilities:
+
+
+
+- Own implementation architecture.
+
+- Write source code and automated tests.
+
+- Review the relevant existing repository files before modifications.
+
+- Design and implement coherent features.
+
+- Create isolated branches and focused commits.
+
+- Push changes to GitHub.
+
+- Review Hermes' raw execution evidence.
+
+- Diagnose failures and produce corrections.
+
+- Maintain technical documentation and dependency decisions.
+
+- Explain tradeoffs and raise scope decisions to Jay.
+
+
+
+GPT-6 must not claim local execution success without corresponding evidence.
+
+
+
+## E.2 Hermes — Local executor and independent verifier
+
+
+
+Responsibilities:
+
+
+
+- Fetch and check out GPT-6 branches in isolated worktrees.
+
+- Run compiler/import checks and required test suites.
+
+- Perform windowed GPU tests on Jay's hardware.
+
+- Capture screenshots, traces and measurements.
+
+- Inspect and challenge implementation behaviour.
+
+- Identify unsupported claims and regressions.
+
+- Report raw logs and an explicit verdict.
+
+- Keep Jay's active working tree intact.
+
+- Avoid declaring acceptance based solely on GPT-6's explanation.
+
+
+
+Hermes may recommend fixes but does not silently rewrite the intended architecture.
+
+
+
+The former Warden role is discontinued. Verification responsibility now rests with Hermes' independent execution, GPT-6's review and Jay's final integration authorization.
+
+
+
+## E.3 Jay — Owner and game director
+
+
+
+Responsibilities:
+
+
+
+- Set the game's creative direction.
+
+- Approve scope, priorities and acceptance criteria.
+
+- Make final decisions about gameplay feel and visual quality.
+
+- Decide which tradeoffs are acceptable.
+
+- Authorize merges and release decisions.
+
+- Play the game and identify problems automated tests cannot.
+
+- Control access to the machine and test sessions.
+
+
+
+Decisions that require Jay specifically include:
+
+
+
+- Release scope and target platform.
+
+- Art style and visual quality threshold.
+
+- Gameplay difficulty and permadeath severity.
+
+- Progression philosophy and pacing.
+
+- Whether features belong in alpha or later.
+
+- Hardware/performance tradeoffs.
+
+- Whether a design feels enjoyable.
+
+- Approval to merge or ship.
+
+
+
+## E.4 One-change development protocol
+
+
+
+A change follows this exact lifecycle:
+
+
+
+**1. Plan** — GPT-6 identifies scope, dependencies, files and test requirements.
+
+
+
+**2. Implement** — GPT-6 writes code on a clean, isolated branch.
+
+
+
+**3. Commit** — GPT-6 provides branch, commit SHA, files and expected tests.
+
+
+
+**4. Verify** — Hermes fetches into a temporary worktree and runs actual commands.
+
+
+
+**5. Report** — Hermes returns raw pass/fail output, visual observations and failures.
+
+
+
+**6. Review** — GPT-6 evaluates the evidence and either fixes defects or recommends acceptance.
+
+
+
+**7. Approve** — Jay authorizes merge.
+
+
+
+**8. Integrate** — Changes are merged only after approval and required regression gates.
+
+
+
+**9. Document** — Roadmap and current-state documentation record the accepted milestone and evidence.
+
+
+
+At any failure, the change returns to implementation rather than quietly advancing.
+
+
+
+### Standard verification report
+
+
+
+```
+
+[PB-RESULT]
+
+
+
+Milestone:
+
+Branch:
+
+Base commit:
+
+Head commit:
+
+Files changed:
+
+Godot version:
+
+GPU/renderer:
+
+Commands executed:
+
+Suites run:
+
+Assertions passed:
+
+Assertions failed:
+
+Process exit code:
+
+Windowed observations:
+
+Screenshots/log references:
+
+Regressions:
+
+Known limitations:
+
+Verdict: PASS / FAIL / BLOCKED
+
+```
+
+
+
+The PASS verdict must explicitly state which checks actually ran.
+
+
+
+## E.5 Desktop-machine policy
+
+
+
+Jay has one primary development computer.
+
+
+
+The project must not make it impractical for him to use his machine.
+
+
+
+Rules:
+
+
+
+- Work in isolated worktrees.
+
+- Avoid expensive concurrent benchmarks.
+
+- Coordinate windowed GPU tests with Jay.
+
+- Use capped workloads during normal development.
+
+- Do not automatically switch windows, close applications or take keyboard/mouse control without permission.
+
+- Keep heavy asset generation separate from active gameplay testing.
+
+- Never delete or reset uncommitted work without explicit consent.
+
+- Record test duration and system resource pressure where relevant.
+
+
+
+---
+
+
+
+# F. Risks and Reality
+
+
+
+## F.1 Technical risk register
+
+
+
+| Risk                      | Early warning                                            | Mitigation                                                 |
+
+| ------------------------- | -------------------------------------------------------- | ---------------------------------------------------------- |
+
+| CPU/GPU divergence        | Same battle behaves differently across engines           | Shared rule matrix and paired scenarios                    |
+
+| Feature-branch sprawl     | Large diffs, unclear dependencies, repeated conflicts    | Small main-based integration slices                        |
+
+| GPU shader defects        | Vulkan errors, incorrect state, visual glitches          | Real-device testing and reference checks                   |
+
+| Non-deterministic combat  | Divergent tick checksums with identical inputs           | Fixed-tick tests and divergence tracing                    |
+
+| Broken formation orders   | Stacking, teleporting, impossible paths accepted         | Isolated planners, movement contracts, integration tests   |
+
+| Renderer LOD failures     | Duplicate units, missing groups, unselectable rectangles | Threshold tests and windowed captures                      |
+
+| Fake test confidence      | Headless green while player path fails                   | Separate GPU campaign end-to-end acceptance                |
+
+| Save corruption           | Missing soldiers, repeated rewards, invalid old saves    | Two-process persistence testing                            |
+
+| Performance regression    | Frame spikes, simulation backlog, memory growth          | Reproducible benchmarks and resource monitoring            |
+
+| Asset/license issues      | Unclear commercial permission or missing sources         | Provenance manifest and approved replacements              |
+
+| Art-scope explosion       | Endless iterations without playable build                | Representative assets first, visual signoff before scaling |
+
+| Integration conflicts     | Dirty-tree overlap with proposed merges                  | Isolated worktrees, protected local changes                |
+
+| Single-machine bottleneck | Tests disrupt Jay's normal computer use                  | Scheduling and lightweight verification first              |
+
+| Scope creep               | More systems added before current loop is playable       | Strict blocking/optional milestone separation              |
+
+| Weak player experience    | Many features but little reason to continue              | Early external playtests and progression evaluation        |
+
+
+
+## F.2 Risks outside our control
+
+
+
+- Availability and stability of Godot, GPU drivers and supporting tooling.
+
+- Hardware-specific Vulkan and rendering issues.
+
+- Third-party asset and software license terms.
+
+- External AI asset-generation consistency and output quality.
+
+- GitHub and CI service availability.
+
+- Commercial distribution platform requirements.
+
+- Player interest, community reception and market conditions.
+
+
+
+Do not design critical gameplay to depend on a continuously available AI service.
+
+
+
+The shipped game must function independently of GPT-6, Hermes and external model APIs.
+
+
+
+## F.3 What could stall the project
+
+
+
+**1. Building too many systems before integrating them.**\
+
+Solution: Stop treating a feature branch as proof of gameplay progress. Integrate accepted slices.
+
+
+
+**2. Repeatedly replacing presentation without accepting a target.**\
+
+Solution: Approve representative screenshots and a minimum visual standard before broad art production.
+
+
+
+**3. Pursuing massive battles prematurely.**\
+
+Solution: Prove ordinary army-size gameplay first. Larger battles become a scaling problem, not an initial requirement.
+
+
+
+**4. Improving the CPU implementation while the game uses GPU combat.**\
+
+Solution: Treat CPU work as reference or shared-contract work unless specifically justified.
+
+
+
+**5. Mistaking technical sophistication for fun.**\
+
+Solution: Measure player decisions, feedback, progression and repeat play.
+
+
+
+**6. Letting test infrastructure grow faster than playable content.**\
+
+Solution: Every hardening task must protect a defined player-facing contract or a necessary engineering invariant.
+
+
+
+**7. Failing to protect Jay's machine and source work.**\
+
+Solution: Isolated worktrees, no blind resets, no unauthorized merges, controlled local tests.
+
+
+
+## F.4 How progress will be measured
+
+
+
+Track three different categories.
+
+
+
+### Functional progress
+
+
+
+- Completed player-facing actions.
+
+- Number of accepted gameplay loops.
+
+- Successful campaign-to-battle-to-campaign runs.
+
+- Successful independent save/restart runs.
+
+- Number of unresolved blocking defects.
+
+
+
+### Engineering reliability
+
+
+
+- Test suites and assertion counts per commit.
+
+- Pass/fail trends.
+
+- Determinism checks.
+
+- Windowed GPU verification.
+
+- Frame times and memory usage.
+
+- Crash and resource-leak trends.
+
+
+
+### Product quality
+
+
+
+- New-player understanding.
+
+- Combat readability.
+
+- Command reliability.
+
+- Perceived enjoyment.
+
+- Progression clarity.
+
+- Replay interest.
+
+- Visual and audio consistency.
+
+
+
+None of these categories replaces the others.
+
+
+
+---
+
+
+
+# G. Dependency Map and Release Gates
+
+
+
+## G.1 Critical sequence
+
+
+
+```
+
+M00  Approve roadmap and scope
+
+  ↓
+
+M01  Establish baseline and protect work
+
+  ↓
+
+M02  Reconcile unreviewed feature branch
+
+  ↓
+
+M03  Define CPU/GPU gameplay contracts
+
+  ↓
+
+M04  Verify real GPU campaign battle
+
+  ↓
+
+M05  Reliable formation commands
+
+  ↓
+
+M06  Reliable combat and outcomes
+
+  ↓
+
+M07  Terrain collision correctness
+
+  ↓
+
+M08  Camera, LOD and strategic readability
+
+  ↓
+
+M09  Battle HUD and controls
+
+  ↓
+
+M10  Persistent battle consequences
+
+  ↓
+
+M11  Sustainable campaign progression
+
+  ↓
+
+M12  Minimum approved art
+
+  ↓
+
+M13  Gameplay audio feedback
+
+  ↓
+
+M14  Performance and stability
+
+  ↓
+
+M15  Usability and release QA
+
+  ↓
+
+M16  Licensing and export build
+
+  ↓
+
+M17  First independent playtest
+
+  ↓
+
+FIRST PLAYABLE ALPHA ACCEPTED
+
+  ↓
+
+M18  Public demo / release preparation
+
+  ↓
+
+OPTIONAL EXPANSIONS M19–M22
+
+```
+
+
+
+This is the primary acceptance order, not a requirement that every safe, independent art or documentation task wait until the prior milestone is fully complete.
+
+
+
+Parallel preparation is allowed only when:
+
+
+
+- It does not risk shared implementation conflicts.
+
+- It does not distract from unresolved critical blockers.
+
+- Its outputs are clearly labelled unaccepted until integrated.
+
+- Jay approves the scope.
+
+
+
+## G.2 Milestone summary
+
+
+
+| ID  | Milestone                      | Alpha gate | Primary category  |
+
+| --- | ------------------------------ | ---------- | ----------------- |
+
+| M00 | Approve scope                  | Blocking   | Design/docs       |
+
+| M01 | Baseline and repository safety | Blocking   | Tooling/tests     |
+
+| M02 | Branch reconciliation          | Blocking   | Code/tests        |
+
+| M03 | CPU/GPU architecture           | Blocking   | Architecture      |
+
+| M04 | Live GPU end-to-end harness    | Blocking   | Code/tests        |
+
+| M05 | Formation orders               | Blocking   | Code/tests        |
+
+| M06 | Combat reliability             | Blocking   | Code/tests        |
+
+| M07 | Terrain legality               | Blocking   | Code/tests        |
+
+| M08 | Strategic zoom and selection   | Blocking   | Code/presentation |
+
+| M09 | Battle UI                      | Blocking   | UI/code           |
+
+| M10 | Battle persistence             | Blocking   | Code/tests        |
+
+| M11 | Campaign progression           | Blocking   | Code/content      |
+
+| M12 | Minimum visual identity        | Blocking   | Art/content       |
+
+| M13 | Minimum audio feedback         | Blocking   | Audio/code        |
+
+| M14 | Performance and determinism    | Blocking   | QA/tooling        |
+
+| M15 | UX and stability               | Blocking   | UI/QA             |
+
+| M16 | Licenses and packaging         | Blocking   | Tooling/docs      |
+
+| M17 | Stranger playtest              | Blocking   | Product QA        |
+
+| M18 | Public/commercial release      | Later gate | Product           |
+
+| M19 | Soldier/equipment depth        | Optional   | Code/content      |
+
+| M20 | Expanded tactical systems      | Optional   | Code/content      |
+
+| M21 | Living campaign world          | Optional   | Code/content      |
+
+| M22 | Grand strategy systems         | Optional   | Code/content      |
+
+
+
+## G.3 Completion criteria for the first major new checkpoint
+
+
+
+Declare **PROJECT BANNER — PLAYABLE ALPHA** only when:
+
+
+
+- The production GPU battle path is tested and accepted.
+
+- The complete campaign loop works in an exported build.
+
+- Combat, orders, terrain and LOD function reliably.
+
+- Results and saves survive a complete restart.
+
+- The game has meaningful reasons to keep playing.
+
+- Essential visuals and sounds are coherent.
+
+- Performance meets the approved target.
+
+- No critical progression or data-loss defects remain.
+
+- Licensing requirements are met.
+
+- An external tester completes the intended loop.
+
+- Jay approves the result.
+
+
+
+No screenshot, milestone report, test count or GitHub commit can substitute for these conditions.
+
+
+
+---
+
+
+
+# H. Immediate State After Roadmap Approval
+
+
+
+The first development action, **only after Jay authorizes it**, is M01: establish the reproducible baseline and preserve the current local work.
+
+
+
+Then M02 begins by independently testing the already-pushed formation-foundation commit.
+
+
+
+Do not create a replacement implementation simply because the existing branch is inconvenient.
+
+
+
+Do not merge the 88-commit feature lineage wholesale.
+
+
+
+Do not abandon the unfinished LOD work.
+
+
+
+Do not begin new large-scale gameplay features before the core battlefield is reliably integrated.
+
+
+
+## Final project principle
+
+
+
+**Project Banner advances when a real player-facing capability works, survives verification and improves the game—not when another impressive subsystem is written.**
+
+
+
+The long-term vision remains ambitious: detailed medieval mercenary management, beautiful HD pixel-art battlefields and large-scale tactical command.
+
+
+
+The immediate mission is narrower:
+
+
+
+**Make one company, one campaign, one complete battle and one persistent consequence feel like a real game.**
+
+
+
+Everything else builds from there.
+
+
+
+---
+
+
+
+**ROADMAP STATUS: DRAFT — AWAITING JAY'S APPROVAL**
+
+
+
+**DEVELOPMENT STATUS: PAUSED**
+
+
+
+**NEXT AUTHORIZED ACTION: None until Jay gives direction.**
+
+
+
+Add a one-page approval summaryResolve the alpha scope contradictions
