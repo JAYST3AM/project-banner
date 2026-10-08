@@ -184,7 +184,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	for unit in units:
 		var key := "%s\u001f%s" % [unit.side, unit.unit_type_id]
 		if not grouped.has(key):
-			grouped[key] = {"side": unit.side, "members": []}
+			grouped[key] = {"side": unit.side, "unit_type_id": unit.unit_type_id, "members": []}
 		var entry := grouped[key] as Dictionary
 		var entry_members := entry["members"] as Array
 		entry_members.append(unit)
@@ -224,12 +224,14 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	_man_ranged.resize(agents)
 	_man_ranged.fill(0)
 	_body_shape_kind.resize(_bodies)
+	_body_unit_label.resize(_bodies)
 
 	for b in groups.size():
 		var group := groups[b]
 		var members := group["members"] as Array
 		var side := 0 if str(group["side"]) == BattleContext.SIDE_PLAYER else 1
 		_body_side[b] = side
+		_body_unit_label[b] = str(group.get("unit_type_id", "Unit")).capitalize()
 		_order[b] = Order.ENGAGE
 		_order_target[b] = -1
 		_order_point[b] = Vector2.ZERO
