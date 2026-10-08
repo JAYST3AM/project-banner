@@ -247,6 +247,8 @@ var run_seconds := 0.0
 ## armies take longer to meet passes a later value so the shot catches the fighting.
 var shot_at := 6.0
 var seed_value := 780780
+## Campaign adapter specifies the battle's actual biome, not the default plains.
+var battlefield_biome_id: String = ""
 var out_dir := "F:/VSC Projects/pb-bench/gpu_crowd"
 ## How far the camera is pushed in past the fit-the-field zoom: at 1.0 the whole field is
 ## visible and a six-thousand-man army is a dot matrix, which is not what a battle looks
@@ -3238,7 +3240,8 @@ func _build_ground() -> void:
 	# Otherwise our terrain-aware fallback paints a pixel-art field, never
 	# the old single flat colour per simulation cell.
 	var config := GameManager.config()
-	var ground := BattlefieldTerrain.generate(seed_value, field, config)
+	var ground := BattlefieldTerrain.generate(seed_value, field, config,
+		null, null, battlefield_biome_id)
 	_view_root = Node2D.new()
 	add_child(_view_root)
 	var ground_art := TerrainGround.new()
