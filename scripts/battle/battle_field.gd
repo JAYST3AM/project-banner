@@ -61,6 +61,7 @@ func _ready() -> void:
 	# bands; campaign bodies provide their own layout below.
 	bodies_per_side = 1
 	seed_value = context.terrain_seed
+	battlefield_biome_id = context.biome_id
 	super._ready()
 	# The journal's second line, and the one a demo battle is read for: who took the field, by
 	# type. A buffer has no unit types in it - this is the only place that knows them.
