@@ -11,6 +11,9 @@ var _full_map := true
 
 
 func _ready() -> void:
+	## The preview is the visual acceptance harness, so the evidence run must be able to choose the zoom
+	## mode without a keypress - a screenshot cannot press M.
+	_full_map = not OS.get_cmdline_user_args().has("--medium-map")
 	_world = Node2D.new()
 	add_child(_world)
 	var ground := Polygon2D.new()
@@ -36,13 +39,19 @@ func _ready() -> void:
 		{"id": 4, "side": 1, "anchor": Vector2(220, 92),
 		 "forward": Vector2.LEFT, "half_depth": 6.0, "half_span": 9.0,
 		 "name": "Bowmen", "alive": 14, "started": 20, "type_key": "bow"},
+		# A destroyed body sits in the snapshot on purpose: the overview must not draw it, so a
+		# screenshot showing nothing where this one stands is the evidence of that behaviour.
+		{"id": 5, "side": 1, "anchor": Vector2(220, 112),
+		 "forward": Vector2.LEFT, "half_depth": 6.0, "half_span": 9.0,
+		 "name": "Destroyed", "alive": 0, "started": 20, "type_key": "bow"},
 	]
 	_overview.set_formations(_formations, [1], 4, _full_map)
 	_command = BattleCommandBar.new()
 	add_child(_command)
 	_command.set_battle_status(false, 50, 39, 1, true, false)
 	var title := Label.new()
-	title.text = "M02 / B1 — COMPONENT PREVIEW (M: TOGGLE MAP / MEDIUM)"
+	title.text = "M02 / B1 — COMPONENT PREVIEW — %s ZOOM (M: toggle)" % (
+		"FULL-MAP" if _full_map else "MEDIUM-MAP")
 	title.add_theme_color_override("font_color", Color("e9e6dc"))
 	title.add_theme_font_size_override("font_size", 16)
 	title.position = Vector2(24, 12)
