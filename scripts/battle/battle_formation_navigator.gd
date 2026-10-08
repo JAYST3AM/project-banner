@@ -170,6 +170,12 @@ func route(start: Vector2, destination: Vector2,
 					var attempt: Array[Vector2i] = grid.get_id_path(from, candidate)
 					if attempt.is_empty():
 						continue
+					# A one-element path whose only cell is the formation's own tile
+					# means walking anywhere was impossible: standing still is not a
+					# routing plan, so the command must be rejected, not rewritten
+					# onto the formation's current position.
+					if attempt.size() == 1 and attempt[0] == from:
+						continue
 					var score := float((candidate - wanted).length_squared())
 					if score < best_score:
 						best_score = score
