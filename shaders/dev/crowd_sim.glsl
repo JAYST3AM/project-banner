@@ -163,17 +163,24 @@ bool terrain_blocked(vec2 world) {
 	return terrain_mask.occupancy[4u + uint(index.y) * columns + uint(index.x)] != 0u;
 }
 
-// Walk and crowd corrections must not move living agents into solid cells.
-// Prefer forward progress along a free axis; never teleport an agent out of
-// an obstacle. The same rule runs on GPU and in BattleTerrainGpuMask tests.
-vec2 terrain_slide(vec2 before, vec2 after) {
-	if (!terrain_blocked(after)) {
-		return after;
-	}
+// Each short substep tests the destination and both diagonal neighbours.
+// Without segment sampling an agent could tunnel through a thin wall when a
+// correction or walk crosses the wall but happens to land in a free cell.
+const int TERRAIN_MAX_SUBSTEPS = 24;
+const float TERRAIN_SUBSTEP_FRACTION = 0.33;
+
+vec2 terrain_slide_step(vec2 before, vec2 after) {
 	vec2 along_x = vec2(after.x, before.y);
 	vec2 along_y = vec2(before.x, after.y);
 	bool open_x = !terrain_blocked(along_x);
 	bool open_y = !terrain_blocked(along_y);
+	bool destination_open = !terrain_blocked(after);
+	bool diagonal = abs(after.x - before.x) > 0.00001 &&
+		abs(after.y - before.y) > 0.00001;
+
+	if (destination_open && (!diagonal || (open_x && open_y))) {
+		return after;
+	}
 	if (open_x && open_y) {
 		return abs(after.x - before.x) >= abs(after.y - before.y) ?
 			along_x : along_y;
@@ -185,6 +192,34 @@ vec2 terrain_slide(vec2 before, vec2 after) {
 		return along_y;
 	}
 	return before;
+}
+
+vec2 terrain_slide(vec2 before, vec2 after) {
+	if (terrain_mask.occupancy[3] == 0u) {
+		return after;
+	}
+	// A bad deployment must be fixed at source rather than being teleported
+	// away by the shader, changing results based on collision order.
+	if (terrain_blocked(before)) {
+		return before;
+	}
+	float terrain_cell = max(0.001, float(terrain_mask.occupancy[2]) * 0.001);
+	float total = length(after - before);
+	int steps = max(1, int(ceil(total / max(0.01,
+		terrain_cell * TERRAIN_SUBSTEP_FRACTION))));
+	if (steps > TERRAIN_MAX_SUBSTEPS) {
+		// Reject enormous displacements: skipping samples would tunnel.
+		return before;
+	}
+	vec2 increment = (after - before) / float(steps);
+	vec2 position = before;
+	for (int i = 0; i < TERRAIN_MAX_SUBSTEPS; i++) {
+		if (i >= steps) {
+			break;
+		}
+		position = terrain_slide_step(position, position + increment);
+	}
+	return position;
 }
 
 void main() {
