@@ -636,6 +636,9 @@ var _arrow_drawn := 0
 ## all melee), and the damage tally he had dealt at the last pack - a rise in it is the only
 ## evidence a shot leaves on the readback.
 var _man_ranged := PackedByteArray()
+## The actual roster art index of each soldier. Never infer character appearance
+## from team side: player and enemy can each contain all six unit archetypes.
+var _man_art_index := PackedInt32Array()
 var _dealt_seen := PackedInt32Array()
 ## The first shot of a battle is reported once, so a run says whether the wiring fires.
 var _arrow_reported := false
@@ -1199,8 +1202,11 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# deploys flies an arrow. The campaign's field fills this from the roster's unit types.
 	_man_ranged.resize(agents)
 	_man_ranged.fill(0)
+	_man_art_index.resize(agents)
 	for i in agents:
 		var side := 0 if i < per_side else 1
+		# The dev probe deliberately compares two example characters.
+		_man_art_index[i] = side
 		var within := i % per_side
 		var band_index := mini(bodies_per_side - 1, within / per_body)
 		var in_body := within % per_body
@@ -3110,9 +3116,10 @@ func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
 		death_age = _tick - _anim_died_tick[i]
 	# One call: the animation, the frame, the placement, the tint and the four writes, with the
 	# per-character tables and the "what changed" memory inside the writer both renderers share.
-	# The dev crowd fields the first two roster units, one a side, so the two armies still read
-	# apart at a glance.
-	_sprite_writer.write(_sprite_buffer, i, i, picture, side, side, alive, moved, hurt_age,
+	# Both armies may contain every roster archetype: a soldier's pixel-art
+	# character follows his unit_type_id, while tint follows his team side.
+	var art_index := _man_art_index[i] if i < _man_art_index.size() else side
+	_sprite_writer.write(_sprite_buffer, i, i, picture, art_index, side, alive, moved, hurt_age,
 		strike_age, death_age, _anim_flip[i] == 1, _tick)
 
 
