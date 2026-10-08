@@ -33,7 +33,7 @@ extends Node
 ## Usage (headless):
 ## [codeblock]
 ## godotc --headless --path "<project>" res://scenes/dev/battle_stalemate_probe.tscn -- \
-##     --per-side=300 --seed=780780 --ticks=24000 --out="F:/VSC Projects/pb-bench/stalemate"
+##     --per-side=300 --seed=780780 --ticks=24000 --out="F:/VSC Projects/Project Banner/_work/pb-bench/stalemate"
 ## [/codeblock]
 ## Switches: [code]--per-side=[/code], [code]--seed=[/code], [code]--ticks=[/code],
 ## [code]--sample-every=[/code], [code]--stall-ticks=[/code], [code]--deep-every=[/code],
@@ -53,7 +53,7 @@ var _stall_ticks := 600
 var _deep_every := 0
 var _deep_at: Array[int] = []
 var _max_seconds := 5400.0
-var _out_dir := "F:/VSC Projects/pb-bench/stalemate"
+var _out_dir := "F:/VSC Projects/Project Banner/_work/pb-bench/stalemate"
 var _label := "probe"
 var _quiet := false
 var _unit_type := "spearman"

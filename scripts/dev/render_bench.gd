@@ -28,7 +28,7 @@ extends Node2D
 ## Usage (windowed - there is nothing to see headlessly):
 ## [codeblock]
 ## godotc --path "<project>" res://scenes/dev/render_bench.tscn -- \
-##     --per-side=10000 --ticks=2 --frames=30 --out="F:/VSC Projects/pb-bench/render"
+##     --per-side=10000 --ticks=2 --frames=30 --out="F:/VSC Projects/Project Banner/_work/pb-bench/render"
 ## [/codeblock]
 ## Switches: [code]--per-side=[/code], [code]--seed=[/code], [code]--ticks=[/code],
 ## [code]--frames=[/code], [code]--warmup=[/code], [code]--fill=setters|buffer|both[/code],
@@ -51,7 +51,7 @@ var _warmup := 5
 var _fill := "setters"
 var _modes_arg := DEFAULT_MODES
 var _zoom := 0.0
-var _out_dir := "F:/VSC Projects/pb-bench/render"
+var _out_dir := "F:/VSC Projects/Project Banner/_work/pb-bench/render"
 var _label := "render"
 var _overlay_enabled := true
 

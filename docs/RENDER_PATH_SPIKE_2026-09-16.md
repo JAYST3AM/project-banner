@@ -208,7 +208,7 @@ a bounded native port.
 | `scripts/battle/battle.gd` | attaches the field as the primary renderer, packs on the tick, drops bars/pips below a zoom threshold, falls back to canvas if the layout cannot be probed, honours `PB_RENDER_BACKEND`. |
 | `scripts/dev/battle_showcase.gd` | uses the same renderer the game uses; `PB_RENDER_BACKEND=canvas` gives the paired comparison. |
 
-Benchmark logs: `F:/VSC Projects/pb-bench/render/` (bench reports), `F:/VSC Projects/pb-bench/showcase/`
+Benchmark logs: `F:/VSC Projects/Project Banner/_work/pb-bench/render/` (bench reports), `F:/VSC Projects/Project Banner/_work/pb-bench/showcase/`
 (`instanced_run.log`, `canvas_run.log`).
 
 ---

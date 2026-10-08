@@ -247,7 +247,7 @@ var run_seconds := 0.0
 ## armies take longer to meet passes a later value so the shot catches the fighting.
 var shot_at := 6.0
 var seed_value := 780780
-var out_dir := "F:/VSC Projects/pb-bench/gpu_crowd"
+var out_dir := "F:/VSC Projects/Project Banner/_work/pb-bench/gpu_crowd"
 ## How far the camera is pushed in past the fit-the-field zoom: at 1.0 the whole field is
 ## visible and a six-thousand-man army is a dot matrix, which is not what a battle looks
 ## like. The camera follows the fighting once it starts.
@@ -609,6 +609,9 @@ var _arrow_drawn := 0
 ## all melee), and the damage tally he had dealt at the last pack - a rise in it is the only
 ## evidence a shot leaves on the readback.
 var _man_ranged := PackedByteArray()
+## Per man: which character draws him - an index into [member UnitArt.UNIT_KEYS]. The campaign's
+## field sets it from each unit's own id; the probe's army is one type throughout.
+var _man_type := PackedByteArray()
 var _dealt_seen := PackedInt32Array()
 ## The first shot of a battle is reported once, so a run says whether the wiring fires.
 var _arrow_reported := false
@@ -834,6 +837,10 @@ func _parse_args() -> void:
 	# the way the rest of the project treats PB_* flags.
 	if OS.get_environment("PB_TGT_MODE").to_lower() in ["legacy", "off", "0", "false", "no"]:
 		target_legacy = true
+	if OS.get_environment("PB_IN_REACH").to_lower() == "global":
+		in_reach_own_reach = false
+	if OS.get_environment("PB_PRESS_IN_REACH").to_lower() in ["off", "0", "false", "no"]:
+		press_while_out_of_reach = false
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--agents="):
 			agents = maxi(MIN_AGENTS, int(arg.substr(9)))
@@ -905,6 +912,15 @@ func _parse_args() -> void:
 			unit_type = arg.substr(7)
 		elif arg == "--legacy-damage":
 			real_strikes = false
+		elif arg.begins_with("--in-reach="):
+			# `--in-reach=global` restores the older reading: every weapon measured against the
+			# scene's engagement reach, which freezes a melee short of its own weapon.
+			in_reach_own_reach = arg.substr("--in-reach=".length()).to_lower() != "global"
+		elif arg.begins_with("--press-in-reach="):
+			# `--press-in-reach=off` restores the older press rule: the anchors' own geometry,
+			# which stops a body whose men cannot reach anybody from ever closing.
+			press_while_out_of_reach = not (arg.substr("--press-in-reach=".length()).to_lower()
+				in ["off", "0", "false", "no"])
 		elif arg == "--trace":
 			trace_orders = true
 		elif arg == "--manual":
@@ -1162,6 +1178,10 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# deploys flies an arrow. The campaign's field fills this from the roster's unit types.
 	_man_ranged.resize(agents)
 	_man_ranged.fill(0)
+	# The probe's men are one character throughout: the scene's own archetype, the same one its
+	# stats came from. The campaign's field fills this from each unit's own id instead.
+	_man_type.resize(agents)
+	_man_type.fill(UnitArt.index_for_unit(unit_type))
 	for i in agents:
 		var side := 0 if i < per_side else 1
 		var within := i % per_side
@@ -1280,6 +1300,30 @@ func _crowding(b: int) -> bool:
 		if ahead.length() < KEEP_STATION and ahead.dot(forward) > 0.0:
 			return true
 	return false
+
+
+## Whether a body should still walk into the fight.
+##
+## The line's own geometry first - the anchors less half the depth of each, which is what stops a
+## body once its front ranks stand where they belong - and then the one thing that geometry cannot
+## see: whether any of its men can actually reach anybody.
+##
+## Measured deadlock, 5 brigands against 10 peasants: two survivors of ours standing in the y-gap
+## their opposite numbers had left when they fell, 2.6 units from the nearest living enemy with a
+## 2.2 reach, and their anchors only 1.5 apart - so `_line_room` read the line as closed, the press
+## never fired, and the battle sat for three minutes with every man "holding out of reach" and not
+## one blow struck. The shader already measures the closest enemy pair for these men's body (the
+## journal's "room"), so the exception is the men's own law: keep leaning in while nobody is in
+## reach, and stop the moment somebody is. The separation holds the men themselves at the pair
+## minimum, so a body pressing into an empty gap cannot crush its own front.
+func _wants_to_close(b: int) -> bool:
+	if _line_room(b) > _engage_room(b):
+		return true
+	if not press_while_out_of_reach:
+		return false
+	if b < 0 or b >= _body_reach.size():
+		return false
+	return _body_room(b) > maxf(1.0, _body_reach[b] * 0.95)
 
 
 ## How much room a body needs before it walks forward.
@@ -1569,8 +1613,9 @@ func _advance_bodies() -> void:
 				# A body's own reach decides where it stops. Melee (reach 2.4) stops on nine
 				# tenths of it; a body of archers (reach 18) holds when the enemy's line is already
 				# inside their range, which is what "sit back in a line and shoot" means in numbers.
-				# The measurement is the line's, not the closest pair's - see [method _line_room].
-				if not crowding and _line_room(b) > _engage_room(b):
+				# The measurement is the line's, not the closest pair's - see [method _line_room] -
+				# with the men's own reach as the exception [method _wants_to_close] explains.
+				if not crowding and _wants_to_close(b):
 					# Walk at the body we are fighting, not the way we happen to be facing. A body
 					# advanced on its heading alone, so when its target drifted it sailed past it and
 					# the two marched away together: the demo journal's survivors finished at
@@ -3062,9 +3107,9 @@ func _write_sprite(i: int, position: Vector2, picture: Vector2, side: int,
 		death_age = _tick - _anim_died_tick[i]
 	# One call: the animation, the frame, the placement, the tint and the four writes, with the
 	# per-character tables and the "what changed" memory inside the writer both renderers share.
-	# The dev crowd fields the first two roster units, one a side, so the two armies still read
-	# apart at a glance.
-	_sprite_writer.write(_sprite_buffer, i, i, picture, side, side, alive, moved, hurt_age,
+	# The table is his own unit's character; the side is only the tint.
+	var table := _man_type[i] if i < _man_type.size() else 0
+	_sprite_writer.write(_sprite_buffer, i, i, picture, table, side, alive, moved, hurt_age,
 		strike_age, death_age, _anim_flip[i] == 1, _tick)
 
 
@@ -3283,7 +3328,12 @@ func _params() -> PackedFloat32Array:
 		# cannot drift from the game by a constant somebody typed twice. The shader reads exactly
 		# these slots - it read [22..25] for a week and the field ran the legacy damage model in
 		# silence: every blow landed, seventy per cent off each, a global 3.4 reach for everyone.
-		hit_chance, defence_mitigation, tick_hz, 1.0 if real_strikes else 0.0])
+		hit_chance, defence_mitigation, tick_hz, 1.0 if real_strikes else 0.0,
+		# [24] the reach gate: 1 = the man's own weapon decides when he is in reach of the
+		# opponent he holds, 0 = the scene's global engagement reach for every weapon. [25] pads
+		# the block to the declared PARAM_SLOTS, so a slot added later cannot be read off the end.
+		1.0 if in_reach_own_reach else 0.0,
+		0.0])
 
 
 func _push_constant(mode: int) -> PackedByteArray:
@@ -3382,6 +3432,17 @@ var hp_max := HP_MAX
 ## 1 = the reference's strike model (hit roll, damage spread, defence, weapon rhythm), 0 = the flat
 ## placeholder it replaced. Kept as a switch so the old behaviour can be measured against the new.
 var real_strikes := true
+## 1 = a man's own weapon decides when he counts as in reach of the opponent he is holding: with
+## the strike model on, a man who cannot touch the opponent he holds must keep closing and keep
+## looking, not stand still at the scene's engagement reach. 0 = the scene's single engagement
+## reach for every weapon. `--in-reach=global` (or `PB_IN_REACH=global`) restores the older
+## reading in the same build, so a before/after is a paired run.
+var in_reach_own_reach := true
+## 1 = a body keeps leaning into the fight while none of its men can reach an enemy, even once its
+## anchors say the lines have met (see [method _wants_to_close]); 0 = the line's own geometry alone,
+## which is what the press rule was before. `--press-in-reach=off` (or `PB_PRESS_IN_REACH=off`)
+## restores it in the same build, so a before/after is a paired run.
+var press_while_out_of_reach := true
 
 
 ## The unit's numbers, as the campaign would hand them to a battle.

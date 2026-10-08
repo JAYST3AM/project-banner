@@ -95,7 +95,7 @@ func _ready() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var image := get_viewport().get_texture().get_image()
-	var path := "F:/VSC Projects/pb-bench/unit_sprites_shots/pipeline_orientation.png"
+	var path := "F:/VSC Projects/Project Banner/_work/pb-bench/unit_sprites_shots/pipeline_orientation.png"
 	image.save_png(path)
 	print("saved ", path)
 

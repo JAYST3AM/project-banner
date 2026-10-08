@@ -3,7 +3,7 @@
  "characters": {
   "peasant_recruit": {
    "cell": [
-    59,
+    72,
     62
    ],
    "anchor": [
@@ -24,7 +24,7 @@
     },
     "attack": {
      "y": 124,
-     "frames": 3,
+     "frames": 4,
      "ms": 65.0
     },
     "hurt": {
@@ -41,7 +41,7 @@
   },
   "spearman": {
    "cell": [
-    51,
+    62,
     58
    ],
    "anchor": [
@@ -62,7 +62,7 @@
     },
     "attack": {
      "y": 426,
-     "frames": 3,
+     "frames": 4,
      "ms": 65.0
     },
     "hurt": {
@@ -155,7 +155,7 @@
   },
   "bandit_brigand": {
    "cell": [
-    55,
+    66,
     58
    ],
    "anchor": [

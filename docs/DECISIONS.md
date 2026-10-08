@@ -2693,7 +2693,7 @@ soldier. The display half shipped first ([code]UnitScale[/code], D-107): one mar
 cohort or legion. This records the other half and the measured case for it.
 
 **What the per-soldier loop actually costs.** Profiled on the 12900K at 30 ticks, profile on, both
-armies formed (`pb-bench/entity/phase_2k.log`, `phase_20k.log`):
+armies formed (`_work/pb-bench/entity/phase_2k.log`, `phase_20k.log`):
 
 | phase (ms/tick) | 2,000 | 20,000 |
 |---|---|---|
@@ -3171,7 +3171,7 @@ be the simulation's, not the renderer's.
 **Determinism, three ways.** The search is a minimum over the neighbourhood with ties broken by the
 lower agent id, so the answer cannot depend on the order the grid binned the men in; the target
 buffer is written only by the soldier that owns it, so no two threads race; and the counters are
-integer atomics, order-independent like the collision proof. `pb-bench/determinism_check.sh` passes
+integer atomics, order-independent like the collision proof. `_work/pb-bench/determinism_check.sh` passes
 at 1,000 and at 600 soldiers (the second run reaches contact, so acquisition and a post-contact wipe
 are both compared).
 
@@ -3538,7 +3538,7 @@ about 580 ms before the terrain appeared. With the world and its grid already on
 (D-129), `WorldBuilder.needs_build()` was false on re-entry - and the loading screen was only
 created inside that branch, so nothing covered the ground's build at all. The map drew its
 placeholder fill and grid while the ground layer ran behind it. The owner's report and the capture
-that matched it (frame 4 of `pb-bench/town_frames_before`, confirmed by eye): bare fill, no terrain.
+that matched it (frame 4 of `_work/pb-bench/town_frames_before`, confirmed by eye): bare fill, no terrain.
 
 **Decision.** Two changes, in the order the numbers asked for:
 
@@ -4518,7 +4518,7 @@ actually create. This supersedes D-162.
 
 The owner's brief: a system "in the game, where the player can customize their banner after
 clicking new game", edited "by pixel art painting ... the user clicks a color and paints the
-banner". The construction was agreed in the paint prototype (`F:\VSC Projects\pb-bench\art\
+banner". The construction was agreed in the paint prototype (`F:\VSC Projects\Project Banner\_work\pb-bench\art\
 avatars\`): the cloth HANGS from a crossbar with a swallowtail notch cut into the bottom hem - the
 owner rejected the earlier flag-floating-beside-the-pole look outright - and the pole carries
 detail (five-tone timber, wrap rings, steel butt ferrule). Two rulings are load-bearing: the grid

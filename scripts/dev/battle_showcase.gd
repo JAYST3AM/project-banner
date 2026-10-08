@@ -25,7 +25,7 @@ extends Node2D
 ## Usage:
 ## [codeblock]
 ## godotc --path "<project>" res://scenes/dev/battle_showcase.tscn -- \
-##     --per-side=300 --ticks-per-frame=2 --out="F:/VSC Projects/pb-bench/showcase"
+##     --per-side=300 --ticks-per-frame=2 --out="F:/VSC Projects/Project Banner/_work/pb-bench/showcase"
 ## [/codeblock]
 ## Switches: [code]--per-side=[/code], [code]--ticks-per-frame=[/code],
 ## [code]--out=[/code], [code]--seed=[/code], [code]--shots=[/code],
@@ -54,7 +54,7 @@ var _seed := 780780
 var _shots := true
 var _overlay_enabled := true
 var _probe_every := 10
-var _out_dir := "F:/VSC Projects/pb-bench/showcase_300v300"
+var _out_dir := "F:/VSC Projects/Project Banner/_work/pb-bench/showcase_300v300"
 var _unit_type := "spearman"
 var _enemy_unit_type := "spearman"
 ## The battle's own clock limit. Left at zero the production value is used - six hundred

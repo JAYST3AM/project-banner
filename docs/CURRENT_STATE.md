@@ -41,7 +41,7 @@ nothing is founded before it; the cloth then rides the party marker on the world
 disc used to be. `--new-campaign` opens the screen at boot for a scripted run or a screenshot;
 `PB_BANNER_MARKER=dot` restores the old disc and `PB_BANNER_WIND=off` stills every cloth in the
 same build. Old saves gain the default banner on load. Suite: `test_banner` (new). Prototype and
-design notes: `F:\VSC Projects\pb-bench\art\avatars\`.
+design notes: `F:\VSC Projects\Project Banner\_work\pb-bench\art\avatars\`.
 
 ---
 

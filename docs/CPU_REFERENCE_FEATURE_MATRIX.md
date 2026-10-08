@@ -119,7 +119,7 @@ worth remembering because each one made the measurement lie:
 against a 2.47 minimum — six pair-samples out of roughly 48,000, at first contact, 0.02 short. The
 grid's fixed capacity (64 a cell) is still a hard cap in principle. The run is now deterministic:
 the atomic-order dependence that made this a fixed-seed-only claim was fixed and proven by
-`pb-bench/determinism_check.sh` (see section 7).
+`_work/pb-bench/determinism_check.sh` (see section 7).
 
 ## 3. Battle system
 
@@ -137,7 +137,7 @@ the atomic-order dependence that made this a fixed-seed-only claim was fixed and
 
 **Target acquisition (measured, this machine, 2026-09-18).** The rules run through the live GPU
 simulation with `godotc --path . res://scenes/dev/gpu_crowd.tscn -- --rule-checks --agents=1200`
-(`F:/VSC Projects/pb-bench/tgt_acq/rule_checks.log`). It cannot run headless - the scene simulates on
+(`F:/VSC Projects/Project Banner/_work/pb-bench/tgt_acq/rule_checks.log`). It cannot run headless - the scene simulates on
 the rendering device - so this is a GPU-side probe and not a headless suite; the reference's own
 `tests/test_target_acquisition.gd` remains the headless authority on the CPU path. Four checks:
 
@@ -192,7 +192,7 @@ that is slice 2.
 | Spatial index for local queries | Yes (native + GDScript grid) | Yes — GPU grid, 32 slots a cell | **PARTIAL** (overflow drops agents) | `overflow` counter |
 | Native C++ hot loops | Yes (3 kernels) | n/a — compute shaders | **PARITY (by other means)** | `native/` builds, CI |
 | Simulation/presentation separation | Yes (fixed 20 Hz) | Yes, since tonight: fixed clock, free frames | **PARITY** | `fps 1,600+ / ticks 20.0` |
-| Deterministic results | Yes — same seed, same battle | Yes — same seed, same battle: the separation is fixed-point integer with atomics, each settling round is accumulate-then-apply, and the tick counter advances by the tick (not the frame), so the awareness schedule cannot depend on the frame rate | **VERIFIED (local GPU)** | `pb-bench/determinism_check.sh`: 20/30/60/120/uncapped fps, identical traces to tick 600; not a headless check |
+| Deterministic results | Yes — same seed, same battle | Yes — same seed, same battle: the separation is fixed-point integer with atomics, each settling round is accumulate-then-apply, and the tick counter advances by the tick (not the frame), so the awareness schedule cannot depend on the frame rate | **VERIFIED (local GPU)** | `_work/pb-bench/determinism_check.sh`: 20/30/60/120/uncapped fps, identical traces to tick 600; not a headless check |
 | Device/renderer diagnostics | Added tonight (`DeviceReport`) | same | **PARITY** | this document's environment block |
 | Test suite | 27 suites / 8,955 assertions | none of its own | **NOT PORTED** | `tests/` |
 

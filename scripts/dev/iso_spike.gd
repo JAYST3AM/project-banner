@@ -43,7 +43,7 @@ const FIELD := Vector2(200.0, 120.0)
 const TERRAIN_SEED := 20260916
 ## Where a screenshot goes. A variable rather than a constant because the auto-orbit writes one
 ## file per angle.
-var shot_path := "F:/VSC Projects/pb-bench/iso/iso_spike.png"
+var shot_path := "F:/VSC Projects/Project Banner/_work/pb-bench/iso/iso_spike.png"
 const SHOT_AFTER := 2.5
 
 var _terrain: BattlefieldTerrain = null
@@ -248,7 +248,7 @@ func _process(delta: float) -> void:
 		var wanted := int(_time / 2.0)
 		if wanted > _auto_shots:
 			_auto_shots = wanted
-			shot_path = "F:/VSC Projects/pb-bench/iso/auto_%d.png" % wanted
+			shot_path = "F:/VSC Projects/Project Banner/_work/pb-bench/iso/auto_%d.png" % wanted
 			write_shot()
 	if not _shot_written and _time >= SHOT_AFTER:
 		_shot_written = true

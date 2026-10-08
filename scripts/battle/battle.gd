@@ -57,6 +57,8 @@ const MAX_ZOOM := 26.0
 ## Whether the field's detail batches were drawn last frame, so the toggle is applied when it
 ## changes rather than every frame.
 var _detail_shown := true
+var _last_lod_level: int = -1
+var _group_view_configured: bool = false
 
 
 func _ready() -> void:
@@ -113,15 +115,13 @@ func _ready() -> void:
 
 
 func _focus_camera() -> void:
-	# Fit the ground the battle is fought on, with a little margin. The armies stand in the middle
-	# half of it, so this frames the fight and the ground around it rather than a field-sized void.
 	var size := _simulator.field_size
 	_camera.position = size * 0.5
 	var window := Vector2(get_viewport().get_visible_rect().size)
 	var fit := minf(window.x / maxf(1.0, size.x), window.y / maxf(1.0, size.y))
 	var zoom := clampf(fit * 0.98, MIN_ZOOM, MAX_ZOOM)
 	_camera.zoom = Vector2(zoom, zoom)
-
+	_sync_lod_renderer()
 
 ## ---------- the army's renderer -------------------------------------------
 
@@ -181,7 +181,7 @@ func _attach_soldier_field() -> SoldierField:
 ## zoomed-out camera they are a rectangle a fraction of a pixel wide: a battle seen from above
 ## does not need two instances per man to draw something nobody can read.
 func _update_field_detail() -> void:
-	if _field == null:
+	if _field == null or not _field.visible:
 		return
 	var detail := _camera.zoom.x >= _detail_zoom
 	if detail == _detail_shown:
@@ -193,7 +193,6 @@ func _update_field_detail() -> void:
 	_field.apply()
 	DebugLogger.info("render: per-soldier detail %s at zoom %.2f" % [
 		"on" if detail else "off", _camera.zoom.x], "Battle")
-
 
 ## ---------- HUD ----------------------------------------------------------
 
@@ -370,6 +369,7 @@ func _process(delta: float) -> void:
 	if _simulator == null:
 		return
 	_update_camera_pan(delta)
+	_sync_lod_renderer()
 	_update_field_detail()
 	if _simulator.is_running():
 		# The enemy's thinking happens here, above the soldiers and outside the
@@ -396,7 +396,8 @@ func _process(delta: float) -> void:
 		# was already given, so what a frame pays for the soldiers is nothing at all, instead of
 		# one canvas command per soldier per overlay. At twenty thousand men that is the
 		# difference between 2.56 ms a frame and 133.6 ms. See [SoldierField] and D-107.
-		if _field != null and ticks > 0:
+		# Never pack invisible soldiers; group boxes derive directly from the sim.
+		if _field != null and _field.visible and ticks > 0:
 			_field.pack(_simulator)
 			_field.apply()
 		_update_formation_drill()
@@ -407,7 +408,6 @@ func _process(delta: float) -> void:
 			_refresh()
 		if _simulator.is_finished():
 			_resolve_and_show(false)
-
 
 ## ---------- camera and input --------------------------------------------
 
@@ -549,7 +549,6 @@ func _formation_for_selection() -> BattleFormation:
 	var ids := _living_selection()
 	if ids.is_empty():
 		return null
-
 	for formation in _simulator.formations:
 		if formation.side != BattleContext.SIDE_PLAYER or formation.unit_ids.size() != ids.size():
 			continue
@@ -560,7 +559,6 @@ func _formation_for_selection() -> BattleFormation:
 				break
 		if matches:
 			return formation
-
 	_formation_counter += 1
 	var formation := BattleFormation.create(
 		"player_body_%d" % _formation_counter,
@@ -574,8 +572,8 @@ func _formation_for_selection() -> BattleFormation:
 	formation.order_hold()
 	_simulator.add_formation(formation)
 	_simulator.assign_formation(formation, ids)
+	_view.invalidate_boxes()
 	return formation
-
 
 func _centroid_of(unit_ids: Array[int]) -> Vector2:
 	var total := Vector2.ZERO
@@ -650,8 +648,7 @@ func _order_formation_type(type_id: String) -> void:
 		formation.id, formation.display_name(), formation.file_count, formation.rank_count,
 		" - they will walk into it" if _simulator.is_running() else "",
 	]
-	_view.queue_redraw()
-
+	_view.invalidate_boxes()
 
 func _turn_selection(radians: float) -> void:
 	var formations := _selected_formations()
@@ -660,8 +657,9 @@ func _turn_selection(radians: float) -> void:
 		return
 	for formation in formations:
 		formation.order_face(formation.desired_facing + radians)
-	_hint.text = "%d formation(s) turning to %.0f degrees." % [formations.size(), rad_to_deg(formations[0].desired_facing)]
-
+	_hint.text = "%d formation(s) turning to %.0f degrees." % [
+		formations.size(), rad_to_deg(formations[0].desired_facing)]
+	_view.invalidate_boxes()
 
 func _order_stance(order: String) -> void:
 	var formations := _selected_formations()
@@ -803,7 +801,8 @@ func _report_formation_consistency() -> void:
 func _zoom_by(factor: float) -> void:
 	var next := clampf(_camera.zoom.x * factor, MIN_ZOOM, MAX_ZOOM)
 	_camera.zoom = Vector2(next, next)
-
+	_sync_lod_renderer()
+	_view.queue_redraw()
 
 ## ---------- selection ----------------------------------------------------
 ## Click selects one unit; drag selects a box; shift adds to the selection. A
@@ -824,16 +823,25 @@ func _finish_box_select(additive: bool) -> void:
 	var dragged_world := _box_start_world.distance_to(_box_current_world)
 	var threshold_world := _drag_threshold_px / maxf(0.2, _camera.zoom.x)
 	var found: Array[int] = []
+	var grouped := not UnitScale.is_single(_view.drawing_level())
 
 	if dragged_world <= threshold_world:
-		var unit_id := _view.unit_at(_box_start_world)
-		if unit_id < 0:
-			if not additive:
-				_clear_selection()
-			return
-		found.append(unit_id)
+		if grouped:
+			found = _view.group_player_ids_at(_box_start_world)
+		else:
+			var unit_id := _view.unit_at(_box_start_world)
+			if unit_id >= 0:
+				found.append(unit_id)
 	else:
-		found = _view.units_in_rect(_world_rect(_box_start_world, _box_current_world))
+		var selection_rect := _world_rect(_box_start_world, _box_current_world)
+		if grouped:
+			found = _view.group_player_ids_in_rect(selection_rect)
+		else:
+			found = _view.units_in_rect(selection_rect)
+
+	if found.is_empty() and not additive:
+		_clear_selection()
+		return
 
 	if additive:
 		for unit_id in found:
@@ -844,7 +852,6 @@ func _finish_box_select(additive: bool) -> void:
 
 	DebugLogger.debug("selected %d unit(s)" % _view.selected_ids.size(), "Battle")
 	_view.queue_redraw()
-
 
 func _clear_selection() -> void:
 	_view.selected_ids.clear()
@@ -900,17 +907,15 @@ func _move_selection_to(world_point: Vector2) -> void:
 			formation.order_move_to(world_point)
 		_hint.text = "%d formation(s) ordered to %.0f, %.0f." % [
 			formations.size(), world_point.x, world_point.y]
-		_view.queue_redraw()
+		_view.invalidate_boxes()
 		return
-
 	var formation := _formation_for_selection()
 	if formation == null:
 		return
 	formation.order_move_to(world_point)
 	_hint.text = "%d soldiers detached as %s and ordered to %.0f, %.0f." % [
 		formation.unit_ids.size(), formation.id, world_point.x, world_point.y]
-	_view.queue_redraw()
-
+	_view.invalidate_boxes()
 
 ## Whether the selection is exactly one or more entire formations. If it is, a move
 ## order moves them; if it is not, it is a detachment and has to be formed up first.
@@ -993,3 +998,45 @@ func _resolve_and_show(retreated: bool) -> void:
 	if _journal != null:
 		_journal.close()
 	SceneManager.change_scene("battle_results", {"result": result, "context": _context})
+
+
+## ---------------------------------------------------------------------------
+## PB-DIRECTIVE-001: strategic-zoom LOD (added by Hermes from GPT-6's code drop;
+## appended rather than spliced so the existing file order is untouched).
+## ---------------------------------------------------------------------------
+
+func _sync_lod_renderer() -> void:
+	if _simulator == null:
+		return
+	if not _group_view_configured:
+		_view.configure_group_view(_config)
+		_group_view_configured = true
+
+	# Controller knows camera zoom NOW; relying on the CanvasItem transform here
+	# could delay a zoom transition by a rendered frame.
+	_view.lod_zoom = _camera.zoom.x
+	var level: int = _view.drawing_level()
+	if _field == null:
+		# No instancing: BattleView owns both soldier and group rendering.
+		_view.show_units = true
+	else:
+		var show_soldiers := UnitScale.is_single(level)
+		if show_soldiers:
+			if not _field.visible:
+				# The buffer was intentionally frozen while grouped; catch up first.
+				var detail := _camera.zoom.x >= _detail_zoom
+				_detail_shown = detail
+				_field.show_bars = detail
+				_field.show_facing = detail
+				_field.pack(_simulator)
+				_field.apply()
+			_view.show_units = false
+			_field.visible = true
+		else:
+			# MultiMeshInstance2D parent hides EVERY child batch. No double-render.
+			_field.visible = false
+			_view.show_units = true
+
+	if level != _last_lod_level:
+		_last_lod_level = level
+		_view.invalidate_boxes()

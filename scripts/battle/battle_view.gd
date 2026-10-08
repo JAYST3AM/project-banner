@@ -52,6 +52,10 @@ var block_view: bool = OS.get_environment("PB_BLOCK_VIEW") == "1"
 ## part of the field: a showcase that wants to see the armies arrange themselves can drop the
 ## words and keep the marks. On by default, which is what the battle scene has always done.
 var show_formation_labels: bool = true
+var lod_zoom: float = -1.0
+var group_min_width_px: float = 24.0
+var group_min_height_px: float = 14.0
+var group_label_min_width_px: float = 36.0
 
 var selected_ids: Array[int] = []
 
@@ -231,6 +235,8 @@ func _draw() -> void:
 ## when the battle does, not when the screen does. See D-117.
 var _boxes: Array[Rect2] = []
 var _box_colours: Array[Color] = []
+var _box_formation_ids: Array[String] = []
+var _box_live_counts: Array[int] = []
 var _box_tick: int = -1
 var _box_level: int = -1
 ## Development only: how many times the boxes have been rebuilt, so the once-a-tick rule can be
@@ -247,10 +253,31 @@ func _draw_groups(level: int) -> void:
 	if step <= 1:
 		return
 	ensure_boxes(level, step)
-	for index in _boxes.size():
-		draw_rect(_boxes[index], _box_colours[index])
-		draw_rect(_boxes[index], _box_colours[index].darkened(0.45), false, 0.7)
+	var selected_bodies: Dictionary = {}
+	for unit_id in selected_ids:
+		var unit := _roster_unit(unit_id)
+		if unit != null and unit.is_alive() and unit.formation_ref != null:
+			selected_bodies[unit.formation_ref.id] = true
 
+	for index in _boxes.size():
+		var rect := _display_box(_boxes[index])
+		var selected := selected_bodies.has(_box_formation_ids[index])
+		var colour: Color = _box_colours[index]
+		if selected:
+			colour = colour.lightened(0.2)
+		draw_rect(rect, colour)
+		draw_rect(rect, COLOR_GOLD if selected else colour.darkened(0.5),
+			false, _group_pixel_world(2.0 if selected else 1.0))
+		# Only visible where a screen-sized glyph has room; no huge world-space
+		# labels at full-map zoom. Counts are from the cache, never per-frame scans.
+		var screen_width := rect.size.x * _group_zoom()
+		var screen_height := rect.size.y * _group_zoom()
+		if _font != null and screen_width >= group_label_min_width_px and screen_height >= 12.0:
+			var text := str(_box_live_counts[index])
+			var font_size := maxi(1, int(roundf(_group_pixel_world(11.0))))
+			var baseline := Vector2(rect.position.x, rect.get_center().y + float(font_size) * 0.35)
+			draw_string(_font, baseline, text, HORIZONTAL_ALIGNMENT_CENTER,
+				rect.size.x, font_size, COLOR_TEXT)
 
 ## Rebuild the boxes if this tick has not built them already, and only then. The drawing above reads
 ## whatever is cached, so a frame that changes nothing about the battle draws the same rectangles for
@@ -267,32 +294,39 @@ func ensure_boxes(level: int, step: int) -> void:
 func _rebuild_boxes(level: int, step: int) -> void:
 	_boxes.clear()
 	_box_colours.clear()
+	_box_formation_ids.clear()
+	_box_live_counts.clear()
 	if simulator == null:
 		return
 	for formation in simulator.formations:
 		var colour := COLOR_PLAYER if formation.side == BattleContext.SIDE_PLAYER else COLOR_ENEMY
-		var groups := {}
+		var groups: Dictionary = {}
 		var order: Array[int] = []
 		for i in formation.unit_ids.size():
 			var unit: BattleUnit = _roster_unit(formation.unit_ids[i])
 			if unit == null or not unit.is_alive():
 				continue
-			var index := i / step
+			var index: int = i / step
 			if groups.has(index):
-				var box: Array = groups[index]
-				box[0] = box[0].min(unit.position)
-				box[1] = box[1].max(unit.position)
+				var group: Array = groups[index]
+				group[0] = (group[0] as Vector2).min(unit.position)
+				group[1] = (group[1] as Vector2).max(unit.position)
+				group[2] = int(group[2]) + 1
+				groups[index] = group
 			else:
-				groups[index] = [unit.position, unit.position]
+				groups[index] = [unit.position, unit.position, 1]
 				order.append(index)
 		for index in order:
-			var box: Array = groups[index]
-			_boxes.append(Rect2(box[0], box[1] - box[0]).grow(1.1))
+			var group: Array = groups[index]
+			var minimum: Vector2 = group[0]
+			var maximum: Vector2 = group[1]
+			_boxes.append(Rect2(minimum, maximum - minimum).grow(1.1))
 			_box_colours.append(colour)
+			_box_formation_ids.append(formation.id)
+			_box_live_counts.append(int(group[2]))
 	_box_tick = simulator.tick_index
 	_box_level = level
 	box_rebuilds += 1
-
 
 ## The boxes currently cached for the frame, and how many there are. Read by tests so the once-a-tick
 ## rule and the boxes' correctness can be pinned rather than assumed.
@@ -317,11 +351,10 @@ func _roster_unit(id: int) -> BattleUnit:
 ## fight as, then the cohort, then the legion. [code]PB_BLOCK_VIEW=1[/code] refuses to draw
 ## individuals at any zoom, which is how the large showcases are watched.
 func drawing_level() -> int:
-	var level := UnitScale.level_for_zoom(get_canvas_transform().get_scale().x)
+	var level := UnitScale.level_for_zoom(_group_zoom())
 	if block_view and UnitScale.is_single(level):
 		return UnitScale.Level.CENTURY
 	return level
-
 
 ## The ground, baked once into a texture with one pixel per terrain cell and drawn in a single call.
 ## The old per-cell rectangles were fine on a field of a few hundred cells and ruinous on one grown
@@ -529,3 +562,87 @@ func units_in_rect(rect: Rect2) -> Array[int]:
 		if unit.is_alive() and rect.has_point(unit.position):
 			out.append(unit.id)
 	return out
+
+
+## ---------------------------------------------------------------------------
+## PB-DIRECTIVE-001: strategic-zoom LOD (added by Hermes from GPT-6's code drop;
+## appended rather than spliced so the existing file order is untouched).
+## ---------------------------------------------------------------------------
+
+func configure_group_view(config: GameConfig) -> void:
+	group_min_width_px = maxf(1.0, config.get_float("battle.group_min_width_px", 24.0))
+	group_min_height_px = maxf(1.0, config.get_float("battle.group_min_height_px", 14.0))
+	group_label_min_width_px = maxf(1.0, config.get_float("battle.group_label_min_width_px", 36.0))
+	invalidate_boxes()
+
+func invalidate_boxes() -> void:
+	_box_tick = -1
+	_box_level = -1
+	queue_redraw()
+
+func _group_zoom() -> float:
+	if lod_zoom > 0.0:
+		return lod_zoom
+	return maxf(0.001, get_canvas_transform().get_scale().x)
+
+func _group_pixel_world(px: float) -> float:
+	return px / maxf(0.001, _group_zoom())
+
+func _display_box(box: Rect2) -> Rect2:
+	# Cache retains true soldier bounds; this is only screen-space minimum legibility.
+	var wanted := Vector2(
+		maxf(box.size.x, _group_pixel_world(group_min_width_px)),
+		maxf(box.size.y, _group_pixel_world(group_min_height_px)))
+	return Rect2(box.get_center() - wanted * 0.5, wanted)
+
+
+## ---------------------------------------------------------------------------
+## PB-DIRECTIVE-001: strategic-zoom LOD (added by Hermes from GPT-6's code drop;
+## appended rather than spliced so the existing file order is untouched).
+## ---------------------------------------------------------------------------
+
+func _living_player_members_of(formation: BattleFormation) -> Array[int]:
+	var found: Array[int] = []
+	if formation == null or formation.side != BattleContext.SIDE_PLAYER:
+		return found
+	for unit_id in formation.unit_ids:
+		var unit := _roster_unit(unit_id)
+		if unit != null and unit.is_alive() and unit.side == BattleContext.SIDE_PLAYER:
+			found.append(unit_id)
+	return found
+
+func group_player_ids_at(world_point: Vector2) -> Array[int]:
+	var empty: Array[int] = []
+	if simulator == null:
+		return empty
+	var level := drawing_level()
+	if UnitScale.is_single(level):
+		return empty
+	ensure_boxes(level, UnitScale.size_of(level))
+	# Last drawn on top receives the click. An enemy box cannot select player units
+	# obscured beneath it.
+	for i in range(_boxes.size() - 1, -1, -1):
+		if _display_box(_boxes[i]).has_point(world_point):
+			var formation: BattleFormation = simulator.formation(_box_formation_ids[i])
+			return _living_player_members_of(formation)
+	return empty
+
+func group_player_ids_in_rect(world_rect: Rect2) -> Array[int]:
+	var found: Array[int] = []
+	if simulator == null:
+		return found
+	var level := drawing_level()
+	if UnitScale.is_single(level):
+		return found
+	ensure_boxes(level, UnitScale.size_of(level))
+	var seen: Dictionary = {}
+	for i in _boxes.size():
+		if not _display_box(_boxes[i]).intersects(world_rect, true):
+			continue
+		var formation_id: String = _box_formation_ids[i]
+		if seen.has(formation_id):
+			continue
+		seen[formation_id] = true
+		var formation: BattleFormation = simulator.formation(formation_id)
+		found.append_array(_living_player_members_of(formation))
+	return found

@@ -1,8 +1,8 @@
 # GPU baseline benchmark — 2026-09-17
 
 The roadmap's Phase 2: what the GPU version does *now*, before any optimisation, measured on the
-owner's machine. Every number below is from `F:/VSC Projects/pb-bench/gpu_ladder.log` and
-`gpu_ladder_gpu.csv`, produced by `pb-bench/gpu_ladder.sh`.
+owner's machine. Every number below is from `F:/VSC Projects/Project Banner/_work/pb-bench/gpu_ladder.log` and
+`gpu_ladder_gpu.csv`, produced by `_work/pb-bench/gpu_ladder.sh`.
 
 **Machine** (the same block `DeviceReport` prints at startup):
 
@@ -132,7 +132,7 @@ and the 6,000-soldier run still acquires and retains targets while fighting: 2,0
 0.24 looks per soldier-tick — one look every four ticks, which is the cadence. The GPU has the
 parallelism for the search; the wall is still the CPU repack.
 
-Logs: `F:/VSC Projects/pb-bench/tgt_acq/perf_*_*.log`.
+Logs: `F:/VSC Projects/Project Banner/_work/pb-bench/tgt_acq/perf_*_*.log`.
 
 ## Suggested next levers, in order
 

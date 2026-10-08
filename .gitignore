@@ -31,6 +31,15 @@ desktop.ini
 /tmp/
 /tools/local/
 
+# Work area (2026-10-07) ----------------------------------------------------
+# Every Project Banner satellite folder was condensed into this one directory:
+#   _work/pb-bench        benchmarks, art pipelines, screenshots, audit briefs
+#   _work/pb-state        git worktree (branch simd-state-first)
+#   _work/pb-reports      run logs
+#   _work/pb-native-deps  godot-cpp extension API dump
+# It is a godot-ignored (.gdignore) scratch tree: never scanned as resources, never committed.
+/_work/
+
 # Native accelerator (Step 7.7) ---------------------------------------------
 # godot-cpp is fetched and pinned by native/build.sh into this path; it is a dependency
 # checkout, not project source, and never committed.

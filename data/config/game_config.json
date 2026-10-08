@@ -63,6 +63,9 @@
     "review_hours": 6.0
   },
   "battle": {
+    "group_min_width_px": 24.0,
+    "group_min_height_px": 14.0,
+    "group_label_min_width_px": 36.0,
     "_comment": "Battle simulation settings. tick_rate is the fixed simulation step the runtime advances the fight at: frames are accumulated and whole ticks are run, so one tick is always 1/tick_rate seconds and the same seed fights the same battle whatever the machine renders at. The owner set sixty on 2026-09-18 and asked to try thirty later the same night, watching what the fight and the map read like at half the rate; every tick-counted rule below halved with it, so the same rule still means the same number of seconds. A tick is a design decision, not a rendering one.",
     "tick_rate": 30.0,
     "max_duration_seconds": 600.0,

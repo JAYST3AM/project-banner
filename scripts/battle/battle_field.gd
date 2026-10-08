@@ -223,6 +223,10 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 	# already came from - this is the same fact told to the picture.
 	_man_ranged.resize(agents)
 	_man_ranged.fill(0)
+	# Who he is drawn as: each unit's own roster id, told to the picture the same way the ranged
+	# flag is. An id the atlas does not carry resolves to the first character, not to nothing.
+	_man_type.resize(agents)
+	_man_type.fill(0)
 	_body_shape_kind.resize(_bodies)
 
 	for b in groups.size():
@@ -287,6 +291,7 @@ func _deploy(state: PackedFloat32Array, meta: PackedFloat32Array, attrs: PackedF
 			_man_file[i] = member_index % files
 			_man_rank[i] = member_index / files
 			_man_ranged[i] = 1 if unit.ranged else 0
+			_man_type[i] = UnitArt.index_for_unit(unit.unit_type_id)
 
 
 ## The catalog's numbers for one of its shapes, as the deployment needs them: files_cap is the

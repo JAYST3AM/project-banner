@@ -178,6 +178,14 @@ void main() {
 	bool targeting = params.f[17] > 0.5;
 	float search_radius = params.f[18];
 	bool immediate_loss = params.f[19] > 0.5;
+	// [24] 1 = a man's own weapon decides when he counts as "in reach" of the opponent he is
+	// holding, 0 = the scene's single engagement reach for every weapon (the behaviour before
+	// this switch). The engagement reach was written when every strike in the scene used one
+	// global 3.4 reach; with the per-weapon model on the two disagree for every melee weapon on
+	// the roster, and a man who freezes 3.4 from an opponent his own 2.2 spear cannot touch
+	// neither walks the last unit nor swings. Measured: 5 brigands against 10 peasants, 15 of 15
+	// holding out of reach, 0 blows landed, 0 missed, for as long as the window was open.
+	bool own_reach_gate = params.f[24] > 0.5;
 
 	if (pc.mode == 0u) {
 		uint step = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
@@ -241,6 +249,11 @@ void main() {
 
 	if (pc.mode == 2u) {
 		float side = meta.m[gid].y;
+		// His own weapon, and the reach the engagement rules read: the same number while the
+		// strike model is on and the gate is in force, and the scene's global reach either side
+		// of that. Declared here because the held-opponent test below needs it too.
+		float my_reach = real_strikes ? stats.s[gid].z : reach;
+		float gate_reach = (real_strikes && own_reach_gate) ? my_reach : reach;
 		// What this man can see: the tactical search radius, and never less than what his own
 		// weapon reaches - an archer who can shoot eighteen units must be able to look eighteen, or
 		// the bow line stands behind its spears with nothing to shoot at (it did: thirty men alive
@@ -276,7 +289,7 @@ void main() {
 					// reach the loss was taken mid-swing, and the next look is brought
 					// forward off the cadence; otherwise it waits its turn. See D-083.
 					atomicAdd(counters.c[18], 1u);
-					if (immediate_loss && held_d2 <= reach * reach) {
+					if (immediate_loss && held_d2 <= gate_reach * gate_reach) {
 						due = true;
 						atomicAdd(counters.c[19], 1u);
 					}
@@ -296,8 +309,12 @@ void main() {
 		}
 		int prior_valid = has_held ? held_id : NO_TARGET;
 		// Whether this soldier is going to look this tick at all: in reach it holds and never
-		// searches, otherwise it looks when a loss or its own cadence has made it due.
-		bool in_reach = has_held && held_d2 <= reach * reach;
+		// searches, otherwise it looks when a loss or its own cadence has made it due. The reach
+		// here is the gate's - his weapon's, while the strike model is on - because it is also
+		// what tells mode 3 that he is fighting and may stand still: measured against the scene's
+		// 3.4 with a 2.2 spear in his hands, a man holds an opponent he can never touch, never
+		// looks again and never closes, and the whole battle stands still.
+		bool in_reach = has_held && held_d2 <= gate_reach * gate_reach;
 		bool want_search = targeting && !in_reach && (due || tick_now >= next_tick);
 		// The nearest enemy the local window offers, and its squared distance. Only the
 		// acquisition path reads these; the legacy path never fills them.
@@ -491,8 +508,8 @@ void main() {
 			atomicAdd(counters.c[21], 1u);
 		}
 		// His own weapon decides what he can reach, not the scene's global one: an archer stands
-		// behind the line and strikes past it, a spearman reaches further than a knife.
-		float my_reach = real_strikes ? stats.s[gid].z : reach;
+		// behind the line and strikes past it, a spearman reaches further than a knife. (The
+		// reach itself is declared at the head of this pass, where the gate above reads it.)
 		if (chosen >= 0 && chosen_d2 <= my_reach * my_reach) {
 			// Strike the acquired opponent - and only it. This is the behaviour change the
 			// slice exists for: the legacy path struck every neighbour inside reach.

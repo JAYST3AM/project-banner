@@ -85,7 +85,7 @@ destroyed at tick 300 so the comparison covers target reassignment and the turn 
 just the approach. Men's positions, their condition, the formations and the standing counts are
 identical at every compared tick — the battle does not care how fast it is drawn.
 
-Repeatable: `pb-bench/determinism_check.sh` runs the variants and `pb-bench/trace_diff.py` reports
+Repeatable: `_work/pb-bench/determinism_check.sh` runs the variants and `_work/pb-bench/trace_diff.py` reports
 the first divergent tick and field, exiting non-zero if one appears. It needs a real GPU (this scene
 simulates on the rendering device, so it cannot run headless) — which is why it is a local check
 rather than part of the headless CI suite. That limitation is stated rather than hidden.
@@ -265,7 +265,7 @@ bug this slice exposed: the awareness schedule reads the tick, and advancing it 
 several ticks in one frame share a tick number, so the battle depended on the frame rate. The
 determinism gate caught it at tick 300 (the scripted wipe) before any number was quoted.
 
-### Rule checks — `--rule-checks --agents=1200` (log: `pb-bench/tgt_acq/rule_checks.log`)
+### Rule checks — `--rule-checks --agents=1200` (log: `_work/pb-bench/tgt_acq/rule_checks.log`)
 
 | Rule | Result |
 | --- | --- |
@@ -283,7 +283,7 @@ split (15 of 27 bereaved found a new opponent within a cadence; the rest had non
 
 ### Paired performance (one build, switch on vs off)
 
-`--ticks-per-frame=1 --max-fps=0 --seconds=20`, same seed; logs `pb-bench/tgt_acq/perf_*_*.log`.
+`--ticks-per-frame=1 --max-fps=0 --seconds=20`, same seed; logs `_work/pb-bench/tgt_acq/perf_*_*.log`.
 
 | Soldiers | Path | tick | readback | repack | ticks/s |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -296,15 +296,15 @@ Acquisition is free at this instrument's resolution: the tick moves at most a hu
 millisecond and the rest is within run-to-run noise. The 6,000 run still did the work it claims —
 2,010 acquisitions, 545,159 retained soldier-ticks, 101,376 scheduled re-searches, 189 switches, for
 about 0.24 looks per soldier-tick (one look every four ticks). A screenshot of the contact line is
-at `pb-bench/tgt_acq/battle_1200_1.png`; the engagement report printed beside it reads
+at `_work/pb-bench/tgt_acq/battle_1200_1.png`; the engagement report printed beside it reads
 `P0 -> E0 24 | P1 -> E0 2 E1 22 | P2 -> E1 1 E2 24` and the mirror on the enemy side.
 
 ### Determinism gate — PASS
 
-`pb-bench/determinism_check.sh` at 1,000 soldiers and again at 600 (contact with targets acquired,
+`_work/pb-bench/determinism_check.sh` at 1,000 soldiers and again at 600 (contact with targets acquired,
 so the comparison covers acquisition and a wipe after contact), frame rates 20 / 30 / 60 / 120 /
 uncapped, same seed and scripted event: **identical on every traced tick to tick 600** in both runs.
-Logs `pb-bench/tgt_acq/determinism_check*.log`. This is a local GPU check, not a headless one.
+Logs `_work/pb-bench/tgt_acq/determinism_check*.log`. This is a local GPU check, not a headless one.
 
 ### Tests
 
