@@ -66,6 +66,16 @@ func set_battle_state(formations: Array[Dictionary], selected: Array[int],
 	queue_redraw()
 
 
+## Lightweight per-frame camera motion. Formation snapshots and territory
+## colours are updated only on simulation ticks or actual UI changes.
+func set_camera(camera_centre: Vector2, camera_span: Vector2) -> void:
+	if _camera_centre.is_equal_approx(camera_centre) 			and _camera_span.is_equal_approx(camera_span):
+		return
+	_camera_centre = camera_centre
+	_camera_span = camera_span
+	queue_redraw()
+
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	custom_minimum_size = Vector2(225.0, 157.0)
