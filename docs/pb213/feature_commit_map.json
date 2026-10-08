@@ -1,0 +1,698 @@
+[
+ {
+  "short": "ebc2f23",
+  "full": "ebc2f23c3cb3e4ee931fb1bb79f9d7e650af2910",
+  "subject": "Register battle formation cohesion speed regression suite",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "78b680a",
+  "full": "78b680aabf3643c879efaeaa29b220bbb388c7da",
+  "subject": "Test measured-cohesion formation marching slowdown and bounded speed",
+  "files": [
+   "tests/test_battle_formation_cohesion.gd"
+  ]
+ },
+ {
+  "short": "06d70ae",
+  "full": "06d70ae768f6e69812d9546995fceeab1aa744ff",
+  "subject": "Slow formation anchors when measured soldier cohesion falls behind ordered movement",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "7e45c2a",
+  "full": "7e45c2a07d226e8785c6dd2b5d1fb5a3b5e17d7f",
+  "subject": "Introduce low-overhead formation cohesion based on measured soldier slot error",
+  "files": [
+   "scripts/battle/battle_formation_cohesion.gd"
+  ]
+ },
+ {
+  "short": "98948bd",
+  "full": "98948bd4d1c0cde5fd21519ead333114aba3883c",
+  "subject": "Regression-test diagonal-corner footprint clearance for rotated formations",
+  "files": [
+   "tests/test_battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "41c308a",
+  "full": "41c308ab4580a30d5af76502e6bc728e4c43d9c3",
+  "subject": "Fix rotated formation clearance to include diagonal corners, not just half-extents",
+  "files": [
+   "scripts/battle/battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "310c43b",
+  "full": "310c43b135060410739faa37e7c1035d99572420",
+  "subject": "Test GPU terrain anti-tunneling, blocked diagonal corners and displacement bounds",
+  "files": [
+   "tests/test_battle_terrain_gpu_mask.gd"
+  ]
+ },
+ {
+  "short": "bb1f8f6",
+  "full": "bb1f8f6404341fa5ccdbc106daab0e6539b23b33",
+  "subject": "Prevent GPU agent tunneling and corner clipping in both walk and separation passes",
+  "files": [
+   "shaders/dev/crowd_sim.glsl"
+  ]
+ },
+ {
+  "short": "ac65073",
+  "full": "ac65073da9b65f53c5c30589e9ee922d2095c85c",
+  "subject": "Reject terrain tunneling via bounded substeps and diagonal corner-safe sliding",
+  "files": [
+   "scripts/battle/battle_terrain_gpu_mask.gd"
+  ]
+ },
+ {
+  "short": "85312bd",
+  "full": "85312bd52f8609e8a40e803c917a6a188f427757",
+  "subject": "Define concrete GPU obstacle collision and campaign determinism acceptance gates",
+  "files": [
+   "docs/BATTLE_VISUAL_TARGET.md"
+  ]
+ },
+ {
+  "short": "313358c",
+  "full": "313358c568ee79b23107c53291a6a3e71b618975",
+  "subject": "Register GPU terrain collision mask regression tests",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "0235342",
+  "full": "0235342f868778f6a529fb0cf2ec0543faa2c57c",
+  "subject": "Verify deterministic GPU terrain mask packing and blocked-cell sliding reference",
+  "files": [
+   "tests/test_battle_terrain_gpu_mask.gd"
+  ]
+ },
+ {
+  "short": "ba7dfda",
+  "full": "ba7dfda13a52dfbc87f15d3402e692fbdb694945",
+  "subject": "Enable terrain-aware GPU soldier collision only in real campaign battles",
+  "files": [
+   "scripts/battle/battle_field.gd"
+  ]
+ },
+ {
+  "short": "b7f6c03",
+  "full": "b7f6c036f5ee6bf312d05ff672b4c061d23274aa",
+  "subject": "Build shared battle terrain once and upload obstacle mask to GPU movement shader",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "572efe3",
+  "full": "572efe3278af567be0758562d37049a7729ffd16",
+  "subject": "Prevent GPU soldiers walking or settling into blocked terrain using deterministic axis sliding",
+  "files": [
+   "shaders/dev/crowd_sim.glsl"
+  ]
+ },
+ {
+  "short": "fe1d7d0",
+  "full": "fe1d7d09dda3493f6fc8000e7d505571584e6c8b",
+  "subject": "Encode authoritative traversability into deterministic GPU soldier collision mask",
+  "files": [
+   "scripts/battle/battle_terrain_gpu_mask.gd"
+  ]
+ },
+ {
+  "short": "0e8763f",
+  "full": "0e8763f5319035eb876754d6b68344a1c2984616",
+  "subject": "Regression-test deployment water clearing before navigation and ground rendering",
+  "files": [
+   "tests/test_battle_deployment_overlay.gd"
+  ]
+ },
+ {
+  "short": "6e6a04d",
+  "full": "6e6a04dc7db8e5da6d6f09f0a2630603eaf41bc6",
+  "subject": "Make deployment terrain traversable before baking battle art and obstacle-aware routes",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "559cf97",
+  "full": "559cf970cede548adcd53d64cf4c8455c129f1fd",
+  "subject": "Test wide vs narrow formations at gates and cached clearance routes near borders",
+  "files": [
+   "tests/test_battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "38469ab",
+  "full": "38469ab8ed161cde496584e90232e9e563303c31",
+  "subject": "Use proposed formation width/depth for full-footprint obstacle-aware movement orders",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "7d89da9",
+  "full": "7d89da9b1b06e02a7a8a9a86da6d328941787054",
+  "subject": "Expose shared conservative formation radius for gameplay orders and clearance tests",
+  "files": [
+   "scripts/battle/battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "01531dd",
+  "full": "01531ddd5a9e03c541481407087c12e7486d2c52",
+  "subject": "Make formation routing width-aware with cached integral-clearance A* grids",
+  "files": [
+   "scripts/battle/battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "a9af3d4",
+  "full": "a9af3d4112d414779e834980f06420c3b88f85ff",
+  "subject": "Clarify catalogue's plains-only art paths and document strict imported tile QA",
+  "files": [
+   "docs/HERMES_TERRAIN_INTEGRATION.md"
+  ]
+ },
+ {
+  "short": "e66691f",
+  "full": "e66691f74a29b22bdb6074e29803ea35563d252d",
+  "subject": "Register biome asset import quality gate in headless tests",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "35eda62",
+  "full": "35eda62b9635e99fcbd1f9cfd5e2441d45707a3a",
+  "subject": "Test tile size, wrap seams, ground opacity and catalogue-owned art paths",
+  "files": [
+   "tests/test_battle_terrain_art_audit.gd"
+  ]
+ },
+ {
+  "short": "92c91c4",
+  "full": "92c91c4f3086a8a3b930ed09a339fda01accd03d",
+  "subject": "Validate authored biome tiles against exact 64px catalogue paths without touching assets",
+  "files": [
+   "scripts/battle/battle_terrain_art_audit.gd"
+  ]
+ },
+ {
+  "short": "1c07d6f",
+  "full": "1c07d6fd07bcbc304e022c6461435678641e38a1",
+  "subject": "Test actual formation march penalty and reachable side of obstructed destinations",
+  "files": [
+   "tests/test_battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "31d9e62",
+  "full": "31d9e62b53a46a638d9ec2590b59d006151945dd",
+  "subject": "Apply real biome/soil/slope movement speed to formation advance orders",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "98dc95a",
+  "full": "98dc95ab7cabf7234f0e0ea6595167124bef6e84",
+  "subject": "Use authoritative ground speed and find reachable alternatives for blocked formation destinations",
+  "files": [
+   "scripts/battle/battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "11c4b73",
+  "full": "11c4b73ac78496d461990e7ce9d004633d38fbc0",
+  "subject": "Document exact Hermes terrain art contract and battle renderer ownership/QA",
+  "files": [
+   "docs/HERMES_TERRAIN_INTEGRATION.md"
+  ]
+ },
+ {
+  "short": "e10d371",
+  "full": "e10d3712eef1e08ddd233f4d71655cd46a8ffad6",
+  "subject": "Test authored-ground material masks match battle terrain without generator changes",
+  "files": [
+   "tests/test_battle_ground_painter.gd"
+  ]
+ },
+ {
+  "short": "e482733",
+  "full": "e482733db45f75426a198f4701fe6999348cff00",
+  "subject": "Restore deterministic 64px biome ground shader matching terrain art and overlay masks",
+  "files": [
+   "shaders/battle/ground.gdshader"
+  ]
+ },
+ {
+  "short": "bdc6258",
+  "full": "bdc625810aa4339c9d5b8566079704230fffe8ed",
+  "subject": "Restore authored terrain type masks and optional overlay bindings without touching BattlefieldTerrain",
+  "files": [
+   "scripts/battle/terrain_ground.gd"
+  ]
+ },
+ {
+  "short": "dfc474c",
+  "full": "dfc474c3215774213b73f68a41fdfe8af9660d53",
+  "subject": "Regression test terrain renderer parses and falls back safely without shader or tiles",
+  "files": [
+   "tests/test_battle_ground_painter.gd"
+  ]
+ },
+ {
+  "short": "5331ccd",
+  "full": "5331ccdd1208ee2a9ae49bf2fa9e25035eea9e71",
+  "subject": "Use configured terrain resolution and fail safely when authored ground shader is missing",
+  "files": [
+   "scripts/battle/terrain_ground.gd"
+  ]
+ },
+ {
+  "short": "4ea81a5",
+  "full": "4ea81a5e92ae38992df722c8c293c5c746bff84a",
+  "subject": "Gate battle UI snapshots on simulation ticks and LOD, keep minimap camera fluid",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "ca88043",
+  "full": "ca880439a2adb4e5eb251a8319b090e77f853d53",
+  "subject": "Separate lightweight minimap camera updates from expensive battle state snapshots",
+  "files": [
+   "scripts/battle/battle_minimap.gd"
+  ]
+ },
+ {
+  "short": "2f4a3b7",
+  "full": "2f4a3b712bf7cf821775d9aefae75d08aa9f223f",
+  "subject": "Unblock authored battle ground renderer using existing configured pixels-per-unit",
+  "files": [
+   "scripts/battle/terrain_ground.gd"
+  ]
+ },
+ {
+  "short": "d931412",
+  "full": "d931412ed529339d74fd7290ae3a4a104c0fb1be",
+  "subject": "Add Shift-right-click multi-formation waypoints with route preservation and safe invalid-order rejection",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "e5dd50c",
+  "full": "e5dd50c0cfd4ed9dc6a89834af0e553b451e1d55",
+  "subject": "Sample complete formation paths and assert they cross only walkable cells",
+  "files": [
+   "tests/test_battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "a9a2bb9",
+  "full": "a9a2bb93ff0f1cfb0f4ebd1c48360730106b9a0d",
+  "subject": "Show selected formations' real terrain routes and simplify waypoint tolerance",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "31addc9",
+  "full": "31addc99c0b2be08303257d3bf40dc07ca9a84ca",
+  "subject": "Add formation pathfinding regression suite to headless tests",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "0a3469b",
+  "full": "0a3469b56b243c62971782ee73b6235e62e0f373",
+  "subject": "Regression-test terrain routefinding, wall gaps, blocked targets and deterministic paths",
+  "files": [
+   "tests/test_battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "49e57ce",
+  "full": "49e57ce2ec2df4f298108e26d402f416b5b57b4b",
+  "subject": "Route formation move orders around blocked terrain and scenery via cached A* waypoints",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "c80fb0c",
+  "full": "c80fb0ce0c98c49ae59172ae6debb0570731686d",
+  "subject": "Add terrain-weighted obstacle-aware formation-anchor path planner",
+  "files": [
+   "scripts/battle/battle_formation_navigator.gd"
+  ]
+ },
+ {
+  "short": "794681e",
+  "full": "794681eec0f9fe1419cd53a20afdfd901efafc53",
+  "subject": "Batch all battlefield scenery without dropping props on large maps",
+  "files": [
+   "scripts/battle/battle_scenery.gd"
+  ]
+ },
+ {
+  "short": "a0b7ca4",
+  "full": "a0b7ca4d6bcb546d7330619b447aabce826e85c8",
+  "subject": "Register deployment frontlines regression suite",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "008b468",
+  "full": "008b468b8fb8758ea7b2f53d88c4fa95c55e8eed",
+  "subject": "Test deployment geometry and scenery exclusion alignment",
+  "files": [
+   "tests/test_battle_deployment_overlay.gd"
+  ]
+ },
+ {
+  "short": "be46929",
+  "full": "be46929946bf4c8bb2c68a3ac1b99b605c096a4a",
+  "subject": "Visualize deployment frontlines and share zone geometry with scenery",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "4919a4a",
+  "full": "4919a4a5a7af73ca9c8d1b8c0d637f309121032c",
+  "subject": "Add pre-battle deployment territories and frontline markers",
+  "files": [
+   "scripts/battle/battle_deployment_overlay.gd"
+  ]
+ },
+ {
+  "short": "219e092",
+  "full": "219e0929b294313b603746f17e8579e0fdcf3808",
+  "subject": "Register battle scenery deterministic regression tests",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "a9c1e6c",
+  "full": "a9c1e6c949c6e857b81fe58ba9c83292f5f97e52",
+  "subject": "Verify all medieval scenery fallback sprites and deterministic pixel art",
+  "files": [
+   "tests/test_battle_scenery.gd"
+  ]
+ },
+ {
+  "short": "d3b36be",
+  "full": "d3b36be96f90cff7ee2f7398b34b92c8a47c3d98",
+  "subject": "Render clustered biome scenery in live battlefield with batched authored/fallback sprites",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "3777e82",
+  "full": "3777e8295f66062faeeab4a9437e0d6ad7e894da",
+  "subject": "Add batched terrain-catalogue scenery with original pixel-art fallback sprites",
+  "files": [
+   "scripts/battle/battle_scenery.gd"
+  ]
+ },
+ {
+  "short": "7149065",
+  "full": "71490657cea5c8f25d3cf127bfdf9bdfd75ba3f2",
+  "subject": "Assert unique sprite atlas index for every battle unit archetype",
+  "files": [
+   "tests/test_unit_sprites.gd"
+  ]
+ },
+ {
+  "short": "856e415",
+  "full": "856e4154fa8239b336e211767b06669cf1130cb5",
+  "subject": "Map each campaign combatant to its correct PixelLab atlas character",
+  "files": [
+   "scripts/battle/battle_field.gd"
+  ]
+ },
+ {
+  "short": "02c3027",
+  "full": "02c3027df767578de9edb79d615bc23a90f888ab",
+  "subject": "Fix GPU battle sprites to use individual unit archetypes instead of team side",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "0fe2ac2",
+  "full": "0fe2ac20c459bc18b8ddbce124f1927b6ea73f15",
+  "subject": "Include tactical formation-strength rendering rules in verification",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "da1dc95",
+  "full": "da1dc956e16b104d3fee6786ea976ac1a4d2d6b6",
+  "subject": "Test visual formation strength is derived from survivor counts",
+  "files": [
+   "tests/test_battle_tactical_overview.gd"
+  ]
+ },
+ {
+  "short": "7ebd9d4",
+  "full": "7ebd9d46a3707ebaf053e07d62e6e69795c940c4",
+  "subject": "Enable seamless soldier, medium-distance unit markers, full-map blocks LOD",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "7454541",
+  "full": "7454541c7895ba908ee4bc7df1a6cc7e836d05e0",
+  "subject": "Add medium-range unit standards and polished strength-aware tactical formation blocks",
+  "files": [
+   "scripts/battle/battle_tactical_overview.gd"
+  ]
+ },
+ {
+  "short": "e576ba6",
+  "full": "e576ba654d76b74c4a45a7275432688a5c717a2d",
+  "subject": "Register minimap interaction maths suite",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "c1e2dd2",
+  "full": "c1e2dd2f16cc22be85a66247c6ab7ea643ed724e",
+  "subject": "Test minimap world projection, clamping and asymmetric battlefields",
+  "files": [
+   "tests/test_battle_minimap.gd"
+  ]
+ },
+ {
+  "short": "6770c94",
+  "full": "6770c940f4f29e1ac4615400546282ad2b6efaeb",
+  "subject": "Wire live minimap into campaign battle camera and formation state",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "3724ff8",
+  "full": "3724ff88f8528b1311ea284450ba1abb53a13a86",
+  "subject": "Add interactive battlefield minimap showing terrain, army footprints and camera",
+  "files": [
+   "scripts/battle/battle_minimap.gd"
+  ]
+ },
+ {
+  "short": "a4f1065",
+  "full": "a4f10651f8e02ebc0df450aca11401988f72c3ee",
+  "subject": "Define Total War-calibre battle visual acceptance targets for realistic medieval pixel art",
+  "files": [
+   "docs/BATTLE_VISUAL_TARGET.md"
+  ]
+ },
+ {
+  "short": "fcfeaa1",
+  "full": "fcfeaa1cca7a58baa05145d9ea7e2494f57d85fd",
+  "subject": "Keep GPU diagnostic telemetry hidden in normal campaign battles",
+  "files": [
+   "scripts/battle/battle_field.gd"
+  ]
+ },
+ {
+  "short": "f0b0951",
+  "full": "f0b0951db91c0519df539e9c10816118cb0ca917",
+  "subject": "Replace developer battle overlay with actionable medieval command HUD",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "27492e4",
+  "full": "27492e46ad0f38ebba1c4d2d1b133b862e6f5b9d",
+  "subject": "Add medieval-styled battlefield command strip with live status and functional orders",
+  "files": [
+   "scripts/battle/battle_command_bar.gd"
+  ]
+ },
+ {
+  "short": "0832be0",
+  "full": "0832be09046d05fafc60b980e801f7b2a58f6413",
+  "subject": "Redesign battle roster as detailed medieval unit cards with real sprite portraits and strength bars",
+  "files": [
+   "scripts/battle/battle_unit_dock.gd"
+  ]
+ },
+ {
+  "short": "634247f",
+  "full": "634247f6a17e41b5b4f59b0cc88435b5a28c70a0",
+  "subject": "Forward encounter biome to live battlefield terrain renderer",
+  "files": [
+   "scripts/battle/battle_field.gd"
+  ]
+ },
+ {
+  "short": "2e07199",
+  "full": "2e0719942fada589ab43b96fe67128b035b5b009",
+  "subject": "Generate live battlefield from encounter biome instead of default map biome",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "afdff92",
+  "full": "afdff9256274396bd51cd2dd279b650fa694e335",
+  "subject": "Avoid fallback texture baking when authored biome ground is available",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "c49df8b",
+  "full": "c49df8bbd297ab983b3147f9fb236549483e2d41",
+  "subject": "Include battlefield ground validation in headless test runner",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "7098085",
+  "full": "70980857d28a8e7f8da347f693730153e8199d4e",
+  "subject": "Test deterministic terrain fallback and non-mutation",
+  "files": [
+   "tests/test_battle_ground_painter.gd"
+  ]
+ },
+ {
+  "short": "339454e",
+  "full": "339454e51214173b8b1a7b5dafeab2b6176a0da0",
+  "subject": "Keep canvas battle terrain fallback consistent with GPU battlefield",
+  "files": [
+   "scripts/battle/battle_view.gd"
+  ]
+ },
+ {
+  "short": "989b513",
+  "full": "989b51378f598c083e91d838c4591da9cddf1d9f",
+  "subject": "Use biome artwork when present and textured terrain fallback otherwise",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "132dfdc",
+  "full": "132dfdc6eeeef63692ba03802608fc4ca0cd84ad",
+  "subject": "Provide terrain-aware pixel-art ground fallback for battlefield",
+  "files": [
+   "scripts/battle/battle_ground_painter.gd"
+  ]
+ },
+ {
+  "short": "4b7c6e9",
+  "full": "4b7c6e90bf6e38bd184adb5ea6deee8873f20165",
+  "subject": "Register battle placement regression suite",
+  "files": [
+   "tests/test_runner.gd"
+  ]
+ },
+ {
+  "short": "89e2cef",
+  "full": "89e2cef3ab6acb9174c2c8e113397654afc3b498",
+  "subject": "Test multi-formation translation, frontage drag and bounds",
+  "files": [
+   "tests/test_battle_placement.gd"
+  ]
+ },
+ {
+  "short": "f1425c2",
+  "full": "f1425c2d37da101e9c146ecd0fcb796b6250e225",
+  "subject": "Add right-drag formation frontage, ghost preview and separate group movement destinations",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "72a0800",
+  "full": "72a0800bcfce2764f701ff0961fa283f951c515e",
+  "subject": "Introduce deterministic formation placement planner",
+  "files": [
+   "scripts/battle/battle_placement_planner.gd"
+  ]
+ },
+ {
+  "short": "7f5e82d",
+  "full": "7f5e82d79b4cb73557e79e6d2d0c802be322a7df",
+  "subject": "Attach unit archetype names to campaign formation bodies",
+  "files": [
+   "scripts/battle/battle_field.gd"
+  ]
+ },
+ {
+  "short": "f5ed98d",
+  "full": "f5ed98de073606a71117016d065c971e5c5ad85e",
+  "subject": "Display campaign unit types in formation cards and tactical map",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "b74a14b",
+  "full": "b74a14bfa9c0269a118095449989b8fb4cbed02c",
+  "subject": "Wire tactical overview, unit cards and accurate formation drag selection",
+  "files": [
+   "scripts/dev/gpu_crowd.gd"
+  ]
+ },
+ {
+  "short": "35071ff",
+  "full": "35071ff1fee8b3c1f362b6e271a34c42478b1f27",
+  "subject": "Add selectable battle formation cards",
+  "files": [
+   "scripts/battle/battle_unit_dock.gd"
+  ]
+ },
+ {
+  "short": "eb02c81",
+  "full": "eb02c811091ef02d0ae75cc0b638897b77998113",
+  "subject": "Add tactical overview formation block renderer",
+  "files": [
+   "scripts/battle/battle_tactical_overview.gd"
+  ]
+ }
+]
