@@ -343,28 +343,13 @@ func _draw_terrain() -> void:
 		draw_texture_rect(_ground, Rect2(Vector2.ZERO, terrain.size), false)
 
 
-## One pixel per cell, shaded by elevation the same way the per-cell rectangles were, and read back
-## with nearest filtering so the ground keeps its blocky grain instead of blurring into a gradient.
+## Match the live GPU field's terrain-aware fallback in the legacy canvas battle.
 func _bake_ground(terrain: BattlefieldTerrain) -> ImageTexture:
-	var cols := maxi(1, terrain.cols)
-	var rows := maxi(1, terrain.rows)
-	var image := Image.create(cols, rows, false, Image.FORMAT_RGBA8)
-	var tallest := maxf(0.001, terrain.max_height())
-	for y in rows:
-		for x in cols:
-			var index := y * cols + x
-			var colour := terrain.colour_of_cell(index)
-			# A little elevation shading so the shape of the ground reads at a glance
-			# without needing a legend.
-			var relief := terrain.height_of_cell(index) / tallest
-			if relief > 0.5:
-				colour = colour.lightened((relief - 0.5) * 0.55)
-			else:
-				colour = colour.darkened((0.5 - relief) * 0.45)
-			image.set_pixel(x, y, colour)
+	var image := BattleGroundPainter.bake(terrain)
+	if image == null:
+		return null
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	return ImageTexture.create_from_image(image)
-
 
 ## The development overlay: where each body means to be, which way it is turned, the
 ## places it has handed out, and how well it is holding them.
