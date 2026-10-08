@@ -2,6 +2,8 @@ extends Control
 ## Standalone visual acceptance harness for M02 Slice B1.
 ## Synthetic display data only: it does not launch a battle or issue simulation orders.
 const FIELD := Vector2(260.0, 130.0)
+const SCREENSHOT_PROBE := preload("res://scripts/dev/screenshot_probe.gd")
+const PREVIEW_MODE_PREFIX := "--preview-mode="
 
 var _world: Node2D
 var _command: BattleCommandBar
@@ -11,6 +13,7 @@ var _full_map := true
 
 
 func _ready() -> void:
+	_full_map = _requested_full_map()
 	_world = Node2D.new()
 	add_child(_world)
 	var ground := Polygon2D.new()
@@ -49,6 +52,35 @@ func _ready() -> void:
 	add_child(title)
 	resized.connect(_layout)
 	_layout()
+	_spawn_screenshot_probe()
+
+
+## Deterministic capture mode; no synthetic keyboard events required.
+## Example: -- --preview-mode=medium --screenshot=... --screenshot-quit
+func _requested_full_map() -> bool:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with(PREVIEW_MODE_PREFIX):
+			var mode := arg.trim_prefix(PREVIEW_MODE_PREFIX).to_lower()
+			if mode == "medium":
+				return false
+			if mode == "full":
+				return true
+			push_warning("Unknown --preview-mode=%s; using full map" % mode)
+	return true
+
+
+## The boot scene is bypassed for direct dev-scene launches. Install the existing
+## root-level probe here only when a screenshot was explicitly requested; this
+## leaves the game's production boot and autoload configuration untouched.
+func _spawn_screenshot_probe() -> void:
+	if DevFlags.screenshot_path().is_empty():
+		return
+	if get_tree().root.get_node_or_null("ScreenshotProbe") != null:
+		return
+	var probe := Node.new()
+	probe.name = "ScreenshotProbe"
+	probe.set_script(SCREENSHOT_PROBE)
+	get_tree().root.add_child.call_deferred(probe)
 
 
 func _layout() -> void:
