@@ -554,6 +554,7 @@ var buf_corr: RID
 var buf_attrs: RID
 var buf_bodies: RID
 var buf_stats: RID
+var buf_terrain: RID
 ## The remembered opponent and its next awareness tick, one ivec4 a soldier. See the shader.
 var buf_targets: RID
 var uniform_set: RID
@@ -747,7 +748,11 @@ var _overview_overlay: BattleTacticalOverview = null
 var _unit_dock: BattleUnitDock = null
 var _battle_minimap: BattleMinimap = null
 var _battle_terrain: BattlefieldTerrain = null
+var _battle_props: TerrainProps = null
 var _battle_scenery: BattleScenery = null
+## The dev probe preserves its historical combat baseline. The actual
+## campaign battle opts into terrain-solid GPU soldiers explicitly.
+var enable_gpu_terrain_collision := false
 var _formation_navigator: BattleFormationNavigator = null
 ## Routes are calculated only when an order arrives. Each formation advances a
 ## waypoint cursor; there is no A* running per frame/per soldier.
@@ -1044,6 +1049,7 @@ func _build() -> void:
 	defence_mitigation = battle_config.get_float("battle.defence_mitigation", 0.05)
 	_load_unit_stats()
 	_deploy(state, meta, attrs)
+	_prepare_battle_terrain()
 	# What each body's men can strike at, needed by the march whether or not a journal is open: a
 	# body of archers holds at its own range (see [method _engage_room]).
 	_refresh_body_reach()
@@ -1074,6 +1080,9 @@ func _build() -> void:
 	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
 	buf_bodies = _storage(_body_state.to_byte_array(), _bodies * 8 * 4)
+	var terrain_bytes := BattleTerrainGpuMask.from_terrain(
+		_battle_terrain if enable_gpu_terrain_collision else null).to_byte_array()
+	buf_terrain = _storage(terrain_bytes, terrain_bytes.size())
 	# Every soldier starts with nobody remembered and a look phase taken from its own index, so
 	# the first look is staggered across the cadence rather than massed on tick one. This is the
 	# schedule D-080 requires to be a property of the soldier, not of the moment.
@@ -1102,6 +1111,7 @@ func _build() -> void:
 	uniforms.append(_uniform(11, buf_targets))
 	uniforms.append(_uniform(12, buf_stats))
 	uniforms.append(_uniform(13, buf_tallies))
+	uniforms.append(_uniform(14, buf_terrain))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
 
 	_build_ground()
@@ -3276,29 +3286,39 @@ func _log_view_geometry() -> void:
 		str(flat_view), rad_to_deg(yaw), squash, _iso(field * 0.5).x, _iso(field * 0.5).y])
 
 
-func _build_ground() -> void:
-	# The production shader renderer is used when a biome has authored tiles.
-	# Otherwise our terrain-aware fallback paints a pixel-art field, never
-	# the old single flat colour per simulation cell.
+## One authoritative terrain is used by ground art, the CPU pathfinder,
+## props and the GPU soldier-occupancy buffer. Build once, after the army
+## composition is known and before creating any RenderingDevice buffers.
+func _prepare_battle_terrain() -> void:
 	var config := GameManager.config()
-	var ground := BattlefieldTerrain.generate(seed_value, field, config,
-		null, null, battlefield_biome_id)
-	# Mark deployment-safe ground BEFORE baking art, props or navigation.
-	# This uses BattlefieldTerrain's existing rule, not a new generator path.
-	var deploy_depth := config.get_float("battle.deploy_depth", 20.0)
-	var deploy_margin := config.get_float("battle.deploy_margin", 8.0)
-	var deployment_zones := BattleDeploymentOverlay.zones(
-		field, deploy_depth, deploy_margin)
-	ground.clear_for_deployment(deployment_zones)
-	_battle_terrain = ground
+	var biomes := BiomeCatalog.load_from()
+	var generated := BattlefieldTerrain.generate(seed_value, field, config,
+		null, biomes, battlefield_biome_id)
+	var depth := config.get_float("battle.deploy_depth", 20.0)
+	var margin := config.get_float("battle.deploy_margin", 8.0)
+	var zones := BattleDeploymentOverlay.zones(field, depth, margin)
+	generated.clear_for_deployment(zones)
+	_battle_props = generated.build_props(config, biomes, zones)
+	_battle_terrain = generated
+	_formation_navigator = BattleFormationNavigator.new()
+	_formation_navigator.setup(generated)
+
+
+func _build_ground() -> void:
+	# The same real terrain used for soldier/formation collision, not a
+	# second regenerated map that could disagree about a blocked cell.
+	var config := GameManager.config()
+	var biomes := BiomeCatalog.load_from()
+	var ground := _battle_terrain
+	if ground == null or not ground.is_valid():
+		push_error("gpu crowd: battle terrain must be prepared before ground")
+		return
 	_view_root = Node2D.new()
 	add_child(_view_root)
-	var biomes := BiomeCatalog.load_from()
 	var ground_art := TerrainGround.new()
 	ground_art.z_index = -20
 	_view_root.add_child(ground_art)
 	if not ground_art.show_field(ground, biomes, config):
-		# Never spend time baking fallback pixels when the biome has authored art.
 		var fallback_image := BattleGroundPainter.bake(ground)
 		if fallback_image != null:
 			var sprite := Sprite2D.new()
@@ -3309,27 +3329,17 @@ func _build_ground() -> void:
 			sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 			sprite.z_index = -20
 			_view_root.add_child(sprite)
-
-	# Existing biome prop definitions supply clustered trees, bushes, rock, ruin,
-	# fence and field clutter. Build the *visual* positions separately for now.
-	# Do not apply their obstacle/collision state to a shader which cannot yet
-	# path around it; that GPU movement integration is a later combat milestone.
-	# Use the terrain's own API so the *same* visible blocking props also
-	# appear as obstacles to formation-anchor routes. GPU soldier collision
-	# against prop geometry remains a separate future integration.
-	var visual_props := ground.build_props(config, biomes, deployment_zones)
-	_formation_navigator = BattleFormationNavigator.new()
-	_formation_navigator.setup(ground)
 	_battle_scenery = BattleScenery.new()
 	_battle_scenery.z_index = -7
 	_view_root.add_child(_battle_scenery)
-	_battle_scenery.build(visual_props)
+	_battle_scenery.build(_battle_props)
 	_deployment_overlay = BattleDeploymentOverlay.new()
 	_deployment_overlay.z_index = -8
-	_deployment_overlay.configure(field, deploy_depth, deploy_margin)
+	_deployment_overlay.configure(field,
+		config.get_float("battle.deploy_depth", 20.0),
+		config.get_float("battle.deploy_margin", 8.0))
 	_deployment_overlay.visible = _deploying
 	_view_root.add_child(_deployment_overlay)
-	# Selection and command marks share the same ground-space transform.
 	var paint := Node2D.new()
 	paint.set_script(load("res://scripts/dev/battle_paint.gd"))
 	paint.z_index = -10
