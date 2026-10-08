@@ -14,6 +14,7 @@ func run() -> void:
 	_test_narrow_gap_rejects_wide_formation()
 	_test_broad_gap_allows_formed_unit()
 	_test_clearance_restricts_field_edges()
+	_test_rotated_rectangle_corner_clearance()
 	_complete()
 
 
@@ -210,3 +211,22 @@ func _test_clearance_restricts_field_edges() -> void:
 			"formation centre stays far enough from the world edge")
 		check(nav.route_avoids_obstacles(route, radius),
 			"the rounded destination satisfies width clearance")
+
+
+func _test_rotated_rectangle_corner_clearance() -> void:
+	section("formation corners, not just its longest half-axis, must clear walls")
+	var half_width := (5.0 - 1.0) * 2.0 * 0.5 + 0.5
+	var half_depth := (5.0 - 1.0) * 2.0 * 0.5 + 0.5
+	var radius := BattleFormationNavigator.footprint_radius(5, 5, 2.0)
+	check(radius > half_width,
+		"square formation clearance includes corners beyond both axes")
+	check(is_equal_approx(radius, sqrt(
+		half_width * half_width + half_depth * half_depth)),
+		"corner distance is the true rotation-invariant enclosing radius")
+	var terrain := _fixture()
+	var actual_cells := BattleFormationNavigator.clearance_cells(
+		terrain, 5, 5, 2.0)
+	var axis_only := maxi(0, ceili((half_width - terrain.cell_size * 0.5) /
+		terrain.cell_size))
+	check(actual_cells > axis_only,
+		"rotated formation asks for more clearance than a straight half-width")
