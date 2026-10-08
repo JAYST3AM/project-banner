@@ -8,9 +8,12 @@ extends TestCase
 ## which frame of it, and where that frame lands. Those are static and pure here, so they are
 ## tested against hand-worked numbers rather than against the code that calls them.
 ##
-## The atlas table itself is checked only if the pack is on this machine. The art is git-ignored
-## third-party work (Zerie's Tiny RPG pack - see assets/art_source/units/tiny_rpg/README.md), so
-## a fresh clone passes without it and the field draws its discs, exactly as before.
+## This suite requires the imported unit atlas fixture. The source art is git-ignored
+## third-party work (Zerie's Tiny RPG pack - see assets/art_source/units/tiny_rpg/README.md);
+## a fresh clone must install/import that fixture before running this suite. If it is absent,
+## atlas-dependent tests fail explicitly rather than silently shedding their assertions.
+## Runtime fallback rendering without the atlas is a separate behaviour, not a reason to
+## report this atlas-specific test suite as passing.
 
 const SEED := 51501
 const PER_SIDE := 4
@@ -29,10 +32,10 @@ func run() -> void:
 	_test_the_instance_write_follows_the_layout()
 	_test_the_writer_matches_the_pure_functions()
 	_test_the_atlas_table_holds_together_when_the_art_is_present()
-	# A runtime error inside a test function aborts that function without recording a failure -
-	# GDScript has no try/catch - so a suite whose static calls all failed would still reach
-	# _complete with a handful of assertions and report PASS. The floor is the guard: the full
-	# suite makes well over thirty assertions even with the art absent.
+	# A runtime error inside a test function can abort it without recording a failure.
+	# This low assertion floor is only a supplemental abort check, NOT a fixture-presence
+	# check. Atlas-dependent paths explicitly fail when the imported fixture is absent,
+	# and the external verifier must enforce the full baseline assertion count.
 	greater(float(checks), 25.0, "the suite ran its assertions rather than aborting before them")
 	_complete()
 
