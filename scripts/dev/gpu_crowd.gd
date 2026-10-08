@@ -3283,6 +3283,13 @@ func _build_ground() -> void:
 	var config := GameManager.config()
 	var ground := BattlefieldTerrain.generate(seed_value, field, config,
 		null, null, battlefield_biome_id)
+	# Mark deployment-safe ground BEFORE baking art, props or navigation.
+	# This uses BattlefieldTerrain's existing rule, not a new generator path.
+	var deploy_depth := config.get_float("battle.deploy_depth", 20.0)
+	var deploy_margin := config.get_float("battle.deploy_margin", 8.0)
+	var deployment_zones := BattleDeploymentOverlay.zones(
+		field, deploy_depth, deploy_margin)
+	ground.clear_for_deployment(deployment_zones)
 	_battle_terrain = ground
 	_view_root = Node2D.new()
 	add_child(_view_root)
@@ -3307,14 +3314,10 @@ func _build_ground() -> void:
 	# fence and field clutter. Build the *visual* positions separately for now.
 	# Do not apply their obstacle/collision state to a shader which cannot yet
 	# path around it; that GPU movement integration is a later combat milestone.
-	var deploy_depth := config.get_float("battle.deploy_depth", 20.0)
-	var deploy_margin := config.get_float("battle.deploy_margin", 8.0)
-	var no_props_at_deployment := BattleDeploymentOverlay.zones(
-		field, deploy_depth, deploy_margin)
 	# Use the terrain's own API so the *same* visible blocking props also
 	# appear as obstacles to formation-anchor routes. GPU soldier collision
 	# against prop geometry remains a separate future integration.
-	var visual_props := ground.build_props(config, biomes, no_props_at_deployment)
+	var visual_props := ground.build_props(config, biomes, deployment_zones)
 	_formation_navigator = BattleFormationNavigator.new()
 	_formation_navigator.setup(ground)
 	_battle_scenery = BattleScenery.new()
