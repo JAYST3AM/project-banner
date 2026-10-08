@@ -8,9 +8,11 @@ extends TestCase
 ## which frame of it, and where that frame lands. Those are static and pure here, so they are
 ## tested against hand-worked numbers rather than against the code that calls them.
 ##
-## The atlas table itself is checked only if the pack is on this machine. The art is git-ignored
-## third-party work (Zerie's Tiny RPG pack - see assets/art_source/units/tiny_rpg/README.md), so
-## a fresh clone passes without it and the field draws its discs, exactly as before.
+## The atlas table is REQUIRED. This suite exists to test atlas behaviour, so a missing atlas fails it
+## with an explicit reason instead of letting it pass with fewer assertions (TI-1). The art is
+## git-ignored third-party work (Zerie's Tiny RPG pack - see assets/art_source/units/tiny_rpg/README.md),
+## so it has to be imported into the tree before this suite can pass: a fresh clone without it FAILS
+## here, deliberately.
 
 const SEED := 51501
 const PER_SIDE := 4
@@ -31,8 +33,9 @@ func run() -> void:
 	_test_the_atlas_table_holds_together_when_the_art_is_present()
 	# A runtime error inside a test function aborts that function without recording a failure -
 	# GDScript has no try/catch - so a suite whose static calls all failed would still reach
-	# _complete with a handful of assertions and report PASS. The floor is the guard: the full
-	# suite makes well over thirty assertions even with the art absent.
+	# _complete with a handful of assertions and report PASS. The floor is the guard against that.
+	# With the art absent the suite fails earlier, at the atlas check, on purpose: that is a failure
+	# with a reason, not a quiet pass with fewer assertions (TI-1).
 	greater(float(checks), 25.0, "the suite ran its assertions rather than aborting before them")
 	_complete()
 
