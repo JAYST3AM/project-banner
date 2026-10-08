@@ -9,6 +9,8 @@ func run() -> void:
 	_test_route_is_deterministic()
 	_test_blocked_destination_resolves_to_nearest_open()
 	_test_no_blocked_destination_is_not_a_straight_line()
+	_test_blocked_cell_prefers_reachable_side()
+	_test_ground_speed_from_authoritative_channel()
 	_complete()
 
 
@@ -104,3 +106,44 @@ func _test_no_blocked_destination_is_not_a_straight_line() -> void:
 	var result := navigator.route(_point(terrain, 1, 1),
 		_point(terrain, target.x, target.y))
 	check(result.is_empty(), "a blocked command is rejected, not routed through solid cells")
+
+
+func _test_blocked_cell_prefers_reachable_side() -> void:
+	section("blocked target resolves to the army's reachable side of a wall")
+	var terrain := _fixture()
+	if terrain.cols < 10 or terrain.rows < 8:
+		check(false, "wall fixture has adequate cells")
+		return
+	var wall := terrain.cols / 2
+	var middle := terrain.rows / 2
+	for row in terrain.rows:
+		terrain._traversable[row * terrain.cols + wall] = 0
+	var navigator := BattleFormationNavigator.new()
+	check(navigator.setup(terrain), "routing grid initialized")
+	var source := _point(terrain, wall + 3, middle)
+	var blocked_target := _point(terrain, wall, middle)
+	var plan := navigator.route(source, blocked_target)
+	check(not plan.is_empty(), "right-side army can route beside the solid target")
+	if not plan.is_empty():
+		var last := plan[plan.size() - 1]
+		check(terrain.cell_col_at(last) > wall,
+			"the resolved target remains on the source's accessible side")
+		check(navigator.route_avoids_obstacles(plan),
+			"no route corners go into blocked cells")
+
+
+func _test_ground_speed_from_authoritative_channel() -> void:
+	section("ground movement speed comes from terrain data rather than visuals")
+	var terrain := _fixture()
+	var slow := terrain.cell_of_col_row(3, 3)
+	var normal := terrain.cell_of_col_row(4, 3)
+	terrain._move[slow] = 0.30
+	terrain._move[normal] = 1.0
+	var slowdown := BattleFormationNavigator.speed_scale(
+		terrain, terrain.cell_centre(slow))
+	var full := BattleFormationNavigator.speed_scale(
+		terrain, terrain.cell_centre(normal))
+	check(is_equal_approx(slowdown, 0.30), "wet or rough ground slows a formation")
+	check(is_equal_approx(full, 1.0), "clear terrain has full march pace")
+	check(is_equal_approx(BattleFormationNavigator.speed_scale(null, Vector2.ZERO),
+		1.0), "legacy probe without battle terrain retains normal pace")
