@@ -8,6 +8,7 @@ func run() -> void:
 	_test_ground_has_visual_detail()
 	_test_ground_does_not_mutate_terrain()
 	_test_renderer_has_safe_fallback_without_art_or_shader()
+	_test_type_masks_use_authoritative_terrain_ids()
 	_complete()
 
 
@@ -71,3 +72,30 @@ func _test_renderer_has_safe_fallback_without_art_or_shader() -> void:
 	else:
 		check(displayed, "complete authored ground assets can render")
 	painter.free()
+
+
+func _test_type_masks_use_authoritative_terrain_ids() -> void:
+	section("authored terrain visual type map follows existing terrain types")
+	var terrain := _terrain()
+	var renderer := TerrainGround.new()
+	renderer.terrain = terrain
+	var image := renderer._build_type_map(1.0)
+	check(image != null, "type map can be baked without changing BattlefieldTerrain")
+	if image == null:
+		renderer.free()
+		return
+	equal(image.get_size(), terrain.build_ground_map(1.0).get_size(),
+		"type and variant maps sample the same world-space pixels")
+	for cell in [0, terrain.cell_count() / 3, terrain.cell_count() / 2,
+			terrain.cell_count() - 1]:
+		var world := terrain.cell_centre(cell)
+		var ix := clampi(int(world.x / terrain.size.x * image.get_width()),
+			0, image.get_width() - 1)
+		var iy := clampi(int(world.y / terrain.size.y * image.get_height()),
+			0, image.get_height() - 1)
+		var pixel := image.get_pixel(ix, iy)
+		var kind := terrain.type_id_of_cell(cell)
+		equal(pixel.r > 0.5, kind == "water", "water mask matches terrain cell")
+		equal(pixel.g > 0.5, kind == "cliff", "cliff mask matches terrain cell")
+		equal(pixel.b > 0.5, kind == "mud", "mud mask matches terrain cell")
+	renderer.free()
