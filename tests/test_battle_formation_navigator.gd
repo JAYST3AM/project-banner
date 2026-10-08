@@ -11,6 +11,9 @@ func run() -> void:
 	_test_no_blocked_destination_is_not_a_straight_line()
 	_test_blocked_cell_prefers_reachable_side()
 	_test_ground_speed_from_authoritative_channel()
+	_test_narrow_gap_rejects_wide_formation()
+	_test_broad_gap_allows_formed_unit()
+	_test_clearance_restricts_field_edges()
 	_complete()
 
 
@@ -147,3 +150,63 @@ func _test_ground_speed_from_authoritative_channel() -> void:
 	check(is_equal_approx(full, 1.0), "clear terrain has full march pace")
 	check(is_equal_approx(BattleFormationNavigator.speed_scale(null, Vector2.ZERO),
 		1.0), "legacy probe without battle terrain retains normal pace")
+
+
+func _test_narrow_gap_rejects_wide_formation() -> void:
+	section("a full line cannot squeeze its ranks through a one-cell gate")
+	var terrain := _fixture()
+	var wall := terrain.cols / 2
+	var gate := terrain.rows / 2
+	for row in terrain.rows:
+		if row != gate:
+			terrain._traversable[row * terrain.cols + wall] = 0
+	var nav := BattleFormationNavigator.new()
+	check(nav.setup(terrain), "wall clearance grid constructed")
+	var start := _point(terrain, 3, gate)
+	var end := _point(terrain, terrain.cols - 4, gate)
+	var single := nav.route(start, end)
+	check(not single.is_empty(), "a single-file anchor can pass a one-cell opening")
+	var large_radius := BattleFormationNavigator.footprint_radius(7, 2, 2.0)
+	var wide := nav.route(start, end, large_radius)
+	check(wide.is_empty(), "a wide formation is correctly denied the same narrow gap")
+	# Planner must leave the simulation's terrain array unchanged.
+	equal(terrain._traversable[gate * terrain.cols + wall], 1,
+		"route planning never changes traversability or digs a new opening")
+
+
+func _test_broad_gap_allows_formed_unit() -> void:
+	section("units march through gaps that fit their actual frontage")
+	var terrain := _fixture()
+	var wall := terrain.cols / 2
+	var middle := terrain.rows / 2
+	for row in terrain.rows:
+		if absi(row - middle) > 2:
+			terrain._traversable[row * terrain.cols + wall] = 0
+	var nav := BattleFormationNavigator.new()
+	nav.setup(terrain)
+	var radius := BattleFormationNavigator.footprint_radius(4, 2, 2.0)
+	var route := nav.route(_point(terrain, 3, middle),
+		_point(terrain, terrain.cols - 4, middle), radius)
+	check(not route.is_empty(), "four-file formation finds the wide opening")
+	check(nav.route_avoids_obstacles(route, radius),
+		"every planned waypoint has the required formation clearance")
+	equal(route, nav.route(_point(terrain, 3, middle),
+		_point(terrain, terrain.cols - 4, middle), radius),
+		"cached clearance-grid routes are deterministic")
+
+
+func _test_clearance_restricts_field_edges() -> void:
+	section("wide formations are kept clear of the battlefield edge")
+	var terrain := _fixture()
+	var nav := BattleFormationNavigator.new()
+	nav.setup(terrain)
+	var radius := BattleFormationNavigator.footprint_radius(4, 2, 2.0)
+	var route := nav.route(_point(terrain, 4, 4),
+		_point(terrain, terrain.cols - 1, 4), radius)
+	check(not route.is_empty(), "border click resolves to a nearby safe position")
+	if not route.is_empty():
+		var last := route[route.size() - 1]
+		check(terrain.cell_col_at(last) <= terrain.cols - 2,
+			"formation centre stays far enough from the world edge")
+		check(nav.route_avoids_obstacles(route, radius),
+			"the rounded destination satisfies width clearance")
