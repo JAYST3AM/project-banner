@@ -425,7 +425,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					_right_held = true
 					_right_moved = 0.0
 					_right_at = button.position
-					_rotating = true
+					_command_preview.clear()
+					# Right-drag places selected formations; camera movement remains on MMB/WASD.
+					_rotating = _living_selection().is_empty()
 					_last_mouse = button.position
 				MOUSE_BUTTON_MIDDLE:
 					# The other half of the convention: middle drags the ground itself.
@@ -446,8 +448,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				MOUSE_BUTTON_RIGHT:
 					_right_held = false
 					_rotating = false
-					if _right_moved < RIGHT_DRAG_SLOP:
+					if _right_moved >= RIGHT_DRAG_SLOP and not _living_selection().is_empty():
+						_apply_placement(_drag_plan(_right_at, button.position))
+					elif _right_moved < RIGHT_DRAG_SLOP:
 						_right_click(_uniso(button.position))
+					_command_preview.clear()
+					_update_marks()
 				MOUSE_BUTTON_MIDDLE:
 					_panning = false
 	elif event is InputEventMouseMotion and _drag_body >= 0:
@@ -457,6 +463,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		_place_body(_drag_body, _uniso((event as InputEventMouseMotion).position) - _drag_grab)
 	elif event is InputEventMouseMotion and _box_active:
 		_box_to = (event as InputEventMouseMotion).position
+	elif event is InputEventMouseMotion and _right_held and not _rotating:
+		var motion := event as InputEventMouseMotion
+		_right_moved += motion.relative.length()
+		if _right_moved >= RIGHT_DRAG_SLOP:
+			_command_preview = _drag_plan(_right_at, motion.position)
+			_update_marks()
 	elif event is InputEventMouseMotion and _rotating:
 		var motion := event as InputEventMouseMotion
 		_right_moved += motion.relative.length()
@@ -1542,6 +1554,8 @@ func _advance_bodies() -> void:
 		# is the one time a body keeps the facing it was given: a formation that turns itself while
 		# the player is still placing it is the formation making a decision for him.
 		var aim := _aim_for(b) if not _deploying else Vector2.ZERO
+		if _ordered_facing.has(b) and (_order[b] == Order.ADVANCE or _hold_ordered[b] == 1):
+			aim = Vector2.RIGHT.rotated(float(_ordered_facing[b]))
 		if aim != Vector2.ZERO:
 			var want := wrapf(aim.angle() - _heading[b], -PI, PI)
 			_heading[b] += clampf(want, -TURN_RATE * DT, TURN_RATE * DT)
@@ -3452,6 +3466,13 @@ var _box_from := Vector2.ZERO
 var _box_to := Vector2.ZERO
 var _drag_body := -1
 var _drag_grab := Vector2.ZERO
+## A right-drag previews destinations without applying commands until mouse release.
+var _command_preview: Array[Dictionary] = []
+## Explicit formation headings. A player-placed body keeps its ordered orientation
+## while moving and after arrival; an attack/engage order gives target-facing back.
+var _ordered_facing: Dictionary = {}
+## The width a unit last took when deployed by frontage drag, kept per body.
+var _preferred_line_files: Dictionary = {}
 ## The line's own width in files, as deployed. A formation ordered into a column and back into a
 ## line has to become the line it was, which means remembering the width it was given rather than
 ## deriving a new one from however many men are left standing.
@@ -3719,17 +3740,87 @@ func _group_recall(digit: int) -> void:
 
 
 ## The player's order to move: the same ADVANCE a scripted event gives, to a point on the ground.
-func _order_move(bodies: Array, point: Vector2) -> void:
-	var moved := 0
-	for b in bodies:
+func _command_bodies(ids: Array) -> Array[Dictionary]:
+	var bodies: Array[Dictionary] = []
+	for b in ids:
 		if not _is_mine(b) or _body_alive[b] <= 0:
 			continue
-		_order[b] = Order.ADVANCE
-		_order_point[b] = point
-		_hold_ordered[b] = 0
-		moved += 1
-	if moved > 0:
-		print("gpu crowd: %s ordered to (%.0f, %.0f)" % [_selection_names(), point.x, point.y])
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		bodies.append({
+			"id": b, "anchor": _anchor_of(b), "forward": _forward_of(b),
+			"files": maxi(1, int(_body_state[b * 8 + 4])),
+			"spacing": spacing, "members": maxi(_body_alive[b],
+				_body_started[b] if b < _body_started.size() else 1)
+		})
+	return bodies
+
+
+func _drag_plan(start_screen: Vector2, end_screen: Vector2) -> Array[Dictionary]:
+	return BattlePlacementPlanner.frontage(_command_bodies(_living_selection()),
+		_uniso(start_screen), _uniso(end_screen), field)
+
+
+## Right click is a group translation: every body retains its relative location.
+func _order_move(bodies: Array, point: Vector2) -> void:
+	var plan := BattlePlacementPlanner.translated(_command_bodies(bodies), point, field)
+	_apply_placement(plan)
+
+
+func _apply_placement(plan: Array[Dictionary]) -> void:
+	var changed := 0
+	for placement in plan:
+		var b := int(placement.get("id", -1))
+		if not _is_mine(b) or _body_alive[b] <= 0:
+			continue
+		var target: Vector2 = placement.get("anchor", _anchor_of(b))
+		var facing: Vector2 = placement.get("forward", _forward_of(b))
+		var files := maxi(1, int(placement.get("files", _body_state[b * 8 + 4])))
+		if files != int(_body_state[b * 8 + 4]):
+			_resize_body_frontage(b, files)
+			_preferred_line_files[b] = files
+		_ordered_facing[b] = facing.angle()
+		if _deploying:
+			_place_body(b, target)
+			_heading[b] = facing.angle()
+			_body_state[b * 8 + 2] = facing.x
+			_body_state[b * 8 + 3] = facing.y
+		else:
+			_order[b] = Order.ADVANCE
+			_order_point[b] = target
+			_hold_ordered[b] = 0
+		changed += 1
+	if changed > 0:
+		print("gpu crowd: %d formation(s) placed independently" % changed)
+
+
+## A frontage drag changes files/ranks without merging units or teleporting them.
+## The shader moves each soldier into the new slot using its normal walk logic.
+func _resize_body_frontage(b: int, requested_files: int) -> void:
+	var members := 0
+	for i in agents:
+		if _man_body[i] == b:
+			members += 1
+	if members == 0:
+		return
+	var files := clampi(requested_files, 1, members)
+	var ranks := ceili(float(members) / float(files))
+	if files == int(_body_state[b * 8 + 4]):
+		return
+	var bytes := rd.buffer_get_data(buf_attrs)
+	var at := 0
+	for i in agents:
+		if _man_body[i] != b:
+			continue
+		var lane := at % files
+		var rank := at / files
+		_man_file[i] = lane
+		_man_rank[i] = rank
+		bytes.encode_u32(i * 16 + 4, lane)
+		bytes.encode_u32(i * 16 + 8, rank)
+		at += 1
+	rd.buffer_update(buf_attrs, 0, bytes.size(), bytes)
+	_body_state[b * 8 + 4] = float(files)
+	_body_state[b * 8 + 5] = float(ranks)
 
 
 ## The player's order to attack, which outranks whatever the body would have chosen for itself -
@@ -3744,6 +3835,7 @@ func _order_attack(bodies: Array, target: int) -> void:
 		_order[b] = Order.ENGAGE
 		_order_target[b] = target
 		_hold_ordered[b] = 0
+		_ordered_facing.erase(b)
 		sent += 1
 	if sent > 0:
 		print("gpu crowd: %s ordered to attack %s" % [_selection_names(), _body_name(target)])
@@ -3758,6 +3850,7 @@ func _order_stance(bodies: Array, hold: bool) -> void:
 		_hold_ordered[b] = 1 if hold else 0
 		if not hold:
 			_order_target[b] = -1
+			_ordered_facing.erase(b)
 		set += 1
 	if set > 0:
 		print("gpu crowd: %s told to %s" % [_selection_names(), "hold" if hold else "engage at will"])
@@ -3795,7 +3888,9 @@ func _relay_body(b: int, shape: Dictionary) -> bool:
 			count += 1
 	if count <= 0:
 		return false
-	var wide := float(maxi(2, _line_files if _line_files > 0 else _body_state[b * 8 + 4]))
+	var restored := int(_preferred_line_files.get(b,
+		_line_files if _line_files > 0 else _body_state[b * 8 + 4]))
+	var wide := float(maxi(2, restored))
 	var cap := float(shape.get("files_cap", 999.0))
 	var wanted := wide * cap if cap < 1.0 else minf(wide, cap)
 	var files := int(clampf(round(wanted), 2.0, wide))
@@ -3858,6 +3953,32 @@ func _update_marks() -> void:
 					lines.append([from, _anchor_of(target), ENEMY_COLOUR, 1.1, 3.0])
 	if _box_active:
 		rects.append([Rect2(_uniso(_box_from), _uniso(_box_to) - _uniso(_box_from)).abs(), BOX_COLOUR, 0.9, 0.10])
+	# Ghost formation frames during right-drag, based on the eventual actual slots.
+	for placement in _command_preview:
+		var b := int(placement.get("id", -1))
+		if b < 0 or b >= _bodies:
+			continue
+		var centre: Vector2 = placement.get("anchor", Vector2.ZERO)
+		var forward: Vector2 = placement.get("forward", Vector2.RIGHT)
+		var across := Vector2(-forward.y, forward.x)
+		var files := maxi(1, int(placement.get("files", 1)))
+		var members := maxi(1, _body_started[b] if b < _body_started.size()
+			else _body_alive[b])
+		var ranks := ceili(float(members) / float(files))
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		var depth := (float(ranks - 1) * spacing) * 0.5 + 2.5
+		var span := (float(files - 1) * spacing) * 0.5 + 2.5
+		var corners := [
+			centre + forward * depth + across * span,
+			centre + forward * depth - across * span,
+			centre - forward * depth - across * span,
+			centre - forward * depth + across * span
+		]
+		for i in corners.size():
+			lines.append([corners[i], corners[(i + 1) % corners.size()],
+				SELECT_COLOUR, 0.9, 0.0])
+		lines.append([centre, centre + forward * (depth + 3.0),
+			SELECT_COLOUR, 0.75, 0.0])
 	_paint.lines = lines
 	_paint.rects = rects
 	_paint.queue_redraw()
