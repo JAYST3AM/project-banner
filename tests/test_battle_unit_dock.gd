@@ -46,6 +46,8 @@ func _test_full_snapshot_and_casualties() -> void:
 	dock.update_bodies(updated, [])
 	equal((dock._cards[1]["count"] as Label).text, "12 / 40", "casualty update changes the displayed count")
 	approx((dock._cards[1]["strength"] as ProgressBar).value, 30.0, 0.01, "casualty update changes the strength strip")
+	check((dock._cards[1]["button"] as Button) == (first["button"] as Button),
+		"a same-type update reuses the card instead of rebuilding the row")
 	check(not (dock._cards[1]["button"] as Button).button_pressed, "caller clears selection")
 	equal(dock._cards.size(), 1, "missing formation is removed on replacement snapshot")
 	dock.free()
