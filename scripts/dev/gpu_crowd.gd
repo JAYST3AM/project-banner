@@ -373,6 +373,11 @@ func _zoom_at(screen: Vector2, factor: float) -> void:
 	var wanted := clampf(_zoom_target * factor, ZOOM_MIN, ZOOM_MAX)
 	if is_equal_approx(wanted, _zoom_target):
 		return
+	if wanted <= ZOOM_MIN + 0.01:
+		_zoom_target = wanted
+		_follow_action = false
+		_camera.position = Vector2.ZERO
+		return
 	var anchor := _uniso(screen)
 	var old_scale := _picture_scale()
 	_zoom_target = wanted
@@ -475,6 +480,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				_tilt(-TILT_STEP * 3.0)
 			KEY_BRACKETRIGHT:
 				_tilt(TILT_STEP * 3.0)
+			KEY_T:
+				# Toggle full-field, formation-only command view; no scene swap or simulation change.
+				if _zoom_target <= ZOOM_MIN + 0.01:
+					_zoom_target = 1.0
+				else:
+					_zoom_target = ZOOM_MIN
+					_camera.position = Vector2.ZERO
+				_follow_action = false
 			KEY_F:
 				_follow_action = true
 				_zoom_target = 1.0
@@ -700,6 +713,10 @@ var _alive := Vector2i(0, 0)
 var _fallen := 0
 var _label: Label = null
 var _camera: Camera2D = null
+var _disc_node: MultiMeshInstance2D = null
+var _bar_node: MultiMeshInstance2D = null
+var _overview_overlay: BattleTacticalOverview = null
+var _unit_dock: BattleUnitDock = null
 var _focus := Vector2.ZERO
 ## The health bars and the formation boxes: two instances a soldier and one line a body, the
 ## same two things the battle view draws for a formed battle.
@@ -1750,6 +1767,7 @@ func _process(delta: float) -> void:
 		_frame_delta = 0.0
 		_frames = 0
 	_update_camera(delta)
+	_refresh_command_ui()
 	# The arrows fly on the frame's clock, not the simulation's: a shot is a tenth of a second of
 	# real time whatever the tick rate, and the last volley keeps flying while a finished battle
 	# is still on the screen - the frame the final one lands is redrawn too, or its shaft stays
@@ -2558,6 +2576,7 @@ func _build_view() -> void:
 	mm.instance_count = agents
 	mm.visible_instance_count = agents
 	node.multimesh = mm
+	_disc_node = node
 
 	instances.resize(agents * STRIDE)
 	var scale := DISC_RADIUS * 2.0
@@ -2926,6 +2945,7 @@ func _build_bars() -> void:
 	_bars.instance_count = agents * 2
 	_bars.visible_instance_count = 0
 	node.multimesh = _bars
+	_bar_node = node
 	_bar_buffer.resize(agents * 2 * STRIDE)
 
 
@@ -3230,6 +3250,10 @@ func _build_ground() -> void:
 	paint.z_index = -10
 	_view_root.add_child(paint)
 	_paint = paint
+	_overview_overlay = BattleTacticalOverview.new()
+	_overview_overlay.z_index = 6
+	_overview_overlay.visible = false
+	_view_root.add_child(_overview_overlay)
 
 
 ## A corner panel in the game's own styling, so what the picture is and what it costs can be
@@ -3252,7 +3276,7 @@ func _build_hud() -> void:
 	# said so - the owner's "the controls aren't there yet." The full help panel he had removed stays
 	# removed; this is the whole of the controls UI.
 	var keys := UiTheme.label(
-		"U attack  ·  H hold  ·  L / C / O line, column, loose  ·  WASD pan  ·  wheel zoom  ·  F frame",
+		"U attack  ·  H hold  ·  L / C / O formations  ·  T full map  ·  WASD pan  ·  wheel zoom  ·  F frame",
 		11, UiTheme.DIM)
 	keys.anchor_top = 1.0
 	keys.anchor_bottom = 1.0
@@ -3262,6 +3286,70 @@ func _build_hud() -> void:
 	keys.offset_bottom = -10.0
 	keys.modulate.a = 0.85
 	layer.add_child(keys)
+	# Persistent formation cards occupy the bottom of the live campaign battle.
+	_unit_dock = BattleUnitDock.new()
+	_unit_dock.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_unit_dock.offset_left = 115.0
+	_unit_dock.offset_right = -115.0
+	_unit_dock.offset_top = -107.0
+	_unit_dock.offset_bottom = -39.0
+	_unit_dock.body_chosen.connect(_on_card_chosen)
+	layer.add_child(_unit_dock)
+
+
+## UI-only snapshot. Neither overview mode nor the dock modifies the combat state.
+func _refresh_command_ui() -> void:
+	if _unit_dock == null and _overview_overlay == null:
+		return
+	var formations: Array[Dictionary] = []
+	for b in _bodies:
+		var files := maxf(1.0, _body_state[b * 8 + 4])
+		var ranks := maxf(1.0, _body_state[b * 8 + 5])
+		var spacing := maxf(0.5, _body_state[b * 8 + 6])
+		formations.append({
+			"id": b,
+			"side": _side_of_body(b),
+			"name": _body_name(b),
+			"alive": _body_alive[b],
+			"started": _body_started[b] if b < _body_started.size() else _body_alive[b],
+			"shape": _body_shape_kind[b] if b < _body_shape_kind.size() else "line",
+			"anchor": _anchor_of(b),
+			"forward": _forward_of(b),
+			"half_depth": maxf(3.0, (ranks - 1.0) * spacing * 0.5) + 3.0,
+			"half_span": maxf(3.0, (files - 1.0) * spacing * 0.5) + 3.0,
+		})
+	var chosen := _living_selection()
+	if _unit_dock != null:
+		_unit_dock.update_bodies(formations, chosen)
+	var overview := _camera_zoom <= 0.52
+	if _overview_overlay != null:
+		_overview_overlay.visible = overview
+		if overview:
+			var size_on_map := clampi(int(13.0 / maxf(_picture_scale(), 0.1)), 2, 28)
+			_overview_overlay.set_formations(formations, chosen, size_on_map)
+	if _sprites_node != null:
+		_sprites_node.visible = not overview
+	if _disc_node != null:
+		_disc_node.visible = not overview
+	if _bar_node != null:
+		_bar_node.visible = not overview
+	if _arrow_node != null:
+		_arrow_node.visible = not overview
+	for line in _outlines:
+		line.visible = not overview
+
+
+func _on_card_chosen(body_id: int, additive: bool) -> void:
+	if body_id < 0 or body_id >= _bodies or not _is_mine(body_id) or _body_alive[body_id] <= 0:
+		return
+	if not additive:
+		_selected.clear()
+	if _selected.has(body_id):
+		if additive:
+			_selected.erase(body_id)
+	else:
+		_selected.append(body_id)
+	_announce_selection()
 
 
 func _save_shot(index: int) -> void:
@@ -3479,6 +3567,8 @@ func _body_at(world: Vector2) -> int:
 				best = b
 	if best >= 0:
 		return best
+	if _camera_zoom <= 0.52:
+		return -1
 	# Nothing under the pointer: offer the nearest formation within reach of it, so a click just off
 	# a line still picks the line up rather than the grass behind it.
 	for b in _bodies:
@@ -3522,6 +3612,8 @@ func _selection_names() -> String:
 
 func _announce_selection() -> void:
 	print("gpu crowd: selected %s" % _selection_names())
+	_update_marks()
+	_refresh_command_ui()
 
 
 ## The command line on the panel: whose formations are in the player's hand, how many are in his
@@ -3560,9 +3652,31 @@ func _click_select(world: Vector2, add: bool) -> void:
 	var hit := _body_at(world)
 	if not add:
 		_selected.clear()
-	if _is_mine(hit) and not _selected.has(hit):
-		_selected.append(hit)
+	if _is_mine(hit):
+		if add and _selected.has(hit):
+			_selected.erase(hit)
+		elif not _selected.has(hit):
+			_selected.append(hit)
 	_announce_selection()
+
+
+## Rotated-rectangle against drag-box overlap, using the four separating axes.
+## Selecting any visible part of a formation selects that formation, not just its centre.
+func _body_intersects_box(b: int, rect: Rect2) -> bool:
+	var centre := _anchor_of(b)
+	var forward := _forward_of(b).normalized()
+	var across := Vector2(-forward.y, forward.x)
+	var spacing := maxf(0.5, _body_state[b * 8 + 6])
+	var half_depth := maxf(3.0, (_body_state[b * 8 + 5] - 1.0) * spacing * 0.5) + 3.0
+	var half_span := maxf(3.0, (_body_state[b * 8 + 4] - 1.0) * spacing * 0.5) + 3.0
+	var box_centre := rect.position + rect.size * 0.5
+	var delta := centre - box_centre
+	for axis in [Vector2.RIGHT, Vector2.DOWN, forward, across]:
+		var body_radius := absf(axis.dot(forward)) * half_depth + absf(axis.dot(across)) * half_span
+		var box_radius := absf(axis.x) * rect.size.x * 0.5 + absf(axis.y) * rect.size.y * 0.5
+		if absf(delta.dot(axis)) > body_radius + box_radius:
+			return false
+	return true
 
 
 func _box_select(from: Vector2, to: Vector2, add: bool) -> void:
@@ -3572,7 +3686,7 @@ func _box_select(from: Vector2, to: Vector2, add: bool) -> void:
 	for b in _bodies:
 		if not _is_mine(b) or _body_alive[b] <= 0:
 			continue
-		if rect.has_point(_anchor_of(b)) and not _selected.has(b):
+		if _body_intersects_box(b, rect) and not _selected.has(b):
 			_selected.append(b)
 	_announce_selection()
 
