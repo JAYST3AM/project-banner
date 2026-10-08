@@ -76,7 +76,12 @@ func _build(config: GameConfig) -> void:
 	scale = terrain.size
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
-	var ppu := terrain.visual_pixels_per_unit(config)
+	# September's terrain revert removed BattlefieldTerrain.visual_pixels_per_unit().
+	# Read the existing catalogue-level resolution directly rather than
+	# depending on a method that no longer exists. Keep the terrain model
+	# untouched so Hermes can install authored tiles without changing its data.
+	var ppu: float = maxf(0.25, config.get_float(
+		"terrain.visual_pixels_per_unit", 1.0)) if config != null else 1.0
 	_material.set_shader_parameter("ground_map", ImageTexture.create_from_image(terrain.build_ground_map(ppu)))
 	_material.set_shader_parameter("overlay_map", ImageTexture.create_from_image(terrain.build_overlay_map(ppu)))
 	_material.set_shader_parameter("type_map", ImageTexture.create_from_image(terrain.build_type_map(ppu)))
