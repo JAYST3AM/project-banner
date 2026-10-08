@@ -34,15 +34,18 @@ func is_ready() -> bool:
 ## conservatively reduced by half a cell because A* works on cell centres.
 ## The body never silently squeezes through narrower gaps or changes its
 ## player-selected formation width.
+static func footprint_radius(files: int, ranks: int, spacing: float) -> float:
+	var half_span := float(maxi(0, files - 1)) * maxf(0.1, spacing) * 0.5 + 0.5
+	var half_depth := float(maxi(0, ranks - 1)) * maxf(0.1, spacing) * 0.5 + 0.5
+	return maxf(half_span, half_depth)
+
+
 static func clearance_cells(terrain: BattlefieldTerrain, files: int,
 		ranks: int, spacing: float) -> int:
 	if terrain == null or not terrain.is_valid():
 		return 0
-	var half_span := float(maxi(0, files - 1)) * maxf(0.1, spacing) * 0.5 + 0.5
-	var half_depth := float(maxi(0, ranks - 1)) * maxf(0.1, spacing) * 0.5 + 0.5
-	var radius := maxf(half_span, half_depth)
-	return maxi(0, ceili((radius - terrain.cell_size * 0.5) /
-		maxf(0.1, terrain.cell_size)))
+	return maxi(0, ceili((footprint_radius(files, ranks, spacing) -
+		terrain.cell_size * 0.5) / maxf(0.1, terrain.cell_size)))
 
 
 func _build_occupancy() -> void:
