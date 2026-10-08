@@ -67,6 +67,11 @@ func _test_selection_requests_and_replacement() -> void:
 	equal(events[0]["additive"], false, "replacement selection is not additive")
 	equal(events[1]["id"], 1, "additive selection carries the clicked ID")
 	equal(events[1]["additive"], true, "additive selection flag survives")
+	(dock._cards[2]["button"] as Button).pressed.emit()
+	equal(events.size(), 3, "clicking a real card button forwards one selection event")
+	equal(events[2]["id"], 2, "button event carries its own formation ID")
+	equal(events[2]["additive"], Input.is_key_pressed(KEY_SHIFT),
+		"button event uses the current Shift modifier")
 	check((dock._cards[1]["button"] as Button).button_pressed,
 		"emitting a request does not mutate the caller's current selection")
 	check(not (dock._cards[2]["button"] as Button).button_pressed,
@@ -101,7 +106,8 @@ func _test_destroyed_and_missing_formations() -> void:
 	dock.body_chosen.connect(func(id: int, _additive: bool): events.append(id))
 	dock.request_selection(7, false)
 	dock.request_selection(999, true)
-	equal(events.size(), 0, "dead and unknown IDs emit no selection events")
+	(dock._cards[7]["button"] as Button).pressed.emit()
+	equal(events.size(), 0, "dead and unknown IDs emit no selection events, even via the button")
 	var empty: Array[Dictionary] = []
 	dock.update_bodies(empty, [])
 	equal(dock._cards.size(), 0, "removed formations are forgotten")
