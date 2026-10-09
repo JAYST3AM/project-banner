@@ -9,6 +9,7 @@ func run() -> void:
 	_test_destroyed_and_missing_formations()
 	_test_portrait_fallback_and_type_change()
 	_test_ordering_and_duplicate_ids()
+	_test_real_toggle_click_remains_battle_owned()
 	_complete()
 
 
@@ -154,4 +155,58 @@ func _test_ordering_and_duplicate_ids() -> void:
 	equal(dock._row.get_child_count(), 2, "duplicate ID does not create duplicate UI children")
 	equal(dock._row.get_child(0), dock._cards[2]["button"], "first card follows updated snapshot order")
 	equal(dock._row.get_child(1), dock._cards[1]["button"], "second card follows updated snapshot order")
+	dock.free()
+
+
+## PB-203: Godot toggles Button.button_pressed *before* the pressed signal.
+## The old tests invoked .pressed.emit(), which bypasses that real input behaviour.
+## Simulate the pre-signal flip, then let the dock handle the callback: the battle,
+## not the widget, must remain the authority for selection.
+func _test_real_toggle_click_remains_battle_owned() -> void:
+	section("real button auto-toggle cannot outrun the authoritative battle snapshot")
+	var dock := BattleUnitDock.new()
+	runner.add_child(dock)
+	var bodies: Array[Dictionary] = [_body(1), _body(2)]
+	dock.update_bodies(bodies, [1])
+	var events: Array[int] = []
+	dock.body_chosen.connect(func(id: int, _additive: bool): events.append(id))
+	var first: Button = dock._cards[1]["button"]
+	var second: Button = dock._cards[2]["button"]
+	check(first.toggle_mode and second.toggle_mode,
+		"the test exercises actual auto-toggle controls, not plain push buttons")
+	first.set_pressed_no_signal(false)
+	dock._choose(1)
+	check(first.button_pressed, "clicking an already-selected card cannot deselect it on its own")
+	equal(events.size(), 1, "a clicked selected card still forwards one request")
+	second.set_pressed_no_signal(true)
+	dock._choose(2)
+	check(not second.button_pressed,
+		"clicking an unselected card cannot highlight it before the battle accepts it")
+	equal(events.size(), 2, "two clicks forward two requests, no extra signal")
+	equal(events[0], 1, "the first request kept its formation identity")
+	equal(events[1], 2, "the second request kept its formation identity")
+
+	# A synchronous battle-controller response is authoritative even though the
+	# signal returns to _choose() afterwards.
+	dock.body_chosen.connect(func(id: int, _additive: bool):
+		if id == 2:
+			dock.update_bodies(bodies, [2]))
+	second.set_pressed_no_signal(true)
+	dock._choose(2)
+	check(second.button_pressed,
+		"an accepted synchronous selection remains highlighted after the signal returns")
+	check(not first.button_pressed,
+		"accepting a different formation clears the previous highlight")
+	equal(events.size(), 3, "controller update does not trigger a recursive choice")
+
+	# Death and removal must invalidate selection even if an old mouse event arrives.
+	var fallen: Array[Dictionary] = [_body(1), _body(2, 0, 0, 20)]
+	dock.update_bodies(fallen, [])
+	second.set_pressed_no_signal(true)
+	dock._choose(2)
+	check(not second.button_pressed, "a dead body's stale click never highlights a disabled card")
+	equal(events.size(), 3, "a dead body cannot emit a new selection request")
+	dock.update_bodies([], [])
+	dock._choose(2)
+	equal(events.size(), 3, "a removed card cannot emit a ghost request")
 	dock.free()
