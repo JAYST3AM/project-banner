@@ -666,7 +666,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	# and a paused screen does not receive input at all - so the menu, which is set to keep running,
 	# hears the second Esc itself.
 	if event.is_action_pressed("ui_cancel") and _pause != null and not _pause.is_open():
-		_pause.open()
+		# Chronicle is an overlay, not a reason to open the pause menu.
+		# ui_cancel is intercepted here BEFORE _handle_key sees Escape.
+		if _hud != null and _hud.chronicle_visible():
+			_hud.toggle_chronicle()
+		else:
+			_pause.open()
 		get_viewport().set_input_as_handled()
 		return
 
