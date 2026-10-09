@@ -8,6 +8,7 @@ func run() -> void:
 	_test_parent_links_and_ancestry()
 	_test_atomic_invalid_parent_rejection()
 	_test_guardianship_and_deaths()
+	_test_manual_birth_is_atomic_and_has_no_implicit_custody()
 	_test_round_trip_and_legacy_campaign_compatibility()
 	_test_corrupt_graph_is_not_restored()
 	_complete()
@@ -163,3 +164,29 @@ func _test_corrupt_graph_is_not_restored() -> void:
 		"save import does not produce ancestor loops")
 	equal(loaded.person("a").get("guardian_id"), "", "dangling guardian is discarded")
 	check(loaded.has_person("a") and loaded.has_person("b"), "valid identities survive damaged links")
+
+
+func _test_manual_birth_is_atomic_and_has_no_implicit_custody() -> void:
+	section("a child record is deliberate, atomic and does not decide custody")
+	var family := CampaignLineage.new()
+	family.ensure_person("one", "Parent One", 1)
+	family.ensure_person("two", "Parent Two", 1)
+	var before := family.to_dict()
+	check(not family.register_child("infant", "Infant", 50, "one", "missing"),
+		"unknown second parent rejects the whole birth")
+	equal(family.to_dict(), before, "failed registration cannot leave a phantom child")
+	check(not family.register_child("infant", "Infant", 50, "one", "two", "missing"),
+		"unknown guardian rejects the whole birth")
+	equal(family.to_dict(), before, "invalid guardian also rolls back the whole record")
+	check(not family.register_child("infant", "Infant", 0, "one", "two"),
+		"day zero is not a legal birth date")
+	check(family.register_child("infant", "Infant", 50, "one", "two"),
+		"explicitly authored birth creates one child")
+	equal(family.parents_of("infant"), ["one", "two"],
+		"both parents are retained in the chosen order")
+	equal(family.person("infant").get("guardian_id"), "",
+		"no custody or guardian is assigned without an explicit decision")
+	check(not family.register_child("infant", "Duplicate", 51, "one", "two"),
+		"person IDs cannot be silently reused for another birth")
+	equal(family.size(), 3, "one successful birth created exactly one additional person")
+	equal(family.children_of("one"), ["infant"], "parentage is queryable immediately")
