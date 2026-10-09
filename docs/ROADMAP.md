@@ -11,8 +11,9 @@ E3 each need their own authorisation.
 
 | When | Work |
 | --- | --- |
-| **Now** | Finish **E1** - the real-GPU verification of disabled-mode terrain collision. Built and published; merge held. |
-| **Next** | **E2** enabled GPU collision + parity (includes PB-207), then **E3** live battle terrain integration (includes PB-206). Neither authorised yet. |
+| **Done** | **E1** - disabled-mode GPU terrain collision. **Merged to `main` as `ddbc6bb280d9425c5b9e3e3bbf09f63c4fffff1a`** (2026-10-09); Gate A and Gate B both green. |
+| **Now** | **E2** - enabled GPU collision + parity (includes PB-207). GPT-6 writes the implementation; Hermes verifies. |
+| **Next** | **E3** live battle terrain integration (includes PB-206). Authorised only after E2 is accepted. |
 | **High** | PB-208 strategic zoom and formation presentation; PB-210 battlefield HUD resolution. |
 | **Supporting** | PB-202 - PB-205 tests, written alongside the relevant development rather than as a block. |
 | **Ongoing** | PB-211 reproducible performance benchmarks. |
@@ -996,9 +997,7 @@ These were the live tasks on the board when it was retired. None is accepted; ea
 GPT-6 confirms completion under the new process. **Priority order is GPT-6's, in the Now / Next /
 Later table at the top of this file** - the order below is transcription order, not priority.
 
-- [ ] **E1 — disabled-mode GPU terrain collision integration.** Candidate built and published;
-      Gate A green (48 suites / 11,244 assertions / 0 failures). Real-GPU Stage-2 benchmark and
-      determinism battery still to run. **Merge on hold.**
+- [x] **E1 - disabled-mode GPU terrain collision integration.** **Complete and merged to `main` as `ddbc6bb280d9425c5b9e3e3bbf09f63c4fffff1a`** (2026-10-09). Disabled-mode collision preserves the simulation exactly; the binding-14 mask upload is verified by reading the GPU buffer back and its failure path is proven to exit non-zero; GPU resources are released on exit. Evidence: Gate A and Gate B each 48 suites / 11,244 assertions / 0 failures / no drift; candidate vs baseline per-tick checksums identical at 600 (145/145) and 20,000 (7/7) soldiers; no performance regression. Corrected candidate `3613709c332837500bae52018b4382e47ecc5f9e`.
 - [ ] **PB-202 — Command bar contract tests.** All seven commands, stage transitions,
       selected-formation counts, pause/map labels, emitted signals.
 - [ ] **PB-203 — Unit dock lifecycle.** Cards update on casualties, disable on elimination, no
