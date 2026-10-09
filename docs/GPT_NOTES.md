@@ -11,7 +11,7 @@
 ## One line per changed file — purpose and GitHub readback
 
 - `scenes/dev/gpu_campaign_terrain_smoke.tscn` — windowed entry scene for battlefield-level GPU collision acceptance; blob `d39f2b6e755b56fb49eff9094fa79f08eb6cf0d2`, 216 UTF-8 bytes, LF, complete readback.
-- `scripts/battle/battle.gd` — opt-in live campaign GPU terrain collision; preserve CPU combat and fail closed on backend faults; blob `8c3b3260b48f9428d0c142f498aa97f9040088d9`, 41072 UTF-8 bytes, LF, complete readback.
+- `scripts/battle/battle.gd` — opt-in live campaign GPU terrain collision; preserve CPU combat and fail closed on backend faults; blob `5c585468a0bd4c12a77a61a1da2c836c3245416b`, 41347 UTF-8 bytes, LF, complete readback.
 - `scripts/battle/battle_gpu_deployment.gd` — transactional, repeatable terrain/zone/spacing-based legal soldier placement; blob `4afc1d0da5b6f7cdb1e948910a456e06f0720bff`, 3312 UTF-8 bytes, LF, complete readback.
 - `scripts/battle/battle_gpu_terrain_collider.gd` — batch real-GPU collision using E2 shader mode 6 and exact authoritative mask; readback and cleanup; blob `771a34e3c834c352e552733a2b1bb885aa9ec2fd`, 5343 UTF-8 bytes, LF, complete readback.
 - `scripts/dev/gpu_campaign_terrain_smoke.gd` — windowed production-battle integration fixture with screenshot and GPU/CPU positional equality; blob `ca83fddd495dd03648ad5257d1d7c9254caa16ee`, 3902 UTF-8 bytes, LF, complete readback.
