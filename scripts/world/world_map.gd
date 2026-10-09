@@ -461,6 +461,8 @@ func _on_arrived(settlement_id: String) -> void:
 	var settlement := _state.settlement(settlement_id)
 	if settlement == null:
 		return
+	CampaignChronicle.record(_state, "travel", "Arrived at %s" % settlement.name,
+		"The company reached %s." % settlement.name, "", settlement.id)
 	_hud.set_hint("Arrived at %s on %s." % [settlement.name, _state.clock.full_string()])
 	_select(settlement)
 	_refresh()
@@ -899,6 +901,8 @@ func _handle_key(event: InputEventKey) -> void:
 			_deselect()
 		KEY_F5:
 			_on_save_requested()
+		KEY_J:
+			_hud.toggle_chronicle()
 		KEY_R:
 			_travel.clear_destination()
 			_hud.set_hint("Travel cancelled.")
