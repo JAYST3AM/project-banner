@@ -48,6 +48,10 @@ func _test_parent_links_and_ancestry() -> void:
 	equal(family.parents_of("child"), ["parent", "other"], "parent order stays as entered")
 	equal(family.children_of("parent"), ["child", "sibling"], "children sorted by stable ID")
 	equal(family.children_of("other"), ["child", "sibling"], "second parent has same children")
+	equal(family.names_for(family.parents_of("child")), ["Parent", "Other parent"],
+		"family profile resolves both parents by their recorded names")
+	equal(family.names_for(family.children_of("parent")), ["Child", "Sibling"],
+		"family profile resolves the recorded children's names")
 	check(family.is_ancestor_of("grand", "child"), "ancestors include grandparents")
 	check(family.is_ancestor_of("parent", "child"), "direct parent is an ancestor")
 	check(not family.is_ancestor_of("child", "parent"), "ancestry is directional")
