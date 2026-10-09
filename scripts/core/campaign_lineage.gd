@@ -33,7 +33,7 @@ func person(person_id: String) -> Dictionary:
 ## Existing people's family records are deliberately never overwritten.
 func ensure_person(person_id: String, display_name: String, born_day: int = UNKNOWN_DAY) -> bool:
 	var id := person_id.strip_edges()
-	if id.is_empty() or (born_day < 1 and born_day != UNKNOWN_DAY):
+	if id.is_empty() or id != person_id or (born_day < 1 and born_day != UNKNOWN_DAY):
 		return false
 	if _people.has(id):
 		return true
@@ -54,7 +54,8 @@ func ensure_person(person_id: String, display_name: String, born_day: int = UNKN
 func register_child(child_id: String, display_name: String, born_day: int,
 		first_parent_id: String = "", second_parent_id: String = "",
 		guardian_id: String = "") -> bool:
-	if child_id.strip_edges().is_empty() or _people.has(child_id) or born_day < 1:
+	if child_id.strip_edges().is_empty() or child_id != child_id.strip_edges() \
+			or _people.has(child_id) or born_day < 1:
 		return false
 	if not ensure_person(child_id, display_name, born_day):
 		return false
