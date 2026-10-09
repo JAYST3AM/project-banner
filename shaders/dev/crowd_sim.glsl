@@ -169,14 +169,24 @@ bool terrain_blocked(vec2 world) {
 const int TERRAIN_MAX_SUBSTEPS = 24;
 const float TERRAIN_SUBSTEP_FRACTION = 0.33;
 
+// Match Godot Math::is_equal_approx(left, right), including magnitude-scaled
+// tolerance. A fixed absolute 1e-5 disagrees near cell boundaries.
+bool terrain_equal_approx(float left, float right) {
+	if (left == right) {
+		return true;
+	}
+	float tolerance = max(0.00001, 0.00001 * abs(left));
+	return abs(left - right) < tolerance;
+}
+
 vec2 terrain_slide_step(vec2 before, vec2 after) {
 	vec2 along_x = vec2(after.x, before.y);
 	vec2 along_y = vec2(before.x, after.y);
 	bool open_x = !terrain_blocked(along_x);
 	bool open_y = !terrain_blocked(along_y);
 	bool destination_open = !terrain_blocked(after);
-	bool diagonal = abs(after.x - before.x) > 0.00001 &&
-		abs(after.y - before.y) > 0.00001;
+	bool diagonal = !terrain_equal_approx(after.x, before.x) &&
+		!terrain_equal_approx(after.y, before.y);
 
 	if (destination_open && (!diagonal || (open_x && open_y))) {
 		return after;
@@ -224,6 +234,18 @@ vec2 terrain_slide(vec2 before, vec2 after) {
 
 void main() {
 	uint gid = gl_GlobalInvocationID.x;
+	// Mode 6 is an isolated real-GPU parity probe. Inputs: Agents.xy =
+	// origin, Pushes.xy = proposed. Output: Agents.xy = terrain_slide().
+	// pc.a limits the vector count; unused worker threads never touch memory.
+	// Keep this BEFORE all normal battle-buffer reads.
+	if (pc.mode == 6u) {
+		if (gid >= pc.a) {
+			return;
+		}
+		vec2 result = terrain_slide(agents.s[gid].xy, pushes.p[gid].xy);
+		agents.s[gid] = vec4(result, 0.0, 0.0);
+		return;
+	}
 	uint n = uint(params.f[0]);
 	uint gw = uint(params.f[1]);
 	uint gh = uint(params.f[2]);

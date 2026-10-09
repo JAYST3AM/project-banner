@@ -533,8 +533,12 @@ var uniform_set: RID
 ## Dev probe preserves its historical combat baseline. Campaign battles opt
 ## into terrain-aware GPU soldier collision explicitly.
 var enable_gpu_terrain_collision := false
+## A terrain-aware tick is legal only after the enabled mask is validated on the GPU.
+var _terrain_collision_ready := false
 ## Test-only GPU upload probe. Off during normal simulation and benchmarks.
 var verify_terrain_mask := false
+## Independent CPU-vs-GPU terrain-slide comparison, run only on explicit request.
+var terrain_parity_probe := false
 ## The bodies, ten numbers each: anchor.xy, forward.xy, files, ranks, spacing, engaged.
 ## Advanced on the CPU - six of them - and read by every soldier in the shader.
 var _body_state := PackedFloat32Array()
@@ -828,7 +832,22 @@ func _ready() -> void:
 	if rd == null:
 		push_error("gpu crowd: no rendering device (a headless run has nothing to measure)")
 		return
+	if terrain_parity_probe and enable_gpu_terrain_collision:
+		push_error("gpu crowd: --terrain-parity and --terrain-collision are mutually exclusive")
+		get_tree().quit(1)
+		return
 	_build()
+	if terrain_parity_probe:
+		# This run uses the standalone scene's GPU to execute known collision
+		# vectors with synthetic masks, against BattleTerrainGpuMask.slide().
+		var ok := pipeline.is_valid() and uniform_set.is_valid()
+		if ok:
+			ok = _run_terrain_parity()
+		else:
+			push_error("gpu crowd: terrain parity pipeline initialization FAILED")
+		set_process(false)
+		get_tree().quit(0 if ok else 1)
+		return
 	if rule_checks:
 		_frozen = true
 		_run_rule_checks()
@@ -954,6 +973,10 @@ func _parse_args() -> void:
 			run_seconds = maxf(0.0, float(arg.substr(10)))
 		elif arg == "--verify-terrain-mask":
 			verify_terrain_mask = true
+		elif arg == "--terrain-collision":
+			enable_gpu_terrain_collision = true
+		elif arg == "--terrain-parity":
+			terrain_parity_probe = true
 		elif arg.begins_with("--shot-at="):
 			shot_at = maxf(0.0, float(arg.substr(10)))
 
@@ -985,6 +1008,15 @@ func _build() -> void:
 	if field.y < needed_depth:
 		field.y = needed_depth
 	grid = Vector2i(ceili(field.x / LG_CELL), ceili(field.y / LG_CELL))
+	# The visible ground and collision mask must originate from the SAME terrain.
+	# Disabled mode still generates ground as before, but uploads a disabled mask.
+	var ground := BattlefieldTerrain.generate(seed_value, field, GameManager.config())
+	_terrain_collision_ready = false
+	if enable_gpu_terrain_collision and (not ground.is_valid() or verify_terrain_mask):
+		push_error("gpu crowd: enabled terrain requires a valid battlefield; disabled-mask verification cannot run simultaneously")
+		set_process(false)
+		get_tree().quit(1)
+		return
 	var cells := grid.x * grid.y
 
 	var state := PackedFloat32Array()
@@ -998,6 +1030,25 @@ func _build() -> void:
 	defence_mitigation = battle_config.get_float("battle.defence_mitigation", 0.05)
 	_load_unit_stats()
 	_deploy(state, meta, attrs)
+	var terrain_mask := BattleTerrainGpuMask.from_terrain(
+		ground if enable_gpu_terrain_collision else null)
+	if enable_gpu_terrain_collision:
+		# Fail closed: never dispatch against a null, disabled or incomplete grid.
+		if terrain_mask.size() != BattleTerrainGpuMask.HEADER_INTS + ground.cols * ground.rows or terrain_mask[3] != 1:
+			push_error("gpu crowd: enabled terrain mask preparation failed")
+			set_process(false)
+			get_tree().quit(1)
+			return
+		# E3 will provide legal deployment. E2-A rejects illegal spawns rather
+		# than silently moving a soldier or dropping collision.
+		for soldier in agents:
+			var origin := Vector2(state[soldier * 4], state[soldier * 4 + 1])
+			if BattleTerrainGpuMask.is_blocked(terrain_mask, origin):
+				push_error("gpu crowd: soldier %d deployed on blocked terrain at %s" % [
+					soldier, str(origin)])
+				set_process(false)
+				get_tree().quit(1)
+				return
 	# What each body's men can strike at, needed by the march whether or not a journal is open: a
 	# body of archers holds at its own range (see [method _engage_room]).
 	_refresh_body_reach()
@@ -1028,10 +1079,9 @@ func _build() -> void:
 	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
 	buf_bodies = _storage(_body_state.to_byte_array(), _bodies * 8 * 4)
-	# E1: the disabled mask keeps the original benchmark behaviour while the
-	# binding and shader functions are integrated. A null terrain yields a
-	# 1x1 disabled grid that terrain_slide() passes through unchanged.
-	var terrain_bytes := BattleTerrainGpuMask.from_terrain(null).to_byte_array()
+	# Disabled remains the default; explicit opt-in uploads the full terrain.
+	# An enabled request is never replaced with a disabled buffer.
+	var terrain_bytes := terrain_mask.to_byte_array()
 	buf_terrain = _storage(terrain_bytes, terrain_bytes.size())
 	# Every soldier starts with nobody remembered and a look phase taken from its own index, so
 	# the first look is staggered across the cadence rather than massed on tick one. This is the
@@ -1063,6 +1113,17 @@ func _build() -> void:
 	uniforms.append(_uniform(13, buf_tallies))
 	uniforms.append(_uniform(14, buf_terrain))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
+	if enable_gpu_terrain_collision:
+		# Verify what was uploaded to the actual GPU buffer, not just the CPU
+		# mask. A failed uniform set or upload never reaches dispatch.
+		if not uniform_set.is_valid() or rd.buffer_get_data(buf_terrain) != terrain_bytes:
+			push_error("gpu crowd: enabled terrain mask GPU upload verification FAILED")
+			set_process(false)
+			get_tree().quit(1)
+			return
+		_terrain_collision_ready = true
+		print("gpu crowd: enabled terrain mask PASS (%dx%d, %d bytes)" % [
+			ground.cols, ground.rows, terrain_bytes.size()])
 	if verify_terrain_mask:
 		# Read back the actual GPU buffer, not just the CPU-side mask.
 		var expected := PackedInt32Array([1, 1, 1000, 0, 0]).to_byte_array()
@@ -1074,7 +1135,7 @@ func _build() -> void:
 			return
 		print("gpu crowd: binding 14 disabled terrain mask upload PASS (20 bytes)")
 
-	_build_ground()
+	_build_ground(ground)
 	_build_view()
 	_build_hud()
 	if cam_at != Vector2(INF, INF):
@@ -1648,10 +1709,9 @@ func _advance_bodies() -> void:
 ## round is two passes - accumulate, then apply - because a round that read its neighbours while
 ## writing its own position made every run of the same battle come out differently.
 func _run_tick() -> void:
-	# E1: enabled terrain collision is gated out. The shader binding is wired,
-	# but an enabled request must fail visibly and never run with a disabled mask.
-	if enable_gpu_terrain_collision:
-		push_error("gpu crowd: enabled terrain collision is not supported in this slice")
+	# Prevent dispatch until enabled data was validated on this GPU.
+	if enable_gpu_terrain_collision and not _terrain_collision_ready:
+		push_error("gpu crowd: enabled terrain collision was not prepared")
 		_freeze()
 		return
 	# The cadence reads the simulation tick, so the params buffer is refreshed before every
@@ -3238,9 +3298,7 @@ func _log_view_geometry() -> void:
 		str(flat_view), rad_to_deg(yaw), squash, _iso(field * 0.5).x, _iso(field * 0.5).y])
 
 
-func _build_ground() -> void:
-	var config := GameManager.config()
-	var ground := BattlefieldTerrain.generate(seed_value, field, config)
+func _build_ground(ground: BattlefieldTerrain) -> void:
 	var cols := maxi(1, ground.cols)
 	var rows := maxi(1, ground.rows)
 	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
@@ -3335,6 +3393,178 @@ func _params() -> PackedFloat32Array:
 
 func _push_constant(mode: int) -> PackedByteArray:
 	return PackedInt32Array([mode, 0, 0, 0]).to_byte_array()
+
+
+
+## ---------- E2-B: real-GPU terrain collision parity probe -------------------
+##
+## Uses the SAME compiled compute shader as the battle. Mode 6 reads origins
+## and proposed moves from two existing buffers and writes resolved positions
+## back. Every output is checked against BattleTerrainGpuMask.slide(), including
+## disabled mode, walls, corners, boundaries, tunnelling and substep budget.
+## This is deliberately opt-in and must never run during normal gameplay.
+
+func _parity_mask(cols: int = 12, rows: int = 12) -> PackedInt32Array:
+	var mask := PackedInt32Array()
+	mask.resize(BattleTerrainGpuMask.HEADER_INTS + cols * rows)
+	mask[0] = cols
+	mask[1] = rows
+	mask[2] = 1000
+	mask[3] = 1
+	return mask
+
+
+func _parity_vector(name: String, before: Vector2, proposed: Vector2,
+		tolerance: float = 0.0001) -> Dictionary:
+	return {"name": name, "before": before, "proposed": proposed,
+		"tolerance": tolerance}
+
+
+func _parity_fixture(label: String, mask: PackedInt32Array,
+		cases: Array[Dictionary]) -> bool:
+	if cases.is_empty() or cases.size() > agents:
+		push_error("gpu crowd: terrain parity %s has invalid case count" % label)
+		return false
+	var mask_bytes := mask.to_byte_array()
+	var probe_buffer := rd.storage_buffer_create(mask_bytes.size(), mask_bytes)
+	if not probe_buffer.is_valid():
+		push_error("gpu crowd: terrain parity %s mask allocation FAILED" % label)
+		return false
+
+	# Rebind only binding 14 to the synthetic mask. All other resources are the
+	# live scene's own 0..13 buffers. The temporary uniform set is freed below.
+	var sources: Array[RID] = [
+		buf_state, buf_push, buf_cursor, buf_slots, buf_params, buf_counters,
+		buf_meta, buf_damage, buf_attrs, buf_bodies, buf_corr, buf_targets,
+		buf_stats, buf_tallies, probe_buffer,
+	]
+	var uniforms: Array[RDUniform] = []
+	for binding in sources.size():
+		uniforms.append(_uniform(binding, sources[binding]))
+	var probe_set := rd.uniform_set_create(uniforms, shader, 0)
+	if not probe_set.is_valid() or rd.buffer_get_data(probe_buffer) != mask_bytes:
+		push_error("gpu crowd: terrain parity %s GPU mask/bind verification FAILED" % label)
+		if probe_set.is_valid():
+			rd.free_rid(probe_set)
+		rd.free_rid(probe_buffer)
+		return false
+
+	var inputs := PackedFloat32Array()
+	var proposals := PackedFloat32Array()
+	for test_case in cases:
+		var before: Vector2 = test_case["before"]
+		var proposed: Vector2 = test_case["proposed"]
+		inputs.append(before.x)
+		inputs.append(before.y)
+		inputs.append(0.0)
+		inputs.append(0.0)
+		proposals.append(proposed.x)
+		proposals.append(proposed.y)
+		proposals.append(0.0)
+		proposals.append(0.0)
+	var inputs_bytes := inputs.to_byte_array()
+	var proposals_bytes := proposals.to_byte_array()
+	rd.buffer_update(buf_state, 0, inputs_bytes.size(), inputs_bytes)
+	rd.buffer_update(buf_push, 0, proposals_bytes.size(), proposals_bytes)
+
+	var cl := rd.compute_list_begin()
+	rd.compute_list_bind_compute_pipeline(cl, pipeline)
+	rd.compute_list_bind_uniform_set(cl, probe_set, 0)
+	rd.compute_list_set_push_constant(cl,
+		PackedInt32Array([6, cases.size(), 0, 0]).to_byte_array(), 16)
+	rd.compute_list_dispatch(cl, (cases.size() + WORKGROUP - 1) / WORKGROUP, 1, 1)
+	rd.compute_list_end()
+	var result := rd.buffer_get_data(buf_state).to_float32_array()
+
+	var passed := result.size() >= cases.size() * 4
+	if not passed:
+		push_error("gpu crowd: terrain parity %s short GPU result" % label)
+	else:
+		for i in cases.size():
+			var test_case: Dictionary = cases[i]
+			var before: Vector2 = test_case["before"]
+			var proposed: Vector2 = test_case["proposed"]
+			var expected := BattleTerrainGpuMask.slide(mask, before, proposed)
+			var actual := Vector2(result[i * 4], result[i * 4 + 1])
+			var delta := actual.distance_to(expected)
+			var tolerance: float = test_case["tolerance"]
+			if not actual.is_finite() or delta > tolerance:
+				passed = false
+				push_error("gpu crowd: terrain parity %s/%s FAIL: CPU=%s GPU=%s delta=%.8f" % [
+					label, str(test_case["name"]), str(expected), str(actual), delta])
+			else:
+				print("gpu crowd: terrain parity %s/%s PASS (delta %.8f)" % [
+					label, str(test_case["name"]), delta])
+	# Free dependent uniform set first, then its temporary storage buffer.
+	rd.free_rid(probe_set)
+	rd.free_rid(probe_buffer)
+	return passed
+
+
+func _run_terrain_parity() -> bool:
+	var passed := true
+	# A disabled mask must return the unmodified proposal even outside a grid
+	# or on top of geometry. This also checks the E1 unchanged path.
+	var disabled := BattleTerrainGpuMask.from_terrain(null)
+	var disabled_cases: Array[Dictionary] = [
+		_parity_vector("disabled-outside", Vector2(-2.0, 3.0), Vector2(19.0, 28.0)),
+		_parity_vector("disabled-unchanged", Vector2(5.25, 6.75), Vector2(5.75, 6.25)),
+	]
+	if not _parity_fixture("disabled", disabled, disabled_cases):
+		passed = false
+
+	var open := _parity_mask()
+	var open_cases: Array[Dictionary] = [
+		_parity_vector("clear", Vector2(2.25, 2.25), Vector2(3.25, 2.5)),
+		_parity_vector("left-boundary", Vector2(0.25, 2.5), Vector2(-0.5, 2.5)),
+		_parity_vector("top-boundary", Vector2(2.5, 0.25), Vector2(2.5, -0.5)),
+		_parity_vector("right-edge-exclusive", Vector2(11.8, 2.5), Vector2(12.0, 2.5)),
+		_parity_vector("bottom-edge-exclusive", Vector2(2.5, 11.8), Vector2(2.5, 12.0)),
+		_parity_vector("24-substeps", Vector2(1.0, 1.0), Vector2(8.8, 1.0)),
+		_parity_vector("25-substeps-refused", Vector2(1.0, 1.0), Vector2(9.1, 1.0)),
+	]
+	if not _parity_fixture("open-grid", open, open_cases):
+		passed = false
+
+	var wall := _parity_mask()
+	for y in 12:
+		wall[BattleTerrainGpuMask.HEADER_INTS + y * 12 + 5] = 1
+	var wall_cases: Array[Dictionary] = [
+		_parity_vector("wall-x", Vector2(4.25, 3.5), Vector2(5.75, 3.5)),
+		_parity_vector("blocked-origin", Vector2(5.5, 4.5), Vector2(4.5, 4.5)),
+		_parity_vector("intermediate-wall-tunnel", Vector2(2.25, 3.5),
+			Vector2(7.75, 3.5)),
+	]
+	if not _parity_fixture("vertical-wall", wall, wall_cases):
+		passed = false
+
+	var horizontal := _parity_mask()
+	for x in 12:
+		horizontal[BattleTerrainGpuMask.HEADER_INTS + 6 * 12 + x] = 1
+	var vertical_cases: Array[Dictionary] = [
+		_parity_vector("wall-y", Vector2(3.5, 5.25), Vector2(3.5, 6.75)),
+	]
+	if not _parity_fixture("horizontal-wall", horizontal, vertical_cases):
+		passed = false
+
+	var corner := _parity_mask()
+	corner[BattleTerrainGpuMask.HEADER_INTS + 4 * 12 + 5] = 1
+	corner[BattleTerrainGpuMask.HEADER_INTS + 5 * 12 + 4] = 1
+	var corner_cases: Array[Dictionary] = [
+		_parity_vector("corner-cutting", Vector2(4.5, 4.5), Vector2(5.5, 5.5)),
+		# The old fixed shader epsilon treated this as diagonal, while
+		# Godot's magnitude-scaled is_equal_approx treats both axes as equal.
+		_parity_vector("near-zero-diagonal", Vector2(4.99998, 4.99998),
+			Vector2(5.00002, 5.00002), 0.00001),
+	]
+	if not _parity_fixture("diagonal-corner", corner, corner_cases):
+		passed = false
+
+	if passed:
+		print("gpu crowd: terrain parity PASS (GPU matches CPU reference, 5 fixtures)")
+	else:
+		push_error("gpu crowd: terrain parity FAILED")
+	return passed
 
 
 func _uniform(binding: int, buffer: RID) -> RDUniform:
