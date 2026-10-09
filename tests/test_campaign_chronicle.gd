@@ -6,6 +6,7 @@ extends TestCase
 func run() -> void:
 	await _tick()
 	_test_empty_and_invalid_events()
+	_test_founding_only_happens_for_new_campaigns()
 	_test_recorded_order_filters_and_snapshot_safety()
 	_test_battle_history_adapter()
 	_test_real_recruitment_transaction_and_rejection()
@@ -87,6 +88,8 @@ func _test_battle_history_adapter() -> void:
 	var all := CampaignChronicle.recent(state)
 	equal(all.size(), 2, "old battle records appear as chronicle events")
 	equal(all[0].get("id"), "battle:battle_0002", "latest battle sorts first")
+	contains(str(all[1].get("title", "")), "Victory against Road Bandits",
+		"victory is a proper outcome label, never an internal faction ID")
 	contains(str(all[0].get("title", "")), "Withdrawal",
 		"a retreat is correctly distinguished from victory")
 	contains(str(all[1].get("detail", "")), "2 fallen",
@@ -189,3 +192,23 @@ func _test_chronicle_panel_and_world_hud() -> void:
 	equal(state.clock.day, stored_day, "opening or closing the journal never advances game time")
 	hud.free()
 	panel.free()
+
+
+func _test_founding_only_happens_for_new_campaigns() -> void:
+	section("founding is recorded once for a new company, not on continue")
+	SaveManager.delete_all_saves()
+	var state := GameManager.new_campaign("A New Company", 501521)
+	var entries := CampaignChronicle.recent(state)
+	equal(entries.size(), 1, "a new campaign has one founding milestone")
+	if entries.size() == 1:
+		equal(entries[0].get("kind"), "milestone", "company founding is a milestone")
+		equal(entries[0].get("title"), "Company founded", "founding event has a readable title")
+		contains(str(entries[0].get("detail", "")), "A New Company",
+			"the founding event names the real campaign")
+	check(GameManager.save_campaign(), "new company saves with its founding milestone")
+	GameManager.end_campaign()
+	check(GameManager.continue_campaign(), "campaign reopens from the saved slot")
+	equal(CampaignChronicle.recent(GameManager.campaign).size(), 1,
+		"continue does not add a second founding event")
+	GameManager.end_campaign()
+	SaveManager.delete_all_saves()
