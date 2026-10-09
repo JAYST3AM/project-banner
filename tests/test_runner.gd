@@ -74,6 +74,7 @@ const SUITES: Array[String] = [
 	"res://tests/test_battle_unit_dock.gd",
 	"res://tests/test_battle_minimap.gd",
 	"res://tests/test_battle_ground_painter.gd",
+	"res://tests/test_battle_terrain_gpu_mask.gd",
 	"res://tests/test_spatial_grid.gd",
 	"res://tests/test_overlap.gd",
 	"res://tests/test_overlap_oracle.gd",
