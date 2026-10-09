@@ -18,6 +18,10 @@ const DEPLETED := Color("b46b59")
 
 var _row: HBoxContainer = null
 var _cards: Dictionary = {}
+## The last authoritative selection snapshot. Button.toggle_mode changes its own
+## pressed state BEFORE pressed.emit(), so a click must never become selection by
+## itself while the battle controller decides whether to accept the request.
+var _selection_snapshot: Array[int] = []
 var _art: UnitArt = null
 
 
@@ -147,6 +151,7 @@ func _make_card(body_id: int, unit_key: String) -> Dictionary:
 func update_bodies(bodies: Array[Dictionary], selected: Array[int]) -> void:
 	if _row == null:
 		return
+	_selection_snapshot = selected.duplicate()
 	var seen: Dictionary = {}
 	var position := 0
 	for body in bodies:
@@ -217,3 +222,10 @@ func request_selection(id: int, additive: bool) -> void:
 
 func _choose(id: int) -> void:
 	request_selection(id, Input.is_key_pressed(KEY_SHIFT))
+	# An actual toggle-button click already flipped button_pressed before this
+	# callback. Restore the last caller-approved state, including a synchronous
+	# update_bodies() made by an action_requested listener during the signal.
+	# A missing/replaced card is legal while that listener handles a casualty.
+	if _cards.has(id):
+		var button: Button = _cards[id]["button"]
+		button.set_pressed_no_signal(not button.disabled and _selection_snapshot.has(id))
