@@ -84,6 +84,20 @@ func _ready() -> void:
 	# because where the armies end up standing is a question about the ground.
 	_simulator.set_terrain_from_context(_context, _config)
 	var formations := BattleSetup.assign_default_formations(_simulator, _config)
+	# Opt-in E3 integration contract. No GPU combat is activated here: this
+	# snapshots the exact terrain the CPU simulation and BattleView already use.
+	# A future GPU backend must consume this capture, never regenerate terrain.
+	if OS.get_environment("PB_GPU_TERRAIN_PREFLIGHT") == "1":
+		var gpu_source := BattleTerrainGpuBridge.capture(_simulator.terrain, _simulator.units)
+		if bool(gpu_source["ready"]) and BattleTerrainGpuBridge.matches_source(
+				gpu_source, _simulator.terrain):
+			DebugLogger.info("GPU terrain preflight PASS: %d units, %d bytes, source %s" % [
+				int(gpu_source["units_checked"]),
+				(gpu_source["bytes"] as PackedByteArray).size(),
+				str(gpu_source["source_signature"])], "Battle")
+		else:
+			DebugLogger.error("GPU terrain preflight FAILED: %s (blocked %d)" % [
+				str(gpu_source["reason"]), int(gpu_source["blocked_count"])], "Battle")
 	_ai = BattleAI.create(_config)
 	_view.bind(_simulator, _context)
 	_field = _attach_soldier_field()
