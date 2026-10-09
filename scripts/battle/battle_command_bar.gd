@@ -18,6 +18,9 @@ var _forces: Label
 var _selection: Label
 var _map_button: Button
 var _pause_button: Button
+## Status can arrive before _ready creates its labels (e.g. scene assembly).
+## Only the newest snapshot matters; actions are never emitted by a status update.
+var _queued_status: Array = []
 
 
 static func _panel_style() -> StyleBoxFlat:
@@ -111,11 +114,17 @@ func _ready() -> void:
 			_map_button = button
 		elif entry[1] == "pause":
 			_pause_button = button
+	if _queued_status.size() == 6:
+		var snapshot := _queued_status.duplicate()
+		_queued_status.clear()
+		set_battle_status(bool(snapshot[0]), int(snapshot[1]), int(snapshot[2]),
+			int(snapshot[3]), bool(snapshot[4]), bool(snapshot[5]))
 
 
 func set_battle_status(deploying: bool, player_alive: int, enemy_alive: int,
 		selected_count: int, map_view: bool, paused: bool) -> void:
 	if _stage == null:
+		_queued_status = [deploying, player_alive, enemy_alive, selected_count, map_view, paused]
 		return
 	_stage.text = "DEPLOYMENT" if deploying else "BATTLE PAUSED" if paused else "IN BATTLE"
 	_stage.add_theme_color_override("font_color", GOLD if deploying else TEXT)
