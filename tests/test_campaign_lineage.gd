@@ -194,6 +194,9 @@ func _test_manual_birth_is_atomic_and_has_no_implicit_custody() -> void:
 	equal(family.to_dict(), before, "invalid guardian also rolls back the whole record")
 	check(not family.register_child("infant", "Infant", 0, "one", "two"),
 		"day zero is not a legal birth date")
+	check(not family.register_child(" infant ", "Invalid ID", 50, "one", "two"),
+		"noncanonical spaced IDs cannot bypass atomic registration")
+	equal(family.to_dict(), before, "whitespace rejection leaves the graph untouched")
 	check(family.register_child("infant", "Infant", 50, "one", "two"),
 		"explicitly authored birth creates one child")
 	equal(family.parents_of("infant"), ["one", "two"],
