@@ -41,6 +41,9 @@ var player_party: Party = null
 ## campaign without one gains the default design on load, so old saves open with a
 ## legal banner rather than a missing marker.
 var player_banner: BannerData = null
+## Persistent genealogy and guardianship. Soldiers remain owned by this state;
+## the lineage registry only stores identity links, never duplicate stats.
+var lineage: CampaignLineage = null
 
 var world_position: Vector2 = Vector2.ZERO
 var current_settlement_id: String = ""
@@ -73,6 +76,7 @@ var _config: GameConfig = null
 
 func _init(config: GameConfig = null) -> void:
 	_config = config
+	lineage = CampaignLineage.new()
 
 
 ## ---------- construction -------------------------------------------------
@@ -122,6 +126,7 @@ func register_soldier(soldier: Soldier) -> void:
 		soldier.id = next_soldier_id()
 	soldiers[soldier.id] = soldier
 	_track_soldier_index(soldier.id)
+	lineage.ensure_person(soldier.id, soldier.full_name())
 
 
 func soldier(soldier_id: String) -> Soldier:
@@ -287,6 +292,7 @@ func to_dict() -> Dictionary:
 		"player_gold": player_gold,
 		"player_party": player_party.to_dict() if player_party != null else {},
 		"player_banner": player_banner.to_dict() if player_banner != null else {},
+		"lineage": lineage.to_dict() if lineage != null else {},
 		"world_position": DataUtils.vec2_to(world_position),
 		"current_settlement_id": current_settlement_id,
 		"destination_id": destination_id,
@@ -317,6 +323,11 @@ static func from_dict(data: Dictionary, config: GameConfig) -> CampaignState:
 	state.destination_point = DataUtils.vec2_from(data.get("destination_point", [0.0, 0.0]))
 	state.destination_is_point = bool(data.get("destination_is_point", false))
 	state.flags = (data.get("flags", {}) as Dictionary).duplicate(true)
+	# Old campaign saves have no lineage field; a new registry will be
+	# populated with their soldiers below without changing saved identity.
+	var raw_lineage: Variant = data.get("lineage", {})
+	if typeof(raw_lineage) == TYPE_DICTIONARY:
+		state.lineage = CampaignLineage.from_dict(raw_lineage as Dictionary)
 	state._next_soldier_index = int(data.get("next_soldier_index", 1))
 
 	state.rng = RngService.new(state.campaign_seed)
@@ -340,6 +351,7 @@ static func from_dict(data: Dictionary, config: GameConfig) -> CampaignState:
 			s.id = str(key)
 		state.soldiers[s.id] = s
 		state._track_soldier_index(s.id)
+		state.lineage.ensure_person(s.id, s.full_name())
 
 	state.settlements.clear()
 	for key in (data.get("settlements", {}) as Dictionary).keys():
