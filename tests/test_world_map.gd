@@ -377,8 +377,11 @@ func _test_scene_flow() -> void:
 		press_escape.pressed = true
 		back.call("_unhandled_input", press_escape)
 		check(not journal_hud.chronicle_visible(), "Escape closes the journal before pause intercepts it")
-		check(not back.get_node("PauseMenu").is_open(),
-			"closing the journal does not accidentally open the pause menu")
+		var pause_menu := back.get("_pause") as PauseMenu
+		check(pause_menu != null, "world map owns its real pause menu")
+		if pause_menu != null:
+			check(not pause_menu.is_open(),
+				"closing the journal does not accidentally open the pause menu")
 		equal(state.clock.day, day_before, "journal keys leave campaign day untouched")
 		approx(state.clock.hour, hour_before, 0.001, "journal keys leave campaign hours untouched")
 
