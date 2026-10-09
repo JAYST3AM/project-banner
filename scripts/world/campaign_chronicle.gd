@@ -130,9 +130,16 @@ static func _from_battle(raw: Dictionary) -> Dictionary:
 	var day := int(raw.get("day", 0))
 	if battle_id.is_empty() or day < 1:
 		return {}
-	var outcome := str(raw.get("winner", "draw")).to_upper()
+	var outcome := "Draw"
+	match str(raw.get("winner", "draw")):
+		"player":
+			outcome = "Victory"
+		"enemy":
+			outcome = "Defeat"
+		"retreat":
+			outcome = "Withdrawal"
 	if bool(raw.get("withdrawal", false)):
-		outcome = "WITHDRAWAL"
+		outcome = "Withdrawal"
 	var enemy := str(raw.get("enemy", "Unknown opponent"))
 	var losses := maxi(0, int(raw.get("player_dead", 0)))
 	var enemies_down := maxi(0, int(raw.get("enemy_dead", 0)))
@@ -141,7 +148,7 @@ static func _from_battle(raw: Dictionary) -> Dictionary:
 		"kind": "battle",
 		"day": day,
 		"hour": float(raw.get("hour", 0.0)),
-		"title": "%s against %s" % [outcome.capitalize(), enemy],
+		"title": "%s against %s" % [outcome, enemy],
 		"detail": "%d fallen · %d enemies defeated · %d gold" % [
 			losses, enemies_down, int(raw.get("gold", 0))],
 		"person_id": "",
