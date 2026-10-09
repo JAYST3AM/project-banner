@@ -27,6 +27,7 @@ func run() -> void:
 	_test_a_hostile_formation_can_never_be_highlighted()
 	_test_a_drag_started_outside_the_map_never_navigates()
 	_test_functional_without_terrain_imagery()
+	_test_mismatched_aspect_ratio_navigation_and_zoom()
 	_complete()
 
 
@@ -382,3 +383,47 @@ func _motion(position: Vector2) -> InputEventMouseMotion:
 	var event := InputEventMouseMotion.new()
 	event.position = position
 	return event
+
+
+## PB-204: FIELD and _rect() in older cases happen to share the same 2:1
+## aspect ratio. This fixture deliberately does not, so x/y projection,
+## drag clamping and shrinking camera windows must be correct independently.
+func _test_mismatched_aspect_ratio_navigation_and_zoom() -> void:
+	section("non-matching field and panel aspect ratios pan and zoom independently")
+	var world := Vector2(360.0, 72.0)
+	var minimap := _minimap(world)
+	minimap.size = Vector2(420.0, 260.0)
+	var map := minimap._map_rect()
+	var samples: Array[Vector2] = [
+		Vector2.ZERO, world, world * 0.5,
+		Vector2(world.x * 0.25, world.y * 0.75),
+		Vector2(world.x * 0.9, world.y * 0.1),
+	]
+	for sample in samples:
+		var projected := BattleMinimap.world_to_map(sample, world, map)
+		var round_trip := BattleMinimap.map_to_world(projected, world, map)
+		check(round_trip.distance_to(sample) < 0.01,
+			"rectangular battlefield sample %s round trips without axis distortion" % str(sample))
+	var requested: Array[Vector2] = []
+	minimap.navigate_requested.connect(func(point: Vector2): requested.append(point))
+	var point_on_panel := map.position + Vector2(map.size.x * 0.25, map.size.y * 0.75)
+	minimap._gui_input(_press(point_on_panel, true))
+	equal(requested.size(), 1, "asymmetric map press navigates exactly once")
+	if requested.size() == 1:
+		check(requested[0].distance_to(Vector2(90.0, 54.0)) < 0.01,
+			"the pressed x and y fractions map to distinct world distances")
+	minimap._gui_input(_motion(map.end + Vector2(100.0, 200.0)))
+	equal(requested.size(), 2, "dragging beyond the map continues navigation")
+	if requested.size() == 2:
+		check(requested[1].distance_to(world) < 0.01,
+			"out-of-map drag clamps separately to both field boundaries")
+	minimap._gui_input(_press(map.end, false))
+	var wide := BattleMinimap.viewport_rect(world * 0.5, world, world, map)
+	var narrow := BattleMinimap.viewport_rect(world * 0.5, world * 0.25, world, map)
+	check(narrow.size.x < wide.size.x and narrow.size.y < wide.size.y,
+		"zooming inward shrinks both footprint axes on a non-square battlefield")
+	approx(narrow.size.x / map.size.x, 0.25, 0.001,
+		"zoomed footprint uses x scale of the field")
+	approx(narrow.size.y / map.size.y, 0.25, 0.001,
+		"zoomed footprint uses y scale independently")
+	minimap.free()
