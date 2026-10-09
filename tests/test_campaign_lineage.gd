@@ -126,6 +126,20 @@ func _test_round_trip_and_legacy_campaign_compatibility() -> void:
 	equal(restored.lineage.person(child.id).get("guardian_id"), "caregiver",
 		"guardian persists independently from parentage")
 	equal(restored.soldier(parent.id).full_name(), "Alena Vale", "soldier identity remains authoritative")
+	# Exercise the actual SaveManager file pipeline as well as the dictionary API.
+	# It is not enough for a nested dictionary to round trip in memory.
+	SaveManager.delete_all_saves()
+	check(SaveManager.save_campaign(state), "lineage campaign writes a real save file")
+	var from_file := SaveManager.load_campaign(SaveManager.SLOT_DEFAULT, GameManager.config())
+	check(from_file != null, "lineage campaign reloads from the real save manager")
+	if from_file != null:
+		equal(from_file.lineage.parents_of(child.id), [parent.id],
+			"parent relationships survive disk serialization")
+		equal(from_file.lineage.person(child.id).get("guardian_id"), "caregiver",
+			"guardian survives disk serialization")
+		equal(from_file.soldier(child.id).full_name(), "Tomas Vale",
+			"the same person still resolves to the authoritative soldier after load")
+	SaveManager.delete_all_saves()
 	# Copy the result rather than mutating live graph through an exported Dictionary.
 	var exported := restored.lineage.to_dict()
 	(exported["people"] as Dictionary).clear()
