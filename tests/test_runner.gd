@@ -46,6 +46,7 @@ const HARD_DEADLINE_S := 900
 const SUITES: Array[String] = [
 	"res://tests/test_core_services.gd",
 	"res://tests/test_campaign_flow.gd",
+	"res://tests/test_campaign_chronicle.gd",
 	"res://tests/test_banner.gd",
 	"res://tests/test_world_map.gd",
 	"res://tests/test_world_chunks.gd",

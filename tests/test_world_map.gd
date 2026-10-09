@@ -359,6 +359,32 @@ func _test_scene_flow() -> void:
 	check(GameManager.campaign == state, "the same campaign survives the town round trip")
 	equal(state.settlements.size(), 4, "world is intact after the round trip")
 
+	# Verify the real map's J / Escape input route, rather than only calling
+	# the presentation widget in isolation. Opening history must preserve map
+	# selection and must not advance the simulation clock.
+	var journal_hud := back.get_node_or_null("HUD") as WorldHud
+	check(journal_hud != null, "world scene has a chronicle-capable HUD")
+	if journal_hud != null:
+		var day_before := state.clock.day
+		var hour_before := state.clock.hour
+		var press_j := InputEventKey.new()
+		press_j.keycode = KEY_J
+		press_j.pressed = true
+		back.call("_unhandled_input", press_j)
+		check(journal_hud.chronicle_visible(), "J opens the journal through the real map input route")
+		var press_escape := InputEventKey.new()
+		press_escape.keycode = KEY_ESCAPE
+		press_escape.pressed = true
+		back.call("_unhandled_input", press_escape)
+		check(not journal_hud.chronicle_visible(), "Escape closes the journal before pause intercepts it")
+		var pause_menu := back.get("_pause") as PauseMenu
+		check(pause_menu != null, "world map owns its real pause menu")
+		if pause_menu != null:
+			check(not pause_menu.is_open(),
+				"closing the journal does not accidentally open the pause menu")
+		equal(state.clock.day, day_before, "journal keys leave campaign day untouched")
+		approx(state.clock.hour, hour_before, 0.001, "journal keys leave campaign hours untouched")
+
 	# The debug panel must be creatable and must not need live state to report.
 	var panel := DebugPanel.new()
 	not_null(panel, "debug panel constructs")

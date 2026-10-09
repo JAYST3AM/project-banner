@@ -461,6 +461,8 @@ func _on_arrived(settlement_id: String) -> void:
 	var settlement := _state.settlement(settlement_id)
 	if settlement == null:
 		return
+	CampaignChronicle.record(_state, "travel", "Arrived at %s" % settlement.name,
+		"The company reached %s." % settlement.name, "", settlement.id)
 	_hud.set_hint("Arrived at %s on %s." % [settlement.name, _state.clock.full_string()])
 	_select(settlement)
 	_refresh()
@@ -664,7 +666,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	# and a paused screen does not receive input at all - so the menu, which is set to keep running,
 	# hears the second Esc itself.
 	if event.is_action_pressed("ui_cancel") and _pause != null and not _pause.is_open():
-		_pause.open()
+		# Chronicle is an overlay, not a reason to open the pause menu.
+		# ui_cancel is intercepted here BEFORE _handle_key sees Escape.
+		if _hud != null and _hud.chronicle_visible():
+			_hud.toggle_chronicle()
+		else:
+			_pause.open()
 		get_viewport().set_input_as_handled()
 		return
 
@@ -896,9 +903,14 @@ func _handle_key(event: InputEventKey) -> void:
 		KEY_3:
 			_on_speed_requested("fast")
 		KEY_ESCAPE:
-			_deselect()
+			if _hud.chronicle_visible():
+				_hud.toggle_chronicle()
+			else:
+				_deselect()
 		KEY_F5:
 			_on_save_requested()
+		KEY_J:
+			_hud.toggle_chronicle()
 		KEY_R:
 			_travel.clear_destination()
 			_hud.set_hint("Travel cancelled.")

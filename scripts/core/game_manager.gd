@@ -38,6 +38,10 @@ func new_campaign(campaign_name: String = "", seed_value: int = 0, banner: Banne
 		campaign.player_banner = banner
 	campaign.campaign_id = generate_campaign_id()
 	campaign.created_at = Time.get_datetime_string_from_system(false, true)
+	# Founding is the first real entry in the company's chronicle. Only a
+	# newly created campaign gets it; loading an old save never adds one.
+	CampaignChronicle.record(campaign, "milestone", "Company founded",
+		"%s began its journey." % campaign.campaign_name)
 
 	DebugLogger.info("new campaign '%s' (seed %d, id %s)" % [
 		campaign.campaign_name, campaign.campaign_seed, campaign.campaign_id,

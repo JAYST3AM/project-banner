@@ -31,6 +31,7 @@ var _hint: Label = null
 var _speed_buttons: Dictionary = {}
 var _selection: SettlementPanel = null
 var _button_styles: Dictionary = {}
+var _chronicle_panel: CampaignChroniclePanel = null
 
 var _state: CampaignState = null
 var _travel: TravelService = null
@@ -80,6 +81,13 @@ func _build() -> void:
 		_stat_values[stat_name] = value
 		_stats.add_child(value)
 
+	# A deliberately visible way to access campaign history. It is not a
+	# gameplay action: the battle and travel services stay authoritative.
+	var chronicle_button := PixelStyle.text_button("CHRONICLE  [J]", _button_styles,
+		11, Vector2(194.0, 31.0), UiTheme.TEXT, UiTheme.DIM)
+	chronicle_button.pressed.connect(toggle_chronicle)
+	top_box.add_child(chronicle_button)
+
 	# --- time controls (top-centre) --------------------------------------
 	# The owner: "I want the pause, normal and faster in the top center of the hud, and I want
 	# symbols not words." A full-width strip with a centred box keeps the cluster centred whatever
@@ -125,6 +133,10 @@ func _build() -> void:
 	_selection.closed.connect(func() -> void: _selection.hide_panel())
 	add_child(_selection)
 
+	_chronicle_panel = CampaignChroniclePanel.new()
+	_chronicle_panel.close_requested.connect(func() -> void: _chronicle_panel.hide())
+	add_child(_chronicle_panel)
+
 
 ## ---------- public API ---------------------------------------------------
 
@@ -142,6 +154,22 @@ func hide_settlement() -> void:
 
 func shown_settlement_id() -> String:
 	return _shown_settlement_id
+
+
+
+## The chronicle refreshes only when opened, not on every render frame.
+func toggle_chronicle() -> void:
+	if _chronicle_panel == null or _state == null:
+		return
+	if _chronicle_panel.visible:
+		_chronicle_panel.hide()
+	else:
+		_chronicle_panel.set_events(CampaignChronicle.recent(_state))
+		_chronicle_panel.show()
+
+
+func chronicle_visible() -> bool:
+	return _chronicle_panel != null and _chronicle_panel.visible
 
 
 func set_hint(text: String) -> void:
