@@ -47,6 +47,8 @@ var _drill_step := 0
 ## and the popups. Null means the canvas path is drawing every soldier, which is the fallback -
 ## and the thing the measurement compares against. See [SoldierField] and D-107.
 var _field: SoldierField = null
+## Explicitly selected campaign GPU-collision backend; default CPU path unchanged.
+var _gpu_terrain: BattleGpuTerrainCollider = null
 ## The zoom below which health bars and facing pips are dropped: at a zoomed-out camera they
 ## are sub-pixel, and they are the two batches whose instances scale with the army.
 var _detail_zoom := 2.5
@@ -83,6 +85,22 @@ func _ready() -> void:
 	# the same field every time it is replayed. It is built before the armies are formed
 	# because where the armies end up standing is a question about the ground.
 	_simulator.set_terrain_from_context(_context, _config)
+	if OS.get_environment("PB_GPU_TERRAIN_BACKEND") == "1":
+		var deployment := BattleGpuDeployment.plan(_simulator.terrain, _simulator.units,
+			BattleSetup.deployment_zones(_config))
+		if not BattleGpuDeployment.apply(deployment, _simulator.units):
+			push_error("GPU terrain deployment FAILED: %s" % str(deployment["reason"]))
+			get_tree().quit(1)
+			return
+		var gpu_report := BattleTerrainGpuBridge.capture(_simulator.terrain, _simulator.units)
+		_gpu_terrain = BattleGpuTerrainCollider.new()
+		if not _gpu_terrain.open(gpu_report, _simulator.terrain, _simulator.units.size()):
+			push_error("GPU terrain activation FAILED: %s" % _gpu_terrain.last_error)
+			_gpu_terrain.close()
+			get_tree().quit(1)
+			return
+		DebugLogger.info("GPU terrain ACTIVE: collision only, %d legal deployments repaired" % [
+			int(deployment["repaired"])], "Battle")
 	var formations := BattleSetup.assign_default_formations(_simulator, _config)
 	# Opt-in E3 integration contract. No GPU combat is activated here: this
 	# snapshots the exact terrain the CPU simulation and BattleView already use.
@@ -400,8 +418,31 @@ func _process(delta: float) -> void:
 		for i in ticks:
 			if not _simulator.is_running():
 				break
+			var previous := PackedVector2Array()
+			if _gpu_terrain != null:
+				if not _gpu_terrain.matches_terrain(_simulator.terrain):
+					push_error("GPU terrain source changed mid-battle; refusing fallback")
+					get_tree().quit(1)
+					return
+				for unit in _simulator.units:
+					previous.append(unit.position)
 			_ai.update(_simulator, _clock.step)
 			var events := _simulator.step(_clock.step)
+			if _gpu_terrain != null:
+				var proposed := PackedVector2Array()
+				for unit in _simulator.units:
+					proposed.append(unit.position)
+				var settled := _gpu_terrain.resolve(previous, proposed)
+				if settled.size() != proposed.size():
+					push_error("GPU terrain collision FAILED: %s" % _gpu_terrain.last_error)
+					get_tree().quit(1)
+					return
+				for index in settled.size():
+					var soldier: BattleUnit = _simulator.units[index]
+					if soldier.is_alive() and soldier.position != settled[index]:
+						soldier.position = settled[index]
+						if _simulator.grid != null:
+							_simulator.grid.native_moved(soldier)
 			_view.add_events(events)
 			if _journal != null:
 				_journal.observe(_simulator)
@@ -1007,3 +1048,10 @@ func _resolve_and_show(retreated: bool) -> void:
 	if _journal != null:
 		_journal.close()
 	SceneManager.change_scene("battle_results", {"result": result, "context": _context})
+
+
+## Release the battle's GPU buffers when leaving for results or world map.
+func _exit_tree() -> void:
+	if _gpu_terrain != null:
+		_gpu_terrain.close()
+		_gpu_terrain = null
