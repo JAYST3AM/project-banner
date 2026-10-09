@@ -121,6 +121,10 @@ func recruit(settlement: Settlement, unit_type_id: String) -> Dictionary:
 	state.register_soldier(soldier)
 	state.player_party.add_member(soldier.id)
 	settlement.recruit_pool[unit_type_id] = available_at(settlement, unit_type_id) - 1
+	CampaignChronicle.record(state, "recruitment",
+		"%s joined the company" % soldier.full_name(),
+		"Recruited at %s for %d gold." % [settlement.name, cost],
+		soldier.id, settlement.id)
 
 	DebugLogger.info("recruited %s (%s, %d gold) at %s - %d gold remaining, %d/%d active" % [
 		soldier.full_name(), units.display_name(unit_type_id), cost, settlement.name,
