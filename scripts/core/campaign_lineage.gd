@@ -68,6 +68,17 @@ func children_of(person_id: String) -> Array[String]:
 	return result
 
 
+## Resolve names without reaching into Soldier objects or changing the graph.
+## Unknown references stay explicit instead of inventing a character.
+func names_for(person_ids: Array[String]) -> Array[String]:
+	var names: Array[String] = []
+	for id in person_ids:
+		var record := person(id)
+		var name := str(record.get("name", "")).strip_edges()
+		names.append(name if not name.is_empty() else id)
+	return names
+
+
 func is_ancestor_of(ancestor_id: String, descendant_id: String) -> bool:
 	if not _people.has(ancestor_id) or not _people.has(descendant_id):
 		return false
