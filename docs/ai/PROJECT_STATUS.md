@@ -4,11 +4,11 @@ Authoritative short state for agent coordination. Refreshed at every integration
 History lives in `docs/PROJECT_BANNER_STATUS.md` and `docs/DECISIONS.md`; Jay's view is
 `docs/ROADMAP.md`.
 
-**Refreshed:** 2026-10-09 (workflow setup + Kanban retirement, merged to `main`)
+**Refreshed:** 2026-10-09 (workflow merged to `main`; E1 Stage-2 battery run and reviewed)
 
 | Field | Value |
 | --- | --- |
-| `main` SHA (origin) | `a3dcfdfc6b40dc02e1b72a5829739e290e09555d` — carries the workflow records; the previous verified development main was `d3d0b2a` |
+| `main` SHA (origin) | Take the live SHA from `git ls-remote origin main` — never from this file. Last workflow-integration commit: `b36e428` (2026-10-09). Previous verified development main: `d3d0b2a`. |
 | Jay's local checkout | branch `main` @ `70a6017f18f938d95ad272c5cf5a06fdf0733534` (behind origin, **dirty, read-only**) |
 | Active task ID | E1 — disabled-mode GPU terrain collision integration (Slice E1) |
 | Active implementer | GPT-6 (primary programmer); E1 code was produced by the previously-authorised implementer worker |
@@ -16,11 +16,11 @@ History lives in `docs/PROJECT_BANNER_STATUS.md` and `docs/DECISIONS.md`; Jay's 
 | Feature branch | `pb-e1-disabled-collision` |
 | Candidate SHA | `e1cfc956d048dd6abbb127d022fead49c1f97bc1` |
 | Candidate worktree | `F:/VSC Projects/Project Banner/.worktrees/t_4c9b65f3` (clean, warm) |
-| Current stage | Stage C — verification, partially complete (Stage-2 benchmark battery outstanding) |
-| Verification result | **Gate A GREEN**: 48 suites / 11,244 assertions / 0 failures / drift none (15:51, 2026-10-09). Real-GPU Stage-2 paired benchmark + determinism battery **NOT RUN**. |
-| Merge authorization state | **MERGE_HELD** — GPT-6 directive: "merge on hold"; publish was repaired to `e1cfc95` on origin, certification authorised to continue at that exact SHA. No merge authorisation issued. |
-| Known blockers | (1) Stage-2 battery needs an exclusive machine — must be run with `godot` process count 0, one run at a time. (2) E1's accepted-but-unmerged state blocks E2/E3 authorisation. |
-| Next required action | Run the 8-run Stage-2 battery (recipe: `project-banner-mcp/docs/tasks/e1-stage2/`, runner `tools/e1_stage2_run.sh`), analyse with `tools/e1_stage2_analyze.py`, send `[PB-RESULT] E1` to GPT-6, await accept/reject. |
+| Current stage | Stage D — E1 Stage-2 battery **COMPLETE** (2026-10-09); GPT-6 reviewed. Determinism PASS; criterion 7 (GPU resource cleanup) FAIL; corrective code awaited from GPT-6. |
+| Verification result | **Gate A GREEN**: 48 suites / 11,244 assertions / 0 failures / drift none (15:51). **Stage-2 real-GPU battery GREEN on behaviour**: 8/8 runs EXIT 0, 0 errors, per-tick checksums identical to baseline (600: 147/147 ticks; 20,000: 7/7), performance neutral (20K median frame 117.647 ms both sides). **Open:** +1 leaked StorageBuffer vs baseline at exit — GPT-6 ruling: FAIL, fix the whole cleanup path. |
+| Merge authorization state | **MERGE_HELD** — GPT-6: "E1 remains merge-held… these corrections need to pass verification first." Implementation judged sound; correction required before merge. |
+| Known blockers | (1) E1 correction outstanding (criterion 7). (2) E2/E3 remain unauthorised — GPT-6 takes over writing E2’s implementation code once E1 closes. |
+| Next required action | Await GPT-6’s corrective code: (a) a runtime check that the uploaded binding-14 bytes are the documented disabled mask, (b) a complete GPU resource cleanup path. Then re-run the paired battery + gate on the new candidate and return `[PB-RESULT] E1`. Do not implement either — GPT-6 owns code. |
 
 ## Authorization ledger
 
