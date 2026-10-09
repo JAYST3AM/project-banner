@@ -533,6 +533,8 @@ var uniform_set: RID
 ## Dev probe preserves its historical combat baseline. Campaign battles opt
 ## into terrain-aware GPU soldier collision explicitly.
 var enable_gpu_terrain_collision := false
+## Test-only GPU upload probe. Off during normal simulation and benchmarks.
+var verify_terrain_mask := false
 ## The bodies, ten numbers each: anchor.xy, forward.xy, files, ranks, spacing, engaged.
 ## Advanced on the CPU - six of them - and read by every soldier in the shader.
 var _body_state := PackedFloat32Array()
@@ -950,6 +952,8 @@ func _parse_args() -> void:
 			out_dir = arg.substr(6)
 		elif arg.begins_with("--seconds="):
 			run_seconds = maxf(0.0, float(arg.substr(10)))
+		elif arg == "--verify-terrain-mask":
+			verify_terrain_mask = true
 		elif arg.begins_with("--shot-at="):
 			shot_at = maxf(0.0, float(arg.substr(10)))
 
@@ -1059,6 +1063,16 @@ func _build() -> void:
 	uniforms.append(_uniform(13, buf_tallies))
 	uniforms.append(_uniform(14, buf_terrain))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
+	if verify_terrain_mask:
+		# Read back the actual GPU buffer, not just the CPU-side mask.
+		var expected := PackedInt32Array([1, 1, 1000, 0, 0]).to_byte_array()
+		if not uniform_set.is_valid() or terrain_bytes != expected or \
+				rd.buffer_get_data(buf_terrain) != expected:
+			push_error("gpu crowd: binding 14 disabled terrain mask upload verification FAILED")
+			set_process(false)
+			get_tree().quit(1)
+			return
+		print("gpu crowd: binding 14 disabled terrain mask upload PASS (20 bytes)")
 
 	_build_ground()
 	_build_view()
@@ -2865,6 +2879,23 @@ func _exit_tree() -> void:
 	if _journal != null:
 		_journal.close()
 		_journal = null
+	_release_gpu_resources()
+
+
+## Explicitly release everything this scene created on the shared rendering device.
+## Uniform sets depend on buffers; pipelines depend on shaders, so free owners first.
+func _release_gpu_resources() -> void:
+	if rd == null:
+		return
+	var owned: Array[RID] = [
+		uniform_set, pipeline, shader,
+		buf_state, buf_push, buf_cursor, buf_slots, buf_params,
+		buf_counters, buf_tallies, buf_meta, buf_damage, buf_corr,
+		buf_attrs, buf_bodies, buf_stats, buf_targets, buf_terrain,
+	]
+	for resource in owned:
+		if resource.is_valid():
+			rd.free_rid(resource)
 
 
 ## The arrow node: one plain Node2D whose draw signal paints the shafts, above the men and their
