@@ -526,9 +526,13 @@ var buf_corr: RID
 var buf_attrs: RID
 var buf_bodies: RID
 var buf_stats: RID
+var buf_terrain: RID
 ## The remembered opponent and its next awareness tick, one ivec4 a soldier. See the shader.
 var buf_targets: RID
 var uniform_set: RID
+## Dev probe preserves its historical combat baseline. Campaign battles opt
+## into terrain-aware GPU soldier collision explicitly.
+var enable_gpu_terrain_collision := false
 ## The bodies, ten numbers each: anchor.xy, forward.xy, files, ranks, spacing, engaged.
 ## Advanced on the CPU - six of them - and read by every soldier in the shader.
 var _body_state := PackedFloat32Array()
@@ -1020,6 +1024,11 @@ func _build() -> void:
 	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
 	buf_bodies = _storage(_body_state.to_byte_array(), _bodies * 8 * 4)
+	# E1: the disabled mask keeps the original benchmark behaviour while the
+	# binding and shader functions are integrated. A null terrain yields a
+	# 1x1 disabled grid that terrain_slide() passes through unchanged.
+	var terrain_bytes := BattleTerrainGpuMask.from_terrain(null).to_byte_array()
+	buf_terrain = _storage(terrain_bytes, terrain_bytes.size())
 	# Every soldier starts with nobody remembered and a look phase taken from its own index, so
 	# the first look is staggered across the cadence rather than massed on tick one. This is the
 	# schedule D-080 requires to be a property of the soldier, not of the moment.
@@ -1048,6 +1057,7 @@ func _build() -> void:
 	uniforms.append(_uniform(11, buf_targets))
 	uniforms.append(_uniform(12, buf_stats))
 	uniforms.append(_uniform(13, buf_tallies))
+	uniforms.append(_uniform(14, buf_terrain))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
 
 	_build_ground()
@@ -1624,6 +1634,12 @@ func _advance_bodies() -> void:
 ## round is two passes - accumulate, then apply - because a round that read its neighbours while
 ## writing its own position made every run of the same battle come out differently.
 func _run_tick() -> void:
+	# E1: enabled terrain collision is gated out. The shader binding is wired,
+	# but an enabled request must fail visibly and never run with a disabled mask.
+	if enable_gpu_terrain_collision:
+		push_error("gpu crowd: enabled terrain collision is not supported in this slice")
+		_freeze()
+		return
 	# The cadence reads the simulation tick, so the params buffer is refreshed before every
 	# dispatch. It is one buffer write a tick and it is what makes the schedule deterministic:
 	# no wall clock is ever read to decide when a soldier looks.
