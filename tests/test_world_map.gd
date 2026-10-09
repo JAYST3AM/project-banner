@@ -369,12 +369,16 @@ func _test_scene_flow() -> void:
 		var hour_before := state.clock.hour
 		var press_j := InputEventKey.new()
 		press_j.keycode = KEY_J
-		back.call("_handle_key", press_j)
-		check(journal_hud.chronicle_visible(), "J opens the actual campaign journal")
+		press_j.pressed = true
+		back.call("_unhandled_input", press_j)
+		check(journal_hud.chronicle_visible(), "J opens the journal through the real map input route")
 		var press_escape := InputEventKey.new()
 		press_escape.keycode = KEY_ESCAPE
-		back.call("_handle_key", press_escape)
-		check(not journal_hud.chronicle_visible(), "Escape closes the journal on the real map")
+		press_escape.pressed = true
+		back.call("_unhandled_input", press_escape)
+		check(not journal_hud.chronicle_visible(), "Escape closes the journal before pause intercepts it")
+		check(not back.get_node("PauseMenu").is_open(),
+			"closing the journal does not accidentally open the pause menu")
 		equal(state.clock.day, day_before, "journal keys leave campaign day untouched")
 		approx(state.clock.hour, hour_before, 0.001, "journal keys leave campaign hours untouched")
 
