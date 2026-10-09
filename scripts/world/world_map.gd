@@ -898,7 +898,10 @@ func _handle_key(event: InputEventKey) -> void:
 		KEY_3:
 			_on_speed_requested("fast")
 		KEY_ESCAPE:
-			_deselect()
+			if _hud.chronicle_visible():
+				_hud.toggle_chronicle()
+			else:
+				_deselect()
 		KEY_F5:
 			_on_save_requested()
 		KEY_J:
