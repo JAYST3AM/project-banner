@@ -92,6 +92,12 @@ func _ready() -> void:
 			push_error("GPU terrain deployment FAILED: %s" % str(deployment["reason"]))
 			get_tree().quit(1)
 			return
+		# The spatial backend keeps a mirrored roster; pre-battle deployment is
+		# a real movement, so synchronize it before formations or AI can query.
+		if _simulator.grid != null:
+			for unit in _simulator.units:
+				if unit.is_alive():
+					_simulator.grid.native_moved(unit)
 		var gpu_report := BattleTerrainGpuBridge.capture(_simulator.terrain, _simulator.units)
 		_gpu_terrain = BattleGpuTerrainCollider.new()
 		if not _gpu_terrain.open(gpu_report, _simulator.terrain, _simulator.units.size()):
