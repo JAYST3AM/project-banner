@@ -103,7 +103,7 @@ func is_ancestor_of(ancestor_id: String, descendant_id: String) -> bool:
 	var to_visit: Array[String] = parents_of(descendant_id)
 	var seen: Dictionary = {}
 	while not to_visit.is_empty():
-		var current := to_visit.pop_back()
+		var current: String = str(to_visit.pop_back())
 		if current == ancestor_id:
 			return true
 		if seen.has(current):
@@ -123,7 +123,7 @@ func set_parents(child_id: String, first_parent_id: String,
 		return false
 	var wanted: Array[String] = []
 	for candidate in [first_parent_id, second_parent_id]:
-		var id := candidate.strip_edges()
+		var id: String = str(candidate).strip_edges()
 		if id.is_empty():
 			continue
 		if id == child_id or wanted.has(id) or not _people.has(id):
