@@ -113,12 +113,22 @@ func _test_stage_transition_and_label_reset() -> void:
 
 
 func _test_pre_ready_status_is_safe() -> void:
-	section("an early state update cannot create a partial command strip")
+	section("pre-ready status is replayed, with only the latest caller snapshot kept")
 	var bar := BattleCommandBar.new()
-	bar.set_battle_status(false, 1, 2, 1, true, true)
-	check(bar._stage == null, "pre-ready update does not fabricate UI children")
+	var emitted: Array[String] = []
+	bar.action_requested.connect(func(action: String): emitted.append(action))
+	bar.set_battle_status(false, 1, 2, 1, false, false)
+	bar.set_battle_status(false, 5, 7, 2, true, true)
+	check(bar._stage == null, "pre-ready updates do not fabricate half-built UI")
 	runner.add_child(bar)
-	check(bar._stage != null, "normal ready builds the command strip")
+	check(bar._stage != null, "ready builds the command strip normally")
 	if bar._stage != null:
-		equal(bar._stage.text, "DEPLOYMENT", "initial stage is still a valid default")
+		equal(bar._stage.text, "BATTLE PAUSED", "latest queued stage applies when ready")
+		equal(bar._forces.text, "OUR ARMY  5    /    ENEMY  7",
+			"latest queued troop counts replace the earlier ones")
+		equal(bar._selection.text, "2 FORMATIONS SELECTED",
+			"latest queued selection count is retained")
+		equal(bar._map_button.text, "T  RETURN", "queued map mode is retained")
+		equal(bar._pause_button.text, "P  RESUME", "queued pause state is retained")
+	equal(emitted.size(), 0, "replaying a status snapshot never emits a command")
 	bar.free()
