@@ -6,6 +6,9 @@ func run() -> void:
 	await _tick()
 	_test_actions_are_forwarded_without_simulation()
 	_test_status_and_selection_labels()
+	_test_every_visible_button_emits_its_own_action()
+	_test_stage_transition_and_label_reset()
+	_test_pre_ready_status_is_safe()
 	_complete()
 
 
@@ -51,4 +54,71 @@ func _test_status_and_selection_labels() -> void:
 	bar.set_battle_status(false, 9, 7, 0, false, false)
 	equal(bar._stage.text, "IN BATTLE", "active state is visible")
 	equal(bar._selection.text, "SELECT A FORMATION", "empty selection is visible")
+	bar.free()
+
+
+## PB-202: test the seven REAL controls, not just _invoke("hold").
+## The action array is checked by index so a duplicated/miswired action cannot
+## pass merely because seven signals were emitted.
+func _test_every_visible_button_emits_its_own_action() -> void:
+	section("all seven command controls forward exactly their own action")
+	var bar := BattleCommandBar.new()
+	runner.add_child(bar)
+	var expected: Array[String] = ["hold", "engage", "line", "column", "loose", "map", "pause"]
+	var captions: Array[String] = [
+		"H  HOLD", "U  ENGAGE", "L  LINE", "C  COLUMN",
+		"O  LOOSE", "T  MAP", "P  PAUSE"]
+	var controls := bar.find_children("*", "Button", true, false)
+	equal(controls.size(), expected.size(), "exactly seven command controls are present")
+	var actual: Array[String] = []
+	bar.action_requested.connect(func(action: String): actual.append(action))
+	for i in mini(controls.size(), expected.size()):
+		var button := controls[i] as Button
+		check(button != null, "control %d is a button" % i)
+		if button == null:
+			continue
+		equal(button.text, captions[i], "control %d has the documented caption" % i)
+		button.pressed.emit()
+		equal(actual.size(), i + 1, "control %d emits exactly one action" % i)
+		if actual.size() == i + 1:
+			equal(actual[i], expected[i], "control %d forwards the correct action" % i)
+	bar.free()
+
+
+func _test_stage_transition_and_label_reset() -> void:
+	section("deployment, active, paused and resumed transitions reset every label")
+	var bar := BattleCommandBar.new()
+	runner.add_child(bar)
+	bar.set_battle_status(true, 40, 35, 0, false, false)
+	equal(bar._stage.text, "DEPLOYMENT", "starts at deployment")
+	equal(bar._forces.text, "OUR ARMY  40    /    ENEMY  35",
+		"both initial forces are exact, not inferred")
+	bar.set_battle_status(false, 39, 32, 3, true, false)
+	equal(bar._stage.text, "IN BATTLE", "start transitions to live battle")
+	equal(bar._selection.text, "3 FORMATIONS SELECTED", "three selected formations are counted")
+	equal(bar._map_button.text, "T  RETURN", "map action says return in map mode")
+	equal(bar._pause_button.text, "P  PAUSE", "unpaused battle offers pause")
+	bar.set_battle_status(false, 31, 18, 1, true, true)
+	equal(bar._stage.text, "BATTLE PAUSED", "pause transitions to paused")
+	equal(bar._forces.text, "OUR ARMY  31    /    ENEMY  18",
+		"casualties update while paused")
+	equal(bar._selection.text, "1 FORMATION SELECTED", "singular count uses singular label")
+	equal(bar._pause_button.text, "P  RESUME", "pause control offers resume")
+	bar.set_battle_status(false, 30, 17, 0, false, false)
+	equal(bar._stage.text, "IN BATTLE", "resume restores live stage")
+	equal(bar._selection.text, "SELECT A FORMATION", "clearing selection drops old count")
+	equal(bar._map_button.text, "T  MAP", "closing overview restores map action")
+	equal(bar._pause_button.text, "P  PAUSE", "resuming restores pause action")
+	bar.free()
+
+
+func _test_pre_ready_status_is_safe() -> void:
+	section("an early state update cannot create a partial command strip")
+	var bar := BattleCommandBar.new()
+	bar.set_battle_status(false, 1, 2, 1, true, true)
+	check(bar._stage == null, "pre-ready update does not fabricate UI children")
+	runner.add_child(bar)
+	check(bar._stage != null, "normal ready builds the command strip")
+	if bar._stage != null:
+		equal(bar._stage.text, "DEPLOYMENT", "initial stage is still a valid default")
 	bar.free()
