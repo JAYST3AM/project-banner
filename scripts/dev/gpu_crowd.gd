@@ -533,6 +533,8 @@ var uniform_set: RID
 ## Dev probe preserves its historical combat baseline. Campaign battles opt
 ## into terrain-aware GPU soldier collision explicitly.
 var enable_gpu_terrain_collision := false
+## A terrain-aware tick is legal only after the enabled mask is validated on the GPU.
+var _terrain_collision_ready := false
 ## Test-only GPU upload probe. Off during normal simulation and benchmarks.
 var verify_terrain_mask := false
 ## The bodies, ten numbers each: anchor.xy, forward.xy, files, ranks, spacing, engaged.
@@ -954,6 +956,8 @@ func _parse_args() -> void:
 			run_seconds = maxf(0.0, float(arg.substr(10)))
 		elif arg == "--verify-terrain-mask":
 			verify_terrain_mask = true
+		elif arg == "--terrain-collision":
+			enable_gpu_terrain_collision = true
 		elif arg.begins_with("--shot-at="):
 			shot_at = maxf(0.0, float(arg.substr(10)))
 
@@ -985,6 +989,15 @@ func _build() -> void:
 	if field.y < needed_depth:
 		field.y = needed_depth
 	grid = Vector2i(ceili(field.x / LG_CELL), ceili(field.y / LG_CELL))
+	# The visible ground and collision mask must originate from the SAME terrain.
+	# Disabled mode still generates ground as before, but uploads a disabled mask.
+	var ground := BattlefieldTerrain.generate(seed_value, field, GameManager.config())
+	_terrain_collision_ready = false
+	if enable_gpu_terrain_collision and (not ground.is_valid() or verify_terrain_mask):
+		push_error("gpu crowd: enabled terrain requires a valid battlefield; disabled-mask verification cannot run simultaneously")
+		set_process(false)
+		get_tree().quit(1)
+		return
 	var cells := grid.x * grid.y
 
 	var state := PackedFloat32Array()
@@ -998,6 +1011,25 @@ func _build() -> void:
 	defence_mitigation = battle_config.get_float("battle.defence_mitigation", 0.05)
 	_load_unit_stats()
 	_deploy(state, meta, attrs)
+	var terrain_mask := BattleTerrainGpuMask.from_terrain(
+		ground if enable_gpu_terrain_collision else null)
+	if enable_gpu_terrain_collision:
+		# Fail closed: never dispatch against a null, disabled or incomplete grid.
+		if terrain_mask.size() != BattleTerrainGpuMask.HEADER_INTS + ground.cols * ground.rows or terrain_mask[3] != 1:
+			push_error("gpu crowd: enabled terrain mask preparation failed")
+			set_process(false)
+			get_tree().quit(1)
+			return
+		# E3 will provide legal deployment. E2-A rejects illegal spawns rather
+		# than silently moving a soldier or dropping collision.
+		for soldier in agents:
+			var origin := Vector2(state[soldier * 4], state[soldier * 4 + 1])
+			if BattleTerrainGpuMask.is_blocked(terrain_mask, origin):
+				push_error("gpu crowd: soldier %d deployed on blocked terrain at %s" % [
+					soldier, str(origin)])
+				set_process(false)
+				get_tree().quit(1)
+				return
 	# What each body's men can strike at, needed by the march whether or not a journal is open: a
 	# body of archers holds at its own range (see [method _engage_room]).
 	_refresh_body_reach()
@@ -1028,10 +1060,9 @@ func _build() -> void:
 	buf_corr = _storage(PackedByteArray(), agents * 16)
 	buf_attrs = _storage(attrs.to_byte_array(), agents * 16)
 	buf_bodies = _storage(_body_state.to_byte_array(), _bodies * 8 * 4)
-	# E1: the disabled mask keeps the original benchmark behaviour while the
-	# binding and shader functions are integrated. A null terrain yields a
-	# 1x1 disabled grid that terrain_slide() passes through unchanged.
-	var terrain_bytes := BattleTerrainGpuMask.from_terrain(null).to_byte_array()
+	# Disabled remains the default; explicit opt-in uploads the full terrain.
+	# An enabled request is never replaced with a disabled buffer.
+	var terrain_bytes := terrain_mask.to_byte_array()
 	buf_terrain = _storage(terrain_bytes, terrain_bytes.size())
 	# Every soldier starts with nobody remembered and a look phase taken from its own index, so
 	# the first look is staggered across the cadence rather than massed on tick one. This is the
@@ -1063,6 +1094,17 @@ func _build() -> void:
 	uniforms.append(_uniform(13, buf_tallies))
 	uniforms.append(_uniform(14, buf_terrain))
 	uniform_set = rd.uniform_set_create(uniforms, shader, 0)
+	if enable_gpu_terrain_collision:
+		# Verify what was uploaded to the actual GPU buffer, not just the CPU
+		# mask. A failed uniform set or upload never reaches dispatch.
+		if not uniform_set.is_valid() or rd.buffer_get_data(buf_terrain) != terrain_bytes:
+			push_error("gpu crowd: enabled terrain mask GPU upload verification FAILED")
+			set_process(false)
+			get_tree().quit(1)
+			return
+		_terrain_collision_ready = true
+		print("gpu crowd: enabled terrain mask PASS (%dx%d, %d bytes)" % [
+			ground.cols, ground.rows, terrain_bytes.size()])
 	if verify_terrain_mask:
 		# Read back the actual GPU buffer, not just the CPU-side mask.
 		var expected := PackedInt32Array([1, 1, 1000, 0, 0]).to_byte_array()
@@ -1074,7 +1116,7 @@ func _build() -> void:
 			return
 		print("gpu crowd: binding 14 disabled terrain mask upload PASS (20 bytes)")
 
-	_build_ground()
+	_build_ground(ground)
 	_build_view()
 	_build_hud()
 	if cam_at != Vector2(INF, INF):
@@ -1648,10 +1690,9 @@ func _advance_bodies() -> void:
 ## round is two passes - accumulate, then apply - because a round that read its neighbours while
 ## writing its own position made every run of the same battle come out differently.
 func _run_tick() -> void:
-	# E1: enabled terrain collision is gated out. The shader binding is wired,
-	# but an enabled request must fail visibly and never run with a disabled mask.
-	if enable_gpu_terrain_collision:
-		push_error("gpu crowd: enabled terrain collision is not supported in this slice")
+	# Prevent dispatch until enabled data was validated on this GPU.
+	if enable_gpu_terrain_collision and not _terrain_collision_ready:
+		push_error("gpu crowd: enabled terrain collision was not prepared")
 		_freeze()
 		return
 	# The cadence reads the simulation tick, so the params buffer is refreshed before every
@@ -3238,9 +3279,7 @@ func _log_view_geometry() -> void:
 		str(flat_view), rad_to_deg(yaw), squash, _iso(field * 0.5).x, _iso(field * 0.5).y])
 
 
-func _build_ground() -> void:
-	var config := GameManager.config()
-	var ground := BattlefieldTerrain.generate(seed_value, field, config)
+func _build_ground(ground: BattlefieldTerrain) -> void:
 	var cols := maxi(1, ground.cols)
 	var rows := maxi(1, ground.rows)
 	var image := Image.create_empty(cols, rows, false, Image.FORMAT_RGBA8)
