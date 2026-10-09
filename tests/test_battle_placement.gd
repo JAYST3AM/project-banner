@@ -13,6 +13,8 @@ func run() -> void:
 	_test_edge_frontage_keeps_spacing()
 	_test_overwide_group_refused()
 	_test_planning_does_not_mutate_input()
+	_test_rejected_orders_preserve_full_command_snapshot()
+	_test_non_finite_placement_is_rejected()
 	_complete()
 
 
@@ -125,3 +127,39 @@ func _test_planning_does_not_mutate_input() -> void:
 	BattlePlacementPlanner.frontage(bodies,
 		Vector2(20, 12), Vector2(21, 12), Vector2(25, 25))
 	equal(bodies, original, "existing formation state was not modified")
+
+
+## PB-205 precursor: proves atomicity only at the pure placement-planner
+## boundary. It DOES NOT certify the live GPU battle's order transaction,
+## route cursor, or formation state; those require an integration fixture.
+func _test_rejected_orders_preserve_full_command_snapshot() -> void:
+	section("rejected layouts cannot rewrite any existing formation command fields")
+	var bodies := _bodies()
+	for body in bodies:
+		body["order"] = "MOVE"
+		body["target_anchor"] = Vector2(40.0, 70.0)
+		body["route"] = PackedVector2Array([Vector2(20, 40), Vector2(40, 70)])
+		body["waypoint_cursor"] = 1
+		body["formation_width"] = 4
+	var before := bodies.duplicate(true)
+	var impossible_field := Vector2(10.0, 10.0)
+	var translated := BattlePlacementPlanner.translated(bodies, Vector2(5, 5), impossible_field)
+	check(translated.is_empty(), "a group wider than the map rejects translation")
+	equal(bodies, before, "translation rejection preserves orders, widths and route cursors")
+	var frontage := BattlePlacementPlanner.frontage(bodies,
+		Vector2(5, 5), Vector2(6, 5), impossible_field)
+	check(frontage.is_empty(), "an impossible frontage rejects the whole group")
+	equal(bodies, before, "frontage rejection preserves every prior command field")
+	var retry := BattlePlacementPlanner.translated(bodies, Vector2(5, 5), impossible_field)
+	equal(retry, translated, "repeating an invalid command does not accumulate changes")
+	equal(bodies, before, "a repeat rejection also leaves the source unchanged")
+
+
+func _test_non_finite_placement_is_rejected() -> void:
+	section("invalid formation coordinates fail closed rather than returning a corrupt plan")
+	var bodies := _bodies()
+	bodies[1]["anchor"] = Vector2(INF, 20.0)
+	var before := bodies.duplicate(true)
+	var plan := BattlePlacementPlanner.translated(bodies, Vector2(90, 40), Vector2(200, 120))
+	check(plan.is_empty(), "non-finite source coordinates cannot produce legal orders")
+	equal(bodies, before, "rejecting an invalid anchor does not edit the source")
