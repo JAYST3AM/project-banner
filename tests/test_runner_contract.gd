@@ -23,6 +23,7 @@ const MISSING := "res://tests/fixtures/this_file_does_not_exist.gd"
 func run() -> void:
 	await _tick()
 
+	_test_fixture_integrity()
 	await _test_healthy_suites()
 	await _test_degenerate_suites()
 	await _test_abort_detection()
@@ -34,6 +35,49 @@ func run() -> void:
 ## A suite that finishes cleanly must pass; one that finishes with a real failed
 ## assertion must fail - and must NOT be confused with a broken suite, because they
 ## mean different things: "your code is wrong" vs "your test never ran".
+
+## Frozen fixture content. These deliberately passing/failing/broken files
+## must not be changed in a test run to manufacture a green runner gate.
+## Hashes are the exact Git blob SHA-1 (header "blob N\\0" + LF bytes).
+const FIXTURE_BLOBS := {
+	"passing_suite.gd": "1232f09595b537b9317af816daa09aac7cef46d8",
+	"failing_suite.gd": "c3afe6802ac49713b0f5c05636a880409876503f",
+	"empty_suite.gd": "c41a92de4b9ee1296b83514ff69e9e3b7a7acf6f",
+	"silent_return_suite.gd": "5f2e9d547a2eb046324ee20227b5f3c3de4b9fb1",
+	"aborting_suite.gd": "8ef5e266271ca1ed5e647be423d80aa964856c4e",
+	"not_a_test_case.gd": "0153363b3bc9ab152feec128865d787d24118819",
+}
+
+
+static func _fixture_blob_sha(path: String) -> String:
+	var bytes := FileAccess.get_file_as_bytes(path)
+	var body := ("blob %d" % bytes.size()).to_utf8_buffer()
+	body.append(0)
+	body.append_array(bytes)
+	var hasher := HashingContext.new()
+	if hasher.start(HashingContext.HASH_SHA1) != OK:
+		return ""
+	if hasher.update(body) != OK:
+		return ""
+	return hasher.finish().hex_encode()
+
+
+func _test_fixture_integrity() -> void:
+	section("frozen runner fixtures have their certified LF content")
+	for basename in FIXTURE_BLOBS.keys():
+		var path := "res://tests/fixtures/" + str(basename)
+		check(FileAccess.file_exists(path), "fixture exists: " + str(basename))
+		if FileAccess.file_exists(path):
+			equal(_fixture_blob_sha(path), str(FIXTURE_BLOBS[basename]),
+				"fixture has certified Git blob: " + str(basename))
+	# The fixture trap itself is part of the integrity contract: none may be
+	# inadvertently introduced into the normal 48-suite roster.
+	var suites := runner.select_suites("")
+	for path in suites:
+		check(not str(path).begins_with("res://tests/fixtures/"),
+			"runner must never execute a negative fixture as a normal suite")
+
+
 func _test_healthy_suites() -> void:
 	section("a suite that completes with passing assertions")
 	var passing: Dictionary = await runner.evaluate(PASSING)
