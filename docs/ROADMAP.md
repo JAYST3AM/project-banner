@@ -956,3 +956,68 @@ name/seed mini-form is gone. **Verified** by the suite and by creation-screen an
 windowed runs. **Next:** faction banners (the data model
 stores one per company and `Party.faction_id` already exists), and the founder sections slot into
 the D-168 rail as their systems arrive. See D-167 and D-168.
+
+---
+
+## Kanban retired — the new development process (2026-10-09)
+
+The task-board (Kanban) workflow is permanently discontinued at Jay's direction. Development is
+now: **GPT-6 writes the code and directs it, Hermes integrates, verifies and pushes approved
+work, Jay controls the vision.** The standing rules are in `docs/ai/WORKFLOW.md`; the current
+task and merge state is in `docs/ai/PROJECT_STATUS.md`; the retirement record (what was stopped,
+what was preserved) is in `docs/ai/KANBAN_RETIREMENT.md`.
+
+- [x] Kanban background automation stopped (three cron jobs paused; board archived; no worker or
+      dispatcher running).
+- [x] Board work-in-progress inventoried and carried into this roadmap (below) — nothing lost.
+- [x] Workflow, status and verification records written and committed on a branch.
+- [ ] Workflow records merged to `main` (needs GPT-6 / Jay approval — not merged).
+
+## Carried over from the retired task board (M02 backlog)
+
+These were the live tasks on the board when it was retired. None is accepted; each is `[ ]` until
+GPT-6 confirms completion under the new process.
+
+- [ ] **E1 — disabled-mode GPU terrain collision integration.** Candidate built and published;
+      Gate A green (48 suites / 11,244 assertions / 0 failures). Real-GPU Stage-2 benchmark and
+      determinism battery still to run. **Merge on hold.**
+- [ ] **PB-202 — Command bar contract tests.** All seven commands, stage transitions,
+      selected-formation counts, pause/map labels, emitted signals.
+- [ ] **PB-203 — Unit dock lifecycle.** Cards update on casualties, disable on elimination, no
+      ghost cards; Shift-click additive selection preserved.
+- [ ] **PB-204 — Minimap interaction verification.** Click/drag navigation, camera bounds,
+      non-square fields, shrinking camera footprints.
+- [ ] **PB-205 — Rejected movement orders preserve state.** Impossible command returns false and
+      leaves route, waypoint cursor, formation width, order state and destination unchanged.
+- [ ] **PB-206 — Deployment legality.** Zones, boundaries, blocked terrain, footprint clearance;
+      no repositioning after battle start.
+- [ ] **PB-207 — Real GPU terrain collision verification.** Windowed Vulkan checks: obstacles,
+      diagonal corners, mixed formation widths, separation passes; binding 14 compiles;
+      reproducible outcomes.
+- [ ] **PB-208 — Live-battle strategic zoom parity.** Select and order formations at full-map
+      zoom; strengths accurate; reversible transitions; no duplicate rendering.
+- [ ] **PB-209 — Campaign aftermath and persistence.** Real GPU battle → casualties → rewards →
+      world-party state → save/reload; include retreat and defeat.
+- [ ] **PB-210 — Battlefield HUD resolution audit** (design findings only) at 1280x720,
+      1920x1080, 2560x1080.
+- [ ] **PB-211 — Reproducible performance benchmark.** Small/medium/large battles; soldier and
+      formation counts, ticks/sec, median and p95 frame time, backend and machine specs.
+- [ ] **PR-E — remaining `gpu_crowd.gd` integration hunks** (GPU sprite atlas archetypes). Map:
+      `docs/pb213/slice_map.md` on `pb-213-branch-decomposition` @ `d17fb5f`.
+
+### Planned, not yet authorised
+
+- [ ] **E2 —** enabled collision + parity (terrain upload, GPU position read-back compared with
+      the CPU reference). **NOT authorized.**
+- [ ] **E3 —** campaign activation, legal deployment, live battle terrain. **NOT authorized.**
+
+## Where the project actually stands (plain language)
+
+- The vertical slice (steps 0–7) and step 8 (dynamic roads) are **done and verified**.
+- Step 9 (the company banner) is **built and verified**.
+- The current work — M02 — is making the tactical battle run on the GPU: the terrain collision
+  mask (Slice D) is **merged and verified** on `main`. The next piece (E1) is **built and
+  published, but not yet fully verified and deliberately not merged**. E2 and E3 come after, once
+  each is separately authorised.
+- Two test-integrity fixes (TI-1, TI-2) are integrated and verified on `main`.
+
