@@ -82,20 +82,20 @@ lost:
 | game repo | none | clean — nothing to remove |
 | `project-banner-mcp/docs/gpt6-collaboration.md` | describes the board workflow | **leave** — historical record; superseded by `docs/ai/WORKFLOW.md` |
 | `project-banner-mcp/docs/tasks/roadmap-state.md` (+ `.bak-*`) | the loop's memory, references the board | **leave** — evidence |
-| `project-banner-mcp/tools/queue_batch.py`, `queue_batch2.py` | batch-queued board tasks | **orphaned** — no longer called by anything once jobs are paused; recommend removal with approval |
+| `project-banner-mcp/tools/queue_batch.py`, `queue_batch2.py` | batch-queued board tasks | **orphaned** — no longer called by anything once the jobs are paused. Removal conditionally approved by GPT-6: verify no active callers or shared dependencies, then delete on a separate cleanup branch, preserving history. |
 | `project-banner-mcp/docs/showcase/2026-10-09.html` | narrative mention | **leave** — showcase artifact |
-| Hermes itself | the built-in `kanban` tool / CLI | **decision required** — see below |
+| Hermes itself | the built-in `kanban` tool / CLI | **retained** — the feature stays installed; only Project Banner’s use of it is disabled (Option A, below) |
 
-## 6. Decision required
+## 6. Decision — Option A, resolved (2026-10-09)
 
-The Kanban *feature* (the `hermes kanban` CLI and the board UI) is part of the Hermes agent
-application, not Project Banner's code. Two options:
+Jay and GPT-6 have confirmed **Option A**. This is decided, not pending:
 
-- **A (done, reversible):** disabled for Project Banner — jobs paused, board archived. Hermes'
-  Kanban capability remains installed but unused. Nothing else on the machine is affected.
-- **B (needs approval):** remove the Kanban feature from the Hermes install and delete the board
-  database. This edits a shared component of the agent tooling and destroys the audit data
-  preserved above, so it was **not** done unilaterally.
+- The three cron jobs stay **disabled**.
+- The board stays **archived**.
+- The Hermes-wide Kanban feature stays **installed** — it is *not* uninstalled.
+- Project Banner's Kanban automation stays **disabled**.
+- Historical tasks, logs, branches and audit evidence are all preserved.
+- **Nothing further is to be deleted.**
 
-Recommendation: stay on **A** until the E1 record and the slice history are no longer needed;
-revisit deletion once the roadmap has fully absorbed the board's content.
+Option B (uninstall the Kanban feature and drop the board database) is **declined** and is no longer
+awaiting a decision. Revisit only if Jay or GPT-6 raise it explicitly.

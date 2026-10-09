@@ -4,6 +4,23 @@ The plan of record. Each step ends with a commit, a tested build and updated doc
 
 Status legend: `DONE` / `IN PROGRESS` / `TODO`
 
+## Now / Next / Later
+
+Priorities approved by GPT-6, 2026-10-09. Priority is **not** authorisation to start work - E2 and
+E3 each need their own authorisation.
+
+| When | Work |
+| --- | --- |
+| **Now** | Finish **E1** - the real-GPU verification of disabled-mode terrain collision. Built and published; merge held. |
+| **Next** | **E2** enabled GPU collision + parity (includes PB-207), then **E3** live battle terrain integration (includes PB-206). Neither authorised yet. |
+| **High** | PB-208 strategic zoom and formation presentation; PB-210 battlefield HUD resolution. |
+| **Supporting** | PB-202 - PB-205 tests, written alongside the relevant development rather than as a block. |
+| **Ongoing** | PB-211 reproducible performance benchmarks. |
+| **Later** | PB-209 campaign aftermath and persistence. |
+| **Deferred** | PR-E sprite atlas work, pending review. |
+
+The full milestone history follows; the carried-over task detail is at the end of this file.
+
 | Step | Milestone | Status |
 | --- | --- | --- |
 | 0 | Bootstrap Godot development environment | **DONE** |
@@ -976,7 +993,8 @@ what was preserved) is in `docs/ai/KANBAN_RETIREMENT.md`.
 ## Carried over from the retired task board (M02 backlog)
 
 These were the live tasks on the board when it was retired. None is accepted; each is `[ ]` until
-GPT-6 confirms completion under the new process.
+GPT-6 confirms completion under the new process. **Priority order is GPT-6's, in the Now / Next /
+Later table at the top of this file** - the order below is transcription order, not priority.
 
 - [ ] **E1 — disabled-mode GPU terrain collision integration.** Candidate built and published;
       Gate A green (48 suites / 11,244 assertions / 0 failures). Real-GPU Stage-2 benchmark and

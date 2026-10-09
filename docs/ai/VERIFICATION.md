@@ -14,17 +14,23 @@ It runs the suites, parses the results, compares assertion counts against the fr
 refuses to report a pass where a suite shed assertions, and refuses a dirty worktree unless
 `--allow-dirty`. Run `tools/verify_branch_selftest.py` after changing the gate.
 
-## Levels of evidence (cheapest first)
+## Evidence matched to risk
 
-1. `--import` clean, then the targeted unit suites, then the wider regression via the gate.
-2. The relevant end-to-end suite (`test_e2e_loop.gd`, `persistence_check.tscn`).
-3. A real windowed run using the `DevFlags` switches, grepping the run log for the actual outcome
-   (`arrived at X`, `battle resolved: VICTORY`, ...). The log is the evidence; screenshots are
-   not, for logic — but for rendering, GPU, physics and battle simulation the runtime check is
-   mandatory, and a CPU-only check never proves a GPU feature.
+Verification is **risk-based**: match the evidence to what actually changed. Do not run a suite for
+a comment, and do not certify a shader from a CPU-only check.
 
-A milestone is not done until level 2 passes. A green suite that tests less is a failure —
-compare assertion counts against the baseline and name every difference.
+| What changed | Required evidence |
+| --- | --- |
+| Documentation, comments, records | A documentation check: the file renders, its links and paths resolve, and its statements match the repository. **No suite run required.** |
+| Ordinary gameplay or logic change | The targeted unit suites first, then the wider regression when the task's risk or acceptance criteria call for it. |
+| An integration or milestone merge | The full regression through the gate, compared against the frozen baseline. |
+| Rendering, GPU, physics or battle simulation | All of the above **plus** actual runtime verification - real GPU / windowed execution, performance metrics, and deterministic checks where relevant. A CPU-only check never proves a GPU feature. |
+
+A change is not done until the evidence its risk class requires has passed. A green suite that
+tests less is a failure — compare assertion counts against the baseline and name every difference.
+
+When the risk class is genuinely unclear, ask GPT-6 to name it before choosing the evidence; do not
+default either way.
 
 ## Rules that have already cost time (keep them)
 
