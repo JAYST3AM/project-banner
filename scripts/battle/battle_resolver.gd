@@ -297,6 +297,7 @@ func apply(result: BattleResult, context: BattleContext) -> void:
 		soldier.kills += int(entry.get("kills", 0))
 		soldier.hp = 0
 		soldier.status = Soldier.STATUS_DEAD
+		state.lineage.mark_dead(soldier.id, day)
 		var note := str(entry.get("death_note", ""))
 		soldier.record_history(day, "death", note if not note.is_empty() else "Killed at %s." % location)
 
@@ -330,6 +331,7 @@ func apply(result: BattleResult, context: BattleContext) -> void:
 		slain.kills += int(entry.get("kills", 0))
 		slain.hp = 0
 		slain.status = Soldier.STATUS_DEAD
+		state.lineage.mark_dead(slain.id, day)
 		slain.record_history(day, "death", "Killed at %s." % location)
 
 	state.player_gold += result.gold_total()

@@ -537,6 +537,31 @@ func _refresh_detail() -> void:
 	_detail_box.add_child(_stat_row("Status",
 		PixelStyle.pixel_label(soldier.status_display().to_upper(), 10)))
 
+	# Campaign kinship is read-only here. Parents and guardians must be
+	# explicitly recorded by campaign actions: an unknown family stays unknown.
+	_detail_box.add_child(PixelStyle.rule(DARK))
+	_detail_box.add_child(PixelStyle.pixel_label("FAMILY", 10, UiTheme.ACCENT))
+	var registry := _state.lineage
+	var parents := registry.parents_of(soldier.id)
+	var children := registry.children_of(soldier.id)
+	var record := registry.person(soldier.id)
+	var guardian_id := str(record.get("guardian_id", ""))
+	if parents.is_empty() and children.is_empty() and guardian_id.is_empty():
+		_detail_box.add_child(PixelStyle.body_label(
+			"No family ties recorded.", SMALL_SIZE, UiTheme.DIM, true))
+	else:
+		if not parents.is_empty():
+			_detail_box.add_child(_stat_row("Parents", PixelStyle.body_label(
+				", ".join(registry.names_for(parents)), SMALL_SIZE, UiTheme.TEXT, true)))
+		if not children.is_empty():
+			_detail_box.add_child(_stat_row("Children", PixelStyle.body_label(
+				", ".join(registry.names_for(children)), SMALL_SIZE, UiTheme.TEXT, true)))
+		if not guardian_id.is_empty():
+			var guardian_ids: Array[String] = [guardian_id]
+			var guardian_names := registry.names_for(guardian_ids)
+			_detail_box.add_child(_stat_row("Guardian", PixelStyle.body_label(
+				guardian_names[0], SMALL_SIZE, UiTheme.TEXT, true)))
+
 	_detail_box.add_child(PixelStyle.rule(DARK))
 	_detail_box.add_child(PixelStyle.pixel_label("TRAITS", 10, UiTheme.ACCENT))
 	if soldier.traits.is_empty():

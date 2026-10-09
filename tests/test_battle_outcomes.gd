@@ -378,6 +378,16 @@ func _test_outcome_matrix() -> void:
 	for entry in victory.player_survivors:
 		check(bool(entry.get("survival_credited", false)), "a victor's survival is credited")
 	check(won_world.defeated, "the beaten enemy is removed from the map")
+	greater(float(victory.enemy_dead.size()), 0.0,
+		"victory fixture actually killed enemies for lineage verification")
+	for entry in victory.enemy_dead:
+		var person_id := str(entry.get("soldier_id", ""))
+		equal(won.lineage.person(person_id).get("died_day"),
+			victory.campaign_day, "enemy casualties are remembered in the persistent lineage")
+	for entry in victory.player_survivors:
+		var person_id := str(entry.get("soldier_id", ""))
+		equal(won.lineage.person(person_id).get("died_day"),
+			CampaignLineage.UNKNOWN_DAY, "surviving friendly soldiers are not marked dead")
 
 	# --- defeat: nothing paid, survivors credited with coming through it.
 	var lost := _fresh_campaign("Matrix Defeat", SEED + 5, RECRUITS)
@@ -400,6 +410,12 @@ func _test_outcome_matrix() -> void:
 	equal(defeat.gold_total(), 0, "a defeat pays nothing")
 	equal(lost.player_gold, lost_gold_before, "and the campaign's gold is untouched")
 	check(lost_world.is_available(), "the enemy that held the field is still on the map")
+	greater(float(defeat.player_dead.size()), 0.0,
+		"defeat fixture actually killed friendly soldiers for lineage verification")
+	for entry in defeat.player_dead:
+		var person_id := str(entry.get("soldier_id", ""))
+		equal(lost.lineage.person(person_id).get("died_day"),
+			defeat.campaign_day, "friendly casualties enter the lineage death record")
 	check(lost_world.encounter_cooldown_until_hours > lost.clock.total_hours(),
 		"and a cooldown stops it re-firing immediately")
 
