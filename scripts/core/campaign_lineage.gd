@@ -48,6 +48,23 @@ func ensure_person(person_id: String, display_name: String, born_day: int = UNKN
 	return true
 
 
+## The caller decides IF a child exists, its identity, and who is recorded
+## as parent or guardian. This atomic operation does not roll fertility, assign
+## custody, or create soldiers. On failure not even an orphaned person remains.
+func register_child(child_id: String, display_name: String, born_day: int,
+		first_parent_id: String = "", second_parent_id: String = "",
+		guardian_id: String = "") -> bool:
+	if child_id.strip_edges().is_empty() or _people.has(child_id) or born_day < 1:
+		return false
+	if not ensure_person(child_id, display_name, born_day):
+		return false
+	if not set_parents(child_id, first_parent_id, second_parent_id) \
+			or not set_guardian(child_id, guardian_id):
+		_people.erase(child_id)
+		return false
+	return true
+
+
 func parents_of(person_id: String) -> Array[String]:
 	var result: Array[String] = []
 	if not _people.has(person_id):
