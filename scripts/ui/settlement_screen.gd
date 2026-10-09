@@ -557,7 +557,8 @@ func _refresh_detail() -> void:
 			_detail_box.add_child(_stat_row("Children", PixelStyle.body_label(
 				", ".join(registry.names_for(children)), SMALL_SIZE, UiTheme.TEXT, true)))
 		if not guardian_id.is_empty():
-			var guardian_names := registry.names_for([guardian_id])
+			var guardian_ids: Array[String] = [guardian_id]
+			var guardian_names := registry.names_for(guardian_ids)
 			_detail_box.add_child(_stat_row("Guardian", PixelStyle.body_label(
 				guardian_names[0], SMALL_SIZE, UiTheme.TEXT, true)))
 
