@@ -4,11 +4,11 @@ Authoritative short state for agent coordination. Refreshed at every integration
 History lives in `docs/PROJECT_BANNER_STATUS.md` and `docs/DECISIONS.md`; Jay's view is
 `docs/ROADMAP.md`.
 
-**Refreshed:** 2026-10-09 (workflow setup + Kanban retirement)
+**Refreshed:** 2026-10-09 (workflow setup + Kanban retirement, merged to `main`)
 
 | Field | Value |
 | --- | --- |
-| `main` SHA (origin) | `d3d0b2ac1cf4de3932a101171d0d3cfc0ea52293` |
+| `main` SHA (origin) | `a3dcfdfc6b40dc02e1b72a5829739e290e09555d` — carries the workflow records; the previous verified development main was `d3d0b2a` |
 | Jay's local checkout | branch `main` @ `70a6017f18f938d95ad272c5cf5a06fdf0733534` (behind origin, **dirty, read-only**) |
 | Active task ID | E1 — disabled-mode GPU terrain collision integration (Slice E1) |
 | Active implementer | GPT-6 (primary programmer); E1 code was produced by the previously-authorised implementer worker |
@@ -41,4 +41,5 @@ Newer explicit decisions override older instructions in this file.
 - Verification gate: `project-banner-mcp/tools/verify_branch.py` (also published in the game repo
   on branch `tools/verification-gate`). Fails on assertion drift, not just failures.
 - Worktree warm-up recipe and suite runner: `project-banner-mcp/docs/tasks/how-to-run-suites.md`.
-- Kanban: **retired**. See `docs/ai/KANBAN_RETIREMENT.md`.
+- Kanban: **retired** (Option A — Banner automation disabled, feature installed, evidence preserved). See `docs/ai/KANBAN_RETIREMENT.md`.
+- The GPT-6-led workflow is **established**: `docs/ai/WORKFLOW.md`, `PROJECT_STATUS.md`, `VERIFICATION.md` and `KANBAN_RETIREMENT.md` are on `main`.

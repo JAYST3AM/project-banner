@@ -988,7 +988,7 @@ what was preserved) is in `docs/ai/KANBAN_RETIREMENT.md`.
       dispatcher running).
 - [x] Board work-in-progress inventoried and carried into this roadmap (below) — nothing lost.
 - [x] Workflow, status and verification records written and committed on a branch.
-- [ ] Workflow records merged to `main` (needs GPT-6 / Jay approval — not merged).
+- [x] Workflow records merged to `main` — GPT-6 reviewed and approved the candidate; fast-forward `d3d0b2a` -> `a3dcfdf` (2026-10-09).
 
 ## Carried over from the retired task board (M02 backlog)
 
