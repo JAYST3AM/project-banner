@@ -87,7 +87,9 @@ func open(report: Dictionary, terrain: BattlefieldTerrain, capacity: int) -> boo
 
 
 func matches_terrain(terrain: BattlefieldTerrain) -> bool:
-	return terrain != null and terrain.is_valid() and _source_id == terrain.get_instance_id()
+	return terrain != null and terrain.is_valid() and \
+		_source_id == terrain.get_instance_id() and \
+		_source_signature == terrain.signature()
 
 
 ## Returns an empty array on failure, never silently falls back to CPU.
