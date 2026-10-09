@@ -72,7 +72,7 @@ func _test_fixture_integrity() -> void:
 				"fixture has certified Git blob: " + str(basename))
 	# The fixture trap itself is part of the integrity contract: none may be
 	# inadvertently introduced into the normal 48-suite roster.
-	var suites := runner.select_suites("")
+	var suites: Array[String] = runner.select_suites("")
 	for path in suites:
 		check(not str(path).begins_with("res://tests/fixtures/"),
 			"runner must never execute a negative fixture as a normal suite")
