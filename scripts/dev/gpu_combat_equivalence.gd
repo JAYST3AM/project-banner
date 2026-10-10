@@ -40,6 +40,9 @@ func _run() -> void:
 	if not _run_retention():
 		get_tree().quit(1)
 		return
+	if not _run_acquisition():
+		get_tree().quit(1)
+		return
 	get_tree().quit(0)
 
 
@@ -84,4 +87,70 @@ func _run_retention() -> bool:
 		return false
 	print("GPU COMBAT RETENTION PASS: %d seeds, %d GPU decisions, %d valid retained; automatic search and all damage CPU-only" % [
 		BattleCombatEquivalenceGate.SEEDS.size(), checked, retained])
+	return true
+
+
+## Slice 3: real Vulkan nearest-target + switching threshold decisions.
+## Fixture decisions are checked in full (including other soldiers), then
+## four seeded independent CPU fights are traced for every tick.
+func _run_acquisition() -> bool:
+	var probe := BattleGpuAcquisitionProbe.new()
+	if not probe.open(6):
+		push_error("GPU COMBAT ACQUISITION FAIL: initialization: %s" % probe.last_error)
+		probe.close()
+		return false
+	var fixture_count := 0
+	var reasons: Dictionary = {}
+	for name in BattleCombatAcquisitionGate.CASES:
+		var fixture := BattleCombatAcquisitionGate.fixture(name)
+		var expected := BattleCombatAcquisitionGate.cpu_all(fixture)
+		var actual := probe.evaluate(fixture)
+		if actual.is_empty():
+			push_error("GPU COMBAT ACQUISITION FAIL: fixture=%s first_field=gpu.readback: %s" % [
+				name, probe.last_error])
+			probe.close()
+			return false
+		var different := BattleCombatAcquisitionGate.compare(expected, actual, 0, fixture.units)
+		if not bool(different.get("ok", false)):
+			push_error("GPU COMBAT ACQUISITION FAIL: fixture=%s tick=0 first_field=%s CPU=%s GPU=%s" % [
+				name, str(different.get("field", "unknown")),
+				str(different.get("cpu", "")), str(different.get("gpu", ""))])
+			probe.close()
+			return false
+		var known := BattleCombatAcquisitionGate.expected_for(name)
+		for component in 4:
+			if actual[component] != known[component]:
+				push_error("GPU COMBAT ACQUISITION FAIL: fixture=%s tick=0 expected_case_component=%d CPU=%d GPU=%d" % [
+					name, component, known[component], actual[component]])
+				probe.close()
+				return false
+		reasons[int(actual[1])] = true
+		fixture_count += 1
+	var decisions := fixture_count * 6
+	var acquisitions := 0
+	var switches := 0
+	for seed_value in BattleCombatEquivalenceGate.SEEDS:
+		var verdict := BattleCombatAcquisitionGate.run_seed(seed_value, probe)
+		if not bool(verdict.get("ok", false)):
+			push_error("GPU COMBAT ACQUISITION FAIL: seed=%d tick=%d first_field=%s CPU=%s GPU=%s" % [
+				seed_value, int(verdict.get("tick", -1)),
+				str(verdict.get("field", "unknown")), str(verdict.get("cpu", "")),
+				str(verdict.get("gpu", ""))])
+			probe.close()
+			return false
+		decisions += int(verdict["gpu_decisions"])
+		acquisitions += int(verdict["acquisitions"])
+		switches += int(verdict["switches"])
+		print("GPU COMBAT ACQUISITION seed=%d PASS ticks=%d winner=%s casualties=%d decisions=%d acquires=%d switches=%d" % [
+			seed_value, int(verdict["ticks"]), str(verdict["winner"]),
+			int(verdict["casualties"]), int(verdict["gpu_decisions"]),
+			int(verdict["acquisitions"]), int(verdict["switches"])])
+	probe.close()
+	if reasons.size() != 8 or decisions <= fixture_count * 6 or \
+			acquisitions <= 0 or switches <= 0:
+		push_error("GPU COMBAT ACQUISITION FAIL: inadequate reason or live-decision coverage; reasons=%s acquired=%d switched=%d" % [
+			str(reasons.keys()), acquisitions, switches])
+		return false
+	print("GPU COMBAT ACQUISITION PASS: 4 seeds, %d adversarial fixtures, 8/8 reasons, %d GPU decisions, %d live acquisitions, %d live switches; CPU combat authoritative" % [
+		fixture_count, decisions, acquisitions, switches])
 	return true
