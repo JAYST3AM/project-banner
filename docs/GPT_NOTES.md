@@ -39,3 +39,42 @@
 - The existing historical F1 20,000-agent positional checksum anomaly remains unresolved. No new deterministic performance guarantee is claimed.
 - Hermes must perform Godot import, targeted legality/fixture tests, real windowed smoke, error-path checks, full frozen regression with reviewed baseline changes, and GPU exclusive-use verification before certification. No verification report or main merge is implied by this branch publication.
 
+
+
+---
+
+## GPU combat integration — Slice 1: result-equivalence GATE (2026-10-10)
+
+**Base:** `ff826eedfe659df2d5ffda399753e3f9d55f9950` (E1–E3 merged). **Working branch:** `gpt6/gpu-combat-equivalence-s1`.
+**Merge status:** HOLD until Hermes compiles, runs targeted tests, runs real-GPU acceptance and frozen 48-suite regression, and certifies exact blobs. No production combat logic was replaced.
+
+### Scope: one line per changed file and GitHub SHA-1/size readback
+
+- `scenes/dev/gpu_combat_equivalence.tscn` — windowed opt-in entry scene; not part of normal CPU battle; Git blob `400fe520dea0d2570ed228da8c11888daf3ac061`, 207 UTF-8 bytes, LF/final newline verified.
+- `scripts/battle/battle_combat_equivalence_gate.gd` — fixed seeded 4-soldier real CPU combat scenario, per-tick field traces, first-mismatch reporting and GPU-target shadow comparison; Git blob `c521baab2bf27258585be3a972faa78f5a80878c`, 7545 UTF-8 bytes, LF/final newline verified.
+- `scripts/battle/battle_gpu_ordered_target_probe.gd` — independent Vulkan compute wrapper for explicit attack-order target validity, with hard failure on allocation/readback and owned RID cleanup; Git blob `c4b03ba379ecfea1907508fc2e94ac7a79e85510`, 4062 UTF-8 bytes, LF/final newline verified.
+- `scripts/dev/gpu_combat_equivalence.gd` — real-GPU acceptance runner for four fixed seeds; reports the first divergent tick and field or exits nonzero; Git blob `e84519f7055bd5321f39f5bdafa3de535188505b`, 1695 UTF-8 bytes, LF/final newline verified.
+- `shaders/dev/gpu_combat_equivalence.glsl` — one narrow GPU combat decision: validity of explicit attack target across a live roster; Git blob `b029cef18ae0acba2af9774551b5b06fbb9f2631`, 1024 UTF-8 bytes, LF/final newline verified.
+- `tests/test_combat.gd` — headless CPU baseline/CPU-shadow determinism, casualties and winners; first-field/first-tick negative tests; dead/friendly/absent-order target tests; Git blob `6115a16a0907777acb100c4dee3e027e96b511ef`, 28547 UTF-8 bytes, LF/final newline verified.
+- `docs/GPT_NOTES.md` — preserves this audit, acceptance boundary, measured/non-measured distinction, and verification instructions; readback hash/byte size reported in delivery response.
+
+### What the equivalence gate actually proves
+
+This is **not** full CPU/GPU combat equivalence. The CPU reference and a second independently constructed `BattleSimulator` both execute real production combat, fixed at `0.05s` steps using four individual soldiers, seeded deterministically by `[101, 2026, 4096, 73001]`. On every tick the gate compares soldier identity, side, explicit/retained targets, attacker memory, health/death, killer/kills/damage, positions, facing, cooldown, the combat event fields, time, live counts, and terminal winner. A mismatch returns `{ok:false, tick, field, cpu, gpu}` and the windowed runner quits nonzero.
+
+The **independent GPU contribution** is deliberately limited to the first-priority combat targeting subdecision: validating a soldier's **explicit player-issued attack target** against the alive/hostile roster. The GPU implementation is not an echo of a CPU-computed answer: the shader searches the roster itself. GPU output is read back and compared against the CPU's priority-1 rule **before each simulation step**. On failure, the harness names the first soldier target field and tick and refuses to certify. The GPU answer never changes the authoritative CPU simulation. On ordinary gameplay this code is **off by default**, because only the manually launched windowed harness creates the probe.
+
+**NOT equivalent and NOT implemented on the GPU:** target reacquisition/cadence, formation focus, retaliation, attack cooldown, RNG hit rolls, damage, death, soldier spatial movement, army victory, full GPU battle snapshots, or campaign aftermath. The mirror's agreement on these CPU-computed values is a **determinism check**, not proof of a second independent GPU implementation. The GPU probe uses a start-of-tick roster; mid-tick ordered-target invalidation after a kill remains CPU-owned.
+
+### Acceptance — evidence or it did not happen
+
+1. **Import/compile:** Godot 4.7.2-stable, headless import exit 0. No GDScript parse failures; GPU shader has no SPIR-V compilation error.
+2. **Headless target suite:** `godotc --headless --path <isolated-worktree> res://scenes/dev/tests.tscn -- --suite=combat`. Require exit 0, no broken tests, all new assertions green, all four seeds complete and actually produce casualties, and injected field/target divergence rejected with the **first named field and tick**.
+3. **Real GPU:** with an exclusive engine on a windowed Vulkan machine, `godotc --path <isolated-worktree> res://scenes/dev/gpu_combat_equivalence.tscn`. Require four seed PASS lines, a final `GPU COMBAT EQUIVALENCE PASS`, nonzero GPU target decision count, zero shader/script errors and RID leaks; a forced GPU mismatch must exit nonzero and print its first tick/field. Headless is not a GPU substitute.
+4. **Regression:** frozen 48 suites pass; GDExtension native binary supplied only via the existing isolated-machine gate. Review genuine new `test_combat` assertion growth, do not silently weaken suite integrity.
+5. **Source integrity:** all 7 changed files read back from GitHub by SHA and byte size; readback equals authored complete content; no CRLF, truncation or file outside the seven-path scope.
+6. **Gameplay:** default game remains CPU-authoritative with no new backend switch. No silent CPU fallback is possible in the manually invoked GPU harness because it fails if initialization/readback fails. Campaign resolution remains unchanged.
+
+### Verification limitations
+
+GPT-6 does not have Jay's private native binary or an executable Godot/Vulkan GPU environment in this response, so **neither Godot compile, native suite, nor windowed equivalence PASS is claimed**. Branch publication and GitHub readback alone are not certification. Hermes owns independent hardware verification and the frozen milestone gate; any failure blocks merge until corrected.
