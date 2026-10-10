@@ -33,7 +33,8 @@ static func cpu_one(unit: BattleUnit, sim: BattleSimulator) -> PackedInt32Array:
 	elif not target.is_alive():
 		answer[1] = DEAD
 		var reach := unit.attack_range * sim.target_contact_loss_factor
-		if unit.position.distance_squared_to(target.position) <= reach * reach:
+		if sim.target_immediate_on_contact_loss and \
+				unit.position.distance_squared_to(target.position) <= reach * reach:
 			answer[2] = 1
 	else:
 		var search := unit.awareness_radius if unit.awareness_radius > 0.0 \
