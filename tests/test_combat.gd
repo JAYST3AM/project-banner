@@ -644,6 +644,10 @@ func _test_gpu_retention_oracle_fixture() -> void:
 			"fixture retention reason for soldier %d" % i)
 	equal(states[3 * 4 + 2], 1,
 		"a dead enemy within contact reach triggers immediate reacquisition")
+	sim.target_immediate_on_contact_loss = false
+	equal(BattleCombatRetentionGate.cpu_one(sim.units[3], sim)[2], 0,
+		"disabled immediate-contact flag prevents forced reacquisition")
+	sim.target_immediate_on_contact_loss = true
 	equal(states[5 * 4], 0,
 		"a living enemy inside the retention radius is remembered by ID")
 	equal(states[6 * 4], -1,
