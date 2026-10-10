@@ -27,7 +27,7 @@ void main() {
                 answer.y = 4;
                 vec2 gap = geometry[index].xy - geometry[i].xy;
                 float reach = geometry[index].w;
-                answer.z = dot(gap, gap) <= reach * reach ? 1 : 0;
+                answer.z = (reach >= 0.0 && dot(gap, gap) <= reach * reach) ? 1 : 0;
             } else {
                 vec2 gap = geometry[index].xy - geometry[i].xy;
                 float radius = geometry[index].z;
