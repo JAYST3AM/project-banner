@@ -51,7 +51,7 @@
 ### Scope: one line per changed file and GitHub SHA-1/size readback
 
 - `scenes/dev/gpu_combat_equivalence.tscn` — windowed opt-in entry scene; not part of normal CPU battle; Git blob `400fe520dea0d2570ed228da8c11888daf3ac061`, 207 UTF-8 bytes, LF/final newline verified.
-- `scripts/battle/battle_combat_equivalence_gate.gd` — fixed seeded 4-soldier real CPU combat scenario, per-tick field traces, first-mismatch reporting and GPU-target shadow comparison; Git blob `c521baab2bf27258585be3a972faa78f5a80878c`, 7545 UTF-8 bytes, LF/final newline verified.
+- `scripts/battle/battle_combat_equivalence_gate.gd` — fixed seeded 4-soldier real CPU combat scenario, per-tick field traces, first-mismatch reporting and GPU-target shadow comparison; Git blob `e763fd4ac27ea2760953dea1fe6b179a3e06e606`, 7545 UTF-8 bytes, LF/final newline verified.
 - `scripts/battle/battle_gpu_ordered_target_probe.gd` — independent Vulkan compute wrapper for explicit attack-order target validity, with hard failure on allocation/readback and owned RID cleanup; Git blob `c4b03ba379ecfea1907508fc2e94ac7a79e85510`, 4062 UTF-8 bytes, LF/final newline verified.
 - `scripts/dev/gpu_combat_equivalence.gd` — real-GPU acceptance runner for four fixed seeds; reports the first divergent tick and field or exits nonzero; Git blob `e84519f7055bd5321f39f5bdafa3de535188505b`, 1695 UTF-8 bytes, LF/final newline verified.
 - `shaders/dev/gpu_combat_equivalence.glsl` — one narrow GPU combat decision: validity of explicit attack target across a live roster; Git blob `b029cef18ae0acba2af9774551b5b06fbb9f2631`, 1024 UTF-8 bytes, LF/final newline verified.
