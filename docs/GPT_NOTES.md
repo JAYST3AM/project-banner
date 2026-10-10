@@ -1,4 +1,11 @@
-# GPT-6 Delivery Notes — E3 live terrain foundation
+# GPT-6 Delivery Notes — Project Banner Milestone Index
+
+**Current candidate:** GPU Combat **Slice 3 — Automatic Acquisition & Hysteresis**, on `gpt6/gpu-combat-acquisition-s3`.
+**Standalone Slice 3 artifact:** [E6 S3 delivery dossier](tasks/e6-s3/GPT_DELIVERY.md). It contains the slice-specific design limits, changed-file list, gate requirements, and reason-code coverage. GitHub readback hashes and sizes for **every** changed file, including this index, are in the final published delivery.
+**Historical notes:** The E3/S1/S2 status labels and branches retained below describe those notes **at the time they were authored**, not the current merged state. E3, GPU Combat S1 and S2 were subsequently independently certified and merged. No old milestone gate has been reopened.
+
+## Historical: E3 live terrain foundation
+
 
 **Base:** `9e7da5454e3db27ac6dad962eb8a22d2557ce957` (the already-published E3 terrain-source contract; E2 is its ancestor).
 **Branch:** `gpt6/e3-live-terrain-activation`.
