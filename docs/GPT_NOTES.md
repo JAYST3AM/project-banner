@@ -78,3 +78,34 @@ The **independent GPU contribution** is deliberately limited to the first-priori
 ### Verification limitations
 
 GPT-6 does not have Jay's private native binary or an executable Godot/Vulkan GPU environment in this response, so **neither Godot compile, native suite, nor windowed equivalence PASS is claimed**. Branch publication and GitHub readback alone are not certification. Hermes owns independent hardware verification and the frozen milestone gate; any failure blocks merge until corrected.
+
+
+---
+
+## GPU Combat Integration — Slice 2, automatic target **retention eligibility** (2026-10-10)
+
+**Base:** `d80af1bc39b19e5d5f75b0479ad56784de099b58`, already-merged S1. **Branch:** `gpt6/gpu-combat-retention-s2`. **Status:** PUBLISHED, NOT CERTIFIED, NO MERGE. Neither old GPU/S1 sources nor E1–E3 were modified.
+
+### One line per changed file — exactly these files
+
+- `scripts/battle/battle_combat_retention_gate.gd` — pure independent pre-tick CPU oracle, deterministic adversarial fixtures, first-field/first-tick comparison, and seeded CPU shadow battle; GitHub blob SHA-1 `6f490c60243e0a309aeeaf81e58f79f0127bb489`; UTF-8 size 5261 bytes; full LF-terminated readback verified.
+- `scripts/battle/battle_gpu_retention_probe.gd` — real Vulkan GPU buffer/pipeline wrapper that evaluates retained auto-targets independently and fails on missing GPU/readback; GitHub blob SHA-1 `17505cc93eaa3beacacb336e6b149260933efb4f`; UTF-8 size 4434 bytes; full LF-terminated readback verified.
+- `scripts/dev/gpu_combat_equivalence.gd` — extends established windowed S1 runner to gate adversarial and live S2 retention decisions on real GPU; GitHub blob SHA-1 `97ec7131019c76e5b2cf3e1b3b4366edac4bb2b5`; UTF-8 size 3877 bytes; full LF-terminated readback verified.
+- `shaders/dev/gpu_combat_retention.glsl` — one bounded retention eligibility decision: missing, ally, dead, out-of-range, valid, contact-loss reacquire; GitHub blob SHA-1 `55a6fef9b909ddf6ed7c14bc12ab18e703da7b58`; UTF-8 size 1817 bytes; full LF-terminated readback verified.
+- `tests/test_combat.gd` — adds headless positive/negative retention fixtures and per-tick two-CPU determinism tests; GitHub blob SHA-1 `5bb3096d709841ee9835b83261a02f7e92419163`; UTF-8 size 31375 bytes; full LF-terminated readback verified.
+- `docs/GPT_NOTES.md` — adds this evidence manifest, acceptance instructions and explicit GPU non-equivalence boundaries; final blob and bytes are in the delivery readback.
+
+### Equivalence scope and acceptance
+
+**GPU-independent work:** A new Vulkan compute kernel validates each live soldier's *remembered* automatic opponent, independently of CPU-computed target answers. Inputs are roster ID/side/alive/auto-target, position, retention radius and contact-loss range; outputs include retained ID or -1, reason (none/valid/missing/ally/dead/far/inactive), and immediate-on-contact-loss eligibility. It neither looks for a *new* enemy nor writes battle state.
+
+**Oracle and test contract:** `BattleCombatRetentionGate` derives the same eligibility rule separately from the existing `BattleSimulator._retained_target` logic. A fixed eight-soldier fixture provokes all seven reason codes and the dead-in-contact transition. The target `test_combat` suite validates oracle results, awareness-radius override, seeded separate-CPU live battles, and failure diagnostics naming the exact first soldier/field/tick. The windowed S1 runner additionally executes real GPU retention and compares four existing seed battles pre-tick. Require GPU retention PASS, >0 live retained decisions, zero shader errors/RID leaks. Inability to initialize/read back must fail rather than revert to the CPU answer.
+
+**Preserved previous gate:** The S1 explicit-order GPU equivalence checks still run first. Ordinary game scenes never allocate this S2 probe. `BattleSimulator` and `BattleResolver` are unmodified and still exclusively decide attacks, target acquisition/search/retaliation, hits, casualties, victory and campaign aftermath.
+
+**NOT equivalent yet:** The GPU does not execute production `_retained_target` side effects (clearing cached IDs, adjusting search cadence), actual automatic search/acquisition, focus, hysteresis switching, mid-tick death ordering, target-cadence scheduling, combat RNG, damage, victory or persistence. A GPU pre-tick eligibility PASS cannot be presented as a CPU/GPU match for those behaviors. A separate gate is required before any adoption into gameplay.
+
+**Required verification:** (1) Godot 4.7.2 headless import/compile clean; (2) targeted `test_combat` passes, each newly named retention test section executes; (3) real GPU/windowed `res://scenes/dev/gpu_combat_equivalence.tscn` exits 0 with both S1 and S2 PASS lines, 4 seeded S2 verdicts and a nonzero retained count; (4) frozen 48 suites, every summary present, recorded actual assertion-count delta, with native GDExtension provisioned under Hermes's exclusive-worktree procedure; (5) exact 6-path GitHub blob/size/line-ending verification.
+
+**What GPT-6 could not verify:** No local Godot 4.7.2/Vulkan or native extension execution was available; no compile, regression, real-GPU throughput or runtime PASS is claimed. No performance capture or CPU LOD capture was attempted. Work stays on the S2 branch until Hermes returns numerical evidence and an independent certification.
+**Final S2 hardening:** the immediate-dead-contact eligibility bit respects `target_immediate_on_contact_loss` being disabled, in both the GPU kernel and the independent CPU oracle; the headless test includes the disabled case. This affects only the unmerged S2 branch.

@@ -19,6 +19,9 @@ func run() -> void:
 	_test_gpu_combat_equivalence_cpu_reference()
 	_test_gpu_combat_equivalence_detects_first_mismatch()
 	_test_gpu_combat_explicit_target_contract()
+	_test_gpu_retention_oracle_fixture()
+	_test_gpu_retention_seeded_shadow()
+	_test_gpu_retention_first_mismatch()
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
 	_complete()
@@ -627,3 +630,57 @@ func _test_gpu_combat_explicit_target_contract() -> void:
 	actor.alive = false
 	equal(BattleCombatEquivalenceGate.cpu_explicit_target(actor, sim.units), -1,
 		"dead soldier cannot issue an attack")
+
+
+## S2 headless tests cover all seven retention reasons independently of GPU.
+func _test_gpu_retention_oracle_fixture() -> void:
+	section("GPU retention: independent oracle exercises every reason")
+	var sim := BattleCombatRetentionGate.fixture()
+	var states := BattleCombatRetentionGate.cpu_all(sim)
+	equal(states.size(), 32, "eight independent soldiers produce eight verdicts")
+	var expected_reasons := [0, 2, 3, 4, 6, 1, 5, 6]
+	for i in expected_reasons.size():
+		equal(states[i * 4 + 1], expected_reasons[i],
+			"fixture retention reason for soldier %d" % i)
+	equal(states[3 * 4 + 2], 1,
+		"a dead enemy within contact reach triggers immediate reacquisition")
+	sim.target_immediate_on_contact_loss = false
+	equal(BattleCombatRetentionGate.cpu_one(sim.units[3], sim)[2], 0,
+		"disabled immediate-contact flag prevents forced reacquisition")
+	sim.target_immediate_on_contact_loss = true
+	equal(states[5 * 4], 0,
+		"a living enemy inside the retention radius is remembered by ID")
+	equal(states[6 * 4], -1,
+		"a living enemy beyond the retention radius is not remembered")
+	# Changing the search radius must expand retained-target eligibility.
+	sim.units[6].awareness_radius = 150.0
+	equal(BattleCombatRetentionGate.cpu_one(sim.units[6], sim)[1],
+		BattleCombatRetentionGate.VALID, "individual awareness extends retention")
+
+
+func _test_gpu_retention_seeded_shadow() -> void:
+	section("GPU retention: separate live CPU simulators remain deterministic")
+	for seed_value in BattleCombatEquivalenceGate.SEEDS:
+		var result := BattleCombatRetentionGate.run_seed(seed_value)
+		check(bool(result.get("ok", false)),
+			"same seed reproduces identities, targets, events, casualties and winner: %s" % str(result))
+		if bool(result.get("ok", false)):
+			greater(int(result["ticks"]), 0, "retention battle advanced real ticks")
+			equal(int(result["gpu_decisions"]), 0,
+				"headless CPU-only test never claims GPU execution")
+			check(int(result["casualties"]) >= 1, "retention battle includes casualties")
+
+
+func _test_gpu_retention_first_mismatch() -> void:
+	section("GPU retention: first mismatching soldier field and tick")
+	var sim := BattleCombatRetentionGate.fixture()
+	var baseline := BattleCombatRetentionGate.cpu_all(sim)
+	var altered := baseline.duplicate()
+	altered[3 * 4 + 2] = 0
+	var error := BattleCombatRetentionGate.compare(baseline, altered, 19, sim.units)
+	check(not bool(error["ok"]), "a wrong contact-loss flag fails the gate")
+	equal(error["field"], "soldier[3].retention.immediate_reacquire",
+		"exact GPU retention subfield named")
+	equal(error["tick"], 19, "first divergent tick named")
+	equal(error["cpu"], 1, "CPU expected flag preserved")
+	equal(error["gpu"], 0, "independent GPU flag reported")
