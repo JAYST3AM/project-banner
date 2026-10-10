@@ -1,0 +1,97 @@
+PROJECT BANNER — DESIGN DECISIONS
+Updated: 2026-10-10
+Status: Working design notes. Q1–Q113 baseline preserved; follow-up decisions appended below.
+Source note: the original Q114 map-knowledge prompt and newer Q111–Q119 prompts use overlapping question numbers. Use topic labels, not numbers, to match decisions.
+
+CORE VISION
+- Sandbox medieval/low-fantasy world with no main quest, chosen one, or forced story.
+- Shared, synchronized persistent world, with detailed local simulation and abstract distant simulation.
+- Finite procedural geography, east-west wrapping contemplated; first discovery establishes canonical places for later players.
+- The world exists as simulation before it exists as scenery. Geography, resources, climate, history and events drive settlements and cultures.
+- Offline characters/companies continue to exist and face real risks; safe locations, guards and standing orders mitigate them.
+- Player encounters are rare in a huge world, with player-created hubs and temporary hosted interactions.
+- Player can live as trader, mercenary, noble, criminal, explorer, ruler, pirate, etc.
+
+EARLIER LOCKED DECISIONS (Q1–Q80, summarized)
+- Multiple character-start presets plus custom starts. Death permits succession to an heir/companion; no successor means player game over, not world reset.
+- Characters age with shared world time, including offline. Global time ratio TBD.
+- Optional deep family system: marriage, children, education, wills, succession. Player-parent first child control rolled, second child goes to other parent. Child mortality possible; playable at 16. Siblings live independently. Betrayal rare and causally justified.
+- NPCs have personalities, motives, imperfect memories, relationships and capacity to lie. Rumors, spies, evidence, counterintelligence and disguises exist.
+- Imprisonment, escape, ransom, prison politics and limited outside operations exist.
+- Crime, fronts, investigation, corruption, law enforcement, governance, political factions and coups are simulated.
+- Player-created laws have economic/social consequences. Governments can be delegated to officials, governors and institutions; corruption can be investigated.
+- Religion has institutions and player-founded/reformed faiths, but doctrine effects are relatively lightweight. Languages mostly cultural flavor.
+- Disease is relatively uncommon and simple. No major natural disasters. Weather and seasons affect travel, agriculture, trade and battle. Winter travel can be dangerous.
+- Roads, bridges, tolls, dynamic routes and settlement founding/growth/decline/ruins are systemic. Players place functional buildings; settlements expand physically and respond to economic geography.
+- Supply/demand drives trade. Monopolies, regional currencies, simple inflation, loans/collateral and risk-based insurance exist.
+- Ships support crews, cargo, fleets, combat, upgrades, captains and automated trade. No manual sailing; naval battles mostly auto-resolve, with optional command/boarding. Captured ships, piracy and basic privateering licenses supported.
+- Bounties can be issued by governments/players; official ones require cause. Live capture depends on contract. Surrender can be negotiated before/during battle.
+
+RECENT LOCKED DECISIONS
+Q81: Surrender terms fully negotiable: money, equipment, prisoners, land, political concessions, safe passage.
+Q82: Agreed surrender terms mechanically enforced; cannot be broken.
+Q83: Formal player-to-player contract binding depends on contract type.
+Q84: Player mercenary contracts include pay, duration/objectives, bonuses, loot shares, expenses and penalties.
+Q85: Switching sides mid-war depends on mercenary contract terms.
+Q86: Players can join NPC factions and rise to rule them.
+Q87: Faction leadership follows its political system, but coups, rebellion and conquest are alternatives.
+Q88: Governments can change via reforms/revolutions; players can drive change.
+Q89: Multiple government types with deeply customizable internal structures.
+Q90: Potentially entire player-run government; NPCs fill remaining roles.
+Q91: Major decision authority determined by government structure and specific laws.
+Q92: Rulers can create titles/offices with basic powers (C, not fully detailed constitutional editor).
+Q93: Land/settlement grants can define taxes, military obligations and privileges.
+Q94: Vassal refusal of military calls depends on obligations, laws and circumstances.
+Q95: Internal vassal warfare depends on laws, contracts and government structure.
+Q96: Multi-sided civil wars with splits, mergers, side-switching and negotiation.
+Q97: Foreign powers can support civil wars via funding, weapons, troops, diplomacy, covert aid, etc.
+Q98: Secretly funding rebellions in another realm: money only (B).
+Q99: Exploration discovers landmarks, ruins, resources, hidden places, etc.; discoveries permanently affect shared world, economy, politics and development.
+Q100: Full interconnected crafting/production economy: resources, workshops, worker skill, quality, regional materials, shortages, trade, military supplies, player industries.
+Q101: XP + practice + training/education + professions/specializations (D; corrected from initial C).
+Q102: Detailed severe injury consequences, including limb loss, infections, disabilities and death; normal recovery should not take too long. Rare, expensive/difficult low-fantasy limb regeneration possible.
+Q103: Low fantasy: magic uncommon but established, not everyday baseline.
+Q104: Deep magic: schools, costs, training, specialization, experiments, spell creation, rituals, enchanting, alchemy and risks.
+Q105: Monsters primarily in wilderness, ruins and dangerous locations (B).
+Q106: High/late medieval technology baseline (B).
+Q107: Deep cultures based on historical accuracy; evolve, mix, split and influence each other dynamically.
+Q108: Believable geology/climate/geography drives cultures, economy, migration, war, trade and history.
+Q109: Detailed character customization; appearance evolves with age, injuries, lifestyle, gear and events.
+Q110: Deep interpersonal relationships with personality, memories, attraction, loyalty, grudges, friends, rivals, romance, family (C); not an overbuilt generational relationship simulator.
+Q111: Layered equipment, materials, quality, durability, fit, weight, physical production, repairs, modifications, loot and inheritance tied to economy.
+Q112: Army management includes recruitment, training, wages, morale, supplies, officers and gear (C); avoid excessively hardcore manpower/economic logistics dependence.
+Q113: Deep diplomacy: treaties, coalitions, guarantees, trade, borders, military access, tribute, spheres of influence, pressure and networks.
+
+FOLLOW-UP DECISIONS (2026-10-10; later chat, separately numbered)
+- Living-world simulation: D — deep, independently evolving world; politics, economics, warfare, migration, religion, population and other connected systems continue without player intervention. Extends existing core vision; no new implementation task implied.
+- World knowledge and intelligence: B + C — knowledge is gained through exploration and contacts. Scouts, spies, merchants and travellers can deliver incomplete, outdated, inaccurate or deliberately misleading reports. Does NOT decide whether formal maps can be purchased/shared or whether cartography is a separate profession.
+- Simulation level-of-detail: D — detailed nearby simulation, abstract simulation at distance, with importance-aware detail to preserve believable outcomes and performance. Restates pre-existing core vision; avoid re-asking.
+- Settlement and kingdom administration: D — rich population, economic, construction, defence, law, tax, politics, infrastructure and diplomacy management, with optional NPC delegation/automation. Delegates have capabilities, loyalties and personal motives that can affect outcomes.
+- Campaign format: B — open-ended sandbox with player-chosen objectives; no mandatory campaign story, quests or forced ending. This reaffirms original core vision.
+- Official modding support: A — none planned. Do not allocate resources to an official editor or modding ecosystem; this does not imply actively blocking unofficial modifications.
+- Sound and atmosphere: C — cinematic and reactive audio, including dynamic music, dramatic battles, character voices and reactive soundscapes. This is a design direction, not a claim that audio assets are implemented.
+- Difficulty and realism: C — historically grounded, challenging systems with meaningful consequences, while avoiding gratuitous punishment or repetitive micromanagement. This does not select an elaborate player-configurable realism menu.
+- Multiplayer: already addressed in earlier decisions (shared persistent world; offline continuation; sparse encounters; player hubs and temporarily hosted player interactions). Later multiplayer multiple-choice prompt was identified as a duplicate and NOT answered; do not interpret it as a new decision or a mandate for MMO/always-online operation.
+
+DESIGN QUESTION PROTOCOL (user preference, 2026-10-10)
+- Ask ONE broad multiple-choice question at a time, with A/B/C/D options.
+- Each question should cover an entire genuinely unresolved system; avoid tiny mechanical questions and unnecessary follow-ups.
+- Check this register first to avoid re-asking settled questions. Merge choices such as B+C when specified.
+- Use explicit topic titles for new decisions; question numbers from different chats overlap and are not global identifiers.
+- These notes document intent, NOT permission for Hermes or anyone else to interrupt running work, alter active branches, merge, execute code, schedule tasks, or change automation.
+
+UNRESOLVED DETAIL FROM ORIGINAL Q114 — MAP KNOWLEDGE
+How should formal map acquisition/cartography work? Exploration and unreliable intelligence are decided above; map purchases, sharing and cartography as a business remain open.
+A) Whole world visible immediately
+B) Fog of war; explore to reveal it
+C) B + buy/share maps and learn from travelers
+D) C + maps can be incomplete/outdated; exploration/cartography is a real skill/business
+
+OPEN DESIGN TOPICS
+- Exact global world clock ratio and travel times.
+- PvP consent/stakes, player-owned hubs and clan systems.
+- Offline combat/standing orders and anti-cheat validation.
+- Discovery synchronization and world-state authority.
+- Detailed tactical battle implementation and networking scale.
+
+NOTE: This file consolidates decisions discussed so far, not a complete technical specification or an instruction to implement immediately. Add new answers by topic, without renumbering earlier historical entries.
