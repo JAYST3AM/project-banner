@@ -88,11 +88,11 @@ GPT-6 does not have Jay's private native binary or an executable Godot/Vulkan GP
 
 ### One line per changed file — exactly these files
 
-- `scripts/battle/battle_combat_retention_gate.gd` — pure independent pre-tick CPU oracle, deterministic adversarial fixtures, first-field/first-tick comparison, and seeded CPU shadow battle; GitHub blob SHA-1 `08c074041e4d1208cb1fb40040d13c660dae85f0`; UTF-8 size 5214 bytes; full LF-terminated readback verified.
-- `scripts/battle/battle_gpu_retention_probe.gd` — real Vulkan GPU buffer/pipeline wrapper that evaluates retained auto-targets independently and fails on missing GPU/readback; GitHub blob SHA-1 `2a94fa3d7d395f3dbbed1a06f578f3566a237b4c`; UTF-8 size 4378 bytes; full LF-terminated readback verified.
+- `scripts/battle/battle_combat_retention_gate.gd` — pure independent pre-tick CPU oracle, deterministic adversarial fixtures, first-field/first-tick comparison, and seeded CPU shadow battle; GitHub blob SHA-1 `6f490c60243e0a309aeeaf81e58f79f0127bb489`; UTF-8 size 5261 bytes; full LF-terminated readback verified.
+- `scripts/battle/battle_gpu_retention_probe.gd` — real Vulkan GPU buffer/pipeline wrapper that evaluates retained auto-targets independently and fails on missing GPU/readback; GitHub blob SHA-1 `17505cc93eaa3beacacb336e6b149260933efb4f`; UTF-8 size 4434 bytes; full LF-terminated readback verified.
 - `scripts/dev/gpu_combat_equivalence.gd` — extends established windowed S1 runner to gate adversarial and live S2 retention decisions on real GPU; GitHub blob SHA-1 `97ec7131019c76e5b2cf3e1b3b4366edac4bb2b5`; UTF-8 size 3877 bytes; full LF-terminated readback verified.
-- `shaders/dev/gpu_combat_retention.glsl` — one bounded retention eligibility decision: missing, ally, dead, out-of-range, valid, contact-loss reacquire; GitHub blob SHA-1 `73fadb80a5ea6434493fd20fd69394fd21b9a4dd`; UTF-8 size 1799 bytes; full LF-terminated readback verified.
-- `tests/test_combat.gd` — adds headless positive/negative retention fixtures and per-tick two-CPU determinism tests; GitHub blob SHA-1 `9ff15ba388553c0c54458b7085fabf88d6950597`; UTF-8 size 31150 bytes; full LF-terminated readback verified.
+- `shaders/dev/gpu_combat_retention.glsl` — one bounded retention eligibility decision: missing, ally, dead, out-of-range, valid, contact-loss reacquire; GitHub blob SHA-1 `55a6fef9b909ddf6ed7c14bc12ab18e703da7b58`; UTF-8 size 1817 bytes; full LF-terminated readback verified.
+- `tests/test_combat.gd` — adds headless positive/negative retention fixtures and per-tick two-CPU determinism tests; GitHub blob SHA-1 `5bb3096d709841ee9835b83261a02f7e92419163`; UTF-8 size 31375 bytes; full LF-terminated readback verified.
 - `docs/GPT_NOTES.md` — adds this evidence manifest, acceptance instructions and explicit GPU non-equivalence boundaries; final blob and bytes are in the delivery readback.
 
 ### Equivalence scope and acceptance
@@ -108,3 +108,4 @@ GPT-6 does not have Jay's private native binary or an executable Godot/Vulkan GP
 **Required verification:** (1) Godot 4.7.2 headless import/compile clean; (2) targeted `test_combat` passes, each newly named retention test section executes; (3) real GPU/windowed `res://scenes/dev/gpu_combat_equivalence.tscn` exits 0 with both S1 and S2 PASS lines, 4 seeded S2 verdicts and a nonzero retained count; (4) frozen 48 suites, every summary present, recorded actual assertion-count delta, with native GDExtension provisioned under Hermes's exclusive-worktree procedure; (5) exact 6-path GitHub blob/size/line-ending verification.
 
 **What GPT-6 could not verify:** No local Godot 4.7.2/Vulkan or native extension execution was available; no compile, regression, real-GPU throughput or runtime PASS is claimed. No performance capture or CPU LOD capture was attempted. Work stays on the S2 branch until Hermes returns numerical evidence and an independent certification.
+**Final S2 hardening:** the immediate-dead-contact eligibility bit respects `target_immediate_on_contact_loss` being disabled, in both the GPU kernel and the independent CPU oracle; the headless test includes the disabled case. This affects only the unmerged S2 branch.
