@@ -22,6 +22,10 @@ func run() -> void:
 	_test_gpu_retention_oracle_fixture()
 	_test_gpu_retention_seeded_shadow()
 	_test_gpu_retention_first_mismatch()
+	_test_gpu_acquisition_adversarial_reasons()
+	_test_gpu_acquisition_tie_and_threshold()
+	_test_gpu_acquisition_seeded_shadow()
+	_test_gpu_acquisition_first_divergence()
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
 	_complete()
@@ -684,3 +688,80 @@ func _test_gpu_retention_first_mismatch() -> void:
 	equal(error["tick"], 19, "first divergent tick named")
 	equal(error["cpu"], 1, "CPU expected flag preserved")
 	equal(error["gpu"], 0, "independent GPU flag reported")
+
+
+## Slice 3 has no headless-GPU shortcut: the pure independent oracle
+## provides expected decisions for both ordinary and adversarial inputs.
+func _test_gpu_acquisition_adversarial_reasons() -> void:
+	section("GPU acquisition S3: all eight reason codes and adversarial inputs")
+	var witnessed: Dictionary = {}
+	for fixture_name in BattleCombatAcquisitionGate.CASES:
+		var simulation := BattleCombatAcquisitionGate.fixture(fixture_name)
+		var oracle := BattleCombatAcquisitionGate.cpu_all(simulation)
+		var expected := BattleCombatAcquisitionGate.expected_for(fixture_name)
+		equal(oracle.size(), simulation.units.size() * 4,
+			"%s: all six soldier decisions recorded" % fixture_name)
+		for component in 4:
+			equal(oracle[component], expected[component],
+				"%s: explicit contract field %d" % [fixture_name, component])
+		witnessed[int(oracle[1])] = true
+	equal(witnessed.size(), 8, "all eight S3 reason codes exercised")
+
+
+func _test_gpu_acquisition_tie_and_threshold() -> void:
+	section("GPU acquisition S3: deterministic ties and strict hysteresis")
+	for fixture_name in ["tie_low_id", "tie_reverse_roster", "tie_same_position"]:
+		var battle := BattleCombatAcquisitionGate.fixture(fixture_name)
+		equal(BattleCombatAcquisitionGate.cpu_one(battle, battle.units[0])[0], 20,
+			"%s: lower ID wins regardless of roster order or equal coordinates" % fixture_name)
+	var at_edge := BattleCombatAcquisitionGate.fixture("keep_hysteresis")
+	equal(BattleCombatAcquisitionGate.cpu_one(at_edge, at_edge.units[0])[0], 40,
+		"exact 4*1.25=5 threshold retains incumbent, strict inequality")
+	var below_edge := BattleCombatAcquisitionGate.fixture("switch_below_threshold")
+	equal(BattleCombatAcquisitionGate.cpu_one(below_edge, below_edge.units[0])[0], 20,
+		"advantage 1.24 makes the challenger strictly sufficient")
+	var tied_challenger := BattleCombatAcquisitionGate.fixture("keep_tied_challenger")
+	equal(BattleCombatAcquisitionGate.cpu_one(tied_challenger, tied_challenger.units[0])[2], 20,
+		"nearest candidate is still lower ID under a challenger tie")
+	equal(BattleCombatAcquisitionGate.cpu_one(tied_challenger, tied_challenger.units[0])[0], 30,
+		"incumbent protected by hysteresis even if low-id tied challenger appears")
+	var no_local := BattleCombatAcquisitionGate.fixture("keep_nonlocal")
+	equal(BattleCombatAcquisitionGate.cpu_one(no_local, no_local.units[0])[1],
+		BattleCombatAcquisitionGate.KEEP_NONLOCAL,
+		"valid retained enemy beyond search radius stays retained")
+
+
+func _test_gpu_acquisition_seeded_shadow() -> void:
+	section("GPU acquisition S3: four live seeded battles preserve every CPU result")
+	for seed_value in BattleCombatEquivalenceGate.SEEDS:
+		var verdict := BattleCombatAcquisitionGate.run_seed(seed_value)
+		check(bool(verdict.get("ok", false)),
+			"seed %d: first-field CPU combat traces agree: %s" % [seed_value, str(verdict)])
+		if bool(verdict.get("ok", false)):
+			greater(int(verdict["ticks"]), 0, "live battle advanced real steps")
+			equal(int(verdict["gpu_decisions"]), 0,
+				"headless tests never claim actual GPU computation")
+			check(int(verdict["casualties"]) >= 1,
+				"live battle has meaningful casualties")
+
+
+func _test_gpu_acquisition_first_divergence() -> void:
+	section("GPU acquisition S3: first divergent soldier decision and tick")
+	var battle := BattleCombatAcquisitionGate.fixture("switch_clearer")
+	var source := BattleCombatAcquisitionGate.cpu_all(battle)
+	var altered := source.duplicate()
+	altered[1] = BattleCombatAcquisitionGate.KEEP_HYSTERESIS
+	altered[4] = 99
+	var mismatch := BattleCombatAcquisitionGate.compare(source, altered, 47, battle.units)
+	check(not bool(mismatch["ok"]), "altered decision causes gate failure")
+	equal(str(mismatch["field"]), "soldier[10].acquisition.reason",
+		"gate names first differing soldier and subfield, not later differences")
+	equal(int(mismatch["tick"]), 47, "first divergent tick is preserved")
+	equal(int(mismatch["cpu"]), BattleCombatAcquisitionGate.SWITCH,
+		"CPU expected reason preserved")
+	equal(int(mismatch["gpu"]), BattleCombatAcquisitionGate.KEEP_HYSTERESIS,
+		"GPU divergent reason preserved")
+	var truncated := source.slice(0, source.size() - 4)
+	var missing := BattleCombatAcquisitionGate.compare(source, truncated, 48, battle.units)
+	equal(str(missing["field"]), "acquisition.output.size",
+		"short GPU output is reported as a hard failure")
