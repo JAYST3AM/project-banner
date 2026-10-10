@@ -18,6 +18,7 @@ func run() -> void:
 	_test_starting_fight_is_a_contest()
 	_test_gpu_combat_equivalence_cpu_reference()
 	_test_gpu_combat_equivalence_detects_first_mismatch()
+	_test_gpu_combat_explicit_target_contract()
 	SaveManager.delete_all_saves()
 	GameManager.end_campaign()
 	_complete()
@@ -599,3 +600,30 @@ func _test_gpu_combat_equivalence_detects_first_mismatch() -> void:
 	equal(str(target_diff["field"]), "soldier[1].target.explicit_validated",
 		"first GPU targeting divergence is named")
 	equal(int(target_diff["tick"]), 17, "GPU targeting divergence carries tick")
+
+
+## Negative and positive examples guard the CPU oracle against accidentally
+## accepting dead, friendly, absent or unordered soldiers.
+func _test_gpu_combat_explicit_target_contract() -> void:
+	section("GPU combat target validity oracle covers live, dead and friendly")
+	var sim := BattleCombatEquivalenceGate.scenario(2026)
+	var actor: BattleUnit = sim.units[0]
+	equal(BattleCombatEquivalenceGate.cpu_explicit_target(actor, sim.units), 2,
+		"explicitly ordered living enemy is valid")
+	sim.units[2].alive = false
+	equal(BattleCombatEquivalenceGate.cpu_explicit_target(actor, sim.units), -1,
+		"dead enemy is invalid")
+	sim.units[2].alive = true
+	actor.attack_order_target_id = 1
+	equal(BattleCombatEquivalenceGate.cpu_explicit_target(actor, sim.units), -1,
+		"friendly soldier is invalid even if explicitly ordered")
+	actor.attack_order_target_id = 99999
+	equal(BattleCombatEquivalenceGate.cpu_explicit_target(actor, sim.units), -1,
+		"missing target is invalid")
+	actor.attack_order_target_id = -1
+	equal(BattleCombatEquivalenceGate.cpu_explicit_target(actor, sim.units), -1,
+		"no explicit order has no explicit GPU target")
+	actor.attack_order_target_id = 2
+	actor.alive = false
+	equal(BattleCombatEquivalenceGate.cpu_explicit_target(actor, sim.units), -1,
+		"dead soldier cannot issue an attack")
