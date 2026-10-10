@@ -87,7 +87,8 @@ func evaluate(sim: BattleSimulator) -> PackedInt32Array:
 			0 if unit.side == BattleContext.SIDE_PLAYER else 1,
 			1 if unit.is_alive() else 0, unit.auto_target_id]))
 		positions.append_array(PackedFloat32Array([unit.position.x, unit.position.y,
-			radius, unit.attack_range * sim.target_contact_loss_factor]))
+			radius, unit.attack_range * sim.target_contact_loss_factor \
+				if sim.target_immediate_on_contact_loss else -1.0]))
 	var encoded := ids.to_byte_array()
 	var geometry := positions.to_byte_array()
 	_rd.buffer_update(_roster, 0, encoded.size(), encoded)
