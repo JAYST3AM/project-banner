@@ -7,7 +7,7 @@ extends RefCounted
 ## result, never the GPU output. Other combat stages are NOT GPU-equivalent.
 const SEEDS := [101, 2026, 4096, 73001]
 const TICK_SECONDS := 0.05
-const MAX_TICKS := 120
+const MAX_TICKS := 160
 
 
 static func _soldier(id: int, side: String, point: Vector2, target: int) -> BattleUnit:
