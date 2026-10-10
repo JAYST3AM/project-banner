@@ -34,6 +34,10 @@ func run() -> void:
 	_test_slide_refuses_to_cut_the_corner_of_a_wall()
 	_test_slide_cannot_tunnel_through_an_intermediate_wall()
 	_test_substep_budget_processes_twenty_four_and_rejects_twenty_five()
+	_test_live_gpu_bridge_authoritative_source()
+	_test_live_gpu_bridge_rejects_invalid_deployment()
+	_test_gpu_deployment_recovers_legal_positions()
+	_test_gpu_deployment_is_transactional()
 	_complete()
 
 
@@ -345,3 +349,107 @@ func _test_substep_budget_processes_twenty_four_and_rejects_twenty_five() -> voi
 	approx(arrived.y, within.y, 0.0001, "and in y")
 	check(BattleTerrainGpuMask.slide(mask, Vector2(0.5, 4.5), beyond) == Vector2(0.5, 4.5),
 		"a move needing one step more is rejected, leaving the soldier where it stood")
+
+## E3 source contract: the bridge receives the exact terrain object the CPU
+## battle/visual view owns. It never creates a second terrain from the seed.
+func _test_live_gpu_bridge_authoritative_source() -> void:
+	section("GPU staging retains the live battlefield source identity")
+	var terrain := _terrain()
+	var free_cell := -1
+	for index in terrain.cell_count():
+		if terrain.is_cell_traversable(index):
+			free_cell = index
+			break
+	check(free_cell >= 0, "terrain contains a legal deployment cell")
+	if free_cell < 0:
+		return
+	var unit := BattleUnit.new()
+	unit.id = 71
+	unit.position = terrain.cell_centre(free_cell)
+	var soldiers: Array[BattleUnit] = [unit]
+	var before := terrain.signature()
+	var report := BattleTerrainGpuBridge.capture(terrain, soldiers)
+	check(bool(report["ready"]), "authoritative terrain produces a ready GPU snapshot")
+	equal(str(report["source_signature"]), before, "snapshot belongs to existing terrain")
+	equal(terrain.signature(), before, "capture never changes the terrain")
+	equal(int(report["units_checked"]), 1, "live unit was checked")
+	var mask: PackedInt32Array = report["mask"]
+	var payload: PackedByteArray = report["bytes"]
+	equal(mask, BattleTerrainGpuMask.from_terrain(terrain),
+		"GPU mask comes from the same source as the CPU battle")
+	equal(payload, mask.to_byte_array(), "serialized GPU payload matches captured mask")
+	check(BattleTerrainGpuBridge.matches_source(report, terrain),
+		"matching source is accepted for GPU upload")
+	var twin := _terrain()
+	check(not BattleTerrainGpuBridge.matches_source(report, twin),
+		"a separately generated terrain is rejected even with the same seed")
+
+
+func _test_live_gpu_bridge_rejects_invalid_deployment() -> void:
+	section("GPU terrain bridge refuses absent ground and illegal soldiers")
+	var empty: Array[BattleUnit] = []
+	var absent := BattleTerrainGpuBridge.capture(null, empty)
+	check(not bool(absent["ready"]), "null source is never uploaded as disabled fallback")
+	var terrain := _terrain()
+	var outside := BattleUnit.new()
+	outside.id = 107
+	outside.position = Vector2(-1.0, 1.0)
+	var soldiers: Array[BattleUnit] = [outside]
+	var report := BattleTerrainGpuBridge.capture(terrain, soldiers)
+	check(not bool(report["ready"]), "an off-field soldier blocks GPU activation")
+	equal(int(report["blocked_count"]), 1, "exactly one illegal soldier was counted")
+	var blocked: PackedInt32Array = report["blocked_ids"]
+	equal(blocked.size(), 1, "invalid IDs are reported for diagnostics")
+	equal(blocked[0], 107, "the offending soldier is identified")
+	check(not BattleTerrainGpuBridge.matches_source(report, terrain),
+		"a rejected capture cannot be uploaded")
+
+
+## E3: real combat deployment is repaired on the same authoritative terrain,
+## never by regenerating an easier field for the GPU.
+func _test_gpu_deployment_recovers_legal_positions() -> void:
+	section("E3 deterministic legal deployment on the live terrain")
+	var terrain := _terrain()
+	var outside := BattleUnit.new()
+	outside.id = 81
+	outside.side = BattleContext.SIDE_PLAYER
+	outside.position = Vector2(-100.0, 1.0)
+	var units: Array[BattleUnit] = [outside]
+	var zones: Array[Rect2] = [
+		Rect2(Vector2.ZERO, Vector2(28.0, terrain.size.y)),
+		Rect2(Vector2(terrain.size.x - 28.0, 0.0), Vector2(28.0, terrain.size.y))]
+	var baseline := terrain.signature()
+	var first := BattleGpuDeployment.plan(terrain, units, zones)
+	var second := BattleGpuDeployment.plan(terrain, units, zones)
+	check(bool(first["ok"]), "invalid initial position has a legal replacement")
+	equal(first["positions"], second["positions"], "legal deployment is deterministic")
+	equal(outside.position, Vector2(-100.0, 1.0), "planning never mutates the soldier")
+	check(BattleGpuDeployment.apply(first, units), "a valid plan can be committed")
+	var mask := BattleTerrainGpuMask.from_terrain(terrain)
+	check(not BattleTerrainGpuMask.is_blocked(mask, outside.position),
+		"repaired position is traversable in the SAME terrain")
+	equal(baseline, terrain.signature(), "repair does not alter the terrain")
+	var capture := BattleTerrainGpuBridge.capture(terrain, units)
+	check(bool(capture["ready"]), "repaired position is accepted by the GPU bridge")
+
+
+func _test_gpu_deployment_is_transactional() -> void:
+	section("E3 impossible deployment refuses all moves")
+	var terrain := _terrain()
+	var left := BattleUnit.new()
+	left.id = 91
+	left.position = Vector2(-20.0, 5.0)
+	left.side = BattleContext.SIDE_PLAYER
+	var right := BattleUnit.new()
+	right.id = 92
+	right.position = Vector2(terrain.size.x + 20.0, 5.0)
+	right.side = BattleContext.SIDE_ENEMY
+	var units: Array[BattleUnit] = [left, right]
+	var impossible: Array[Rect2] = [Rect2(-99, -99, 0.0, 0.0),
+		Rect2(-99, -99, 0.0, 0.0)]
+	var result := BattleGpuDeployment.plan(terrain, units, impossible)
+	check(not bool(result["ok"]), "no legal cells refuses the entire deployment")
+	check(not BattleGpuDeployment.apply(result, units), "failed plan cannot be applied")
+	equal(left.position, Vector2(-20.0, 5.0), "first soldier stays unchanged")
+	equal(right.position, Vector2(terrain.size.x + 20.0, 5.0),
+		"second soldier stays unchanged")
